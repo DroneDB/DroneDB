@@ -1,4 +1,5 @@
 #include "../../vendor/base64/base64.h"
+#include "randomutil.h"
 #include "passwordmanager.h"
 #include "logger.h"
 #include "hash.h"
@@ -6,12 +7,11 @@
 
 #include <string>
 #include <random>
-#include "utils.h"
 
 namespace ddb
 {
 
-	DDB_DLL int PasswordManager::countPasswords()
+	int PasswordManager::countPasswords()
 	{
 
 		const std::string sql = "SELECT COUNT(*) FROM passwords";
@@ -23,7 +23,7 @@ namespace ddb
 		return cnt;
 	}
 
-	DDB_DLL void PasswordManager::append(const std::string &password)
+	void PasswordManager::append(const std::string &password)
 	{
 
 		if (password.empty())
@@ -32,7 +32,7 @@ namespace ddb
 			return;
 		}
 
-		const auto salt = utils::generateRandomString(SALT_LENGTH);
+		const auto salt = randomString(SALT_LENGTH);
 		const auto hash = Hash::strSHA256(salt + password);
 
 		const std::string sql = "INSERT INTO passwords VALUES(?, ?)";
@@ -56,7 +56,7 @@ namespace ddb
 	//{
 	//}
 
-	DDB_DLL bool PasswordManager::verify(const std::string &password)
+	bool PasswordManager::verify(const std::string &password)
 	{
 		const auto noPasswords = countPasswords() == 0;
 		if (password.empty() && noPasswords)
@@ -85,7 +85,7 @@ namespace ddb
 		return false;
 	}
 
-	DDB_DLL void PasswordManager::clearAll()
+	void PasswordManager::clearAll()
 	{
 		const std::string sql = "DELETE FROM passwords";
 		const auto q = this->db->query(sql);

@@ -6,8 +6,10 @@
 #include <cstdint>
 #include <istream>
 #include "logger.h"
+#include "stringutil.h"
 #include "ply.h"
 #include "exceptions.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -47,7 +49,7 @@ namespace ddb
             int fRestCount = 0;
             for (const auto &d : dims)
             {
-                if (d.rfind("f_rest_", 0) == 0)
+                if (d.starts_with("f_rest_"))
                     ++fRestCount;
             }
 
@@ -107,43 +109,21 @@ namespace ddb
             return any;
         }
 
-        bool isSpace(char c)
-        {
-            return c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v';
-        }
-
-        std::vector<std::string> tokenize(const std::string &line)
-        {
-            std::vector<std::string> tokens;
-            size_t i = 0;
-            while (i < line.size())
-            {
-                while (i < line.size() && isSpace(line[i]))
-                    ++i;
-                const size_t start = i;
-                while (i < line.size() && !isSpace(line[i]))
-                    ++i;
-                if (i > start)
-                    tokens.emplace_back(line.substr(start, i - start));
-            }
-            return tokens;
-        }
-
         // Text after the first `n` whitespace-separated tokens, trimmed.
         std::string restAfterTokens(const std::string &line, int n)
         {
             size_t i = 0;
             for (int k = 0; k < n; ++k)
             {
-                while (i < line.size() && isSpace(line[i]))
+                while (i < line.size() && str::isSpaceChar(line[i]))
                     ++i;
-                while (i < line.size() && !isSpace(line[i]))
+                while (i < line.size() && !str::isSpaceChar(line[i]))
                     ++i;
             }
-            while (i < line.size() && isSpace(line[i]))
+            while (i < line.size() && str::isSpaceChar(line[i]))
                 ++i;
             size_t end = line.size();
-            while (end > i && isSpace(line[end - 1]))
+            while (end > i && str::isSpaceChar(line[end - 1]))
                 --end;
             return line.substr(i, end - i);
         }
@@ -179,7 +159,7 @@ namespace ddb
             int i = 0;
             while (readHeaderLine(in, line, consumed, tooLong))
             {
-                const auto tokens = tokenize(line);
+                const auto tokens = str::splitWhitespace(line);
                 if (!tokens.empty())
                 {
                     const std::string &kw = tokens[0];
@@ -335,9 +315,9 @@ namespace ddb
 
     bool parsePlyHeader(const fs::path &plyFile, PlyHeader &header, std::string *error)
     {
-        std::ifstream in(plyFile.string(), std::ios::binary);
+        std::ifstream in(plyFile, std::ios::binary);
         if (!in.is_open())
-            throw FSException("Cannot open " + plyFile.string());
+            throw FSException("Cannot open " + io::toUtf8(plyFile));
 
         std::string err;
         const bool ok = parseHeaderStream(in, header, err);
@@ -351,7 +331,7 @@ namespace ddb
         PlyHeader h;
         std::string err;
         if (!parsePlyHeader(plyFile, h, &err))
-            throw AppException("Invalid PLY header in " + plyFile.string() + ": " + err);
+            throw AppException("Invalid PLY header in " + io::toUtf8(plyFile) + ": " + err);
         return h;
     }
 
@@ -367,7 +347,7 @@ namespace ddb
         return "";
     }
 
-    DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info)
+    bool getPlyInfo(const fs::path &plyFile, PlyInfo &info)
     {
         info.isMesh = false;      // Assumed
         info.hasTextures = false; // Assumed
@@ -383,7 +363,7 @@ namespace ddb
         std::string err;
         if (!parsePlyHeader(plyFile, h, &err))
         {
-            LOGD << "Cannot read PLY header of " << plyFile.string() << ": " << err;
+            LOGD << "Cannot read PLY header of " << io::toUtf8(plyFile) << ": " << err;
             return false;
         }
 
@@ -420,22 +400,22 @@ namespace ddb
                 // stay Generic, like any other unsupported textured PLY.
                 if (!info.unsupportedTextureReason.empty())
                 {
-                    LOGD << "PLY " << plyFile.string() << " is not built as a Model: "
+                    LOGD << "PLY " << io::toUtf8(plyFile) << " is not built as a Model: "
                          << info.unsupportedTextureReason;
-                    return Generic;
+                    return EntryType::Generic;
                 }
-                return Model;
+                return EntryType::Model;
             }
             // A 3D Gaussian Splat is a vertex-only PLY carrying SH/covariance
             // attributes. Check before falling back to a plain point cloud.
             if (info.isSplat)
             {
-                return GaussianSplat;
+                return EntryType::GaussianSplat;
             }
-            return PointCloud;
+            return EntryType::PointCloud;
         }
         else
-            return Generic;
+            return EntryType::Generic;
     }
 
 }

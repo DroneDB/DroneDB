@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb data-only STAC collection",
+  "description": "DDBStacData without an entry (XI-09): the DDBStac collection without id and links, and without asset hrefs",
+  "type": "object",
+  "required": [
+    "type",
+    "stac_version",
+    "title",
+    "description",
+    "license",
+    "extent",
+    "assets"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "Collection"
+    },
+    "stac_version": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string"
+    },
+    "extent": {
+      "$ref": "stac-collection.schema.json#/$defs/extent"
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "stac-data-item.schema.json#/$defs/asset"
+      }
+    }
+  }
+}

@@ -5,11 +5,23 @@
 #define DDB_H
 
 #include "ddb_export.h"
+#include "ddb_version.h"
+#include <stddef.h>
 #include <stdint.h>
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
+
+/* ddb.h is valid C11 as well as C++ (XI-03): tests/unit/c11_header.c includes it with -std=c11
+ * -pedantic -Werror (MSVC: /std:c11 /W4 /WX). No default arguments, (void) for an empty
+ * parameter list, bool from <stdbool.h> (1 byte: marshal it as U1), typedef'd types. */
 
 #ifdef __cplusplus
+#define DDB_STATIC_ASSERT(condition, message) static_assert(condition, message)
 extern "C"
 {
+#else
+#define DDB_STATIC_ASSERT(condition, message) _Static_assert(condition, message)
 #endif
 
 #define DDB_LOG_ENV "DDB_LOG"
@@ -17,15 +29,45 @@ extern "C"
 
 #define DDB_FOLDER ".ddb"
 
-    enum DDBErr
+/* Version (XI-01). The library, its C ABI and the release have ONE version, the "version" of
+ * package.json (semver): ddb_version.h, generated from it, defines DDB_VERSION_MAJOR/MINOR/PATCH
+ * and DDB_VERSION_STRING, and DDB_ABI_MAJOR/DDB_ABI_MINOR, which are the MAJOR and the MINOR of
+ * that version (the PATCH never changes the ABI). ddb_version.h is installed and published next
+ * to this header.
+ *
+ * The MINOR grows with every additive change (a new export, a new error code, a new field in a
+ * JSON output); the MAJOR grows when an export is removed or changes its signature or meaning.
+ * The exported DDB* symbols are listed in ddb.symbols, next to this header. scripts/check-abi.py
+ * (CI) fails when the library exports a different list, a removed export without a MAJOR bump
+ * since the previous release, or a new one without a MINOR (or MAJOR) bump. The list cannot see
+ * a changed signature or meaning: that MAJOR bump is up to the author and the review.
+ * A caller checks DDBGetAbiVersion() against the version it was built for: the same MAJOR and a
+ * MINOR at least as large. (ddb_version.h is included above.) */
+
+    /* Error codes. A new code is also listed in DDBGetCapabilities() (kErrorCodes, ddb.cpp).
+     * Every code but DDBERR_NONE comes with a message (DDBGetLastError). An export returns the
+     * codes its documentation names, DDBERR_NONE and DDBERR_EXCEPTION. In 2.0 the exports
+     * that existed in 1.x keep the codes they always returned: an invalid argument and a
+     * retryable failure are DDBERR_EXCEPTION there; DDBERR_INVALIDARGS and DDBERR_RETRYABLE are
+     * returned by the exports added in 2.0 only. Every export but the exempt ones (see
+     * DDBShutdown) returns DDBERR_SHUTDOWN once DDBShutdown started, and DDBERR_CANCELED when
+     * the caller set a cancel token on the thread (DDBSetThreadCancelToken) and canceled it. */
+    typedef enum DDBErr
     {
         DDBERR_NONE = 0,            // No error
         DDBERR_EXCEPTION = 1,       // Generic app exception
         DDBERR_BUILDDEPMISSING = 2, // Build skipped: dependency missing
         DDBERR_BUILDINPROGRESS = 3, // Build skipped: another process holds the lock
-        DDBERR_CANCELED = 4,        // Operation canceled by the progress callback
-        DDBERR_BUSY = 5             // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
-    };
+        DDBERR_CANCELED = 4,        // Canceled by the progress callback, or by a cancel token (new in 2.0)
+        DDBERR_BUSY = 5,            // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
+        DDBERR_NOTFOUND = 6,        // The requested entry does not exist
+        DDBERR_INVALIDARGS = 7,     // An argument is invalid: fix the call, do not retry (new in 2.0)
+        DDBERR_RETRYABLE = 8,       // A transient failure (DDBGetLastErrorReason): retry later (new in 2.0)
+        DDBERR_SHUTDOWN = 9         // The library is shut down (DDBShutdown): no call is accepted (new in 2.0)
+    } DDBErr;
+
+    DDB_STATIC_ASSERT(sizeof(bool) == 1, "bool is 1 byte (marshal it as U1)");
+    DDB_STATIC_ASSERT(sizeof(DDBErr) == 4, "DDBErr is 4 bytes");
 
     /** Progress callback for long-running operations.
      * @param fraction progress in [0,1], or -1 for indeterminate
@@ -34,56 +76,278 @@ extern "C"
      * @return 0 to continue, non-zero to request cancellation */
     typedef int (*DDBProgressCallback)(double fraction, const char *phase, void *userData);
 
-#define DDB_C_BEGIN \
-    try             \
-    {
-#define DDB_C_END                  \
-    }                              \
-    catch (const DBBusyException &e) \
-    {                              \
-        DDBSetLastError(e.what()); \
-        return DDBERR_BUSY;        \
-    }                              \
-    catch (const AppException &e)  \
-    {                              \
-        DDBSetLastError(e.what()); \
-        return DDBERR_EXCEPTION;   \
-    }                              \
-    catch (const std::bad_alloc &e) \
-    {                              \
-        DDBSetLastError("Out of memory"); \
-        return DDBERR_EXCEPTION;   \
-    }                              \
-    catch (const std::exception &e) \
-    {                              \
-        DDBSetLastError(e.what()); \
-        return DDBERR_EXCEPTION;   \
-    }                              \
-    catch (...)                    \
-    {                              \
-        DDBSetLastError("Unknown error occurred"); \
-        return DDBERR_EXCEPTION;   \
-    }                              \
-    return DDBERR_NONE;
+    /* The last error (XI-02) belongs to the calling thread. Every call clears it on entry and
+     * sets it when it returns a code other than DDBERR_NONE, except the accessors that never
+     * touch it: DDBGetLastError, DDBGetLastErrorReason, DDBGetVersion, DDBGetAbiVersion,
+     * DDBGetCapabilities, DDBFree, DDBVSIFree and DDBFreeCancelToken. Read it on the thread that made the failing
+     * call, before any other libddb call on that thread (no await or thread hop in between).
+     * Outputs are written only on DDBERR_NONE: on another code an output pointer is left
+     * untouched (or set to NULL). */
 
-#ifdef __cplusplus
-    extern thread_local char ddbLastError[255];
-#endif
-    // thread_local (src/library/ddb.cpp): DDBGetLastError() must be called on the same thread
-    // that made the failing call, before any await/thread-hop - see DDBSetLastError.
-    void DDBSetLastError(const char *err);
+    /** The message of the last failed call on this thread, whole (UTF-8): never NULL, "" when
+     * the last call succeeded. The string is owned by the library and stays valid until the
+     * next libddb call on the same thread. */
+    DDB_DLL const char *DDBGetLastError(void);
 
-    /** Get the last error message
-     * @return last error message */
-    DDB_DLL const char *DDBGetLastError();
+    /** The machine-readable reason of the last failed call on this thread, next to its message
+     * (new in 2.0): never NULL, "" when the failure has no reason or the last call succeeded.
+     * Valid like DDBGetLastError(). A reason is a stable camelCase name; names are only ever
+     * added (DDBGetCapabilities() lists them as "errorReasons"), so treat an unknown one like "".
+     * Defined today, for a transient failure (the disk or a tool, not the input) after which the
+     * same call can succeed later:
+     *   "lowDiskSpace"     free disk space fell below the build budget
+     *   "noSpaceOnDevice"  a write failed because the disk is full
+     *   "idleTimeout"      an external tool stopped producing output and was stopped
+     * An export added in 2.0 returns DDBERR_RETRYABLE for them; an older export (DDBBuild)
+     * returns DDBERR_EXCEPTION with the same reason. */
+    DDB_DLL const char *DDBGetLastErrorReason(void);
 
-    /** This must be called as the very first function
-     * of every DDB process/program
-     * @param verbose whether the program should output log messages to stdout */
-    DDB_DLL void DDBRegisterProcess(bool verbose = false);
+    /** @deprecated since 2.0: libddb sets and clears the last error itself. Replaces the last
+     * error message of this thread with err (NULL clears it) and clears the reason. */
+    DDB_DLL void DDBSetLastError(const char *err);
+
+    /** This must be called as the very first function of every DDB process/program, before any
+     * other call but the exempt accessors. A failed initialization is final: this and every
+     * later call return DDBERR_EXCEPTION with its message (new in 2.0; returned void before).
+     * @param verbose whether the program should output its debug and trace log messages to
+     *                stderr (the console of the log; stdout is for the output of the commands)
+     * @return DDBERR_NONE on success, DDBERR_EXCEPTION when the initialization failed */
+    DDB_DLL DDBErr DDBRegisterProcess(bool verbose);
 
     /** Get library version */
-    DDB_DLL const char *DDBGetVersion();
+    DDB_DLL const char *DDBGetVersion(void);
+
+    /** ABI version of the loaded library: (DDB_ABI_MAJOR << 16) | DDB_ABI_MINOR.
+     * Callable at any time, before DDBRegisterProcess too; it never changes DDBGetLastError(). */
+    DDB_DLL uint32_t DDBGetAbiVersion(void);
+
+    /** What the loaded library supports, as a JSON object:
+     *   "abi"          {"major": DDB_ABI_MAJOR, "minor": DDB_ABI_MINOR}
+     *   "version"      DDBGetVersion()
+     *   "errorCodes"   every DDBErr code by name without the prefix: {"NONE": 0, "EXCEPTION": 1, ...}
+     *   "errorReasons" every reason DDBGetLastErrorReason() returns, sorted
+     *   "cancellable"  the exports whose work checks a cancel token (DDBSetThreadCancelToken)
+     *                  while it runs, and stops with DDBERR_CANCELED when it is canceled;
+     *                  DDBExportRaster2 also stops when its DDBProgressCallback asks to
+     *   "symbols"      every exported DDB* function, sorted (ddb.symbols)
+     * Fields are only ever added. The string is built once and owned by the library: it stays
+     * valid for the life of the process and is the same pointer on every call and every thread;
+     * do not free it. Callable at any time, before DDBRegisterProcess too; it never changes
+     * DDBGetLastError().
+     * @return the JSON, or NULL only if the process ran out of memory while building it */
+    DDB_DLL const char *DDBGetCapabilities(void);
+
+    /* Process configuration (DQ-15, XI-06, new in 2.0). One set of settings for the whole process,
+     * which a host sets with DDBConfigure and reads back with DDBGetEffectiveConfig. Each setting
+     * takes, by precedence: the DDBConfigure value, else its environment variable, else the
+     * built-in default. An environment variable that is not a valid value is ignored.
+     *
+     *   "cpuPoolSize"    integer 0..4096, env DDB_CPU_POOL_SIZE, default cores - 1.
+     *                    The process-wide CPU token pool: the worker threads libddb may run at
+     *                    once beside the calling threads, across every call (parallel indexing,
+     *                    GDAL NUM_THREADS, PDAL readers, the cores given to Obj2Tiles and those
+     *                    counted for untwine). A calling thread always works and never needs a
+     *                    token; a section gets the tokens that are free and never waits for one,
+     *                    so 0 runs every call on its calling thread only. The calls a host runs
+     *                    at once plus cpuPoolSize bound libddb's busy CPU threads.
+     *   "ioThreads"      integer 1..256, env DDB_IO_THREADS, default 4.
+     *                    The threads of one disk-bound section (hashing the files of a delta,
+     *                    deleting build folders); they take no CPU token.
+     *   "minFreeDiskMb"  integer 0..10^13, env DDB_MIN_FREE_DISK_MB, default 512.
+     *                    The free space in MiB a build or a copy of build artifacts needs on the
+     *                    volume it writes to; below it the call fails with the reason
+     *                    "lowDiskSpace". 0 turns the check off.
+     *   "cacheDir"       absolute folder path (UTF-8), default the profile folder: DDB_HOME/.ddb
+     *                    when DDB_HOME is set (source "environment"), else the home folder's .ddb.
+     *                    Where libddb caches thumbnails, tiles, index templates and DSM tiles
+     *                    (created when first needed). The registry credentials of the ddb command
+     *                    line stay in the profile folder.
+     *
+     * The per-section thread counts DDB_INDEX_THREADS, DDB_BUILD_THREADS, DDB_RENDER_THREADS and
+     * DDB_OBJ2TILES_MAX_CORES (environment or GDAL config options) stay what a section asks for;
+     * the CPU pool decides how many of them run. */
+
+    /** Changes settings of the process configuration (see above). Callable at any time, from any
+     * thread, before DDBRegisterProcess too and concurrently with any other call (until
+     * DDBShutdown); a host
+     * normally calls it once, before DDBRegisterProcess. A change applies to the work that reads
+     * the setting after this call returned: a parallel section that is running keeps the tokens
+     * it holds (after the pool shrank, given-back tokens are handed out again only below the new
+     * size), a call that is running keeps the cache folder it opened, and files in a previous
+     * cache folder are neither moved nor deleted.
+     * @param configJson a JSON object with the settings to change, by name: a value sets the
+     *                   setting, null puts it back to its environment variable or default;
+     *                   settings not named keep their value. "{}" changes nothing.
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when configJson is NULL, not a JSON object, names an
+     *         unknown setting or has an invalid value (see DDBGetLastError). An invalid call
+     *         changes nothing: every member is checked before any is applied. An unknown name
+     *         is an error, not ignored, so a misspelled budget never goes unnoticed; a host
+     *         finds the names a library knows in DDBGetEffectiveConfig's "settings". */
+    DDB_DLL DDBErr DDBConfigure(const char *configJson);
+
+    /** The process configuration in effect (see above), as a JSON object:
+     *   "settings"         every setting by name, with its value (an object DDBConfigure accepts)
+     *   "sources"          every setting by name: "configure", "environment" or "default"
+     *   "hardwareThreads"  the cores libddb sees (at least 1)
+     * Fields and settings are only ever added. Callable at any time, like DDBConfigure.
+     * @param output pointer to C-string where to store the JSON (free with DDBFree)
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when output is NULL; DDBERR_EXCEPTION when the
+     *         default cache folder cannot be found (no DDB_HOME, HOME or USERPROFILE) */
+    DDB_DLL DDBErr DDBGetEffectiveConfig(char **output);
+
+    /* Shutdown (DQ-15, XI-07, new in 2.0). A host calls DDBShutdown once, when it stops (after it
+     * stopped sending work), so that the index files are left whole and the log is written out
+     * before the process exits. The library has three states:
+     *   running        every call works;
+     *   shutting down  DDBShutdown started: every call but the exempt ones returns
+     *                  DDBERR_SHUTDOWN without running (DDBRegisterProcess and DDBConfigure
+     *                  too), and the calls in flight are asked to stop: they return
+     *                  DDBERR_SHUTDOWN, or finish;
+     *   shut down      no call is in flight any more and the teardown ran.
+     * The exempt calls work in every state: DDBGetLastError, DDBGetLastErrorReason,
+     * DDBGetVersion, DDBGetAbiVersion, DDBGetCapabilities, DDBFree, DDBVSIFree and
+     * DDBFreeCancelToken; DDBCancel works too (it is not counted in flight). There is no
+     * way back to running: the process exits after it. Without DDBShutdown, the exit-time
+     * checkpoint of the idle index connections stays the fallback. */
+
+    /** Shuts the library down: refuses new calls (DDBERR_SHUTDOWN), waits up to timeoutMs for
+     * the calls in flight on other threads to return, then runs a TRUNCATE checkpoint on every
+     * pooled index connection and closes them, closes the cached rasters, unregisters the log
+     * callback (DDBSetLogCallback) and flushes the log.
+     * Idempotent: once shut down it returns DDBERR_NONE at once; concurrent calls wait for each
+     * other within their timeouts. Never counted in flight itself; callable from any thread,
+     * but not from inside a libddb call or callback.
+     * @param timeoutMs how long to wait for the calls in flight, in milliseconds; < 0 waits
+     *                  without a limit, 0 does not wait
+     * @return DDBERR_NONE when the library is shut down;
+     *         DDBERR_BUSY when calls were still running after timeoutMs: the library is shutting
+     *         down (new calls are refused, the log callback is unregistered, so what those calls
+     *         still log goes to stderr, and the log is flushed) but the connections and rasters
+     *         are left open for the calls still running; a later DDBShutdown finishes the
+     *         shutdown, and at exit the exit-time checkpoint covers the idle connections;
+     *         DDBERR_INVALIDARGS when called from inside a libddb call (a progress callback) or
+     *         from the log callback;
+     *         DDBERR_EXCEPTION when a teardown step failed (see DDBGetLastError): the library is
+     *         shut down all the same */
+    DDB_DLL DDBErr DDBShutdown(int timeoutMs);
+
+    /* Cancellation (DQ-15, XI-07, new in 2.0). A cancel token stops the work of the calls made for
+     * it, without a new variant of every export:
+     *   1. DDBCreateCancelToken creates a token (one per request or job);
+     *   2. DDBSetThreadCancelToken(token) on the thread that makes the call, right before it: the
+     *      next call on that thread works for the token, and when that call returns the thread
+     *      has no token again (set it before every call that should be cancellable);
+     *   3. DDBCancel(token), from any thread at any time: the call stops at its next
+     *      checkpoint and returns DDBERR_CANCELED, with a message; or it completes;
+     *   4. DDBFreeCancelToken(token) when the host no longer needs it, even while a call that
+     *      uses it is still running (the library keeps its own references).
+     * A token is canceled for good. The checkpoints: every item of a parallel section, the GDAL
+     * progress of warps, translations, statistics and raster reads, SQLite statements, and
+     * external tools (killed). DDBGetCapabilities() lists as "cancellable" the exports whose
+     * work checks a token while it runs; any export may return DDBERR_CANCELED when a token is
+     * set and canceled, and no export returns it without one (but DDBExportRaster2, through its
+     * progress callback). DDBShutdown stops the work of every thread the same way, with
+     * DDBERR_SHUTDOWN. */
+
+    /** An opaque cancel token */
+    typedef struct DDBCancelToken DDBCancelToken;
+
+    /** Creates a cancel token, not canceled.
+     * @param token where to store the token (free it with DDBFreeCancelToken)
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when token is NULL */
+    DDB_DLL DDBErr DDBCreateCancelToken(DDBCancelToken **token);
+
+    /** Cancels a token: the calls working for it stop at their next checkpoint. Callable from
+     * any thread, also from a callback and in every state of the library (while it shuts down
+     * too); canceling a canceled token does nothing.
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when token is NULL */
+    DDB_DLL DDBErr DDBCancel(DDBCancelToken *token);
+
+    /** Frees the caller's token (NULL does nothing). Calls that use it keep working with it
+     * until they return. Like DDBFree it works in every state and never changes
+     * DDBGetLastError(). Always DDBERR_NONE. */
+    DDB_DLL DDBErr DDBFreeCancelToken(DDBCancelToken *token);
+
+    /** Sets the token the next call on this thread works for (NULL: none), until that call
+     * returns. The thread keeps a reference while it is set.
+     * @return DDBERR_NONE */
+    DDB_DLL DDBErr DDBSetThreadCancelToken(DDBCancelToken *token);
+
+    /* Logging (DQ-15, XI-08, new in 2.0). A host receives libddb's log records and GDAL's messages
+     * in one callback, each with the operation id it set on the thread that made the call, and
+     * maps them to its own logger. Without a callback the records go to stderr, like GDAL's
+     * messages; stdout carries only the output of the CLI commands. While a callback is
+     * registered the records no longer go to stderr; the DDB_LOG file keeps them too.
+     *
+     * Threading: the callback is called on the thread that logs: the thread of the call, a
+     * worker of the call's parallel sections (with the call's operation id), or a thread of
+     * GDAL's own (operation id 0). It may run on several threads at once: make it thread-safe,
+     * quick, and never let an exception or a longjmp leave it. It must not call libddb (but the
+     * exempt accessors): libddb may hold a lock while it logs. What libddb logs on a thread
+     * while that thread runs the callback is dropped. DDBSetLogCallback and DDBShutdown called
+     * from the callback return DDBERR_INVALIDARGS.
+     *
+     * Levels: a record below the process log level is not produced at all. That level is set by
+     * DDBRegisterProcess: INFO, TRACE when verbose (or DDB_DEBUG/DDB_LOG is set), and the
+     * minLevel of a callback registered before DDBRegisterProcess; register the callback first
+     * to receive DEBUG and TRACE records without a verbose stderr. */
+
+    /** Log levels, in increasing severity (the order of .NET's LogLevel and Serilog's) */
+    typedef enum DDBLogLevel
+    {
+        DDB_LOG_TRACE = 0,
+        DDB_LOG_DEBUG = 1,
+        DDB_LOG_INFO = 2,
+        DDB_LOG_WARNING = 3,
+        DDB_LOG_ERROR = 4,
+        DDB_LOG_FATAL = 5
+    } DDBLogLevel;
+
+    /** The log callback (the platform's default C calling convention, like DDBProgressCallback).
+     * @param level a DDBLogLevel
+     * @param message the text, UTF-8, never NULL; valid during the call only
+     * @param source "ddb" for libddb's records, "gdal" for GDAL's messages (more may be added)
+     * @param opId the operation id of the thread (DDBSetThreadOperation), 0 for none
+     * @param userData the pointer given to DDBSetLogCallback */
+    typedef void (*DDBLogCallback)(int level, const char *message, const char *source, uint64_t opId,
+                                   void *userData);
+
+    /** Registers the log callback for the records of minLevel and above, replacing the previous
+     * one; NULL unregisters it (the records go to stderr again). Callable before
+     * DDBRegisterProcess (see the levels above). When it returns, the previous callback is not
+     * called any more: it waits for the threads still inside it. DDBShutdown unregisters it;
+     * at process exit libddb disables it before its exit-time handlers run.
+     * @param callback the callback, or NULL
+     * @param minLevel a DDBLogLevel (ignored when callback is NULL)
+     * @param userData passed to every call of callback
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when minLevel is not a DDBLogLevel or when called
+     *         from inside the callback */
+    DDB_DLL DDBErr DDBSetLogCallback(DDBLogCallback callback, int minLevel, void *userData);
+
+    /** Sets the operation id the next call on this thread logs with (0: none), until that call
+     * returns, like DDBSetThreadCancelToken: the host maps it to its request or job.
+     * @return DDBERR_NONE */
+    DDB_DLL DDBErr DDBSetThreadOperation(uint64_t opId);
+
+    /** Normalize a dataset-relative entry path, or reject it, with libddb's path rules (XI-09,
+     * entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):
+     * '/' and '\' both separate segments; empty and "." segments are dropped; the result uses '/'
+     * with no leading or trailing separator. Names are compared byte for byte, without Unicode
+     * normalization. ".ddb" is reserved as a segment at any depth.
+     * The rejection codes, checked in this order: "empty" (""), "nul" (unreachable through this
+     * NUL-terminated API), "encoding" (not valid UTF-8), "absolute" (leading '/' or '\', a UNC
+     * path, a drive "X:"), "traversal" (a ".." segment), "empty" (nothing left, e.g. "./"),
+     * "reserved". New codes may be added; treat an unknown code as a rejection.
+     * The existing exports do not apply these rules yet (new in 2.0).
+     * @param path the path (UTF-8)
+     * @param reservedJson NULL, "" or a JSON array of extra names reserved as the FIRST segment
+     *                     only, e.g. [".uploads"]; each name is one segment (no separator, not
+     *                     "", "." or "..")
+     * @param output pointer to C-string where to store the JSON (free with DDBFree):
+     *               {"path": "a/b"} when accepted, {"rejected": "<code>"} when rejected
+     * @return DDBERR_NONE for an accepted and for a rejected path; DDBERR_INVALIDARGS when path
+     *         or output is NULL or reservedJson is invalid (see DDBGetLastError) */
+    DDB_DLL DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output);
 
     /** Initialize a DroneDB database
      * @param directory Path to directory where to initialize the database
@@ -97,7 +361,7 @@ extern "C"
      * @param output pointer to C-string where to store output
      * @param recursive whether to recursively add folders
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char **output, bool recursive = false);
+    DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char **output, bool recursive);
 
     /** Options for DDBAddWithOptions. Caller must
      * initialize every field explicitly; these are semantic defaults, not enforced ones. */
@@ -106,6 +370,11 @@ extern "C"
         bool stopOnError;        // default true == DDBAdd's semantics
         int maxConflictRetries;  // default 2
     } DDBAddOptions;
+
+    DDB_STATIC_ASSERT(sizeof(DDBAddOptions) == 8, "DDBAddOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAddOptions, recursive) == 0, "DDBAddOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAddOptions, stopOnError) == 1, "DDBAddOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAddOptions, maxConflictRetries) == 4, "DDBAddOptions layout");
 
     /** Add one or more files to a DroneDB database with per-item error isolation.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
@@ -120,6 +389,31 @@ extern "C"
      *         failed — check the "errors" array), an error otherwise */
     DDB_DLL DDBErr DDBAddWithOptions(const char *ddbPath, const char **paths, int numPaths,
                                      const DDBAddOptions *options, char **output);
+
+    /** A file with the SHA-256 its writer computed while writing it (see DDBAddWithHints) */
+    typedef struct {
+        const char *path;   // file to add
+        const char *sha256; // lowercase hex digest; NULL or "" = no hint, the file is hashed
+        long long size;     // bytes written; < 0 = not checked
+        double mtime;       // modification time after the write (seconds since the epoch); <= 0 = not checked
+    } DDBAddHint;
+
+    /* 64-bit layout (the one Registry marshals) */
+    DDB_STATIC_ASSERT(sizeof(void *) != 8 || sizeof(DDBAddHint) == 32, "DDBAddHint layout");
+    DDB_STATIC_ASSERT(sizeof(void *) != 8 || offsetof(DDBAddHint, sha256) == 8, "DDBAddHint layout");
+    DDB_STATIC_ASSERT(sizeof(void *) != 8 || offsetof(DDBAddHint, size) == 16, "DDBAddHint layout");
+    DDB_STATIC_ASSERT(sizeof(void *) != 8 || offsetof(DDBAddHint, mtime) == 24, "DDBAddHint layout");
+
+    /** DDBAddWithOptions for files whose SHA-256 the caller computed while writing them.
+     * A hint is used only when the file still has its size and mtime; otherwise the file is
+     * hashed as usual, so a wrong hint can never index a wrong hash for a changed file.
+     * Folders are not expanded (options->recursive is ignored).
+     * @param files array of files with their hints
+     * @param numFiles number of files
+     * @param options, output as DDBAddWithOptions
+     * @return as DDBAddWithOptions */
+    DDB_DLL DDBErr DDBAddWithHints(const char *ddbPath, const DDBAddHint *files, int numFiles,
+                                   const DDBAddOptions *options, char **output);
 
     /** Remove one or more files to a DroneDB database
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
@@ -139,14 +433,32 @@ extern "C"
      * @param withHash whether to compute SHA256 hashes
      * @param stopOnError whether to stop on failure
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
-                           const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
+    DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth,
+                           const char *geometry, bool withHash, bool stopOnError);
 
-    /** Retrieve a single entry from the index
-     * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param path path of the entry
-     * @param output pointer to C-string where to store result (JSON)
+    /** Close the idle pooled index connections and the idle cached rasters (tilers and
+     *  datasets kept open between tile/render calls) of the files under a folder.
+     *  Call it before deleting, moving or replacing a dataset folder (or its .ddb/dbase.sqlite)
+     *  from this process: idle connections and rasters keep their files open.
+     * @param path dataset folder (parent of ".ddb"), or a folder that contains datasets
+     * @param closed out (optional): number of connections and rasters closed
      * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBReleaseConnections(const char *path, int *closed);
+
+    /** Move the committed changes of an index from its WAL into the database file and empty
+     *  the WAL. Index writes leave their changes in .ddb/dbase.sqlite-wal (no checkpoint per
+     *  call): call this before copying dbase.sqlite without its WAL.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param complete out (optional): 1 when the WAL was emptied, 0 when another connection
+     *        (a reader of an older snapshot, a writer) kept the checkpoint from completing
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBCheckpoint(const char *ddbPath, int *complete);
+
+    /** Retrieve a single entry from the index, including its metadata
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param path dataset-relative path of the entry (exact match, no wildcards)
+     * @param output pointer to C-string where to store result (JSON)
+     * @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path, an error otherwise */
     DDB_DLL DDBErr DDBGet(const char *ddbPath, const char *path, char **output);
 
     /** List files inside index
@@ -158,7 +470,24 @@ extern "C"
      * @param recursive whether to recursively scan folders
      * @param maxRecursionDepth limit the depth of recursion
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
+    DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth);
+
+    /** List the entries below a folder that match a file name pattern and entry types. The
+     * filters run in the index query, so non-matching entries are never read or serialized.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param folder dataset-relative folder, "" for the dataset root; a file selects itself
+     * @param recursive the whole subtree of the folder (true) or its children only (false)
+     * @param namePattern file name pattern ('*' any characters, '?' one character, letters in any
+     *                    case: Unicode simple case folding since 2.0, ASCII only before; a
+     *                    name or pattern that is not valid UTF-8 folds ASCII only), or "" for
+     *                    every name
+     * @param types comma-separated entry types (see DDBRescan, "directory" allowed), or "" for all
+     * @param withDetails true: full entries as DDBList's "json" format; false: path, hash, type,
+     *                    mtime, size and depth only
+     * @param output pointer to C-string where to store the JSON array, sorted by path
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBListEntries(const char *ddbPath, const char *folder, bool recursive, const char *namePattern,
+                                  const char *types, bool withDetails, char **output);
 
     /** Search files inside index
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
@@ -233,7 +562,7 @@ extern "C"
      * @param tms Generate TMS-style tiles instead of XYZ
      * @param forceRecreate ignore cache and always recreate the tile
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBTile(const char *inputPath, int tz, int tx, int ty, char **outputTilePath, int tileSize = 256, bool tms = false, bool forceRecreate = false);
+    DDB_DLL DDBErr DDBTile(const char *inputPath, int tz, int tx, int ty, char **outputTilePath, int tileSize, bool tms, bool forceRecreate);
 
     /** Generate image/orthophoto/EPT tiles in memory
      * @param inputPath path to the input geoTIFF/EPT
@@ -247,10 +576,12 @@ extern "C"
      * @param forceRecreate ignore cache and always recreate the tile
      * @param inputPathHash Optional hash of the resource to tile (if available), allowing smarter decisions about file downloads for certain resource types.
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "");
+    DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize, bool tms, bool forceRecreate, const char *inputPathHash);
 
-    /** Generate a tile in memory with explicit output format ("png" or "jpeg"). */
-    DDB_DLL DDBErr DDBMemoryTileFmt(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "", const char *outputFormat = "png");
+    /** Generate a tile in memory with explicit output format: "png", "jpeg" or "webp"
+     *  (or their MIME types). PNG tiles are written at zlib level 1, WebP tiles lossy at
+     *  quality 80; tiles without transparent pixels have no alpha band. */
+    DDB_DLL DDBErr DDBMemoryTileFmt(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize, bool tms, bool forceRecreate, const char *inputPathHash, const char *outputFormat);
 
     /** Generate delta between two ddbs
      * @param ddbSourceStamp JSON stamp of the source DroneDB database
@@ -260,7 +591,9 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, char **output, const char *format);
 
-    /** Apply a delta on a database
+    /** Apply a delta on a database. The added files are moved out of sourcePath, and each
+     * must match the hash in the delta (checked before any change; set the environment
+     * variable DDB_VERIFY_PUSH_HASHES=0 to skip the check; DDBApplyDeltaEx skips it per file)
      * @param delta JSON delta between databases
      * @param sourcePath path to source database (or path to partial files to be added)
      * @param ddbPath path to DroneDB database to which the delta should be applied
@@ -269,6 +602,25 @@ extern "C"
      * @param conflicts pointer to C-string where to store list of conflicts (if any) in JSON
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, char **conflicts);
+
+    /** DDBApplyDelta for a host that checked the hashes of the added files itself, e.g. while
+     * it received them (XI-05, new in 2.0): libddb does not read those files again.
+     * verifiedHashesJson NULL: as DDBApplyDelta (every added file is hashed, unless
+     * DDB_VERIFY_PUSH_HASHES=0). Otherwise a JSON object {"<delta path>": "<sha256>"} of the
+     * files the caller verified, and DDB_VERIFY_PUSH_HASHES is ignored: a listed file is
+     * trusted, every other added file is hashed ({} hashes them all). Each entry must name a
+     * file the delta adds, with exactly the delta's hash (lowercase hex), or the call fails with
+     * DDBERR_INVALIDARGS before anything changes: a hash the caller did not verify for this
+     * delta is never trusted, and a different hash means the received bytes are not the delta's.
+     * @param delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump as DDBApplyDelta
+     * @param verifiedHashesJson the files the caller verified (JSON object), or NULL
+     * @param conflicts as DDBApplyDelta: the conflicting paths (JSON array), freed with DDBFree
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for a missing argument, malformed JSON,
+     *         a delta path outside the dataset or a bad verifiedHashesJson (not a JSON object of
+     *         strings, an entry that is not a file add of the delta or has another hash);
+     *         DDBERR_BUSY when the database is locked; DDBERR_EXCEPTION when an added file that
+     *         was hashed does not have its delta hash, or the apply fails */
+    DDB_DLL DDBErr DDBApplyDeltaEx(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, const char *verifiedHashesJson, char **conflicts);
 
     /** Compute map of local files that are available for delta adds operations
      * @param delta JSON delta between databases
@@ -296,6 +648,13 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetStamp(const char *ddbPath, char **output);
 
+    /** Get the checksum of the current database's stamp (the "checksum" field of
+     * DDBGetStamp) without building the stamp
+     * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     * @param output pointer to C-string where to store the checksum (hex SHA-256)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetStampChecksum(const char *ddbPath, char **output);
+
     /** Rescan all files in the index to update metadata
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param output pointer to C-string where to store output (JSON array of results)
@@ -303,7 +662,18 @@ extern "C"
      *              Valid types: generic, geoimage, georaster, pointcloud, image, dronedb, markdown, video, geovideo, model, panorama, geopanorama, vector, gaussiansplat
      * @param stopOnError whether to stop processing on first error (default true)
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBRescan(const char *ddbPath, char **output, const char *types = "", bool stopOnError = true);
+    DDB_DLL DDBErr DDBRescan(const char *ddbPath, char **output, const char *types, bool stopOnError);
+
+    /** Rescan the files in the index that match both a type and an extension filter
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param output pointer to C-string where to store output (JSON array of results, same format as DDBRescan)
+     * @param types comma-separated list of entry types to rescan (see DDBRescan), or empty for all
+     * @param extensions comma-separated list of file extensions to rescan (e.g., "dwg,.dxf,copc.laz"; case and
+     *                   leading dot are ignored), or empty for all
+     * @param stopOnError whether to stop processing on first error (default true)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBRescanEx(const char *ddbPath, char **output, const char *types,
+                               const char *extensions, bool stopOnError);
 
     /** Move entry
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -325,7 +695,7 @@ extern "C"
      *         written), an error otherwise. Missing external tools and dependency
      *         references that can never be satisfied (absolute, or outside the dataset)
      *         are errors, not deferrals. */
-    DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const char *dest = nullptr, bool force = false, bool pendingOnly = false);
+    DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *dest, bool force, bool pendingOnly);
 
     /** Cleanup a dataset:
      *   1. Remove from the database all (non-directory) entries whose underlying
@@ -360,8 +730,12 @@ extern "C"
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param output pointer to C-string where to store result (JSON array).
      *               Each element: { "hash": "...", "path": "...",
-     *               "missingDependencies": ["..."], "lastAttempt": 1721612345 }
-     *               (caller must free with DDBFree)
+     *               "missingDependencies": ["..."], "lastAttempt": 1721612345,
+     *               "retryAfter": 1721612405 }
+     *               (caller must free with DDBFree). lastAttempt and retryAfter are Unix
+     *               seconds: retryAfter is when DDBBuild with pendingOnly (and no force)
+     *               retries the build, as in the build object of DDBGetBuildArtifacts (see
+     *               "Build manifest")
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetPendingBuildInfo(const char *ddbPath, char **output);
 
@@ -381,6 +755,192 @@ extern "C"
      * @param isBuildComplete out: true if build output is complete and valid
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildComplete(const char *ddbPath, const char *path, bool *isBuildComplete);
+
+    /** GetBuildStatus
+     *  DDBIsBuildable and DDBIsBuildComplete for several entries with one index open.
+     * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     * @param paths array of dataset-relative entry paths (exact match)
+     * @param numPaths number of paths
+     * @param output pointer to C-string where to store result (JSON array, one element per
+     *               input path, in input order). Each element:
+     *               { "path": "...", "exists": true, "buildable": true, "complete": false }
+     *               (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetBuildStatus(const char *ddbPath, const char **paths, int numPaths, char **output);
+
+    /* ---- Build manifest (XI-04, new in 2.0) -------------------------------------------------------
+     * libddb owns the build layout, the build state and the entry type rules: a host serves the
+     * roles, paths and states these exports return, and never composes a build path, names an
+     * artifact file or keeps its own list of buildable types.
+     *
+     * Artifact roles say what an artifact is for, never where it is. They are only ever added:
+     * pass an unknown role through, and ignore it where it has no use.
+     *   raster.cog       Cloud Optimized GeoTIFF of a GeoRaster (downloadable)
+     *   vector.gpkg      GeoPackage of a Vector (downloadable)
+     *   vector.mvt       Mapbox Vector Tiles of a Vector: a directory, its index the TileJSON
+     *   vector.local     drawing-coordinate metadata of a CAD drawing without a CRS (it has no MVT)
+     *   pointcloud.copc  Cloud Optimized Point Cloud (downloadable)
+     *   pointcloud.ept   Entwine Point Tiles of datasets built before COPC: a directory, legacy
+     *   model.nexus      Nexus multiresolution mesh of a Model
+     *   model.3dtiles    OGC 3D Tiles of a Model or a .3tz: a directory, its index tileset.json
+     *   gsplat.lod       level-of-detail Gaussian Splat (Spark RAD, streamed with range requests)
+     *   gsplat.spz       Gaussian Splat in SPZ
+     *   gsplat.bounds    local bounding box of a splat (JSON)
+     *   gsplat.georef    georeference of a splat (JSON)
+     *
+     * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?}
+     *   path          relative to the build root ("root" below), '/'-separated; URLs append it
+     *                 to ".../build/{hash}/" and DDBResolveBuildFile takes it
+     *   kind          "file", or "dir" for a directory (index names its descriptor file; its
+     *                 other files, e.g. tiles, are "<path>/<file>")
+     *   mediaType     of the file a client opens: the file, or the index of a directory
+     *   downloadName  the file name to offer for a download; absent when the artifact is not one
+     *   index         the descriptor file of a directory, relative to path
+     *   legacy        true for an output of an older layout: read when present, never written;
+     *                 listed only when the entry has none of its current artifacts
+     *
+     * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
+     *   {"buildable": bool, "source": string|null, "hash": string|null, "root": string|null,
+     *    "state": "none"|"pending"|"building"|"complete", "missingDependencies": [string],
+     *    "lastAttempt": integer|null, "retryAfter": integer|null, "artifacts": [artifact]}
+     *   buildable  the entry is built, by itself or as a sidecar of its main file (a .dbf of a .shp)
+     *   source     dataset-relative path of the entry the artifacts belong to: the entry itself,
+     *              or the main file of a sidecar
+     *   hash       the hash of source, which names its build (URLs: ".../build/{hash}/{path}")
+     *   root       the absolute build root of source (UTF-8); it may not exist yet
+     *   state      in this order: "building" a live build holds the build lock of the entry;
+     *              "pending" a build waits for missing dependencies; "complete" the artifacts
+     *              are complete (as DDBIsBuildComplete); "none" not built, failed or incomplete
+     *   missingDependencies, lastAttempt
+     *              from the pending marker when there is one (a pending or a building entry),
+     *              [] and null otherwise: dataset-relative names, and the time of the last
+     *              attempt in Unix seconds (0 when the marker's time is unreadable)
+     *   retryAfter the Unix second from which DDBBuild with pendingOnly (and no force) retries it:
+     *              lastAttempt + the retry backoff (60 s, libddb's rule; a host must not keep a
+     *              copy of it). The retry is due when the current time is at or past it, so an
+     *              unreadable marker time (lastAttempt 0) is due at once. Null exactly when
+     *              lastAttempt is; a value, not a "due now" flag, so a listing stays the same
+     *              until the marker changes
+     *   artifacts  the artifacts that exist (a directory when its index exists), in the order
+     *              of the entry type, its primary output first: the file thumbnails and tiles
+     *              are made from (raster.cog, pointcloud.copc or pointcloud.ept, vector.gpkg,
+     *              model.nexus, gsplat.lod, model.3dtiles of a .3tz)
+     *   source, hash and root are null, state "none", the arrays empty for an entry that is not
+     *   buildable.
+     * Reading build objects changes nothing on disk: a stale lock left by a crashed build is not
+     * a build and stays in place (DDBIsBuildActive removes it). A call opens the index once; an
+     * entry that is not buildable costs no filesystem access. */
+
+    /** The entry types of libddb and what it does with them (XI-04, new in 2.0).
+     * @param output pointer to C-string where to store the JSON array, by id (free with DDBFree).
+     *               Each element: {"id": int, "name": string, "buildable": bool,
+     *               "thumbnail": "none"|"file"|"build", "sidecarExtensions": [string],
+     *               "roles": [string]}
+     *                 id                 the entry type value (entries' "type")
+     *                 name               its name, as DDBRescan takes it (case-insensitive)
+     *                 thumbnail          "file": rendered from the entry's file; "build": from
+     *                                    one of its artifacts, once built; "none": no thumbnail
+     *                 sidecarExtensions  lowercase extensions, without the dot, of the files that
+     *                                    belong to a main file of this type (same folder and
+     *                                    stem; the main file's extension in any letter case): a
+     *                                    sidecar's build is the main file's
+     *                 roles              every artifact role a build of this type can produce,
+     *                                    legacy ones included
+     * @return DDBERR_NONE on success, DDBERR_INVALIDARGS when output is NULL */
+    DDB_DLL DDBErr DDBGetEntryTypes(char **output);
+
+    /** The build state and the existing artifacts of several entries, with one index open
+     * (XI-04, new in 2.0). For a host it replaces DDBIsBuildable, DDBIsBuildActive,
+     * DDBIsBuildComplete, DDBIsBuildPending, DDBGetPendingBuildInfo and DDBGetBuildStatus.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param paths array of dataset-relative entry paths (exact match)
+     * @param numPaths number of paths (0 is allowed)
+     * @param output pointer to C-string where to store the JSON array, one element per input
+     *               path, in input order (free with DDBFree):
+     *               {"path", "exists": false} for a path that is not indexed, otherwise
+     *               {"path", "exists": true, "hash": string|null (null for a folder),
+     *                "type": int, "build": <the build object above>}
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when ddbPath is empty, paths is NULL
+     *         or holds a NULL, numPaths is negative or output is NULL; DDBERR_BUSY on database
+     *         contention; DDBERR_EXCEPTION otherwise (no database at ddbPath, ...) */
+    DDB_DLL DDBErr DDBGetBuildArtifacts(const char *ddbPath, const char **paths, int numPaths, char **output);
+
+    /** The absolute path of a file of a build, checked (XI-04, new in 2.0): it serves the
+     * ".../build/{hash}/{path}" URLs, tiles included.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param hash the hash of the build ("hash" of a build object): 64 hexadecimal characters
+     * @param path the file, relative to the build root: an artifact's path, or a file below a
+     *             directory artifact ("mvt/3/4/2.pbf"). The dataset path rules apply
+     *             (DDBNormalizePath: '/' or '\' separators, no "..", not absolute).
+     * @param outPath pointer to C-string where to store the absolute path (UTF-8, free with
+     *                DDBFree)
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, the
+     *         hash is malformed or the path breaks the path rules (traversal, absolute, ...);
+     *         DDBERR_NOTFOUND when no entry has this hash, the path is not inside one of its
+     *         artifacts (lock files and scratch folders are not served), the file does not
+     *         exist, or a link leads it out of the build root; DDBERR_BUSY on database
+     *         contention */
+    DDB_DLL DDBErr DDBResolveBuildFile(const char *ddbPath, const char *hash, const char *path, char **outPath);
+
+    /** Copy the build of an entry to another dataset, with its pending marker (XI-04, new in 2.0):
+     * after copying or moving a file between datasets, its artifacts need no rebuild and a
+     * deferred build stays deferred. Copies the artifact folders of the types of the source
+     * entries with this hash (legacy ones included), each through a scratch folder renamed onto
+     * the destination's, which it replaces; the destination's other files are left alone. Holds
+     * the destination's build locks while it copies. The destination needs no entry with this
+     * hash yet.
+     * @param sourceDdbPath path to the DroneDB database the build is copied from
+     * @param destinationDdbPath path to the DroneDB database it is copied to (another dataset)
+     * @param hash the hash of the build ("hash" of a build object)
+     * @param output pointer to C-string where to store the JSON (free with DDBFree):
+     *               {"hash": string, "artifacts": [artifact], "pending": bool}: the artifacts
+     *               of the destination after the copy (as in a build object) and whether it has
+     *               a pending marker
+     * @return DDBERR_NONE on success, also when the source has nothing built (nothing copied);
+     *         DDBERR_INVALIDARGS when an argument is NULL or empty, the hash is malformed or
+     *         both paths are the same dataset; DDBERR_NOTFOUND when no buildable entry of the
+     *         source has this hash; DDBERR_BUILDINPROGRESS when a build of it runs in either
+     *         dataset (nothing copied: the destination can build it itself);
+     *         DDBERR_RETRYABLE when the destination's disk is (nearly) full
+     *         (DDBGetLastErrorReason); DDBERR_BUSY on database contention */
+    DDB_DLL DDBErr DDBCopyBuildArtifacts(const char *sourceDdbPath, const char *destinationDdbPath, const char *hash,
+                                         char **output);
+
+    /** Options for DDBListEntriesEx (new in 2.0). Set structSize to sizeof(DDBListEntriesOptions)
+     * and every other field explicitly. A later version may append fields: a library that does not
+     * know them rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
+    typedef struct {
+        uint32_t structSize; // sizeof(DDBListEntriesOptions)
+        bool recursive;      // the whole subtree of the folder (true) or its children only (false)
+        bool withDetails;    // full entries (true) or path, hash, type, mtime, size, depth (false)
+        bool withBuild;      // each entry gets its "build" object (see the build manifest above)
+        uint8_t reserved;    // must be 0: a later version may give it a meaning (DDBERR_INVALIDARGS otherwise)
+    } DDBListEntriesOptions;
+
+    DDB_STATIC_ASSERT(sizeof(DDBListEntriesOptions) == 8, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, structSize) == 0, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, recursive) == 4, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, withDetails) == 5, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, withBuild) == 6, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, reserved) == 7, "DDBListEntriesOptions layout");
+
+    /** DDBListEntries with options (new in 2.0): with withBuild false the output is DDBListEntries',
+     * byte for byte; with withBuild true every entry also has "build", its build object (see
+     * the build manifest above), read with the same index connection, so a listing with build
+     * states is one call.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param folder dataset-relative folder, "" or NULL for the dataset root; a file selects itself
+     * @param namePattern file name pattern as DDBListEntries takes it, "" or NULL for every name
+     * @param types comma-separated entry types as DDBListEntries takes them, "" or NULL for all
+     * @param options see DDBListEntriesOptions
+     * @param output pointer to C-string where to store the JSON array, sorted by path (free
+     *               with DDBFree)
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when ddbPath is empty, options is NULL
+     *         or has a structSize below 8, a non-zero reserved byte or unknown non-zero fields,
+     *         types holds an unknown type
+     *         or output is NULL; DDBERR_BUSY on database contention */
+    DDB_DLL DDBErr DDBListEntriesEx(const char *ddbPath, const char *folder, const char *namePattern,
+                                    const char *types, const DDBListEntriesOptions *options, char **output);
 
     /** Add metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -456,7 +1016,39 @@ extern "C"
      *  @param offset number of items to skip (paging)
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBStacItemCollection(const char *ddbPath, const char *stacCollectionRoot, const char *id, const char *stacCatalogRoot, const char *bbox, const char *datetime, int limit, int offset, char **output);
-    /** Get raster info including bands, detected sensor, presets
+
+    /** Data-only STAC (XI-09, new in 2.0): the document of DDBStac with id NULL, without any member
+     *  built from a URL or an ID, which the caller (Registry) owns: no "id", "collection" or
+     *  "links", and no asset "href". Everything else is the same: an Item keeps its entry path
+     *  as properties.title and as the key of its data asset, a Collection takes its title from
+     *  the dataset name or else the dataset folder name.
+     *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     *  @param entry path of the entry to generate a STAC Item for; NULL or "" for the Collection
+     *  @param output pointer to C-string where to store result (JSON, free with DDBFree)
+     *  @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path,
+     *          DDBERR_INVALIDARGS when ddbPath or output is NULL, an error otherwise */
+    DDB_DLL DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output);
+
+    /** Data-only STAC ItemCollection (XI-09, new in 2.0): the document of DDBStacItemCollection
+     *  without "links", and with data-only features (DDBStacData). numberMatched and
+     *  numberReturned are kept. bbox, datetime, limit and offset are those of
+     *  DDBStacItemCollection.
+     *  @param output pointer to C-string where to store result (JSON, free with DDBFree)
+     *  @return DDBERR_NONE on success, DDBERR_INVALIDARGS when ddbPath or output is NULL or bbox
+     *          is not 4 numbers, an error otherwise */
+    DDB_DLL DDBErr DDBStacItemCollectionData(const char* ddbPath,
+                                             const char* bbox,
+                                             const char* datetime,
+                                             int limit,
+                                             int offset,
+                                             char** output);
+    /** Get raster info including bands, detected sensor, presets, and "indexLayer": the spectral
+     *  indices the WMS vegetation-index layer (DDBRenderRasterIndex) can render from the raster,
+     *  as an array of names in the layer's order, a subset of ["NDVI", "NDRE", "NDWI", "SAVI",
+     *  "EVI"], [] when the raster has none. A raster has an index when its bands are named by its
+     *  sensor profile (or it has five or more unnamed data bands, read as R, G, B, Red edge, NIR)
+     *  and, for SAVI and EVI, which need reflectance, when its data is floating point:
+     *  DDBRenderRasterIndex refuses the others.
      * @param path Path to raster file
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
@@ -775,11 +1367,16 @@ extern "C"
 
     /** Render a spectral index over a raster region (WMS GetMap STYLES support).
      *
-     * Computes NDVI / NDRE / NDWI / EVI / SAVI using the standard 5-band mapping
-     * (R=1, G=2, B=3, RedEdge=4, NIR=5) and applies a red-yellow-green color ramp.
+     * Computes NDVI / NDRE / NDWI / SAVI / EVI and applies a red-yellow-green color ramp. The
+     * bands are those the tiles use (the raster's sensor profile: band names, descriptions,
+     * colour interpretation); a raster that names none of them and has five data bands or more is
+     * read as R=1, G=2, B=3, RedEdge=4, NIR=5. SAVI and EVI add constants to the band values, so
+     * they need a floating-point (reflectance) raster. An index the raster cannot render is
+     * refused with the reason: DDBGetRasterInfo lists the renderable ones ("indexLayer"). Along
+     * the edge of the raster's alpha band the output alpha is partial (anti-aliased).
      *
      * @param inputPath Source raster path.
-     * @param indexName One of: "NDVI", "NDRE", "NDWI", "EVI", "SAVI" (case-insensitive).
+     * @param indexName One of: "NDVI", "NDRE", "NDWI", "SAVI", "EVI" (case-insensitive).
      * @param bbox 4 doubles [minX,minY,maxX,maxY] in @p bboxSrs.
      * @param bboxSrs CRS authority code; NULL = "EPSG:4326".
      * @param width Output width in pixels (1..4096).
@@ -833,6 +1430,47 @@ extern "C"
                                   const char *outputFormat,
                                   char **output);
 
+    /** DDBQueryVector restricted to the features with the given ids (WFS RESOURCEID,
+     * GetFeatureById, OGC API /items/{id}). Feature ids are the source FIDs: GML ids are
+     * "<layer>.<fid>" and GeoJSON features carry "id": fid, the same in every page.
+     *
+     * @param fids Feature ids to return, or NULL for every feature; a GeoPackage reads
+     *             them by primary key.
+     * @param numFids Number of ids in @p fids.
+     * @param where Attribute filter, or NULL: an SQL expression over the layer's fields
+     *              (SQLite syntax for a GeoPackage, e.g. "\"name\" = 'A' AND \"pop\" > '10'").
+     *              It is applied as given: build it from quoted identifiers and literals only,
+     *              and check the field names first (SQLite reads an unknown double-quoted
+     *              identifier as a string literal).
+     * Other parameters and the result: see DDBQueryVector. */
+    DDB_DLL DDBErr DDBQueryVectorEx(const char *vectorPath,
+                                    const char *layerName,
+                                    const double *bbox,
+                                    const char *bboxSrs,
+                                    const long long *fids,
+                                    int numFids,
+                                    const char *where,
+                                    int maxFeatures,
+                                    int startIndex,
+                                    const char *outputFormat,
+                                    char **output);
+
+    /** Count the features of a vector layer that match a bbox, feature ids and an attribute
+     * filter (WFS numberMatched, OGC API numberMatched), without reading them when the format
+     * has a spatial index (GeoPackage) and there is no attribute filter.
+     *
+     * @param vectorPath, layerName, bbox, bboxSrs, fids, numFids, where See DDBQueryVectorEx.
+     * @param count Receives the number of matching features.
+     * @return DDBERR_NONE on success, an error otherwise. */
+    DDB_DLL DDBErr DDBCountVector(const char *vectorPath,
+                                  const char *layerName,
+                                  const double *bbox,
+                                  const char *bboxSrs,
+                                  const long long *fids,
+                                  int numFids,
+                                  const char *where,
+                                  long long *count);
+
     /** Describe a vector dataset (WFS DescribeFeatureType / OGC API collection).
      *
      * @param vectorPath Path to vector source.
@@ -843,6 +1481,14 @@ extern "C"
     DDB_DLL DDBErr DDBDescribeVector(const char *vectorPath,
                                      const char *layerName,
                                      char **output);
+
+    /** Content of a .prj that gives a CAD drawing the coordinate system @p crs (DDB-12).
+     *
+     * @param crs An authority code ("EPSG:32632"), WKT or PROJ string, written as ESRI WKT;
+     *            or "local" for LOCAL_CS["Drawing"] (the drawing stays in its own coordinates).
+     * @param output Receives the .prj content (caller frees with DDBFree).
+     * @return DDBERR_NONE on success, DDBERR_EXCEPTION when @p crs is not a coordinate system. */
+    DDB_DLL DDBErr DDBMakeCadPrj(const char *crs, char **output);
 
 #ifdef __cplusplus
 }

@@ -1,95 +1,133 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-
-#include "authcredentials.h"
-#include "ddb.h"
-#include "mio.h"
-#include "registryutils.h"
-#include "tagmanager.h"
-#include "userprofile.h"
+#include <boolinq/boolinq.h>
 
 #include "dbops.h"
+#include "delta.h"
 #include "exceptions.h"
+#include "mio.h"
+#include "registry_ops.h"
+#include "syncmanager.h"
+#include "tagmanager.h"
 
-namespace ddb
-{
+namespace ddb {
 
-    DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy, bool sslVerify)
-    {
-        const auto currentPath = fs::current_path().string();
+void pullDataset(RegistryClient& client, const std::string& path, const MergeStrategy mergeStrategy, std::ostream& out) {
+    auto db = open(path, true);
+    TagManager tagManager(db.get());
 
-        const auto db = open(currentPath, true);
+    // Get our tag using tagmanager
+    const auto tag = tagManager.getTag();
 
-        std::string registryUrl = registry;
+    if (tag.empty())
+        throw IndexException("Cannot pull if no tag is specified");
 
-        if (registry.empty())
-        {
-            TagManager manager(db.get());
+    const auto tagInfo = RegistryUtils::parseTag(tag);
 
-            const auto autoTagRaw = manager.getTag();
+    out << "Pulling from '" << tag << "'" << std::endl;
 
-            if (autoTagRaw.empty())
-                throw IndexException("Cannot pull if no tag is specified");
+    const auto tempDdbFolder =
+        db->ddbDirectory() / "tmp" / "pull_cache" / io::fromUtf8(tagInfo.organization + "-" + tagInfo.dataset);
 
-            auto tag = RegistryUtils::parseTag(autoTagRaw);
+    if (fs::exists(tempDdbFolder)) {
+        // TODO: there might be ways to resume downloads if a user CTRL+Cs
+        io::assureIsRemoved(tempDdbFolder);
+    }
 
-            registryUrl = tag.registryUrl;
-        }
+    // Get stamp from registry
+    json remoteStamp = client.getStamp(tagInfo.organization, tagInfo.dataset);
 
-        const AuthCredentials ac =
-            UserProfile::get()->getAuthManager()->loadCredentials(
-                registryUrl);
+    // Perform local diff using delta method using last stamp
+    SyncManager sm(db.get());
+    const auto delta = getDelta(remoteStamp, sm.getLastStamp(tagInfo.registryUrl));
 
-        Registry reg(registryUrl, sslVerify);
+    if (!delta.empty()) {
+        out << "Delta: files (+" << delta.adds.size() << ",-" << delta.removes.size()
+            << "), meta (+" << delta.metaAdds.size() << ",-" << delta.metaRemoves.size() << ")"
+            << std::endl;
+    }
 
-        try
-        {
-            if (ac.empty())
-            {
-                const auto username = utils::getPrompt("Username: ");
-                const auto password = utils::getPass("Password: ");
+    json remoteMetaDump = json::array();
 
-                if (reg.login(username, password).length() <= 0)
-                    throw AuthException("Cannot authenticate with " +
-                                        reg.getUrl());
+    if (delta.metaAdds.size() > 0) {
+        // Get meta dump
+        remoteMetaDump = client.getMetaDump(tagInfo.organization, tagInfo.dataset, delta.metaAdds);
+    }
 
-                UserProfile::get()->getAuthManager()->saveCredentials(
-                    registryUrl, AuthCredentials(username, password));
+    const auto tempNewFolder = tempDdbFolder / std::to_string(time(nullptr));
 
-                reg.pull(currentPath, mergeStrategy, std::cout);
-            }
-            else
-            {
-                if (reg.login(ac.username, ac.password).length() <= 0)
-                    throw AuthException("Cannot authenticate with " +
-                                        reg.getUrl());
+    // Let's download only if we have anything to download
+    if (!delta.adds.empty()) {
 
-                reg.pull(currentPath, mergeStrategy, std::cout);
-            }
-        }
-        catch (const AuthException &)
-        {
-            const auto username = utils::getPrompt("Username: ");
-            const auto password = utils::getPass("Password: ");
+        auto localMap = computeDeltaLocals(delta, db.get(), io::toUtf8(tempNewFolder));
 
-            if (reg.login(username, password).length() > 0)
-            {
-                UserProfile::get()->getAuthManager()->saveCredentials(
-                    registryUrl, AuthCredentials(username, password));
+        const auto filesToDownload =
+            boolinq::from(delta.adds)
+                .where([&localMap](const AddAction& add) {
+                    return !add.isDirectory() && localMap.find(add.hash) == localMap.end();
+                })
+                .select([](const AddAction& add) { return add.path; })
+                .toStdVector();
 
-                reg.pull(currentPath, mergeStrategy, std::cout);
-            }
-            else
-            {
-                throw AuthException("Cannot authenticate with " +
-                                    reg.getUrl());
-            }
-        }
-        catch (const AppException &e)
-        {
-            throw e;
+        // Download all the missing files
+        client.downloadFiles(tagInfo.organization,
+                            tagInfo.dataset,
+                            filesToDownload,
+                            io::toUtf8(tempNewFolder),
+                            out);
+
+    }
+
+    // TODO: speedup: we should be able to check for conflicts
+    // before we download the files
+
+    // Apply changes to local files
+    DeltaApplication application;
+    application.sourcePath = tempNewFolder;
+    application.mergeStrategy = mergeStrategy;
+    application.sourceMetaDump = remoteMetaDump;
+    auto conflicts = applyDelta(delta, db.get(), application, out);
+    io::assureIsRemoved(tempNewFolder);
+
+    if (conflicts.size() == 0) {
+        // No errors? Update stamp
+        sm.setLastStamp(tagInfo.registryUrl, remoteStamp);
+    } else {
+        out << "Found conflicts, but don't worry! Make a copy of the conflicting entries and use "
+               "--keep-theirs or --keep-ours to finish the pull:"
+            << std::endl
+            << std::endl;
+
+        for (auto& c : conflicts) {
+            out << "C\t" << c.path << " (" << c.description() << ")" << std::endl;
         }
     }
 
-} // namespace ddb
+    db->close();
+
+    // Cleanup
+    io::assureIsRemoved(tempDdbFolder);
+    io::assureIsRemoved(tempNewFolder);
+
+    // Inform user if nothing was needed
+    if (delta.empty()) {
+        out << "Everything up-to-date" << std::endl;
+    } else {
+        out << "Pull completed" << std::endl;
+    }
+}
+
+void pull(const std::string& registry, MergeStrategy mergeStrategy, bool sslVerify,
+          CredentialProvider& credentials, std::ostream& out, const RegistryDeps& deps) {
+    const auto currentPath = io::toUtf8(fs::current_path());
+
+    const auto db = open(currentPath, true);
+    const auto registryUrl = datasetRegistryUrl(db.get(), registry, "pull");
+
+    withAuthenticatedRegistry(registryUrl, sslVerify, credentials, [&](RegistryClient& client) {
+        pullDataset(client, currentPath, mergeStrategy, out);
+    }, {}, deps);
+}
+
+}  // namespace ddb

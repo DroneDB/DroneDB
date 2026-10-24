@@ -134,7 +134,19 @@ fs::path TestArea::downloadTestAsset(const std::string& url,
     if (isSqliteFile)
         validator = isValidSqliteFile;
 
-    return TestFS::downloadTestAsset(url, destination, false, validator);
+    if (TestFS::downloadCacheFolder().empty())
+        return TestFS::downloadTestAsset(url, destination, false, validator);
+
+    // Shared cache: downloaded once, copied to the test area
+    const fs::path cached = TestFS::cachedAssetPath(url);
+    fs::create_directories(cached.parent_path());
+    if (isSqliteFile && fs::exists(cached) && !isValidSqliteFile(cached)) {
+        LOGD << "Found corrupted SQLite file at " << cached << ", forcing re-download";
+        fs::remove(cached);
+    }
+    TestFS::downloadTestAsset(url, cached, false, validator);
+    fs::copy_file(cached, destination, fs::copy_options::overwrite_existing);
+    return destination;
 }
 
 void TestArea::clearAll() {

@@ -1,0 +1,171 @@
+{
+  "call": "DDBGetEntryTypes()",
+  "description": "No input: the registered entry types",
+  "normalisation": {
+    "placeholders": [],
+    "volatileKeys": []
+  },
+  "output": [
+    {
+      "buildable": false,
+      "id": 0,
+      "name": "Undefined",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": false,
+      "id": 1,
+      "name": "Directory",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": false,
+      "id": 2,
+      "name": "Generic",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": false,
+      "id": 3,
+      "name": "GeoImage",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "file"
+    },
+    {
+      "buildable": true,
+      "id": 4,
+      "name": "GeoRaster",
+      "roles": [
+        "raster.cog"
+      ],
+      "sidecarExtensions": [],
+      "thumbnail": "file"
+    },
+    {
+      "buildable": true,
+      "id": 5,
+      "name": "PointCloud",
+      "roles": [
+        "pointcloud.copc",
+        "pointcloud.ept"
+      ],
+      "sidecarExtensions": [],
+      "thumbnail": "build"
+    },
+    {
+      "buildable": false,
+      "id": 6,
+      "name": "Image",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "file"
+    },
+    {
+      "buildable": false,
+      "id": 7,
+      "name": "DroneDB",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": false,
+      "id": 8,
+      "name": "Markdown",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": false,
+      "id": 9,
+      "name": "Video",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": false,
+      "id": 10,
+      "name": "GeoVideo",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": true,
+      "id": 11,
+      "name": "Model",
+      "roles": [
+        "model.nexus",
+        "model.3dtiles"
+      ],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": false,
+      "id": 12,
+      "name": "Panorama",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "file"
+    },
+    {
+      "buildable": false,
+      "id": 13,
+      "name": "GeoPanorama",
+      "roles": [],
+      "sidecarExtensions": [],
+      "thumbnail": "file"
+    },
+    {
+      "buildable": true,
+      "id": 14,
+      "name": "Vector",
+      "roles": [
+        "vector.gpkg",
+        "vector.mvt",
+        "vector.local"
+      ],
+      "sidecarExtensions": [
+        "cpg",
+        "dbf",
+        "shx",
+        "prj"
+      ],
+      "thumbnail": "none"
+    },
+    {
+      "buildable": true,
+      "id": 15,
+      "name": "GaussianSplat",
+      "roles": [
+        "gsplat.lod",
+        "gsplat.spz",
+        "gsplat.bounds",
+        "gsplat.georef"
+      ],
+      "sidecarExtensions": [],
+      "thumbnail": "build"
+    },
+    {
+      "buildable": true,
+      "id": 16,
+      "name": "Tiles3D",
+      "roles": [
+        "model.3dtiles"
+      ],
+      "sidecarExtensions": [],
+      "thumbnail": "none"
+    }
+  ],
+  "schema": "entry-types.schema.json"
+}

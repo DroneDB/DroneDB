@@ -1,0 +1,114 @@
+{
+  "call": "DDBStac(<root>, entry=\"DJI_0018.JPG\", stacCollectionRoot=\"https://hub.example/orgs/contract/ds/fixtures\", id=\"contract\", stacCatalogRoot=\"https://hub.example\")",
+  "description": "test_data images/DJI_0018.JPG (DJI drone image) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "assets": {
+      "DJI_0018.JPG": {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/download?path=DJI_0018.JPG",
+        "roles": [
+          "data"
+        ],
+        "title": "DJI_0018.JPG",
+        "type": "image/jpeg"
+      },
+      "thumbnail": {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/thumb?path=DJI_0018.JPG&size=512",
+        "roles": [
+          "thumbnail"
+        ],
+        "title": "Thumbnail",
+        "type": "image/webp"
+      }
+    },
+    "bbox": [
+      -91.99507616867,
+      46.84225026546,
+      -91.99404197212,
+      46.84296499723
+    ],
+    "collection": "contract",
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            -91.99469773386,
+            46.84296499723,
+            158.5099983215
+          ],
+          [
+            -91.99507616867,
+            46.84271189348,
+            158.5099983215
+          ],
+          [
+            -91.9944204067,
+            46.84225026546,
+            158.5099983215
+          ],
+          [
+            -91.99404197212,
+            46.84250336707,
+            158.5099983215
+          ],
+          [
+            -91.99469773386,
+            46.84296499723,
+            158.5099983215
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    },
+    "id": "path-dji_0018-jpg",
+    "links": [
+      {
+        "href": "https://hub.example/stac",
+        "rel": "root",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+        "rel": "parent",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+        "rel": "collection",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac/REpJXzAwMTguSlBH",
+        "rel": "self",
+        "type": "application/geo+json"
+      }
+    ],
+    "properties": {
+      "cameraPitch": -89.9000015258789,
+      "cameraRoll": 0.0,
+      "cameraYaw": 45.0,
+      "captureTime": 1466717519000.0,
+      "datetime": "2016-06-23T21:31:59Z",
+      "focalLength": 3.4222222222222225,
+      "focalLength35": 20.0,
+      "hasCameraOrientation": true,
+      "height": 2250,
+      "make": "DJI",
+      "model": "FC300S",
+      "orientation": 1,
+      "sensor": "dji fc300s",
+      "sensorHeight": 3.4650000000000003,
+      "sensorWidth": 6.16,
+      "title": "DJI_0018.JPG",
+      "width": 4000
+    },
+    "stac_version": "1.1.0",
+    "type": "Feature"
+  },
+  "schema": "stac-item.schema.json"
+}

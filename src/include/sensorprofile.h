@@ -6,10 +6,11 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
+#include <list>
 #include <map>
 #include <mutex>
-#include "json.h"
-#include "ddb_export.h"
+#include "json_fwd.h"
 
 namespace ddb {
 
@@ -76,14 +77,17 @@ struct SensorDetectionResult {
     std::string defaultPresetId;
 };
 
-class DDB_DLL SensorProfileManager {
+class SensorProfileManager {
 public:
     static SensorProfileManager& instance();
 
     void loadDefaults(const std::string &jsonPath = "");
     void loadOverrides(const std::string &jsonStr);
 
+    // Detection is memoised per file version (fileVersion)
     SensorDetectionResult detectSensor(const std::string &rasterPath) const;
+    // Detections that opened the raster (cache misses), for tests and diagnostics
+    uint64_t uncachedDetections() const;
     BandMapping getDefaultBandMapping(const std::string &rasterPath) const;
     BandMapping getBandMappingForPreset(const std::string &rasterPath, const std::string &presetId) const;
 
@@ -102,10 +106,23 @@ private:
                         bool lastBandIsAlpha) const;
 
     BandMapping getFallbackMapping(const std::string &rasterPath, int bandCount) const;
+    SensorDetectionResult detectSensorUncached(const std::string &rasterPath,
+                                               const std::vector<SensorProfile> &profiles) const;
+    void invalidateDetections();
+
+    struct CachedDetection {
+        std::string path;
+        std::string version;
+        SensorDetectionResult result;
+    };
+    static constexpr size_t MaxCachedDetections = 256;
 
     mutable std::mutex mutex_;
     mutable std::vector<SensorProfile> profiles_;
     mutable bool loaded_ = false;
+    mutable std::list<CachedDetection> detections_; // most recently used first
+    mutable uint64_t generation_ = 0;
+    mutable uint64_t uncachedDetections_ = 0;
 
     void ensureLoaded() const;
 };

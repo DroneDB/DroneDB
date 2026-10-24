@@ -75,6 +75,17 @@ for file in proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
     fi
 done
 
+# GDAL's data folder: without it every raster build warns "Cannot find tms_NZTM2000.json
+# (GDAL_DATA is not defined)" in hosts that do not source /etc/profile.d/ddb.sh. libddb looks for
+# it in /usr/share/ddb/gdal (process_init.cpp setupGdalData).
+echo "Checking for the GDAL data folder..."
+for file in gdalvrt.xsd tms_NZTM2000.json gt_datum.csv; do
+    if [ ! -f "$TEMP_DIR/usr/share/ddb/gdal/$file" ]; then
+        echo "Error: gdal/$file not found in package!"
+        exit 1
+    fi
+done
+
 # Obj2Tiles is optional, but when shipped it must actually start: it is a .NET
 # single-file app whose appended bundle is destroyed by strip/dwz, and the only
 # symptom is a runtime "Failure processing application bundle" error.
@@ -105,6 +116,22 @@ fi
 # "package smoke test" step in .github/workflows/c-cpp.yml: an extraction-
 # only smoke test cannot be trusted here because the build tree is reachable
 # through the binaries' RUNPATH and would shadow the packaged files.
+# dwg2dxf is optional (DWG support), but when shipped it must run and come with
+# its GPL license text.
+if [ -f "$TEMP_DIR/usr/bin/dwg2dxf" ]; then
+    echo "Checking dwg2dxf..."
+    if ! DWG2DXF_OUTPUT=$("$TEMP_DIR/usr/bin/dwg2dxf" --version 2>&1); then
+        echo "Error: packaged dwg2dxf failed to run!"
+        echo "$DWG2DXF_OUTPUT"
+        exit 1
+    fi
+    echo "  $DWG2DXF_OUTPUT"
+    if [ ! -f "$TEMP_DIR/usr/share/doc/ddb/dwg2dxf.LICENSE.txt" ]; then
+        echo "Error: dwg2dxf.LICENSE.txt not found in /usr/share/doc/ddb!"
+        exit 1
+    fi
+fi
+
 echo "Checking PDAL plugin packaging..."
 if [ ! -f "$TEMP_DIR/usr/lib/libpdalcpp.so.20" ] && ! ls "$TEMP_DIR"/usr/lib/libpdalcpp.so.* >/dev/null 2>&1; then
     echo "Error: no versioned libpdalcpp.so.* found in /usr/lib!"

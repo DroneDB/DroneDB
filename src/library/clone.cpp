@@ -1,69 +1,58 @@
-﻿/* This Source Code Form is subject to the terms of the Mozilla Public
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-
-#include "authcredentials.h"
-#include "mio.h"
-#include "registryutils.h"
-#include "userprofile.h"
-
-#include <algorithm>
-#include <optional>
-#include <utility>
-#include <vector>
-
 #include "dbops.h"
 #include "exceptions.h"
+#include "mio.h"
+#include "registry_ops.h"
+#include "tagmanager.h"
 
-namespace ddb
-{
+namespace ddb {
 
-    void clone(const TagComponents &tag, const std::string &folder, bool sslVerify)
-    {
-        if (fs::exists(folder) && !fs::is_empty(folder))
-        {
-            std::cout << "Cannot clone in folder '" + folder +
-                             "' because it already exists"
-                      << std::endl;
-            return;
-        }
-
-        std::cout << "Cloning dataset '" << tag.organization << "/" << tag.dataset
-                  << "' from registry '" << tag.registryUrl << "' to folder '"
-                  << folder << "'" << std::endl;
-
-        const AuthCredentials ac =
-            UserProfile::get()->getAuthManager()->loadCredentials(tag.registryUrl);
-
-        Registry reg(tag.registryUrl, sslVerify);
-
-        try
-        {
-            reg.clone(tag.organization, tag.dataset, folder, std::cout);
-        }
-        catch (const AuthException &)
-        {
-            io::assureIsRemoved(folder);
-            const auto username = utils::getPrompt("Username: ");
-            const auto password = utils::getPass("Password: ");
-
-            if (reg.login(username, password).length() > 0)
-            {
-
-                UserProfile::get()->getAuthManager()->saveCredentials(
-                    tag.registryUrl, AuthCredentials(username, password));
-
-                reg.clone(tag.organization, tag.dataset, folder, std::cout);
-            }
-            else
-            {
-                throw AuthException("Cannot authenticate with " + reg.getUrl());
-            }
-        }
-        catch (const AppException &e)
-        {
-            throw e;
-        }
+void cloneDataset(RegistryClient& client, const std::string& organization, const std::string& dataset,
+                  const std::string& folder, std::ostream& out) {
+    if (fs::exists(io::fromUtf8(folder)) && !fs::is_empty(io::fromUtf8(folder))) {
+        throw FSException(folder + " already exists");
     }
 
-} // namespace ddb
+    io::assureFolderExists(io::fromUtf8(folder));
+
+    client.ensureTokenValidity();
+
+    initIndex(folder);
+    const auto db = ddb::open(folder, false);
+
+    TagManager tagManager(db.get());
+    tagManager.setTag(client.getUrl("/" + organization + "/" + dataset));
+    pullDataset(client, folder, MergeStrategy::KeepTheirs, out);
+}
+
+void clone(const TagComponents& tag, const std::string& folder, bool sslVerify, CredentialProvider& credentials,
+           std::ostream& out, const RegistryDeps& deps) {
+    if (fs::exists(io::fromUtf8(folder)) && !fs::is_empty(io::fromUtf8(folder))) {
+        out << "Cannot clone in folder '" + folder + "' because it already exists" << std::endl;
+        return;
+    }
+
+    out << "Cloning dataset '" << tag.organization << "/" << tag.dataset << "' from registry '"
+              << tag.registryUrl << "' to folder '" << folder << "'" << std::endl;
+
+    // A public dataset needs no login: the credentials are asked for when the server says 401
+    AuthenticationOptions options;
+    options.tryAnonymousFirst = true;
+
+    withAuthenticatedRegistry(
+        tag.registryUrl, sslVerify, credentials,
+        [&](RegistryClient& client) {
+            try {
+                cloneDataset(client, tag.organization, tag.dataset, folder, out);
+            } catch (const AuthException&) {
+                // What the refused attempt started is removed: the next one needs an empty folder
+                io::assureIsRemoved(io::fromUtf8(folder));
+                throw;
+            }
+        },
+        options, deps);
+}
+
+}  // namespace ddb

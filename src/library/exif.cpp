@@ -2,10 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "exif.h"
+#include "exceptions.h"
+#include "stringutil.h"
 #include "logger.h"
 #include "timezone.h"
 #include "dsmservice.h"
 #include "sensor_data.h"
+#include "mio.h"
+
+#include <algorithm>
+#include <fstream>
 
 namespace ddb
 {
@@ -77,11 +83,11 @@ namespace ddb
 
                 // Validate that strings contain valid integer format
                 for (char c : widthStr)
-                    if (!std::isdigit(c) && c != '-' && c != '+')
+                    if (!str::isDigitChar(c) && c != '-' && c != '+')
                         throw std::invalid_argument("Width is not a valid integer: " + widthStr);
 
                 for (char c : heightStr)
-                    if (!std::isdigit(c) && c != '-' && c != '+')
+                    if (!str::isDigitChar(c) && c != '-' && c != '+')
                         throw std::invalid_argument("Height is not a valid integer: " + heightStr);
 
                 int width = std::stoi(widthStr);
@@ -144,8 +150,8 @@ namespace ddb
     {
         std::string make = extractMake();
         std::string model = extractModel();
-        utils::toLower(make);
-        utils::toLower(model);
+        str::toLower(make);
+        str::toLower(model);
 
         if (make != "unknown")
         {
@@ -158,8 +164,8 @@ namespace ddb
             }
         }
 
-        utils::trim(make);
-        utils::trim(model);
+        str::trim(make);
+        str::trim(model);
 
         return make + " " + model;
     }
@@ -347,7 +353,7 @@ namespace ddb
 
             for (unsigned long i = 1; i < gps.length(); i++)
             {
-                if (std::isdigit(gps[i]) || gps[i] == ',' || gps[i] == '.')
+                if (str::isDigitChar(gps[i]) || gps[i] == ',' || gps[i] == '.')
                 {
                     buf += gps[i];
                 }
@@ -425,7 +431,7 @@ namespace ddb
         if (geoRefTag != exifData.end())
         {
             std::string ref = geoRefTag->toString();
-            utils::toUpper(ref);
+            str::toUpper(ref);
             if (ref == "S" || ref == "W")
                 sign = -1.0;
         }
@@ -556,7 +562,7 @@ namespace ddb
                     double msecs = (seconds - s) * 1000.0;
 
                     cctz::time_zone utc = cctz::utc_time_zone();
-                    double result = Timezone::getUTCEpoch(year, month, day, h, m, s, msecs, utc);
+                    double result = Timezone::getUTCEpoch(cctz::civil_second(year, month, day, h, m, s), msecs, utc);
                     if (result > 0)
                     {
                         LOGD << "Using GPS timestamp as capture time (UTC)";
@@ -606,7 +612,7 @@ namespace ddb
             // DateTime is in local time; apply offset to convert to UTC
             // OffsetTime "+02:00" means local = UTC + 2h, so UTC = local - offset
             cctz::time_zone utc = cctz::utc_time_zone();
-            double result = Timezone::getUTCEpoch(year, month, day, hour, minute, second, msecs, utc);
+            double result = Timezone::getUTCEpoch(cctz::civil_second(year, month, day, hour, minute, second), msecs, utc);
             result -= offsetSecs * 1000.0;
 
             if (result > 0)
@@ -647,7 +653,7 @@ namespace ddb
                 LOGD << "No geolocation for timezone lookup, assuming UTC";
             }
 
-            return Timezone::getUTCEpoch(year, month, day, hour, minute, second, msecs, tz);
+            return Timezone::getUTCEpoch(cctz::civil_second(year, month, day, hour, minute, second), msecs, tz);
         }
 
         return 0.0;
@@ -874,13 +880,13 @@ namespace ddb
         return true;
     }
 
-    void ExifParser::printAllTags()
+    void ExifParser::printAllTags(std::ostream &out)
     {
         Exiv2::ExifData::const_iterator end = exifData.end();
         for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i)
         {
             const char *tn = i->typeName();
-            std::cout << i->key() << " "
+            out << i->key() << " "
                       << i->value()
                       << " | " << tn
                       << std::endl;
@@ -889,7 +895,7 @@ namespace ddb
         for (Exiv2::XmpData::const_iterator i = xmpData.begin(); i != xend; ++i)
         {
             const char *tn = i->typeName();
-            std::cout << i->key() << " "
+            out << i->key() << " "
                       << i->value()
                       << " | " << tn
                       << std::endl;
@@ -909,6 +915,39 @@ namespace ddb
     bool ExifParser::hasTags()
     {
         return this->hasExif() || this->hasXmp();
+    }
+
+    Exiv2::Image::UniquePtr openExivImage(const fs::path &path)
+    {
+#ifdef _WIN32
+        const std::string utf8 = io::toUtf8(path);
+        if (!std::all_of(utf8.begin(), utf8.end(), [](unsigned char c) { return c < 0x80; }))
+        {
+            const std::vector<uint8_t> data = io::readAllBytes(path);
+            auto memory = std::make_unique<Exiv2::MemIo>();
+            memory->write(data.data(), data.size());
+            return Exiv2::ImageFactory::open(std::move(memory));
+        }
+        return Exiv2::ImageFactory::open(utf8);
+#else
+        return Exiv2::ImageFactory::open(path.native());
+#endif
+    }
+
+    void writeExivMetadata(Exiv2::Image &image, const fs::path &path)
+    {
+        image.writeMetadata();
+#ifdef _WIN32
+        if (auto *memory = dynamic_cast<Exiv2::MemIo *>(&image.io()))
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out.write(reinterpret_cast<const char *>(memory->mmap()), static_cast<std::streamsize>(memory->size()));
+            if (!out)
+                throw FSException("Cannot write " + io::toUtf8(path));
+        }
+#else
+        (void)path;
+#endif
     }
 
 }

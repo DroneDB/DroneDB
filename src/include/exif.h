@@ -6,11 +6,11 @@
 
 #include <exiv2/exiv2.hpp>
 #include <memory>
+#include <ostream>
 #include <stdio.h>
 #include <cmath>
-#include "utils.h"
+#include "fs.h"
 #include "sensor_data.h"
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -19,23 +19,23 @@ namespace ddb
     {
         int width;
         int height;
-        DDB_DLL ImageSize(int width, int height) : width(width), height(height) {};
+        ImageSize(int width, int height) : width(width), height(height) {};
     };
 
     struct Focal
     {
         double length;   // in mm
         double length35; // in 35mm film equivalent
-        DDB_DLL Focal() : length(0), length35(0) {};
-        DDB_DLL Focal(double length, double length35) : length(length), length35(length35) {};
+        Focal() : length(0), length35(0) {};
+        Focal(double length, double length35) : length(length), length35(length35) {};
     };
 
     struct SensorSize
     {
         double width;  // mm
         double height; // mm
-        DDB_DLL SensorSize() : width(0), height(0) {};
-        DDB_DLL SensorSize(double width, double height) : width(width), height(height) {};
+        SensorSize() : width(0), height(0) {};
+        SensorSize(double width, double height) : width(width), height(height) {};
     };
 
     struct GeoLocation
@@ -44,8 +44,8 @@ namespace ddb
         double longitude;
         double altitude;
 
-        DDB_DLL GeoLocation() : latitude(0), longitude(0), altitude(0) {}
-        DDB_DLL GeoLocation(double latitude, double longitude, double altitude) : latitude(latitude), longitude(longitude), altitude(altitude) {};
+        GeoLocation() : latitude(0), longitude(0), altitude(0) {}
+        GeoLocation(double latitude, double longitude, double altitude) : latitude(latitude), longitude(longitude), altitude(altitude) {};
     };
 
     struct PanoramaInfo
@@ -66,8 +66,8 @@ namespace ddb
         double yaw;   // degress. 0 = magnetic north, 90 = east, -90 = west, 180 = south
         double roll;  // degrees. 20 = left roll, -20 = right roll
 
-        DDB_DLL CameraOrientation() : pitch(0), yaw(0), roll(0) {};
-        DDB_DLL CameraOrientation(double pitch, double yaw, double roll) : pitch(pitch), yaw(yaw), roll(roll) {};
+        CameraOrientation() : pitch(0), yaw(0), roll(0) {};
+        CameraOrientation(double pitch, double yaw, double roll) : pitch(pitch), yaw(yaw), roll(roll) {};
     };
     inline std::ostream &operator<<(std::ostream &os, const CameraOrientation &c)
     {
@@ -81,11 +81,11 @@ namespace ddb
         double zAccuracy;   // meters, vertical accuracy (-1 = not available)
         double dop;         // dilution of precision (-1 = not available)
 
-        DDB_DLL GpsAccuracy() : xyAccuracy(-1), zAccuracy(-1), dop(-1) {};
-        DDB_DLL GpsAccuracy(double xyAccuracy, double zAccuracy, double dop) : xyAccuracy(xyAccuracy), zAccuracy(zAccuracy), dop(dop) {};
+        GpsAccuracy() : xyAccuracy(-1), zAccuracy(-1), dop(-1) {};
+        GpsAccuracy(double xyAccuracy, double zAccuracy, double dop) : xyAccuracy(xyAccuracy), zAccuracy(zAccuracy), dop(dop) {};
 
         // Returns true if at least one accuracy value is available
-        DDB_DLL bool hasData() const { return xyAccuracy >= 0 || zAccuracy >= 0 || dop >= 0; }
+        bool hasData() const { return xyAccuracy >= 0 || zAccuracy >= 0 || dop >= 0; }
     };
     inline std::ostream &operator<<(std::ostream &os, const GpsAccuracy &a)
     {
@@ -99,14 +99,14 @@ namespace ddb
         double y;  // m/s, north-south axis (positive = north)
         double z;  // m/s, vertical axis (positive = up)
 
-        DDB_DLL FlightSpeed() : x(0), y(0), z(0) {};
-        DDB_DLL FlightSpeed(double x, double y, double z) : x(x), y(y), z(z) {};
+        FlightSpeed() : x(0), y(0), z(0) {};
+        FlightSpeed(double x, double y, double z) : x(x), y(y), z(z) {};
 
         // Horizontal speed magnitude in m/s
-        DDB_DLL double horizontal() const { return std::sqrt(x * x + y * y); }
+        double horizontal() const { return std::sqrt(x * x + y * y); }
 
         // 3D speed magnitude in m/s
-        DDB_DLL double magnitude() const { return std::sqrt(x * x + y * y + z * z); }
+        double magnitude() const { return std::sqrt(x * x + y * y + z * z); }
     };
     inline std::ostream &operator<<(std::ostream &os, const FlightSpeed &s)
     {
@@ -124,10 +124,10 @@ namespace ddb
         std::string trackRef;       // "T" = true north, "M" = magnetic north
         bool hasTrack;
 
-        DDB_DLL GpsDirection() : imgDirection(0), imgDirectionRef("T"), hasImgDirection(false),
+        GpsDirection() : imgDirection(0), imgDirectionRef("T"), hasImgDirection(false),
                                   track(0), trackRef("T"), hasTrack(false) {};
 
-        DDB_DLL bool hasData() const { return hasImgDirection || hasTrack; }
+        bool hasData() const { return hasImgDirection || hasTrack; }
     };
     inline std::ostream &operator<<(std::ostream &os, const GpsDirection &d)
     {
@@ -183,7 +183,7 @@ namespace ddb
         bool extractGpsDirection(GpsDirection &direction);
         bool extractPanoramaInfo(PanoramaInfo &info);
 
-        void printAllTags();
+        void printAllTags(std::ostream &out);
 
         bool hasExif();
         bool hasXmp();
@@ -212,6 +212,15 @@ namespace ddb
         FingerprintContext(FingerprintContext &&) = default;
         FingerprintContext &operator=(FingerprintContext &&) = default;
     };
+
+    // Exiv2::ImageFactory::open of a file. Exiv2 0.28 opens a file name with fopen, which on
+    // Windows reads it in the ANSI code page (or the CRT locale): there a non-ASCII name is
+    // read into memory first (mio.h, "Path encoding"). Throws Exiv2::Error like the factory.
+    Exiv2::Image::UniquePtr openExivImage(const fs::path &path);
+
+    // image.writeMetadata() for an image of openExivImage(path): an image read into memory
+    // is written back to path
+    void writeExivMetadata(Exiv2::Image &image, const fs::path &path);
 
 }
 

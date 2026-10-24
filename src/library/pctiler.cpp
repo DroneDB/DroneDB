@@ -4,30 +4,30 @@
 
 #include "pctiler.h"
 
-#include <mutex>
+#include <cstdlib>
+#include <iomanip>
 #include <memory>
+#include <optional>
 #include <vector>
 
+#include "pdal_inc.h"
 #include <pdal/Options.hpp>
-#include <pdal/PointTable.hpp>
 #include <pdal/io/CopcReader.hpp>
 #include <pdal/filters/ColorinterpFilter.hpp>
 
-#include "entry.h"
+#include "copc_node_cache.h"
+#include "copc_utils.h"
 #include "exceptions.h"
-#include "coordstransformer.h"
-#include "hash.h"
 #include "logger.h"
 #include "mio.h"
-#include "userprofile.h"
+#include "point_rasterizer.h"
 
 namespace ddb
 {
 
     PointCloudTiler::PointCloudTiler(const std::string &inputPath, const std::string &outputFolder,
                        int tileSize, bool tms)
-        : Tiler(inputPath, outputFolder, tileSize, tms),
-          wSize(tileSize * tileSize)
+        : Tiler(inputPath, outputFolder, tileSize, tms)
     {
 
         // Open COPC and gather metadata
@@ -58,13 +58,30 @@ namespace ddb
                     std::find(pcInfo.dimensions.begin(), pcInfo.dimensions.end(), "Blue") != pcInfo.dimensions.end();
         LOGD << "Has colors: " << (hasColors ? "true" : "false");
 
+        toCloud = std::make_unique<CoordsTransformer>(3857, pcInfo.wktProjection);
+        toMercator = std::make_unique<CoordsTransformer>(pcInfo.wktProjection, 3857);
+
+        if (hasColors && !io::isNetworkPath(inputPath))
+        {
+            try
+            {
+                nodeReader = std::make_unique<CopcNodeReader>(inputPath);
+                if (!nodeReader->hasColor())
+                    nodeReader.reset();
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Reading " << inputPath << " with PDAL: " << e.what();
+            }
+        }
+
 #ifdef _WIN32
         const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
         if (!caBundlePath.empty())
         {
-            LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
+            LOGD << "ARBITRER CA Bundle: " << io::toUtf8(caBundlePath);
             std::stringstream ss;
-            ss << "ARBITER_CA_INFO=" << caBundlePath.string();
+            ss << "ARBITER_CA_INFO=" << io::toUtf8(caBundlePath);
             if (_putenv(ss.str().c_str()) != 0)
             {
                 LOGD << "Cannot set ARBITER_CA_INFO";
@@ -73,70 +90,123 @@ namespace ddb
 #endif
     }
 
-    PointCloudTiler::~PointCloudTiler()
+    PointCloudTiler::~PointCloudTiler() = default;
+
+    int PointCloudTiler::resolutionOffset()
     {
+        static const int offset = []() {
+            const char *value = std::getenv("DDB_PCTILE_RESOLUTION_OFFSET");
+            if (value == nullptr || *value == '\0')
+                return 2;
+            try
+            {
+                return std::stoi(value);
+            }
+            catch (const std::exception &)
+            {
+                LOGW << "Ignoring invalid DDB_PCTILE_RESOLUTION_OFFSET=" << value;
+                return 2;
+            }
+        }();
+        return offset;
     }
 
-    std::string PointCloudTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize)
+    std::string PointCloudTiler::tile(int tz, int tx, int ty, ImageFormat format, uint8_t **outBuffer, int *outBufferSize)
     {
-        std::string tilePath = getTilePath(tz, tx, ty, true);
-
-        if (tms)
-        {
-            ty = tmsToXYZ(ty, tz);
-            LOGD << "TY: " << ty;
-        }
+        const int xyzY = tms ? tmsToXYZ(ty, tz) : ty;
 
         BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
-        if (!tMinMax.contains(tx, ty))
+        if (!tMinMax.contains(tx, xyzY))
             throw GDALException(std::string("Out of bounds [(") +
                                 std::to_string(tMinMax.min.x) + "; " +
                                 std::to_string(tMinMax.min.y) + ") - (" +
                                 std::to_string(tMinMax.max.x) + "; " +
                                 std::to_string(tMinMax.max.y) + ")]");
 
-        // Get bounds of tile (3857), convert to EPT CRS
-        auto tileBounds = mercator.tileBounds(tx, ty, tz);
+        // Get bounds of tile (3857), convert to the cloud CRS
+        const auto tileBounds = mercator.tileBounds(tx, xyzY, tz);
         auto bounds = tileBounds;
 
         // Expand by a few meters, so that we have sufficient
         // overlap with other tiles
-        double tileResolution = mercator.resolution(tz);
+        const double tileResolution = mercator.resolution(tz);
         const int boundsBufSize = tileResolution * std::ceil(static_cast<float>(tileSize) / 40.0); // resolution (m / px) * border (px) --> buffer (m)
         bounds.min.x -= boundsBufSize;
         bounds.max.x += boundsBufSize;
         bounds.min.y -= boundsBufSize;
         bounds.max.y += boundsBufSize;
 
-        CoordsTransformer ct(3857, pcInfo.wktProjection);
-        ct.transform(&bounds.min.x, &bounds.min.y);
-        ct.transform(&bounds.max.x, &bounds.max.y);
+        toCloud->transform(&bounds.min.x, &bounds.min.y);
+        toCloud->transform(&bounds.max.x, &bounds.max.y);
 
-        pdal::Options copcOpts;
-        fs::path path(inputPath);
-        copcOpts.add("filename", (!utils::isNetworkPath(inputPath) && path.is_relative()) ? ("." / path).string() : inputPath);
+        // Both readers take these exact values (copcWindowOptions writes them losslessly)
+        const double minX = bounds.min.x, maxX = bounds.max.x;
+        const double minY = bounds.min.y, maxY = bounds.max.y;
+        LOGD << "COPC bounds: [" << minX << ", " << maxX << "] x [" << minY << ", " << maxY << "]";
 
-        std::stringstream ss;
-        ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.max.x << "]," << "[" << bounds.min.y << "," << bounds.max.y << "])";
-        copcOpts.add("bounds", ss.str());
-        LOGD << "COPC bounds: " << ss.str();
-
-        double copcResolution = mercator.resolution(tz - 2);
-        copcOpts.add("resolution", copcResolution);
+        const double copcResolution = mercator.resolution(tz - resolutionOffset());
         LOGD << "COPC resolution: " << copcResolution;
 
-        std::unique_ptr<pdal::CopcReader> copcReader = std::make_unique<pdal::CopcReader>();
-        pdal::Stage *main = copcReader.get();
-        copcReader->setOptions(copcOpts);
-        LOGD << "Options set";
+        // Discs of pointRadius px; the z-buffer is padded by the radius so that points
+        // just outside the tile still draw their part of a disc inside it
+        const int pointRadius = 2;
+        const double pointRadiusMeters = pointRadius * tileResolution;
+        const int paddedTileSize = tileSize + pointRadius * 2;
+
+        PixelMapping mapping;
+        mapping.originX = tileBounds.min.x;
+        mapping.shiftX = -pointRadiusMeters;
+        mapping.scaleX = paddedTileSize / (tileBounds.max.x - tileBounds.min.x + pointRadiusMeters * 2.0);
+        mapping.originY = tileBounds.min.y;
+        mapping.shiftY = pointRadiusMeters;
+        mapping.scaleY = paddedTileSize / (tileBounds.max.y - tileBounds.min.y + pointRadiusMeters * 2.0);
+        mapping.width = mapping.height = paddedTileSize;
+
+        std::optional<PointRasterizer> rasterizer;
+        const auto draw = [&](PointBatch &points) {
+            toMercator->transform(points.size(), points.x.data(), points.y.data());
+            rasterizer->add(points);
+        };
+
+        bool drawn = false;
+        if (nodeReader)
+        {
+            try
+            {
+                rasterizer.emplace(tileSize, mapping, pointRadius, pointRadius);
+                nodeReader->read(minX, minY, maxX, maxY, copcResolution, draw);
+                drawn = true;
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "COPC node read failed for " << inputPath << ", reading with PDAL: " << e.what();
+            }
+        }
+        if (!drawn)
+        {
+            rasterizer.emplace(tileSize, mapping, pointRadius, pointRadius);
+            readWithPdal({minX, minY, maxX, maxY, copcResolution}, draw);
+        }
+
+        LOGD << "Drew " << rasterizer->drawn() << " points";
+
+        return writeTile(rasterizer->toImage(), format, tz, tx, ty, outBuffer, outBufferSize);
+    }
+
+    void PointCloudTiler::readWithPdal(const CopcWindow &window,
+                                       const std::function<void(PointBatch &)> &sink)
+    {
+        const auto copcThreads = copcReadThreads(inputPath);  // until the reader has run
+        pdal::CopcReader copcReader;
+        copcReader.setOptions(copcWindowOptions(inputPath, copcThreads, window));
+        pdal::Stage *main = &copcReader;
 
         std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
-        bool colorFilterFailed = false;
         if (!hasColors)
         {
             try
             {
-                colorFilter.reset(new pdal::ColorinterpFilter());
+                colorFilter = std::make_unique<pdal::ColorinterpFilter>();
 
                 // Add ramp filter
                 LOGD << "Adding ramp filter (" << pcInfo.bounds[2] << ", " << pcInfo.bounds[5] << ")";
@@ -146,207 +216,24 @@ namespace ddb
                 cfOpts.add("minimum", pcInfo.bounds[2]);
                 cfOpts.add("maximum", pcInfo.bounds[5]);
                 colorFilter->setOptions(cfOpts);
-                colorFilter->setInput(*copcReader);
+                colorFilter->setInput(copcReader);
                 main = colorFilter.get();
             }
             catch (const pdal::pdal_error &e)
             {
                 LOGD << "ColorinterpFilter failed: " << e.what() << ". Proceeding without color filter.";
-                colorFilterFailed = true;
                 colorFilter.reset();
-                main = copcReader.get();
+                main = &copcReader;
             }
         }
 
-        pdal::PointTable table;
-        main->prepare(table);
-        pdal::PointViewSet point_view_set;
-
-        LOGD << "PointTable prepared";
-
         try
         {
-            point_view_set = main->execute(table);
+            forEachPointBatch(*main, sink);
         }
         catch (const pdal::pdal_error &e)
         {
             throw PDALException(e.what());
-        }
-
-        pdal::PointViewPtr point_view = *point_view_set.begin();
-        pdal::Dimension::IdList dims = point_view->dims();
-
-        const int nBands = 3;
-        const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
-
-        const int pointRadius = 2;
-        const double pointRadiusMeters = pointRadius * tileResolution;
-        const int paddedTileSize = tileSize + pointRadius * 2;
-        const int paddedWSize = paddedTileSize * paddedTileSize;
-        const int paddedBufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * paddedWSize;
-
-        std::unique_ptr<uint8_t[]> buffer(new uint8_t[bufSize * nBands]);
-        std::unique_ptr<uint8_t[]> alphaBuffer(new uint8_t[bufSize]);
-        std::unique_ptr<float[]> zBuffer(new float[paddedBufSize]);
-
-        memset(buffer.get(), 0, bufSize * nBands);
-        memset(alphaBuffer.get(), 0, bufSize);
-
-        for (int i = 0; i < paddedWSize; i++)
-        {
-            zBuffer.get()[i] = -99999.0;
-        }
-
-        LOGD << "Fetched " << point_view->size() << " points";
-
-        const double tileScaleW = tileSize / (tileBounds.max.x - tileBounds.min.x);
-        const double tileScaleH = tileSize / (tileBounds.max.y - tileBounds.min.y);
-        const double paddedTileScaleW = paddedTileSize / (tileBounds.max.x - tileBounds.min.x + pointRadiusMeters * 2.0);
-        const double paddedTileScaleH = paddedTileSize / (tileBounds.max.y - tileBounds.min.y + pointRadiusMeters * 2.0);
-
-        CoordsTransformer ict(pcInfo.wktProjection, 3857);
-
-        bool normalize = false;
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx)
-        {
-            auto p = point_view->point(idx);
-            uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
-            uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
-            uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
-
-            if (red > 255 || green > 255 || blue > 255)
-            {
-                normalize = true;
-                break;
-            }
-        }
-
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx)
-        {
-            auto p = point_view->point(idx);
-            double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-            double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-            double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
-
-            ict.transform(&x, &y);
-
-            // Map projected coordinates to local PNG coordinates
-            int px = std::round((x - tileBounds.min.x - pointRadiusMeters) * paddedTileScaleW);
-            int py = paddedTileSize - 1 - std::round((y - tileBounds.min.y + pointRadiusMeters) * paddedTileScaleH);
-
-            if (px >= 0 && px < paddedTileSize && py >= 0 && py < paddedTileSize)
-            {
-                // Within bounds
-                PointColor color;
-                uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
-                uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
-                uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
-
-                if (normalize)
-                {
-                    color.r = red >> 8;
-                    color.g = green >> 8;
-                    color.b = blue >> 8;
-                }
-                else
-                {
-                    color.r = static_cast<uint8_t>(red);
-                    color.g = static_cast<uint8_t>(green);
-                    color.b = static_cast<uint8_t>(blue);
-                }
-
-                int off_px = px - pointRadius;
-                int off_py = py - pointRadius;
-
-                if (zBuffer.get()[py * paddedTileSize + px] < z)
-                {
-                    zBuffer.get()[py * paddedTileSize + px] = z;
-                    drawCircle(buffer.get(), alphaBuffer.get(), off_px, off_py,
-                               pointRadius, color.r, color.g, color.b, tileSize, wSize);
-                }
-            }
-        }
-
-        GDALDriverH memDrv = GDALGetDriverByName("MEM");
-        if (memDrv == nullptr)
-            throw GDALException("Cannot create MEM driver");
-        GDALDriverH pngDrv = GDALGetDriverByName("PNG");
-        if (pngDrv == nullptr)
-            throw GDALException("Cannot create PNG driver");
-
-        // Need to create in-memory dataset
-        // (PNG driver does not have Create() method)
-        const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, nBands + 1,
-                                               GDT_Byte, nullptr);
-        if (dsTile == nullptr)
-            throw GDALException("Cannot create dsTile");
-
-        if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0,
-                                tileSize, tileSize,
-                                buffer.get(), tileSize, tileSize,
-                                GDT_Byte, nBands, nullptr, 0, 0,
-                                0) != CE_None)
-        {
-            throw GDALException("Cannot write tile data");
-        }
-
-        const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(dsTile, nBands + 1);
-        GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
-
-        if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,
-                         alphaBuffer.get(), tileSize, tileSize,
-                         GDT_Byte, 0, 0) != CE_None)
-        {
-            throw GDALException("Cannot write tile alpha data");
-        }
-
-        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE,
-                                                  nullptr, nullptr, nullptr);
-        if (outDs == nullptr)
-            throw GDALException("Cannot create output dataset " + tilePath);
-
-        GDALFlushCache(outDs);
-        GDALClose(outDs);
-        GDALClose(dsTile);
-
-        if (outBuffer != nullptr)
-        {
-            vsi_l_offset bufSize;
-            *outBuffer = VSIGetMemFileBuffer(tilePath.c_str(), &bufSize, TRUE);
-            if (bufSize > std::numeric_limits<int>::max())
-                throw GDALException("Exceeded max buf size");
-            *outBufferSize = bufSize;
-            return "";
-        }
-        else
-        {
-            return tilePath;
-        }
-    }
-
-    void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius,
-                    uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize)
-    {
-        const int r2 = radius * radius;
-        const int area = r2 << 2;
-        const int rr = radius << 1;
-
-        for (int i = 0; i < area; i++)
-        {
-            const int tx = (i % rr) - radius;
-            const int ty = (i / rr) - radius;
-            if (tx * tx + ty * ty <= r2)
-            {
-                const int dx = px + tx;
-                const int dy = py + ty;
-                if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize)
-                {
-                    buffer[dy * tileSize + dx + wSize * 0] = r;
-                    buffer[dy * tileSize + dx + wSize * 1] = g;
-                    buffer[dy * tileSize + dx + wSize * 2] = b;
-                    alpha[dy * tileSize + dx] = 255;
-                }
-            }
         }
     }
 

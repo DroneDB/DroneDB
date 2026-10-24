@@ -2,10 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "stac.h"
+#include "index_sql.h"
+#include "json.h"
+#include "stringutil.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "mio.h"
-#include <cpr/cpr.h>
+#include "http_client.h"
 #include <ctime>
 #include <iomanip>
 #include <sstream>
@@ -15,7 +18,7 @@
 #include <functional>
 #include <limits>
 #include "ddb.h"
-#include "thumbs.h"
+#include "entry_handler.h"
 #include "../../vendor/base64/base64.h"
 
 namespace ddb
@@ -61,8 +64,8 @@ namespace ddb
         }
         for (char ch : input)
         {
-            char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            if (std::isalnum(static_cast<unsigned char>(lower)))
+            const char lower = str::toLowerChar(ch);
+            if (str::isAlnumChar(lower))
             {
                 result += lower;
             }
@@ -86,9 +89,8 @@ namespace ddb
     // Get MIME type from file extension for STAC assets
     static std::string getStacMimeType(const std::string &path)
     {
-        auto ext = fs::path(path).extension().string();
-        std::transform(ext.begin(), ext.end(), ext.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+        // With the dot, as the table below spells its extensions
+        const auto ext = "." + io::lowerExtension(io::fromUtf8(path));
 
         // Images
         if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
@@ -333,21 +335,54 @@ namespace ddb
         return true;
     }
 
+    // The Registry routes that the STAC outputs of DDBStac and DDBStacItemCollection link to.
+    // The data-only outputs (XI-09: DDBStacData, DDBStacItemCollectionData) have none: they
+    // leave out every member built from a URL or an ID ("id", "collection", "links" and the
+    // asset "href"s), which the caller (Registry) owns.
+    struct StacUrls {
+        const std::string& collectionRoot;
+        const std::string& catalogRoot;
+    };
+
+    // The STAC id of the dataset: `id`, else the name of the dataset folder
+    static std::string datasetRootId(Database* db, const std::string& id) {
+        return !id.empty() ? id : io::toUtf8(fs::weakly_canonical(db->rootDirectory()).filename());
+    }
+
+    // The columns of an entry row a STAC Item is built from (the SELECT of stacItemSql)
+    struct StacRow {
+        std::string path;
+        std::string propertiesText;
+        std::string geomText;
+        int entryTypeInt = 0;
+        long long mtime = 0;
+    };
+
+    // path, properties, the GeoJSON of the footprint, type and mtime, in the order StacRow reads them
+    static const char* const stacRowColumns =
+        "path, properties, "
+        "CASE WHEN polygon_geom IS NOT NULL THEN AsGeoJSON(polygon_geom) "
+        "WHEN point_geom IS NOT NULL THEN AsGeoJSON(point_geom) ELSE NULL END AS geom, "
+        "type, mtime";
+
+    static StacRow readStacRow(Statement& q) {
+        return {q.getText(0), q.getText(1), q.getText(2), q.getInt(3), q.getInt64(4)};
+    }
+
     // Build a complete STAC Item (Feature) JSON for a single entry row.
     // Shared by the single-item endpoint and the ItemCollection endpoint (DRY).
-    static json buildStacItem(const std::string &path,
-                              const std::string &propertiesText,
-                              const std::string &geomText,
-                              int entryTypeInt,
-                              long long mtime,
-                              const std::string &stacCollectionRoot,
-                              const std::string &stacCatalogRoot,
-                              const std::string &rootId)
-    {
+    // urls: null for the data-only item (no id, collection, links or asset hrefs)
+    static json buildStacItem(const StacRow& row, const StacUrls* urls, const std::string& rootId) {
+        const std::string& path = row.path;
+        const std::string& propertiesText = row.propertiesText;
+        const std::string& geomText = row.geomText;
+        const int entryTypeInt = row.entryTypeInt;
+        const long long mtime = row.mtime;
         json j;
         j["stac_version"] = STAC_VERSION;
         j["type"] = "Feature";
-        j["id"] = slugify(path, "path-");
+        if (urls != nullptr)
+            j["id"] = slugify(path, "path-");
 
         try
         {
@@ -420,69 +455,74 @@ namespace ddb
         if (!bbox.empty())
             j["bbox"] = bbox;
 
-        json links = json::array();
+        if (urls != nullptr) {
+            json links = json::array();
 
-        // Root
-        if (!stacCatalogRoot.empty())
-        {
-            links.push_back({{"rel", "root"},
-                             {"href", stacCatalogRoot + STAC_ENDPOINT},
-                             {"type", "application/json"}});
+            // Root
+            if (!urls->catalogRoot.empty()) {
+                links.push_back({{"rel", "root"},
+                                 {"href", urls->catalogRoot + STAC_ENDPOINT},
+                                 {"type", "application/json"}});
+            }
+
+            if (urls->collectionRoot != ".") {
+                // Parent
+                links.push_back({{"rel", "parent"},
+                                 {"href", urls->collectionRoot + STAC_ENDPOINT},
+                                 {"type", "application/json"}});
+
+                // Collection
+                links.push_back({{"rel", "collection"},
+                                 {"href", urls->collectionRoot + STAC_ENDPOINT},
+                                 {"type", "application/json"}});
+
+                // Self
+                links.push_back(
+                    {{"rel", "self"},
+                     {"href", urls->collectionRoot + STAC_ENDPOINT + "/" + Base64::encode(path)},
+                     {"type", "application/geo+json"}});
+
+                // STAC Item schema requires the top-level "collection" field whenever a
+                // rel:collection link is present; its value must match the Collection id.
+                j["collection"] = rootId;
+            }
+
+            j["links"] = links;
         }
 
-        if (stacCollectionRoot != ".")
-        {
-            // Parent
-            links.push_back({{"rel", "parent"},
-                             {"href", stacCollectionRoot + STAC_ENDPOINT},
-                             {"type", "application/json"}});
-
-            // Collection
-            links.push_back({{"rel", "collection"},
-                             {"href", stacCollectionRoot + STAC_ENDPOINT},
-                             {"type", "application/json"}});
-
-            // Self
-            links.push_back({{"rel", "self"},
-                             {"href", stacCollectionRoot + STAC_ENDPOINT + "/" + Base64::encode(path)},
-                             {"type", "application/geo+json"}});
-
-            // STAC Item schema requires the top-level "collection" field whenever a
-            // rel:collection link is present; its value must match the Collection id.
-            j["collection"] = rootId;
-        }
+        const std::string pathQuery =
+            urls != nullptr ? "?path=" + urlEncode(path) : "";
 
         j["assets"] = json::object();
-        j["assets"][path] = {{"href", stacCollectionRoot + DOWNLOAD_ENDPOINT + "?path=" + std::string(cpr::util::urlEncode(path))},
-                             {"title", path},
+        j["assets"][path] = {{"title", path},
                              {"type", getStacMimeType(path)},
                              {"roles", json::array({"data"})}};
+        if (urls != nullptr)
+            j["assets"][path]["href"] = urls->collectionRoot + DOWNLOAD_ENDPOINT + pathQuery;
 
+        // Rendered from the file itself or from a build artifact (COPC, RAD)
         const EntryType t = static_cast<EntryType>(entryTypeInt);
-        if (supportsThumbnails(t) || t == PointCloud || t == GaussianSplat)
+        if (entryHandler(t).thumbnailSource() != ThumbnailSource::None)
         {
             j["assets"]["thumbnail"] = {{"title", "Thumbnail"},
                                         {"type", "image/webp"},
-                                        {"roles", json::array({"thumbnail"})},
-                                        {"href", stacCollectionRoot + THUMB_ENDPOINT + "?path=" + std::string(cpr::util::urlEncode(path)) + "&size=512"}};
+                                        {"roles", json::array({"thumbnail"})}};
+            if (urls != nullptr)
+                j["assets"]["thumbnail"]["href"] =
+                    urls->collectionRoot + THUMB_ENDPOINT + pathQuery + "&size=512";
         }
 
-        j["links"] = links;
         return j;
     }
 
-    json generateStac(const std::string &ddbPath,
-                      const std::string &entry,
-                      const std::string &stacCollectionRoot,
-                      const std::string &id,
-                      const std::string &stacCatalogRoot)
-    {
+    // The STAC Item of `entry`, or the Collection of the dataset when entry is ""; urls: null
+    // for the data-only document
+    static json generateStacDocument(const std::string& ddbPath,
+                                     const std::string& entry,
+                                     const std::string& id,
+                                     const StacUrls* urls) {
         // Collection -> Dataset STAC
         // Catalog -> Entry point STAC / root (index of multiple Collection)
-
-        const std::string stacEndpoint = "/stac";
-        const std::string downloadEndpoint = "/download";
-        const std::string thumbEndpoint = "/thumb";
 
         if (ddbPath.empty())
             throw AppException("No ddbPath is set for generating STAC");
@@ -490,45 +530,31 @@ namespace ddb
         json j;
         j["stac_version"] = STAC_VERSION;
 
-        //CURLInstance curl; // for urlEncode
-
         // What kind of STAC element are we generating?
         auto db = open(ddbPath, false);
 
-        const auto rootId = !id.empty() ? id : fs::weakly_canonical(db->rootDirectory()).filename().string();
+        const auto rootId = datasetRootId(db.get(), id);
         const auto rootTitle = db->getMetaManager()->getString("name", "", "", rootId);
 
         if (!entry.empty())
         {
-            const auto q = db->query(R"<<<(
-                    SELECT path,
-                           properties,
-                           CASE
-                                WHEN polygon_geom IS NOT NULL THEN AsGeoJSON(polygon_geom)
-                                WHEN point_geom IS NOT NULL THEN AsGeoJSON(point_geom)
-                                ELSE NULL
-                           END AS geom,
-                           type,
-                           mtime
-                    FROM entries WHERE path = ?
-                )<<<");
+            const auto q = db->query(std::string("SELECT ") + stacRowColumns + " FROM entries WHERE path = ?");
             q->bind(1, entry);
             if (q->fetch())
             {
                 // STAC Item (delegates to the shared builder)
-                j = buildStacItem(q->getText(0), q->getText(1), q->getText(2),
-                                  q->getInt(3), q->getInt64(4),
-                                  stacCollectionRoot, stacCatalogRoot, rootId);
+                j = buildStacItem(readStacRow(*q), urls, rootId);
             }
             else
             {
-                throw AppException("Requested STAC entry does not exist");
+                throw EntryNotFoundException("Requested STAC entry does not exist");
             }
         }
         else
         {
             // Stac Collection
-            j["id"] = rootId;
+            if (urls != nullptr)
+                j["id"] = rootId;
             j["type"] = "Collection";
             j["title"] = rootTitle;
 
@@ -537,56 +563,63 @@ namespace ddb
 
             j["license"] = db->getMetaManager()->getString("license", "", "", "proprietary");
 
-            json links = json::array();
+            if (urls != nullptr) {
+                json links = json::array();
 
-            // Root
-            if (!stacCatalogRoot.empty())
-            {
-                links.push_back({{"rel", "root"},
-                                 {"href", stacCatalogRoot + stacEndpoint},
-                                 {"type", "application/json"}});
-                // Parent
-                links.push_back({{"rel", "parent"},
-                                 {"href", stacCatalogRoot + stacEndpoint},
-                                 {"type", "application/json"}});
-            }
-
-            if (stacCollectionRoot != ".")
-            {
-                // Self
-                links.push_back({{"rel", "self"},
-                                 {"href", stacCollectionRoot + stacEndpoint},
-                                 {"type", "application/json"}});
-            }
-
-            // Items
-            {
-                const auto q = db->query("SELECT path FROM entries WHERE point_geom IS NOT NULL OR polygon_geom IS NOT NULL ORDER BY path");
-                while (q->fetch())
-                {
-                    const std::string path = q->getText(0);
-                    links.push_back({{"rel", "item"},
-                                     {"href", stacCollectionRoot + stacEndpoint + "/" + Base64::encode(path)},
-                                     {"type", "application/geo+json"},
-                                     {"title", path}});
+                // Root
+                if (!urls->catalogRoot.empty()) {
+                    links.push_back({{"rel", "root"},
+                                     {"href", urls->catalogRoot + STAC_ENDPOINT},
+                                     {"type", "application/json"}});
+                    // Parent
+                    links.push_back({{"rel", "parent"},
+                                     {"href", urls->catalogRoot + STAC_ENDPOINT},
+                                     {"type", "application/json"}});
                 }
+
+                if (urls->collectionRoot != ".") {
+                    // Self
+                    links.push_back({{"rel", "self"},
+                                     {"href", urls->collectionRoot + STAC_ENDPOINT},
+                                     {"type", "application/json"}});
+                }
+
+                // Items
+                {
+                    const auto q = db->query(
+                        "SELECT path FROM entries WHERE point_geom IS NOT NULL OR polygon_geom IS "
+                        "NOT NULL ORDER BY path");
+                    while (q->fetch()) {
+                        const std::string path = q->getText(0);
+                        links.push_back(
+                            {{"rel", "item"},
+                             {"href",
+                              urls->collectionRoot + STAC_ENDPOINT + "/" + Base64::encode(path)},
+                             {"type", "application/geo+json"},
+                             {"title", path}});
+                    }
+                }
+
+                j["links"] = links;
             }
 
-            j["links"] = links;
             j["extent"] = db->getExtent();
 
             j["assets"] = json::object();
 
             // Assets
             {
-                const auto q = db->query("SELECT path FROM entries WHERE point_geom IS NULL AND polygon_geom IS NULL "
-                                         "AND type != 1 AND type != 7 ORDER BY path");
+                const auto q = db->query("SELECT path FROM entries WHERE point_geom IS NULL AND polygon_geom IS NULL AND " +
+                                         typeCondition("type", "!=", EntryType::Directory) + " AND " +
+                                         typeCondition("type", "!=", EntryType::DroneDB) + " ORDER BY path");
                 while (q->fetch())
                 {
                     const std::string path = q->getText(0);
-                    const auto href = stacCollectionRoot + downloadEndpoint + "?path=" + std::string(cpr::util::urlEncode(path));
-                    j["assets"][path] = {{"href", href},
-                                         {"title", path}};
+                    j["assets"][path] = {{"title", path}};
+                    if (urls != nullptr)
+                        j["assets"][path]["href"] =
+                            urls->collectionRoot + DOWNLOAD_ENDPOINT +
+                            "?path=" + urlEncode(path);
                 }
             }
         }
@@ -594,26 +627,37 @@ namespace ddb
         return j;
     }
 
-    json generateStacItemCollection(const std::string &ddbPath,
-                                    const std::string &stacCollectionRoot,
-                                    const std::string &id,
-                                    const std::string &stacCatalogRoot,
-                                    const std::vector<double> &bbox,
-                                    const std::string &datetimeStart,
-                                    const std::string &datetimeEnd,
-                                    int limit,
-                                    int offset)
-    {
+    json generateStac(const std::string& ddbPath,
+                      const std::string& entry,
+                      const std::string& stacCollectionRoot,
+                      const std::string& id,
+                      const std::string& stacCatalogRoot) {
+        const StacUrls urls{stacCollectionRoot, stacCatalogRoot};
+        return generateStacDocument(ddbPath, entry, id, &urls);
+    }
+
+    json generateStacData(const std::string& ddbPath, const std::string& entry) {
+        return generateStacDocument(ddbPath, entry, "", nullptr);
+    }
+
+    // The STAC ItemCollection of the dataset; urls: null for the data-only one
+    static json generateItemCollection(const std::string& ddbPath,
+                                       const StacUrls* urls,
+                                       const std::string& id,
+                                       const StacItemQuery& query) {
         if (ddbPath.empty())
             throw AppException("No ddbPath is set for generating STAC");
 
+        const std::vector<double>& bbox = query.bbox;
+        int limit = query.limit;
+        int offset = query.offset;
         if (limit <= 0)
             limit = 10;
         if (offset < 0)
             offset = 0;
 
         auto db = open(ddbPath, false);
-        const auto rootId = !id.empty() ? id : fs::weakly_canonical(db->rootDirectory()).filename().string();
+        const auto rootId = datasetRootId(db.get(), id);
 
         // High-precision double formatter for inlining bbox literals (bind() has no double overload)
         const auto fmtD = [](double v)
@@ -636,8 +680,8 @@ namespace ddb
         }
 
         time_t dtStart = 0, dtEnd = 0;
-        const bool hasStart = parseIso8601ToEpochSecs(datetimeStart, dtStart);
-        const bool hasEnd = parseIso8601ToEpochSecs(datetimeEnd, dtEnd);
+        const bool hasStart = parseIso8601ToEpochSecs(query.datetimeStart, dtStart);
+        const bool hasEnd = parseIso8601ToEpochSecs(query.datetimeEnd, dtEnd);
 
         // Per-entry instant (seconds): captureTime (ms) if present and > 0, else mtime
         const std::string instantExpr =
@@ -663,12 +707,8 @@ namespace ddb
                 numberMatched = cq->getInt64(0);
         }
 
-        const std::string sql =
-            "SELECT path, properties, "
-            "CASE WHEN polygon_geom IS NOT NULL THEN AsGeoJSON(polygon_geom) "
-            "WHEN point_geom IS NOT NULL THEN AsGeoJSON(point_geom) ELSE NULL END AS geom, "
-            "type, mtime FROM entries WHERE " +
-            where + " ORDER BY path LIMIT ? OFFSET ?";
+        const std::string sql = std::string("SELECT ") + stacRowColumns + " FROM entries WHERE " +
+                                where + " ORDER BY path LIMIT ? OFFSET ?";
 
         const auto q = db->query(sql);
         int idx = 1;
@@ -682,9 +722,7 @@ namespace ddb
         json features = json::array();
         while (q->fetch())
         {
-            features.push_back(buildStacItem(q->getText(0), q->getText(1), q->getText(2),
-                                             q->getInt(3), q->getInt64(4),
-                                             stacCollectionRoot, stacCatalogRoot, rootId));
+            features.push_back(buildStacItem(readStacRow(*q), urls, rootId));
         }
 
         json fc;
@@ -693,23 +731,36 @@ namespace ddb
         fc["numberReturned"] = features.size();
         fc["numberMatched"] = numberMatched;
 
-        json links = json::array();
-        if (!stacCatalogRoot.empty())
-            links.push_back({{"rel", "root"},
-                             {"href", stacCatalogRoot + STAC_ENDPOINT},
-                             {"type", "application/json"}});
-        if (stacCollectionRoot != ".")
-        {
-            links.push_back({{"rel", "self"},
-                             {"href", stacCollectionRoot + STAC_ENDPOINT + "/items"},
-                             {"type", "application/geo+json"}});
-            links.push_back({{"rel", "collection"},
-                             {"href", stacCollectionRoot + STAC_ENDPOINT},
-                             {"type", "application/json"}});
+        if (urls != nullptr) {
+            json links = json::array();
+            if (!urls->catalogRoot.empty())
+                links.push_back({{"rel", "root"},
+                                 {"href", urls->catalogRoot + STAC_ENDPOINT},
+                                 {"type", "application/json"}});
+            if (urls->collectionRoot != ".") {
+                links.push_back({{"rel", "self"},
+                                 {"href", urls->collectionRoot + STAC_ENDPOINT + "/items"},
+                                 {"type", "application/geo+json"}});
+                links.push_back({{"rel", "collection"},
+                                 {"href", urls->collectionRoot + STAC_ENDPOINT},
+                                 {"type", "application/json"}});
+            }
+            fc["links"] = links;
         }
-        fc["links"] = links;
 
         return fc;
     }
 
+    json generateStacItemCollection(const std::string& ddbPath,
+                                    const std::string& stacCollectionRoot,
+                                    const std::string& id,
+                                    const std::string& stacCatalogRoot,
+                                    const StacItemQuery& query) {
+        const StacUrls urls{stacCollectionRoot, stacCatalogRoot};
+        return generateItemCollection(ddbPath, &urls, id, query);
+    }
+
+    json generateStacItemCollectionData(const std::string& ddbPath, const StacItemQuery& query) {
+        return generateItemCollection(ddbPath, nullptr, "", query);
+    }
 }

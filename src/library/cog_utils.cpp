@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "cog_utils.h"
 #include "logger.h"
 #include "exceptions.h"
@@ -10,11 +10,12 @@ namespace ddb
 {
     bool isOptimizedCog(const std::string &inputPath)
     {
-        GDALDatasetH hDataset = GDALOpen(inputPath.c_str(), GA_ReadOnly);
-        if (!hDataset) {
+        const auto dataset = adoptDataset(GDALOpen(inputPath.c_str(), GA_ReadOnly));
+        if (!dataset) {
             LOGD << "Cannot open " << inputPath << " for COG verification";
             return false;
         }
+        GDALDatasetH hDataset = datasetHandle(dataset);
 
         bool isOptimized = false;
 
@@ -23,28 +24,21 @@ namespace ddb
             const char* projRef = GDALGetProjectionRef(hDataset);
             if (!projRef || strlen(projRef) == 0) {
                 LOGD << "File has no projection, needs rebuild";
-                GDALClose(hDataset);
                 return false;
             }
 
-            OGRSpatialReferenceH hSRS = OSRNewSpatialReference(projRef);
+            const SrsPtr hSRS(OSRNewSpatialReference(projRef));
             if (!hSRS) {
                 LOGD << "Cannot parse projection, needs rebuild";
-                GDALClose(hDataset);
                 return false;
             }
 
             // Check if it's Web Mercator (EPSG:3857)
-            OGRSpatialReferenceH hTargetSRS = OSRNewSpatialReference(nullptr);
-            OSRImportFromEPSG(hTargetSRS, 3857);
+            const SrsPtr hTargetSRS(OSRNewSpatialReference(nullptr));
+            OSRImportFromEPSG(hTargetSRS.get(), 3857);
 
-            bool sameProjection = OSRIsSame(hSRS, hTargetSRS);
-            OSRDestroySpatialReference(hSRS);
-            OSRDestroySpatialReference(hTargetSRS);
-
-            if (!sameProjection) {
+            if (!OSRIsSame(hSRS.get(), hTargetSRS.get())) {
                 LOGD << "File not in EPSG:3857, needs reprojection";
-                GDALClose(hDataset);
                 return false;
             }
 
@@ -59,7 +53,6 @@ namespace ddb
 
             if (!properTiling) {
                 LOGD << "File doesn't have proper tiling (" << blockXSize << "x" << blockYSize << "), needs rebuild";
-                GDALClose(hDataset);
                 return false;
             }
 
@@ -67,7 +60,6 @@ namespace ddb
             int overviewCount = GDALGetOverviewCount(hBand);
             if (overviewCount == 0) {
                 LOGD << "File has no overviews, needs rebuild";
-                GDALClose(hDataset);
                 return false;
             }
 
@@ -78,7 +70,6 @@ namespace ddb
 
             if (!isCOGDriver) {
                 LOGD << "File driver is not COG compatible (" << driverName << "), needs rebuild";
-                GDALClose(hDataset);
                 return false;
             }
 
@@ -90,7 +81,6 @@ namespace ddb
             isOptimized = false;
         }
 
-        GDALClose(hDataset);
         return isOptimized;
     }
 

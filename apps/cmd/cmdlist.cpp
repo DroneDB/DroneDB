@@ -3,6 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "include/cmdlist.h"
+
+#include <stdexcept>
+
 #include "include/build.h"
 #include "include/init.h"
 #include "include/add.h"
@@ -44,62 +47,102 @@
 namespace cmd
 {
 
-  std::map<std::string, Command *> commands = {
-      {"build", new Build()},
-      {"init", new Init()},
-      {"add", new Add()},
-      {"align", new Align()},
-      {"remove", new Remove()},
-      {"sync", new Sync()},
-      {"rescan", new Rescan()},
-      {"geoproj", new GeoProj()},
-      {"info", new Info()},
-      {"list", new List()},
-      {"thumbs", new Thumbs()},
-      {"setexif", new SetExif()},
-      {"login", new Login()},
-      {"logout", new Logout()},
-      {"tile", new Tile()},
-      {"share", new Share()},
-      {"system", new System()},
-      {"status", new Status()},
-      {"password", new Password()},
-      {"delta", new Delta()},
-      {"clone", new Clone()},
-      {"tag", new Tag()},
-      {"copc", new Copc()},
-      {"push", new Push()},
-      {"pull", new Pull()},
-      {"meta", new Meta()},
-      {"stamp", new Stamp()},
-      {"cog", new Cog()},
-      {"contour", new Contour()},
-      {"nxs", new Nxs()},
-      {"3dtiles", new Tiles3d()},
-      {"gsplat", new Gsplat()},
-      {"search", new Search()},
-      {"stac", new Stac()},
-      {"mask", new Mask()},
-      {"merge-multispectral", new MergeMultispectral()},
-      {"cleanup", new Cleanup()}};
+  const CommandRegistry &CommandRegistry::builtin()
+  {
+    static const CommandRegistry registry = [] {
+      CommandRegistry r;
+      r.add<Build>("build");
+      r.add<Init>("init");
+      r.add<Add>("add");
+      r.add<Align>("align");
+      r.add<Remove>("remove");
+      r.add<Sync>("sync");
+      r.add<Rescan>("rescan");
+      r.add<GeoProj>("geoproj");
+      r.add<Info>("info");
+      r.add<List>("list");
+      r.add<Thumbs>("thumbs");
+      r.add<SetExif>("setexif");
+      r.add<Login>("login");
+      r.add<Logout>("logout");
+      r.add<Tile>("tile");
+      r.add<Share>("share");
+      r.add<System>("system");
+      r.add<Status>("status");
+      r.add<Password>("password");
+      r.add<Delta>("delta");
+      r.add<Clone>("clone");
+      r.add<Tag>("tag");
+      r.add<Copc>("copc");
+      r.add<Push>("push");
+      r.add<Pull>("pull");
+      r.add<Meta>("meta");
+      r.add<Stamp>("stamp");
+      r.add<Cog>("cog");
+      r.add<Contour>("contour");
+      r.add<Nxs>("nxs");
+      r.add<Tiles3d>("3dtiles");
+      r.add<Gsplat>("gsplat");
+      r.add<Search>("search");
+      r.add<Stac>("stac");
+      r.add<Mask>("mask");
+      r.add<MergeMultispectral>("merge-multispectral");
+      r.add<Cleanup>("cleanup");
 
-  std::map<std::string, std::string> aliases = {
-      {"rm", "remove"},
-      {"r", "remove"},
-      {"a", "add"},
-      {"s", "sync"},
-      {"rs", "rescan"},
-      {"gp", "geoproj"},
-      {"i", "info"},
-      {"ls", "list"},
-      {"sh", "share"},
-      {"psw", "password"},
-      {"attrib", "chattr"},
-      {"attr", "chattr"},
-      {"diff", "delta"},
-      {"c", "clone"},
-      {"checkout", "clone"},
-      {"co", "clone"},
-      {"b", "build"}};
+      r.alias("rm", "remove");
+      r.alias("r", "remove");
+      r.alias("a", "add");
+      r.alias("s", "sync");
+      r.alias("rs", "rescan");
+      r.alias("gp", "geoproj");
+      r.alias("i", "info");
+      r.alias("ls", "list");
+      r.alias("sh", "share");
+      r.alias("psw", "password");
+      r.alias("diff", "delta");
+      r.alias("c", "clone");
+      r.alias("checkout", "clone");
+      r.alias("co", "clone");
+      r.alias("b", "build");
+      return r;
+    }();
+    return registry;
+  }
+
+  void CommandRegistry::add(const std::string &name, Factory factory)
+  {
+    if (!factories_.emplace(name, std::move(factory)).second)
+      throw std::logic_error("Command registered twice: " + name);
+  }
+
+  void CommandRegistry::alias(const std::string &alias, const std::string &target)
+  {
+    if (factories_.count(target) == 0)
+      throw std::logic_error("Alias " + alias + " names a command that is not registered: " + target);
+    if (factories_.count(alias) != 0 || !aliases_.emplace(alias, target).second)
+      throw std::logic_error("Alias is already a command or an alias: " + alias);
+  }
+
+  std::string CommandRegistry::resolve(const std::string &name) const
+  {
+    if (factories_.count(name) != 0)
+      return name;
+    const auto it = aliases_.find(name);
+    return it == aliases_.end() ? std::string() : it->second;
+  }
+
+  std::unique_ptr<Command> CommandRegistry::create(const std::string &name) const
+  {
+    const auto resolved = resolve(name);
+    return resolved.empty() ? nullptr : factories_.at(resolved)();
+  }
+
+  std::vector<std::string> CommandRegistry::names() const
+  {
+    std::vector<std::string> result;
+    for (const auto &entry : factories_)
+      result.push_back(entry.first);
+    return result;
+  }
 
 }

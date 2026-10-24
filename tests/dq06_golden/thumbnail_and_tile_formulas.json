@@ -1,0 +1,212 @@
+{
+ "thumb_EVI_spectral_rescale": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_EXG_grayscale_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_GLI_rdylgn_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_GRVI_inferno_rescale": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_NDRE_rdylgn_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_NDVI_default_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_NDWI_bugn_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_NOPE_default_auto": {
+  "error": "Unknown formula: NOPE"
+ },
+ "thumb_SAVI_viridis_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_VARI_plasma_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "tile_EVI_spectral_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "afe41c0f42b1b3b7",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_EVI_spectral_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "51ed240b685a8c57",
+  "transparent": 62807,
+  "width": 256
+ },
+ "tile_EXG_grayscale_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "74556cca671b2dc6",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_EXG_grayscale_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "99de232b5dc8b668",
+  "transparent": 62807,
+  "width": 256
+ },
+ "tile_GLI_rdylgn_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "89533641f723eb00",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_GLI_rdylgn_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "399ec59b204328a5",
+  "transparent": 62807,
+  "width": 256
+ },
+ "tile_GRVI_inferno_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "eaecc9d859509249",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_GRVI_inferno_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "758fd84ba26c5532",
+  "transparent": 62807,
+  "width": 256
+ },
+ "tile_NDRE_rdylgn_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "4db252ac8b64c1e9",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_NDRE_rdylgn_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "07a0fe910ae0428a",
+  "transparent": 62807,
+  "width": 256
+ },
+ "tile_NDVI_default_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "489108cf8d874125",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_NDVI_default_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "513f891c20af80f3",
+  "transparent": 62807,
+  "width": 256
+ },
+ "tile_NDWI_bugn_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "6febb8425616824d",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_NDWI_bugn_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "3b7025b0612e7df8",
+  "transparent": 62807,
+  "width": 256
+ },
+ "tile_SAVI_viridis_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "2a0f99e9737516ee",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_SAVI_viridis_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "4a27bd6185bcbce3",
+  "transparent": 62807,
+  "width": 256
+ },
+ "tile_VARI_plasma_17294_20979": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "eb7a5c529a3f897f",
+  "transparent": 57286,
+  "width": 256
+ },
+ "tile_VARI_plasma_17294_20980": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "98e577e1e4ef8ff1",
+  "transparent": 62807,
+  "width": 256
+ }
+}

@@ -214,6 +214,22 @@ if (Test-Path $obj2tilesPath) {
     Write-Host "  - Obj2Tiles.exe (not found, skipping - 3D Tiles generation disabled, Nexus still produced)" -ForegroundColor Yellow
 }
 
+# Copy dwg2dxf.exe if present (optional - enables DWG drawings; LibreDWG, GPL-3.0,
+# invoked only as a subprocess). Built by scripts/build-libredwg.sh (CI cross-compiles
+# it) or scripts/build-libredwg.ps1; found next to ddbcmd.exe, or on PATH in Registry.
+$dwg2dxfPath = Join-Path $BuildDir "dwg2dxf.exe"
+if (Test-Path $dwg2dxfPath) {
+    Copy-Item $dwg2dxfPath $stagingDir -Force
+    Write-Host "  ✓ dwg2dxf.exe (LibreDWG DWG converter)" -ForegroundColor Green
+    $dwg2dxfLicense = Join-Path $BuildDir "dwg2dxf.LICENSE.txt"
+    if (Test-Path $dwg2dxfLicense) {
+        Copy-Item $dwg2dxfLicense $stagingDir -Force
+        Write-Host "  ✓ dwg2dxf.LICENSE.txt (GPL-3.0 license)" -ForegroundColor Green
+    }
+} else {
+    Write-Host "  - dwg2dxf.exe (not found, skipping - DWG builds fail with an actionable message)" -ForegroundColor Yellow
+}
+
 # Copy license files (always included for redistribution compliance)
 $licenseFiles = @("LICENSE.md", "THIRD_PARTY_LICENSES.md")
 foreach ($lic in $licenseFiles) {
@@ -223,10 +239,12 @@ foreach ($lic in $licenseFiles) {
     }
 }
 
-# Copy directories (zoneinfo, plugins)
+# Copy directories (zoneinfo, plugins, gdal)
 Write-Host ""
 Write-Host "Copying directories..." -ForegroundColor Cyan
-$directories = @("zoneinfo", "plugins")
+# gdal: GDAL's data files, found next to the library (process_init.cpp setupGdalData); the build
+# stages them (cmake/StageGdalData.cmake)
+$directories = @("zoneinfo", "plugins", "gdal")
 $copiedDirs = 0
 foreach ($dir in $directories) {
     $sourcePath = Join-Path $BuildDir $dir
@@ -239,6 +257,11 @@ foreach ($dir in $directories) {
     else {
         Write-Host "  - $dir/ (not found, skipping)" -ForegroundColor Yellow
     }
+}
+
+if (-not (Test-Path (Join-Path $stagingDir "gdal\gdalvrt.xsd"))) {
+    Write-Error "The GDAL data folder (gdal) is missing from the build: rasters would warn about missing GDAL data files."
+    exit 1
 }
 
 # Count total files staged

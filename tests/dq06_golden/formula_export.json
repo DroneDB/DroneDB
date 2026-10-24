@@ -1,0 +1,242 @@
+{
+ "badrescale": {
+  "error": "Invalid rescale format: oops. Expected format: min,max"
+ },
+ "bands": {
+  "bands": [
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "nodata": -9999.0,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "nodata": -9999.0,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Gray",
+    "maskFlags": 1,
+    "nodata": -9999.0,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 128,
+  "pixels": "028b70b98a0df6d8",
+  "srs": "WGS 84 / Pseudo-Mercator",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG"
+  },
+  "width": 128
+ },
+ "exg_percentile": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Red",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Green",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Blue",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Alpha",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 128,
+  "pixels": "1727224821471efe",
+  "srs": "WGS 84 / Pseudo-Mercator",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "2"
+  },
+  "width": 128
+ },
+ "grvi_tiled": {
+  "bands": [
+   {
+    "blockX": 64,
+    "blockY": 64,
+    "colorInterp": "Red",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 64,
+    "blockY": 64,
+    "colorInterp": "Green",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 64,
+    "blockY": 64,
+    "colorInterp": "Blue",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 64,
+    "blockY": 64,
+    "colorInterp": "Alpha",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 128,
+  "pixels": "3517e57e60bf3054",
+  "srs": "WGS 84 / Pseudo-Mercator",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "2"
+  },
+  "width": 128
+ },
+ "ndvi_range": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Red",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Green",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Blue",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Alpha",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 128,
+  "pixels": "6c20307016ff67d8",
+  "srs": "WGS 84 / Pseudo-Mercator",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "2"
+  },
+  "width": 128
+ },
+ "ndvi_rescale": {
+  "bands": [
+   {
+    "blockX": 64,
+    "blockY": 64,
+    "colorInterp": "Red",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 64,
+    "blockY": 64,
+    "colorInterp": "Green",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 64,
+    "blockY": 64,
+    "colorInterp": "Blue",
+    "maskFlags": 6,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 64,
+    "blockY": 64,
+    "colorInterp": "Alpha",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 128,
+  "pixels": "b584f25eda095e83",
+  "srs": "WGS 84 / Pseudo-Mercator",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "2"
+  },
+  "width": 128
+ },
+ "unknown": {
+  "error": "Unknown formula: NOPE"
+ }
+}

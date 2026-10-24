@@ -2,9 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_analysis.h"
+#include "raster_utils.h"
+#include "json.h"
 #include "thermal.h"
 #include "sensorprofile.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "logger.h"
 
 #include <gdal_priv.h>
@@ -13,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -58,11 +62,100 @@ bool detectIsThermal(const std::string &filePath, std::string &outSensorId) {
     return false;
 }
 
+// The rectangle of an area statistic, in pixels (inclusive)
+struct AreaBounds {
+    int x0, y0, x1, y1;
+
+    // The rectangle clamped to a w x h raster, corners in order
+    static AreaBounds clamped(int x0, int y0, int x1, int y1, int w, int h) {
+        x0 = std::max(0, std::min(x0, w - 1));
+        y0 = std::max(0, std::min(y0, h - 1));
+        x1 = std::max(0, std::min(x1, w - 1));
+        y1 = std::max(0, std::min(y1, h - 1));
+        if (x0 > x1) std::swap(x0, x1);
+        if (y0 > y1) std::swap(y0, y1);
+        return {x0, y0, x1, y1};
+    }
+};
+
+// Reads the first band over the rectangle as floats (raw thermal values converted to
+// temperatures when the calibration allows); nothing when GDAL cannot read it
+std::optional<std::vector<float>> readAreaBand(GDALRasterBandH hBand, GDALDataType dt, const AreaBounds &b,
+                                               bool needsConversion, const ThermalCalibration &cal) {
+    const int roiW = b.x1 - b.x0 + 1;
+    const int roiH = b.y1 - b.y0 + 1;
+    const size_t roiCount = static_cast<size_t>(roiW) * roiH;
+    std::vector<float> roiData(roiCount);
+
+    if (dt == GDT_UInt16) {
+        std::vector<uint16_t> rawRoi(roiCount);
+        if (GDALRasterIO(hBand, GF_Read, b.x0, b.y0, roiW, roiH,
+                         rawRoi.data(), roiW, roiH,
+                         GDT_UInt16, 0, 0) != CE_None)
+            return std::nullopt;
+        for (size_t i = 0; i < roiCount; i++) {
+            roiData[i] = needsConversion
+                ? static_cast<float>(rawToTemperature(rawRoi[i], cal))
+                : static_cast<float>(rawRoi[i]);
+        }
+        return roiData;
+    }
+
+    // Floating point and other integer types: read as Float32.
+    if (GDALRasterIO(hBand, GF_Read, b.x0, b.y0, roiW, roiH,
+                     roiData.data(), roiW, roiH, GDT_Float32, 0, 0) != CE_None)
+        return std::nullopt;
+    return roiData;
+}
+
+// The statistics of the values (which must not be empty; sorted here), as the area endpoint
+// answers them
+std::string areaStatsJson(std::vector<float> values, const AreaBounds &b, const std::string &unit,
+                          bool isThermal) {
+    std::sort(values.begin(), values.end());
+    const float vMin = values.front();
+    const float vMax = values.back();
+
+    double sum = 0;
+    for (float v : values) sum += v;
+    const double mean = sum / values.size();
+
+    double sqSum = 0;
+    for (float v : values) {
+        double diff = v - mean;
+        sqSum += diff * diff;
+    }
+    const double stddev = std::sqrt(sqSum / values.size());
+
+    float median;
+    const size_t n = values.size();
+    if (n % 2 == 0) {
+        median = (values[n / 2 - 1] + values[n / 2]) / 2.0f;
+    } else {
+        median = values[n / 2];
+    }
+
+    json result;
+    result["min"] = vMin;
+    result["max"] = vMax;
+    result["mean"] = mean;
+    result["stddev"] = stddev;
+    result["median"] = median;
+    result["pixelCount"] = static_cast<int>(values.size());
+    result["bounds"] = {
+        {"x0", b.x0}, {"y0", b.y0}, {"x1", b.x1}, {"y1", b.y1}
+    };
+    result["unit"] = unit;
+    result["isThermal"] = isThermal;
+    return result.dump();
+}
+
 } // anonymous namespace
 
 std::string readGdalUnitType(const std::string &filePath) {
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (!hDs) return std::string();
+    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset) return std::string();
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     std::string unit;
     if (GDALGetRasterCount(hDs) >= 1) {
@@ -71,7 +164,6 @@ std::string readGdalUnitType(const std::string &filePath) {
         if (u != nullptr) unit = u;
     }
 
-    GDALClose(hDs);
     return unit;
 }
 
@@ -89,8 +181,8 @@ std::string getRasterValueInfoJson(const std::string &filePath) {
     float vMin = 0.f, vMax = 0.f;
     bool hasStats = false;
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
+    if (const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+        GDALDatasetH hDs = datasetHandle(dataset);
         width = GDALGetRasterXSize(hDs);
         height = GDALGetRasterYSize(hDs);
         bandCount = GDALGetRasterCount(hDs);
@@ -116,7 +208,6 @@ std::string getRasterValueInfoJson(const std::string &filePath) {
                 hasStats = true;
             }
         }
-        GDALClose(hDs);
     }
 
     // Fallback for small R-JPEG thermal images not fully handled by GDAL stats.
@@ -181,13 +272,12 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y) {
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
+    if (const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+        GDALDatasetH hDs = datasetHandle(dataset);
         const int w = GDALGetRasterXSize(hDs);
         const int h = GDALGetRasterYSize(hDs);
 
         if (x < 0 || x >= w || y < 0 || y >= h) {
-            GDALClose(hDs);
             throw InvalidArgsException("Pixel coordinates out of bounds: (" +
                 std::to_string(x) + ", " + std::to_string(y) + ") for image " +
                 std::to_string(w) + "x" + std::to_string(h));
@@ -263,11 +353,9 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y) {
                     result["hasGeo"] = false;
                 }
 
-                GDALClose(hDs);
                 return result.dump();
             }
         }
-        GDALClose(hDs);
     }
 
     // Fallback: R-JPEG (small thermal images).
@@ -320,18 +408,13 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
+    if (const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+        GDALDatasetH hDs = datasetHandle(dataset);
         const int w = GDALGetRasterXSize(hDs);
         const int h = GDALGetRasterYSize(hDs);
         const int nBands = GDALGetRasterCount(hDs);
 
-        x0 = std::max(0, std::min(x0, w - 1));
-        y0 = std::max(0, std::min(y0, h - 1));
-        x1 = std::max(0, std::min(x1, w - 1));
-        y1 = std::max(0, std::min(y1, h - 1));
-        if (x0 > x1) std::swap(x0, x1);
-        if (y0 > y1) std::swap(y0, y1);
+        const AreaBounds bounds = AreaBounds::clamped(x0, y0, x1, y1, w, h);
 
         std::string unit;
 
@@ -348,92 +431,27 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
                 needsConversion = cal.valid;
             }
 
-            const int roiW = x1 - x0 + 1;
-            const int roiH = y1 - y0 + 1;
-            const size_t roiCount = static_cast<size_t>(roiW) * roiH;
-            std::vector<float> roiData(roiCount);
-
-            bool gotData = false;
-            if (dt == GDT_Float32 || dt == GDT_Float64) {
-                gotData = (GDALRasterIO(hBand, GF_Read, x0, y0, roiW, roiH,
-                    roiData.data(), roiW, roiH, GDT_Float32, 0, 0) == CE_None);
-            } else if (dt == GDT_UInt16) {
-                std::vector<uint16_t> rawRoi(roiCount);
-                if (GDALRasterIO(hBand, GF_Read, x0, y0, roiW, roiH,
-                                 rawRoi.data(), roiW, roiH,
-                                 GDT_UInt16, 0, 0) == CE_None) {
-                    for (size_t i = 0; i < roiCount; i++) {
-                        roiData[i] = needsConversion
-                            ? static_cast<float>(rawToTemperature(rawRoi[i], cal))
-                            : static_cast<float>(rawRoi[i]);
-                    }
-                    gotData = true;
-                }
-            } else {
-                gotData = (GDALRasterIO(hBand, GF_Read, x0, y0, roiW, roiH,
-                    roiData.data(), roiW, roiH, GDT_Float32, 0, 0) == CE_None);
-            }
-
-            if (gotData) {
+            if (const auto roiData = readAreaBand(hBand, dt, bounds, needsConversion, cal)) {
                 // Respect nodata.
-                int hasNoData = 0;
-                double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
+                const BandNodata noData = readBandNodata(hBand);
 
                 std::vector<float> values;
-                values.reserve(roiCount);
-                for (float v : roiData) {
+                values.reserve(roiData->size());
+                for (float v : *roiData) {
                     if (!std::isfinite(v)) continue;
-                    if (hasNoData && std::abs(static_cast<double>(v) - noData) < 1e-6) continue;
+                    if (isNodata(v, noData)) continue;
                     values.push_back(v);
                 }
-
-                GDALClose(hDs);
 
                 if (values.empty()) {
                     throw AppException("No valid data in the specified area");
                 }
 
-                std::sort(values.begin(), values.end());
-                const float vMin = values.front();
-                const float vMax = values.back();
-
-                double sum = 0;
-                for (float v : values) sum += v;
-                const double mean = sum / values.size();
-
-                double sqSum = 0;
-                for (float v : values) {
-                    double diff = v - mean;
-                    sqSum += diff * diff;
-                }
-                const double stddev = std::sqrt(sqSum / values.size());
-
-                float median;
-                const size_t n = values.size();
-                if (n % 2 == 0) {
-                    median = (values[n / 2 - 1] + values[n / 2]) / 2.0f;
-                } else {
-                    median = values[n / 2];
-                }
-
                 if (unit.empty() && isThermal) unit = "\xC2\xB0\x43";
 
-                json result;
-                result["min"] = vMin;
-                result["max"] = vMax;
-                result["mean"] = mean;
-                result["stddev"] = stddev;
-                result["median"] = median;
-                result["pixelCount"] = static_cast<int>(values.size());
-                result["bounds"] = {
-                    {"x0", x0}, {"y0", y0}, {"x1", x1}, {"y1", y1}
-                };
-                result["unit"] = unit;
-                result["isThermal"] = isThermal;
-                return result.dump();
+                return areaStatsJson(std::move(values), bounds, unit, isThermal);
             }
         }
-        GDALClose(hDs);
     }
 
     // Fallback: R-JPEG thermal only.
@@ -446,17 +464,12 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
         throw AppException("Cannot read raster data from " + filePath);
     }
 
-    x0 = std::max(0, std::min(x0, td.width - 1));
-    y0 = std::max(0, std::min(y0, td.height - 1));
-    x1 = std::max(0, std::min(x1, td.width - 1));
-    y1 = std::max(0, std::min(y1, td.height - 1));
-    if (x0 > x1) std::swap(x0, x1);
-    if (y0 > y1) std::swap(y0, y1);
+    const AreaBounds bounds = AreaBounds::clamped(x0, y0, x1, y1, td.width, td.height);
 
     std::vector<float> values;
-    values.reserve(static_cast<size_t>(x1 - x0 + 1) * (y1 - y0 + 1));
-    for (int row = y0; row <= y1; row++) {
-        for (int col = x0; col <= x1; col++) {
+    values.reserve(static_cast<size_t>(bounds.x1 - bounds.x0 + 1) * (bounds.y1 - bounds.y0 + 1));
+    for (int row = bounds.y0; row <= bounds.y1; row++) {
+        for (int col = bounds.x0; col <= bounds.x1; col++) {
             float t = td.temperatures[static_cast<size_t>(row) * td.width + col];
             if (std::isfinite(t) && t > -273.15f && t < 1000.0f) {
                 values.push_back(t);
@@ -468,42 +481,7 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
         throw AppException("No valid data in the specified area");
     }
 
-    std::sort(values.begin(), values.end());
-    const float vMin = values.front();
-    const float vMax = values.back();
-
-    double sum = 0;
-    for (float v : values) sum += v;
-    const double mean = sum / values.size();
-
-    double sqSum = 0;
-    for (float v : values) {
-        double diff = v - mean;
-        sqSum += diff * diff;
-    }
-    const double stddev = std::sqrt(sqSum / values.size());
-
-    float median;
-    const size_t n = values.size();
-    if (n % 2 == 0) {
-        median = (values[n / 2 - 1] + values[n / 2]) / 2.0f;
-    } else {
-        median = values[n / 2];
-    }
-
-    json result;
-    result["min"] = vMin;
-    result["max"] = vMax;
-    result["mean"] = mean;
-    result["stddev"] = stddev;
-    result["median"] = median;
-    result["pixelCount"] = static_cast<int>(values.size());
-    result["bounds"] = {
-        {"x0", x0}, {"y0", y0}, {"x1", x1}, {"y1", y1}
-    };
-    result["unit"] = std::string("\xC2\xB0\x43");
-    result["isThermal"] = true;
-    return result.dump();
+    return areaStatsJson(std::move(values), bounds, "\xC2\xB0\x43", true);
 }
 
 } // namespace ddb

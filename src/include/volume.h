@@ -5,7 +5,6 @@
 #define VOLUME_H
 
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -42,10 +41,10 @@ namespace ddb {
  * Throws InvalidArgsException for bad input (geometry, method name),
  * AppException for runtime GDAL/IO errors.
  */
-DDB_DLL std::string calculateVolumeJson(const std::string &rasterPath,
-                                        const std::string &polygonGeoJson,
-                                        const std::string &baseMethod,
-                                        double flatElevation);
+std::string calculateVolumeJson(const std::string &rasterPath,
+                                const std::string &polygonGeoJson,
+                                const std::string &baseMethod,
+                                double flatElevation);
 
 } // namespace ddb
 

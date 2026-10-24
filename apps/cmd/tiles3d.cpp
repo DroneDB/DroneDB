@@ -10,6 +10,7 @@
 
 #include "3d.h"
 #include "fs.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -21,8 +22,9 @@ namespace cmd
     .positional_help("[args]")
     .custom_help("3dtiles model.obj [output_dir]")
     .add_options()
-    ("i,input", "Model to process (OBJ/GLTF/GLB/PLY)", cxxopts::value<std::string>())
-    ("o,output", "Output 3D Tiles directory (defaults to a 3dtiles/ folder next to the input)", cxxopts::value<std::string>())
+    ("i,input", "Model to process (OBJ/GLTF/GLB/PLY)", cxxopts::value<std::string>());
+    cmd::addOutputOption(opts, "Output 3D Tiles directory (defaults to a 3dtiles/ folder next to the input)");
+    opts.add_options()
     ("lat", "Latitude of the model origin (WGS84). With --lon, forces a georeferenced tileset", cxxopts::value<double>())
     ("lon", "Longitude of the model origin (WGS84). With --lat, forces a georeferenced tileset", cxxopts::value<double>())
     ("alt", "Altitude of the model origin in meters (used with --lat/--lon)", cxxopts::value<double>()->default_value("0"))
@@ -38,11 +40,11 @@ namespace cmd
         return "Generate OGC 3D Tiles (tileset.json + b3dm) from 3D models (OBJ/GLTF/GLB/PLY) using Obj2Tiles.";
     }
 
-    void Tiles3d::run(cxxopts::ParseResult &opts)
+    int Tiles3d::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            usageError();
         }
 
         const auto input = opts["input"].as<std::string>();
@@ -51,7 +53,7 @@ namespace cmd
         if (opts.count("output"))
             output = opts["output"].as<std::string>();
         else
-            output = (fs::path(input).parent_path() / "3dtiles").string();
+            output = ddb::io::toUtf8(ddb::io::fromUtf8(input).parent_path() / "3dtiles");
 
         const bool overwrite = opts["overwrite"].as<bool>();
         const bool forceLocal = opts["local"].as<bool>();
@@ -79,7 +81,12 @@ namespace cmd
 
         const bool autoDetect = !forceLocal && !georef.has_value();
 
-        std::cout << ddb::buildModel3DTiles(input, output, overwrite, georef, autoDetect) << std::endl;
+        ddb::Tiles3DOptions tilesOptions;
+        tilesOptions.overwrite = overwrite;
+        tilesOptions.georef = georef;
+        tilesOptions.autoDetectGeoref = autoDetect;
+        std::cout << ddb::buildModel3DTiles(input, output, tilesOptions) << std::endl;
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

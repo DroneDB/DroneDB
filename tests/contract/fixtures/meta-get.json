@@ -1,0 +1,22 @@
+{
+  "call": "DDBMetaGet(<root>, \"sub/img.jpg\", \"annotation\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "id",
+      "mtime"
+    ]
+  },
+  "output": {
+    "data": {
+      "level": 2,
+      "note": "tree"
+    },
+    "id": "<volatile>",
+    "mtime": 0
+  },
+  "schema": "meta-item.schema.json"
+}

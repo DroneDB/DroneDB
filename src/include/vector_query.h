@@ -4,37 +4,45 @@
 #ifndef VECTOR_QUERY_H
 #define VECTOR_QUERY_H
 
+#include <array>
+#include <cstdint>
+#include <optional>
 #include <string>
-#include "ddb_export.h"
+#include <vector>
 
 namespace ddb
 {
-    /**
-     * Query a vector dataset, returning features as a string.
-     *
-     * @param vectorPath   Path to vector (e.g. a GeoPackage from build/).
-     * @param layerName    Empty = first layer.
-     * @param bbox         [minX, minY, maxX, maxY] or nullptr for no filter.
-     * @param bboxSrs      Authority code; empty = "EPSG:4326".
-     * @param maxFeatures  Max features to return (0 = unbounded; caller validates).
-     * @param startIndex   Pagination offset (0-based).
-     * @param outputFormat "geojson" | "gml" | "json" (== geojson). Empty = "geojson".
-     * @return Serialized features in requested format.
-     */
-    DDB_DLL std::string queryVector(const std::string &vectorPath,
-                                    const std::string &layerName,
-                                    const double *bbox,
-                                    const std::string &bboxSrs,
-                                    int maxFeatures,
-                                    int startIndex,
-                                    const std::string &outputFormat);
+    /** Which features of a vector layer queryVector() / countVectorFeatures() select. */
+    struct VectorQuery
+    {
+        std::string layerName;                      // empty = first layer
+        std::optional<std::array<double, 4>> bbox;  // [minX, minY, maxX, maxY]; none = no filter
+        std::string bboxSrs;                        // empty = "EPSG:4326"
+        std::vector<int64_t> fids;                  // feature ids; empty = every feature
+        std::string where;                          // attribute filter: an SQL expression over the
+                                                    // layer's fields (SQLite syntax for GeoPackage),
+                                                    // built by the caller; empty = none
+        int maxFeatures = 0;                        // 0 = unbounded (query only)
+        int startIndex = 0;                         // 0-based offset (query only)
+        std::string outputFormat;                   // "geojson" (default, also "json") | "gml" (query only)
+    };
 
+    /**
+     * Features of a vector layer, reprojected to EPSG:4326 when the layer has an SRS.
+     * Feature ids are the source FIDs (GML: gml:id="<layer>.<fid>"), so the same feature
+     * keeps its id in every page and in id lookups. With fids set, a GeoPackage reads
+     * them by primary key.
+     */
+    std::string queryVector(const std::string &vectorPath, const VectorQuery &query);
+
+    /** Number of features matching query's layer, bbox, fids and where (paging is ignored). */
+    int64_t countVectorFeatures(const std::string &vectorPath, const VectorQuery &query);
     /**
      * Describe a vector dataset: layers, geometry types, SRS, extent,
      * feature count and fields. Returns JSON.
      */
-    DDB_DLL std::string describeVector(const std::string &vectorPath,
-                                       const std::string &layerName);
+    std::string describeVector(const std::string &vectorPath,
+                               const std::string &layerName);
 
 } // namespace ddb
 

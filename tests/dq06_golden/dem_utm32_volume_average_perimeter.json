@@ -1,0 +1,39 @@
+{
+ "area2d": 210100.0,
+ "area3d": 210156.59300831452,
+ "baseElevation": 101.09279998779004,
+ "basePlaneMethod": "average_perimeter",
+ "boundaryPolygon": {
+  "coordinates": [
+   [
+    [
+     9.991403461004603,
+     45.013066804226625
+    ],
+    [
+     9.997240335432204,
+     45.01301598139683
+    ],
+    [
+     9.997168483620717,
+     45.00887573110629
+    ],
+    [
+     9.991332029575322,
+     45.00892654664093
+    ],
+    [
+     9.991403461004603,
+     45.013066804226625
+    ]
+   ]
+  ],
+  "type": "Polygon"
+ },
+ "crs": "PROJCS[\"WGS 84 / UTM zone 32N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",9],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"32632\"]]",
+ "cutVolume": 266348.9391174316,
+ "fillVolume": 16300.390594482471,
+ "netVolume": 250048.5485229491,
+ "pixelCount": 2101,
+ "pixelSize": 10.0
+}

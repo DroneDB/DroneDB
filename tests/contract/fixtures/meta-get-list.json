@@ -1,0 +1,26 @@
+{
+  "call": "DDBMetaGet(<root>, \"\", \"tags\") (a key ending in s holds a list)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "id",
+      "mtime"
+    ]
+  },
+  "output": [
+    {
+      "data": "survey",
+      "id": "<volatile>",
+      "mtime": 0
+    },
+    {
+      "data": "2024",
+      "id": "<volatile>",
+      "mtime": 0
+    }
+  ],
+  "schema": "meta-items.schema.json"
+}

@@ -3,9 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "buildlock.h"
+#include "build_layout.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "fs.h"
+#include "mio.h"
 
 #include <sstream>
 #include <fstream>
@@ -74,6 +76,40 @@ void releaseKernelLock(int fd) {
 #  endif
 }
 
+/** @brief Outcome of a lock query on an open descriptor. */
+enum class LockQuery { Free, Held, Unknown };
+
+/**
+ * @brief Ask whether another open file description holds the advisory lock, without keeping one.
+ *
+ * Linux: F_OFD_GETLK takes no lock at all. flock() has no query: a non-blocking shared lock
+ * is taken and released at once. `outErrno` is set when the answer is Unknown.
+ */
+LockQuery queryKernelLock(int fd, int* outErrno) {
+    *outErrno = 0;
+#  ifdef DDB_USE_OFD_LOCKS
+    struct flock fl{};
+    fl.l_type   = F_WRLCK;   // "could I take the lock BuildLock takes?"
+    fl.l_whence = SEEK_SET;
+    fl.l_start  = 0;
+    fl.l_len    = 0;         // whole file
+    fl.l_pid    = 0;         // required by OFD commands
+    if (fcntl(fd, F_OFD_GETLK, &fl) == -1) {
+        *outErrno = errno;
+        return LockQuery::Unknown;
+    }
+    return fl.l_type == F_UNLCK ? LockQuery::Free : LockQuery::Held;
+#  else
+    if (flock(fd, LOCK_SH | LOCK_NB) == 0) {
+        (void)flock(fd, LOCK_UN);
+        return LockQuery::Free;
+    }
+    if (errno == EWOULDBLOCK || errno == EAGAIN) return LockQuery::Held;
+    *outErrno = errno;
+    return LockQuery::Unknown;
+#  endif
+}
+
 /** @brief True if the file behind `fd` is still the one linked at `path` (not unlinked by a previous holder). */
 bool isStillLinked(int fd, const std::string& path) {
     struct stat fdStat{};
@@ -95,7 +131,7 @@ bool probeDirectoryWritable(const fs::path& dir) {
     static std::atomic<unsigned long> counter{0};
     auto probe = dir / (".ddb_lock_probe_" + std::to_string(_getpid()) + "_" +
                        std::to_string(counter.fetch_add(1)));
-    HANDLE h = CreateFileA(probe.string().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+    HANDLE h = CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                            FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
     CloseHandle(h);
@@ -108,7 +144,7 @@ bool probeDirectoryWritable(const fs::path& dir) {
 namespace ddb {
 
 BuildLock::BuildLock(const std::string& outputPath)
-    : lockFilePath(outputPath + ".building")
+    : lockFilePath(buildLockPath(outputPath))
     , isLocked(false)
 #ifdef WIN32
     , fileHandle(INVALID_HANDLE_VALUE)
@@ -120,7 +156,7 @@ BuildLock::BuildLock(const std::string& outputPath)
 }
 
 BuildLock::BuildLock(const std::string& outputPath, bool wait)
-    : lockFilePath(outputPath + ".building")
+    : lockFilePath(buildLockPath(outputPath))
     , isLocked(false)
 #ifdef WIN32
     , fileHandle(INVALID_HANDLE_VALUE)
@@ -279,20 +315,17 @@ BuildLock& BuildLock::operator=(BuildLock&& other) noexcept {
     return *this;
 }
 
-void BuildLock::acquireLock(bool waitForLock) {
-    LOGD << "Attempting to acquire build lock" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
-
-    // Check if containing folder exists
-    fs::path lockPath(lockFilePath);
-    if (!fs::exists(lockPath.parent_path()))
-        throw BuildLockDirectoryException("Lock file directory does not exist: " + lockPath.parent_path().string());
-
+namespace {
 
 #ifdef WIN32
+// Opens (creating when missing) the lock file for exclusive access and returns its handle: the
+// lock is the open itself. Throws BuildInProgressException when another process holds it, and the
+// BuildLock* exceptions for the other failures.
+HANDLE openExclusiveLockFile(const fs::path& lockPath, const std::string& lockFilePath) {
     // Windows implementation using CreateFile with exclusive access
     // FILE_FLAG_DELETE_ON_CLOSE ensures automatic cleanup even if process crashes
-    fileHandle = CreateFileA(
-        lockFilePath.c_str(),
+    HANDLE fileHandle = CreateFileW(
+        lockPath.c_str(),
         GENERIC_WRITE,              // We need write access to write PID info
         0,                          // No sharing - this is the key for exclusivity
         nullptr,                    // Default security attributes
@@ -325,41 +358,33 @@ void BuildLock::acquireLock(bool waitForLock) {
             throw BuildLockException(ss.str());
         }
     }
-
-    isLocked = true;
-    // OPEN_ALWAYS preserves diagnostic contents until exclusive ownership. Only
-    // the holder may truncate an orphan's contents; contention must not mutate it.
-    if (!SetFilePointerEx(fileHandle, LARGE_INTEGER{}, nullptr, FILE_BEGIN) || !SetEndOfFile(fileHandle)) {
-        LOGW << "Failed to truncate lock file " << lockFilePath << " (Windows error " << GetLastError() << ")";
-    }
-    LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
-
+    return fileHandle;
+}
 #else
-    // Unix implementation using kernel-managed advisory locks.
-    //
-    // Rationale: the previous implementation used O_CREAT|O_EXCL which relied
-    // on the lock file's presence to signal "build in progress". That approach
-    // is fragile in two ways:
-    //   1. If a process crashes, the orphan file remains and requires PID-based
-    //      liveness checks to detect staleness. PID checks are unreliable in
-    //      Docker containers (PID namespaces restart from low values and the
-    //      same PID can belong to an unrelated process after restart).
-    //   2. Cross-platform asymmetry: Windows' FILE_FLAG_DELETE_ON_CLOSE makes
-    //      orphans impossible, but the Unix branch had no equivalent.
-    //
-    // The new model: the file is just a container; mutual exclusion is provided
-    // by an OS-level advisory lock (F_OFD_SETLK on Linux, flock() elsewhere)
-    // that the kernel releases automatically when the holding process dies.
-    // Orphan files are harmless: the next process opens them, takes the lock,
-    // truncates the body and rewrites the diagnostic info.
-    //
-    // `waitForLock` is intentionally ignored on Unix (both modes are non-
-    // blocking) to preserve the existing higher-level semantics in build.cpp.
-
-    (void)waitForLock;  // unused on Unix; preserved in signature for API parity
-
+// Opens (creating when missing) the lock file and takes the kernel lock on it; returns the
+// descriptor that holds it. Throws BuildInProgressException when another process holds it, and
+// the BuildLock* exceptions for the other failures.
+//
+// Unix implementation using kernel-managed advisory locks.
+//
+// Rationale: the previous implementation used O_CREAT|O_EXCL which relied
+// on the lock file's presence to signal "build in progress". That approach
+// is fragile in two ways:
+//   1. If a process crashes, the orphan file remains and requires PID-based
+//      liveness checks to detect staleness. PID checks are unreliable in
+//      Docker containers (PID namespaces restart from low values and the
+//      same PID can belong to an unrelated process after restart).
+//   2. Cross-platform asymmetry: Windows' FILE_FLAG_DELETE_ON_CLOSE makes
+//      orphans impossible, but the Unix branch had no equivalent.
+//
+// The new model: the file is just a container; mutual exclusion is provided
+// by an OS-level advisory lock (F_OFD_SETLK on Linux, flock() elsewhere)
+// that the kernel releases automatically when the holding process dies.
+// Orphan files are harmless: the next process opens them, takes the lock,
+// truncates the body and rewrites the diagnostic info.
+int openAndLockFile(const std::string& lockFilePath) {
     for (int attempt = 0;; ++attempt) {
-        fileDescriptor = open(
+        int fileDescriptor = open(
             lockFilePath.c_str(),
             // no O_EXCL: an orphan file is reclaimable. O_CLOEXEC: child processes
             // must never inherit the descriptor (it would keep the lock alive).
@@ -390,7 +415,6 @@ void BuildLock::acquireLock(bool waitForLock) {
             // Clean up the fd before throwing; do NOT unlink, the lock holder
             // legitimately owns the file.
             close(fileDescriptor);
-            fileDescriptor = -1;
 
             if (lockErrno == EWOULDBLOCK || lockErrno == EAGAIN || lockErrno == EACCES) {
                 // EACCES is what F_OFD_SETLK can return when another process holds
@@ -405,13 +429,40 @@ void BuildLock::acquireLock(bool waitForLock) {
 
         // The previous holder may have unlinked the file between our open() and the lock:
         // that inode is orphaned and locking it excludes nobody, so retry on the current path.
-        if (isStillLinked(fileDescriptor, lockFilePath)) break;
+        if (isStillLinked(fileDescriptor, lockFilePath)) return fileDescriptor;
 
         close(fileDescriptor);
-        fileDescriptor = -1;
         if (attempt >= kMaxStaleInodeRetries)
             throw BuildInProgressException("Build in progress by another process");
     }
+}
+#endif
+
+}  // namespace
+
+void BuildLock::acquireLock(bool waitForLock) {
+    LOGD << "Attempting to acquire build lock" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
+
+    // Check if containing folder exists
+    const fs::path lockPath = io::fromUtf8(lockFilePath);
+    if (!fs::exists(lockPath.parent_path()))
+        throw BuildLockDirectoryException("Lock file directory does not exist: " + io::toUtf8(lockPath.parent_path()));
+
+#ifdef WIN32
+    fileHandle = openExclusiveLockFile(lockPath, lockFilePath);
+
+    isLocked = true;
+    // OPEN_ALWAYS preserves diagnostic contents until exclusive ownership. Only
+    // the holder may truncate an orphan's contents; contention must not mutate it.
+    if (!SetFilePointerEx(fileHandle, LARGE_INTEGER{}, nullptr, FILE_BEGIN) || !SetEndOfFile(fileHandle)) {
+        LOGW << "Failed to truncate lock file " << lockFilePath << " (Windows error " << GetLastError() << ")";
+    }
+#else
+    // `waitForLock` is intentionally ignored on Unix (both modes are non-
+    // blocking) to preserve the existing higher-level semantics in build.cpp.
+    (void)waitForLock;  // unused on Unix; preserved in signature for API parity
+
+    fileDescriptor = openAndLockFile(lockFilePath);
 
     // Lock acquired. The file may contain stale diagnostic data from a previous
     // crashed run; truncate it before writing fresh info.
@@ -421,9 +472,8 @@ void BuildLock::acquireLock(bool waitForLock) {
     }
 
     isLocked = true;
-    LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
-
 #endif
+    LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
 
     // Write diagnostic information to the lock file
     try {
@@ -431,6 +481,76 @@ void BuildLock::acquireLock(bool waitForLock) {
     } catch (const std::exception& e) {
         // Non-fatal error - lock is still valid even if we can't write info
         LOGW << "Failed to write lock info to " << lockFilePath << ": " << e.what();
+    }
+}
+
+bool BuildLock::isHeld(const std::string& outputPath) {
+    const std::string lockFile = buildLockPath(outputPath);
+
+#ifdef WIN32
+    // A live holder has the file open with GENERIC_WRITE, no sharing and delete-on-close, so
+    // any open asking for data access fails. All share modes are granted here so that two
+    // probes never see each other as holders; OPEN_EXISTING never creates the file.
+    HANDLE h = CreateFileW(io::toWide(lockFile).c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            return false;
+        // ERROR_ACCESS_DENIED is also what a holder's file reports while its delete-on-close
+        // is pending (the holder is releasing): still held at this instant.
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) {
+            LOGD << "Cannot probe build lock " << lockFile << " (Windows error " << error
+                 << "), assuming a live holder";
+        }
+        return true;
+    }
+    CloseHandle(h);
+    return false;
+#else
+    // No O_CREAT: a missing file is "not held" and stays missing. Read-only: F_OFD_GETLK and
+    // flock() do not need write access, and the file is never modified.
+    const int fd = open(lockFile.c_str(), O_RDONLY | O_CLOEXEC | O_NOCTTY);
+    if (fd == -1) {
+        const int error = errno;
+        if (error == ENOENT || error == ENOTDIR)
+            return false;
+        LOGD << "Cannot open build lock " << lockFile << " (" << strerror(error)
+             << "), assuming a live holder";
+        return true;
+    }
+
+    int queryErrno = 0;
+    const LockQuery state = queryKernelLock(fd, &queryErrno);
+    // Closing this descriptor releases nothing of a holder: OFD locks and flock() belong to
+    // the open file description that took them.
+    close(fd);
+    if (state == LockQuery::Unknown) {
+        LOGD << "Cannot query build lock " << lockFile << " (" << strerror(queryErrno)
+             << "), assuming a live holder";
+    }
+    return state != LockQuery::Free;
+#endif
+}
+
+bool BuildLock::removeIfStale(const std::string& outputPath) {
+    std::error_code ec;
+    if (!fs::exists(io::fromUtf8(buildLockPath(outputPath)), ec))
+        return !ec;  // nothing to remove; a stat error leaves the state unknown
+
+    try {
+        // Succeeds only without a live holder. The destructor then removes the file while the
+        // lock is still held (Unix) or closes the delete-on-close handle (Windows), so a build
+        // that starts at the same moment can never lose its lock file.
+        BuildLock reclaim(outputPath, false);
+        LOGD << "Removing stale build lock (no live holder): " << reclaim.getLockFilePath();
+        return true;
+    } catch (const BuildInProgressException&) {
+        return false;
+    } catch (const AppException& e) {
+        LOGD << "Cannot determine build lock status (" << e.what() << "), assuming a live holder";
+        return false;
     }
 }
 

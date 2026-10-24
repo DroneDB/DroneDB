@@ -7,8 +7,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include "ddb_export.h"
-#include "json.h"
+#include "json_fwd.h"
 
 namespace ddb {
 
@@ -66,21 +65,21 @@ struct RawThermalData {
 };
 
 // Detection
-DDB_DLL bool isThermalImage(const std::string &filePath);
-DDB_DLL bool isThermalImageFromExif(const std::string &make, const std::string &model);
+bool isThermalImage(const std::string &filePath);
+bool isThermalImageFromExif(const std::string &make, const std::string &model);
 
 // Calibration extraction
-DDB_DLL ThermalCalibration extractThermalCalibration(const std::string &filePath);
+ThermalCalibration extractThermalCalibration(const std::string &filePath);
 
 // R-JPEG raw data extraction
-DDB_DLL RawThermalData extractRawThermalData(const std::string &filePath);
+RawThermalData extractRawThermalData(const std::string &filePath);
 
 // Temperature conversion
-DDB_DLL double rawToTemperature(uint16_t raw, const ThermalCalibration &cal);
-DDB_DLL std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal);
+double rawToTemperature(uint16_t raw, const ThermalCalibration &cal);
+std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal);
 
 // Check if a GeoTIFF contains direct temperature values (e.g., ODM output)
-DDB_DLL bool isDirectTemperatureRaster(const std::string &filePath);
+bool isDirectTemperatureRaster(const std::string &filePath);
 
 // Internal shared helpers used by raster_analysis.cpp.
 // They live here so that thermal-specific code (Planck calibration, R-JPEG extraction)
@@ -94,9 +93,9 @@ struct TemperatureData {
     std::string projection;
 };
 
-DDB_DLL TemperatureData readTemperatureData(const std::string &filePath);
-DDB_DLL void pixelToGeo(double px, double py, const double geoTransform[6],
-                        const std::string &projection, double &geoX, double &geoY);
+TemperatureData readTemperatureData(const std::string &filePath);
+void pixelToGeo(double px, double py, const double geoTransform[6],
+                const std::string &projection, double &geoX, double &geoY);
 
 } // namespace ddb
 

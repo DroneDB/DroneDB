@@ -6,15 +6,14 @@
 
 #include <string>
 
-#include "ddb_export.h"
 
 namespace ddb {
 
-DDB_DLL void maskBorders(const std::string &input,
-                         const std::string &output,
-                         int nearDist = 15,
-                         bool white = false,
-                         const std::string &color = "");
+void maskBorders(const std::string &input,
+                 const std::string &output,
+                 int nearDist = 15,
+                 bool white = false,
+                 const std::string &color = "");
 
 }
 

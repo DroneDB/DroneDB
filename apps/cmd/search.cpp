@@ -23,9 +23,9 @@ namespace cmd
 			.positional_help("[args]")
             .custom_help("search '*file*'")
             .add_options()
-            ("q,query", "Search query", cxxopts::value<std::string>())
-			("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
-			("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
+            ("q,query", "Search query", cxxopts::value<std::string>());
+		cmd::addWorkingDirOption(opts);
+		cmd::addFormatOption(opts);
 		// clang-format on
 		opts.parse_positional({"query"});
 	}
@@ -35,25 +35,18 @@ namespace cmd
 		return "Search indexed files and directories";
 	}
 
-	void Search::run(cxxopts::ParseResult &opts)
+	int Search::run(cxxopts::ParseResult &opts)
 	{
 
-		try
-		{
+		const auto ddbPath = opts["working-dir"].as<std::string>();
+		const auto query = opts.count("query") > 0 ? opts["query"].as<std::string>() : "%";
+		const auto format = cmd::getFormatOption(opts);
 
-			const auto ddbPath = opts["working-dir"].as<std::string>();
-			const auto query = opts.count("query") > 0 ? opts["query"].as<std::string>() : "%";
-			const auto format = opts["format"].as<std::string>();
+		const auto db = ddb::open(std::string(ddbPath), true);
 
-			const auto db = ddb::open(std::string(ddbPath), true);
+		searchIndex(db.get(), query, std::cout, format);
 
-			searchIndex(db.get(), query, std::cout, format);
-		}
-		catch (ddb::InvalidArgsException &e)
-		{
-			std::cerr << "Error: " << e.what() << std::endl;
-			printHelp();
-		}
+	    return EXIT_SUCCESS;
 	}
 
 }

@@ -7,6 +7,7 @@
 #include "logger.h"
 #include "exceptions.h"
 
+#include <fstream>
 #include <algorithm>
 #include <system_error>
 
@@ -46,9 +47,9 @@ namespace ddb::zip
 
         // Defense-in-depth: verify the resolved target stays inside outdir.
         std::error_code baseEc, targetEc;
-        const fs::path base = fs::weakly_canonical(fs::path(outdir), baseEc);
+        const fs::path base = fs::weakly_canonical(io::fromUtf8(outdir), baseEc);
         const fs::path target =
-            fs::weakly_canonical(fs::path(outdir) / fs::path(name), targetEc);
+            fs::weakly_canonical(io::fromUtf8(outdir) / io::fromUtf8(name), targetEc);
         if (!baseEc && !targetEc)
         {
             std::error_code relEc;
@@ -102,7 +103,7 @@ namespace ddb::zip
         int bytesRead;
         char buf[COPY_BUF_SIZE];
 
-        io::createDirectories(outdir);
+        io::createDirectories(io::fromUtf8(outdir));
 
         zip_int64_t nEntries = zip_get_num_entries(pZip, 0);
 
@@ -128,7 +129,7 @@ namespace ddb::zip
                 ensureSafeZipEntry(outdir, fStat.name);
 
                 // Directory
-                fs::path entryPath = fs::path(outdir) / fs::path(fStat.name);
+                fs::path entryPath = io::fromUtf8(outdir) / io::fromUtf8(fStat.name);
 
                 if ((fStat.name[0] != '\0') && (fStat.name[strlen(fStat.name) - 1] == '/'))
                 {
@@ -140,10 +141,10 @@ namespace ddb::zip
                 io::assureFolderExists(entryPath.parent_path());
 
                 // Open write stream
-                std::ofstream of(entryPath.string(), std::ios::binary | std::ios::out | std::ios::trunc);
+                std::ofstream of(entryPath, std::ios::binary | std::ios::out | std::ios::trunc);
                 if (!of.is_open())
                 {
-                    throw ZipException("Cannot open " + entryPath.string() + " for writing");
+                    throw ZipException("Cannot open " + io::toUtf8(entryPath) + " for writing");
                 }
 
                 // Open file in archive
@@ -213,11 +214,11 @@ namespace ddb::zip
 
         try
         {
-            for (auto i = fs::recursive_directory_iterator(folder);
+            for (auto i = fs::recursive_directory_iterator(io::fromUtf8(folder));
                  i != fs::recursive_directory_iterator(); ++i)
             {
 
-                const auto relPath = io::Path(i->path()).relativeTo(folder);
+                const auto relPath = io::Path(i->path()).relativeTo(io::fromUtf8(folder));
 
                 bool exclude = false;
 
@@ -229,7 +230,7 @@ namespace ddb::zip
                     if (excl[excl.length() - 1] == '/')
                     {
                         const auto folderName = excl.substr(0, excl.length() - 1);
-                        if (relPath.generic().find(folderName) == 0)
+                        if (relPath.generic().starts_with(folderName))
                         {
                             exclude = true;
                             i.disable_recursion_pending();
@@ -257,7 +258,7 @@ namespace ddb::zip
                     }
                     else
                     {
-                        source = zip_source_file(pZip, i->path().string().c_str(), 0, 0);
+                        source = zip_source_file(pZip, io::toUtf8(i->path()).c_str(), 0, 0);
                         if (source == nullptr)
                         {
                             throw ZipException("Failed to add file to zip: " + std::string(zip_strerror(pZip)));

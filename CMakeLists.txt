@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 project(ddb LANGUAGES CXX C)
 
-# Enable C++17 standard
-set(CMAKE_CXX_STANDARD 17)
+# C++20 (DQ-01). CMAKE_CXX_EXTENSIONS is left at its default.
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_MESSAGE_LOG_LEVEL VERBOSE)
@@ -17,11 +17,15 @@ else()
     message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 endif()
 
-set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-
-# Define support files directory (these are typically in the main build directory)
-set(SUPPORT_DIR "${CMAKE_BINARY_DIR}")
-message(STATUS "Using support directory: ${SUPPORT_DIR}")
+# Build tree layout: everything users and tests run, and everything packaging copies, is in the
+# build root (ddbcmd, libddb, libnxs, ddbtest and its helpers, the data files and, on Windows,
+# the DLLs and Qt plugins). Targets are built there directly instead of being copied after the
+# build, so build/Makefile and build/CTestTestfile.cmake stay the top-level ones. The generator
+# expression stops multi-config generators (Visual Studio) from appending a per-config
+# subdirectory. Set before add_subdirectory(vendor) so it also covers libnexus's nxs.
+set(DDB_RUNTIME_DIR "${CMAKE_BINARY_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$<1:${DDB_RUNTIME_DIR}>")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "$<1:${DDB_RUNTIME_DIR}>")
 
 # Use vcpkg manifest mode
 
@@ -48,10 +52,11 @@ endif()
 # Consider position-independent code for all targets (especially for shared libs)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Read version
-file(READ "package.json" PACKAGE_JSON)
-string(REGEX MATCH "\"version\": \"[0-9]+\\.[0-9]+\\.[0-9]+" APP_VERSION ${PACKAGE_JSON})
-string(SUBSTRING ${APP_VERSION} 12 -1 APP_VERSION)
+# Read version (package.json is the one source: the library, the C ABI and the release share it)
+include("${CMAKE_SOURCE_DIR}/cmake/DdbVersion.cmake")
+ddb_read_version("${CMAKE_SOURCE_DIR}/package.json")
+# A new version re-runs CMake: the version is read here, at configure time
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/package.json")
 
 # Read git commit
 set(GIT_REV "")
@@ -69,8 +74,19 @@ else()
 endif()
 
 message("DDB Version: ${DAPP_VERSION}")
-add_compile_options("-DAPP_VERSION=\"${DAPP_VERSION}\"")
-add_compile_options("-DAPP_REVISION=\"${DAPP_REVISION}\"")
+
+# The version lives in one generated TU (ddb::version()/ddb::revision(), version.h) instead of
+# global -D defines, so a new commit recompiles that file only. configure_file rewrites it only
+# when the content changes; like the old defines, the hash is read at configure time.
+set(DDB_VERSION_SOURCE "${CMAKE_BINARY_DIR}/generated/version.cpp")
+configure_file("${CMAKE_SOURCE_DIR}/src/library/version.cpp.in" "${DDB_VERSION_SOURCE}" @ONLY)
+
+# The C ABI follows the version (ddb_version.h, included by ddb.h). The header is generated into
+# its own include folder so it can be installed next to ddb.h; an installed ddb.h never refers
+# to the build tree.
+set(DDB_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated/include")
+ddb_generate_version_header("${CMAKE_SOURCE_DIR}/package.json"
+    "${CMAKE_SOURCE_DIR}/src/library/ddb_version.h.in" "${DDB_GENERATED_INCLUDE_DIR}/ddb_version.h")
 
 # Find PROJ data folder (vcpkg: share/proj or share/proj4)
 find_path(PROJ_DATA_DIR
@@ -89,8 +105,32 @@ else()
     message(WARNING "PROJ data directory not found - proj.db may not be available")
 endif()
 
+# Find GDAL data folder (vcpkg: share/gdal). libddb finds it next to itself at run time
+# (setupGdalData, process_init.cpp), so it is staged in the runtime folder and packaged.
+find_path(GDAL_DATA_DIR
+  NAMES gdalvrt.xsd
+  HINTS
+    "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/gdal"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/gdal"
+  PATH_SUFFIXES share/gdal
+)
+
+if(GDAL_DATA_DIR)
+    message(STATUS "Found GDAL data directory: ${GDAL_DATA_DIR}")
+else()
+    message(WARNING "GDAL data directory not found - GDAL will warn about its missing data files")
+endif()
+
 # Add custom CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(MsvcReleaseDebugInfo)
+include(Warnings)
+# DDB_ENABLE_ASAN/UBSAN/TSAN/COVERAGE (DQ-01). Directory-wide options: must stay before
+# add_subdirectory(vendor) so the vendored code built in this tree is instrumented too.
+include(Sanitizers)
+
+# compile_commands.json for clang-tidy and editors (DQ-01); ignored by the Visual Studio generators
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Option to build tests
 option(BUILD_TESTING "Build unit tests" ON)
@@ -101,53 +141,11 @@ set(SRC_LIST "")
 # Add vendor directory
 add_subdirectory(vendor)
 
-set(CUSTOM_INCLUDE_DIRS "")
-
 # Add the source code (builds both shared and static libs)
 add_subdirectory(src)
 
 # Add applications (main executable)
 add_subdirectory(apps)
-
-# Node.js bindings
-if (CMAKE_JS_VERSION)
-    message(STATUS "Building Node.js bindings")
-
-    # Don't build distribution target
-    set(SKIP_DIST ON)
-
-    # Check if nan module exists, if not suggest to install it
-    if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
-        message(WARNING "Node.js NAN module not found. Please run 'npm install' first.")
-    endif()
-
-    # Include necessary directories
-    include_directories(${CMAKE_JS_INC})
-
-    # Find all Node.js source files
-    file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc"
-                               "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.h")
-
-    # Create Node.js addon library
-    add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES} ${CMAKE_JS_SRC})
-
-    # Configure output properties for the Node.js addon
-    set_target_properties("node-${PROJECT_NAME}" PROPERTIES
-                         PREFIX ""
-                         SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX}
-                         CXX_STANDARD 17
-                         CXX_STANDARD_REQUIRED ON)
-
-    # Link against required libraries
-    target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME})
-
-    # Copy the Node.js addon to the build directory with the correct name
-    add_custom_command(TARGET "node-${PROJECT_NAME}" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:node-${PROJECT_NAME}>
-                ${CMAKE_BINARY_DIR}/node-${PROJECT_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
-        COMMENT "Created ${CMAKE_BINARY_DIR}/node-${PROJECT_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
-endif()
 
 # Add tests
 if(BUILD_TESTING)
@@ -162,8 +160,16 @@ install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}cmd
     ARCHIVE DESTINATION lib
 )
 
-# Install public headers
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/include/
+# Install the public headers: the C API and nothing else (DQ-14). libddb exports only the DDB*
+# functions of ddb.h, so the C++ headers of src/include could not be used with it. ddb.h includes
+# ddb_export.h (the export macro) and ddb_version.h (generated from package.json); the symbol
+# manifest lists the exports. Each header compiles on its own (tests/CMakeLists.txt,
+# ddb_header_check).
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/include/ddb.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/include/ddb_export.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/include/ddb.symbols"
+    "${DDB_GENERATED_INCLUDE_DIR}/ddb_version.h"
     DESTINATION include
 )
 

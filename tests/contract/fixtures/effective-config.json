@@ -1,0 +1,28 @@
+{
+  "call": "DDBConfigure({\"cacheDir\": \"<cache>\", \"cpuPoolSize\": 3, \"ioThreads\": 2, \"minFreeDiskMb\": 256}), then DDBGetEffectiveConfig()",
+  "description": "Every setting set with DDBConfigure, cacheDir an absolute folder <cache>",
+  "normalisation": {
+    "placeholders": [
+      "<cache>"
+    ],
+    "volatileKeys": [
+      "hardwareThreads"
+    ]
+  },
+  "output": {
+    "hardwareThreads": 0,
+    "settings": {
+      "cacheDir": "<cache>",
+      "cpuPoolSize": 3,
+      "ioThreads": 2,
+      "minFreeDiskMb": 256
+    },
+    "sources": {
+      "cacheDir": "configure",
+      "cpuPoolSize": "configure",
+      "ioThreads": "configure",
+      "minFreeDiskMb": "configure"
+    }
+  },
+  "schema": "effective-config.schema.json"
+}

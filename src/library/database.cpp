@@ -3,11 +3,15 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "database.h"
+#include "index_sql.h"
+#include "json.h"
 #include "metamanager.h"
+#include "databasepool.h"
 
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <string>
 
@@ -19,26 +23,64 @@
 namespace ddb
 {
 
+    void freeSpatialiteCache(void *cache)
+    {
+        if (cache == nullptr)
+            return;
+
+        // Upstream spatialite_cleanup_ex() is not per connection only: it also runs
+        // xmlCleanupParser(), the process-wide libxml2 teardown, which is not thread-safe. Two
+        // caches freed at once tore libxml2 down together (one thread destroyed a libxml2 mutex
+        // another was waiting for, which then blocked forever), and per-thread libxml2 state
+        // leaked. Our libspatialite overlay (vcpkg-overlays/libspatialite) removes that call;
+        // the caches are still freed one at a time, so a libspatialite built without the
+        // overlay cannot deadlock. Connections close on any thread (concurrent C API calls,
+        // DatabasePool). Never destroyed (like DatabasePool): a connection may still close
+        // during static destruction.
+        static auto *cleanupMutex = new std::mutex();
+        std::lock_guard<std::mutex> lock(*cleanupMutex);
+        spatialite_cleanup_ex(cache);
+    }
+
     void Database::afterOpen()
     {
-        // Busy timeout FIRST: journal-mode conversion needs to acquire an exclusive lock and
-        // must be able to wait for it. Kept small (~200ms): transaction-acquisition retry/jitter
+        // spatialite_initialize() sets an unguarded global flag (and initializes libxml2) on
+        // its first call, which spatialite_alloc_connection() makes implicitly: run it once.
+        // With a reentrant GEOS build (GEOS_REENTRANT) the rest of the per-connection setup
+        // only touches the new cache and this handle, so connections can open concurrently
+        // (freeing a cache cannot: see freeSpatialiteCache).
+        static std::once_flag spatialiteInitialized;
+        std::call_once(spatialiteInitialized, [] { spatialite_initialize(); });
+
+        // reopen() runs afterOpen() again on a closed handle
+        freeSpatialiteCache(spatialiteCache);
+        spatialiteCache = spatialite_alloc_connection();
+        spatialite_init_ex(db, spatialiteCache, 0);
+
+        // Busy timeout after spatialite_init_ex(), which sets its own (5 s), and before any
+        // statement: journal-mode conversion needs to acquire an exclusive lock and must be
+        // able to wait for it. Kept small (busyTimeoutMs): transaction-acquisition retry/jitter
         // is owned by RetryPolicy, not by this floor — a
         // larger floor here would reintroduce the unjittered wait RetryPolicy is meant to remove.
         // This is only a floor for statements executed outside an explicit Transaction.
-        constexpr int busyTimeoutMs = 200;
         if (sqlite3_busy_timeout(db, busyTimeoutMs) != SQLITE_OK)
         {
             LOGD << "Cannot set busy timeout";
         }
 
-        spatialiteCache = spatialite_alloc_connection();
-        spatialite_init_ex(db, spatialiteCache, 0);
+        // Indexes are created in WAL mode: only legacy databases need the switch (which
+        // takes an exclusive lock)
+        if (this->getJournalMode() != "wal")
+            this->setJournalMode("wal");
 
-        this->setJournalMode("wal");
-        // Safe under WAL: durable across app crashes, can only lose the most recent transactions
-        // on OS/power failure — acceptable for an index that is reconstructible from the
-        // filesystem.
+        // Keep the -wal/-shm files when the last connection closes, so that every
+        // read-only call does not delete and recreate them. The size limit truncates the
+        // WAL to zero bytes once it has been checkpointed (on close and on reset), so no
+        // checkpointed frames are left next to the database file.
+        int persistWal = 1;
+        sqlite3_file_control(db, "main", SQLITE_FCNTL_PERSIST_WAL, &persistWal);
+        this->exec("PRAGMA journal_size_limit=0;");
+
         this->exec("PRAGMA synchronous=NORMAL;");
     }
 
@@ -115,7 +157,7 @@ END;
         return *this;
     }
 
-    DDB_DLL void Database::ensureSchemaConsistency()
+    void Database::ensureSchemaConsistency()
     {
         LOGD << "Ensuring schema consistency";
 
@@ -201,15 +243,40 @@ END;
                 LOGD << "Dropped attributes table";
             }
 
-            // Mark database as migrated to current version
-            this->setUserVersion(DDB_SCHEMA_VERSION);
-            LOGD << "Database migrated to schema version " << DDB_SCHEMA_VERSION;
+            // Mark database as migrated to current version. A read-only connection (read-only
+            // file or filesystem) got here only because the schema needed no change: it
+            // cannot record the version, so it leaves it for the next writable open.
+            if (this->isReadOnly())
+            {
+                LOGD << "Read-only database, schema version left at " << dbVersion;
+            }
+            else
+            {
+                this->setUserVersion(DDB_SCHEMA_VERSION);
+                LOGD << "Database migrated to schema version " << DDB_SCHEMA_VERSION;
+            }
         }
 
         // Future migrations would be added here:
         // if (dbVersion < 2) { runMigration_1_to_2(); }
         // if (dbVersion < 3) { runMigration_2_to_3(); }
         // etc.
+    }
+
+    void Database::removeRootEntry()
+    {
+        try
+        {
+            if (!this->query("SELECT 1 FROM entries WHERE path = ''")->fetch())
+                return;
+
+            this->exec("DELETE FROM entries WHERE path = ''");
+            LOGD << "Removed the root entry of " << this->getOpenFile();
+        }
+        catch (const std::exception &e)
+        {
+            LOGD << "Cannot remove the root entry of " << this->getOpenFile() << ": " << e.what();
+        }
     }
 
     json Database::getProperties() const
@@ -245,32 +312,8 @@ END;
 
         // Find meta
         {
-            const std::string sql = R"<<<(
-                SELECT json_group_object(key, json(meta)) AS meta
-                FROM (
-                  SELECT
-                    key,
-                    CASE
-                      WHEN substr(key, -1, 1) = 's' THEN
-                        json_group_array(
-                          json_object(
-                            'id',    id,
-                            'data',  json(data),
-                            'mtime', mtime
-                          )
-                        )
-                      ELSE
-                        json_object(
-                          'id',    id,
-                          'data',  json(data),
-                          'mtime', mtime
-                        )
-                    END AS meta
-                  FROM entries_meta
-                  WHERE path = ''
-                  GROUP BY key
-                )
-                )<<<";
+            // The metadata of the dataset: the entries_meta rows with the empty path
+            const std::string sql = metaAggregateSql("''");
             const auto q = this->query(sql);
             if (q->fetch())
             {
@@ -294,59 +337,138 @@ END;
         return j;
     }
 
-    json Database::getStamp() const
+    namespace
     {
-        json j;
+        // Appends `s` as a JSON string literal, escaped like json::dump() does.
+        void appendJsonString(std::string &out, const std::string &s)
+        {
+            static const char *hex = "0123456789abcdef";
+            out += '"';
+            size_t plainStart = 0;
+            for (size_t i = 0; i < s.size(); i++)
+            {
+                const auto c = static_cast<unsigned char>(s[i]);
+                if (c >= 0x20 && c != '"' && c != '\\')
+                    continue;
 
-        // Initialize OpenSSL EVP context for incremental hashing
-        EvpMdCtxPtr ctx(EVP_MD_CTX_new());
-        if (!ctx) throw AppException("Failed to create EVP_MD_CTX for SHA256");
-        if (EVP_DigestInit_ex(ctx.get(), EVP_sha256(), NULL) != 1) {
-            throw AppException("Failed to initialize SHA256 digest");
+                out.append(s, plainStart, i - plainStart);
+                plainStart = i + 1;
+                switch (c)
+                {
+                case '"': out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\b': out += "\\b"; break;
+                case '\f': out += "\\f"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:
+                    out += "\\u00";
+                    out += hex[c >> 4];
+                    out += hex[c & 0x0f];
+                }
+            }
+            out.append(s, plainStart, std::string::npos);
+            out += '"';
         }
+    }
+
+    std::string Database::readStamp(const StampEntryVisitor &onEntry, const StampMetaVisitor &onMeta) const
+    {
+        // The checksum is a SHA-256 over every path+hash (path order), then every meta id
+        // (id order). Clients compare it across versions: keep the input and order fixed.
+        Sha256 checksum;
 
         auto q = this->query("SELECT path,hash FROM entries ORDER BY path ASC");
-        j["entries"] = json::array();
         while (q->fetch())
         {
             const std::string p = q->getText(0);
             const std::string h = q->getText(1);
-            safeDigestUpdate(ctx.get(), p.c_str(), p.length());
-            safeDigestUpdate(ctx.get(), h.c_str(), h.length());
-
-            j["entries"].push_back(json::object({{p, h}}));
+            checksum.update(p);
+            checksum.update(h);
+            if (onEntry) onEntry(p, h);
         }
 
         q = this->query("SELECT id FROM entries_meta ORDER BY id ASC");
-        j["meta"] = json::array();
         while (q->fetch())
         {
             const std::string id = q->getText(0);
-            safeDigestUpdate(ctx.get(), id.c_str(), id.length());
-            j["meta"].push_back(id);
+            checksum.update(id);
+            if (onMeta) onMeta(id);
         }
 
-        // Finalize hash and convert to hex string
-        unsigned char hash[EVP_MAX_MD_SIZE];
-        unsigned int hashLen;
-        safeDigestFinal(ctx.get(), hash, &hashLen);
+        return checksum.finishHex();
+    }
 
-        std::ostringstream oss;
-        for (unsigned int i = 0; i < hashLen; ++i) {
-            oss << std::hex << std::setfill('0') << std::setw(2) << (int)hash[i];
-        }
-        j["checksum"] = oss.str();
+    json Database::emptyStamp()
+    {
+        // The checksum of readStamp over no entry and no metadata
+        return json{{"entries", json::array()}, {"meta", json::array()}, {"checksum", Sha256().finishHex()}};
+    }
+
+    json Database::getStamp() const
+    {
+        json j;
+        j["entries"] = json::array();
+        j["meta"] = json::array();
+        j["checksum"] = readStamp(
+            [&j](const std::string &p, const std::string &h)
+            { j["entries"].push_back(json::object({{p, h}})); },
+            [&j](const std::string &id)
+            { j["meta"].push_back(id); });
         return j;
+    }
+
+    std::string Database::getStampJson() const
+    {
+        // Same document as getStamp().dump(), written directly: a 50k-entry stamp would
+        // otherwise allocate one json object per entry and serialize them afterwards.
+        // "checksum" comes first (keys are sorted) but is known last: reserve its place.
+        static const std::string head = "{\"checksum\":\"";
+        constexpr size_t checksumLength = 64; // hex SHA-256
+
+        std::string out = head + std::string(checksumLength, '0') + "\",\"entries\":[";
+        const size_t firstEntry = out.size();
+        std::string meta = "[";
+        const auto checksum = readStamp(
+            [&out, firstEntry](const std::string &p, const std::string &h)
+            {
+                if (out.size() > firstEntry) out += ',';
+                out += '{';
+                appendJsonString(out, p);
+                out += ':';
+                appendJsonString(out, h);
+                out += '}';
+            },
+            [&meta](const std::string &id)
+            {
+                if (meta.size() > 1) meta += ',';
+                appendJsonString(meta, id);
+            });
+
+        if (checksum.size() != checksumLength)
+            throw AppException("Unexpected stamp checksum length");
+        out.replace(head.size(), checksumLength, checksum);
+
+        out += "],\"meta\":";
+        out += meta;
+        out += "]}";
+        return out;
+    }
+
+    std::string Database::getStampChecksum() const
+    {
+        return readStamp(nullptr, nullptr);
     }
 
     fs::path Database::rootDirectory() const
     {
-        return fs::path(this->getOpenFile()).parent_path().parent_path();
+        return io::fromUtf8(this->getOpenFile()).parent_path().parent_path();
     }
 
     fs::path Database::ddbDirectory() const
     {
-        return fs::path(this->getOpenFile()).parent_path();
+        return io::fromUtf8(this->getOpenFile()).parent_path();
     }
 
     fs::path Database::buildDirectory() const
@@ -364,7 +486,7 @@ END;
             const std::string p = q->getText(0);
             if (p == "README.md")
             {
-                std::ifstream f((this->rootDirectory() / p).string());
+                std::ifstream f(this->rootDirectory() / io::fromUtf8(p));
                 if (f.is_open())
                 {
                     std::stringstream buffer;
@@ -481,24 +603,65 @@ END;
     MetaManager *Database::getMetaManager()
     {
         if (metaManager == nullptr)
-        {
-            metaManager = new MetaManager(this);
-        }
-        return metaManager;
+            metaManager = std::make_unique<MetaManager>(this);
+        return metaManager.get();
     }
 
     Database::~Database()
     {
-        if (metaManager != nullptr)
+        this->close();
+    }
+
+    SqliteDatabase &Database::close()
+    {
+        if (db != nullptr && pooled)
         {
-            delete metaManager;
-            metaManager = nullptr;
+            DatabasePool::instance().release(*this);
+            return *this;
         }
-        if (spatialiteCache != nullptr)
-        {
-            spatialite_cleanup_ex(spatialiteCache);
-            spatialiteCache = nullptr;
-        }
+
+        // The SpatiaLite cache must outlive the connection that uses it
+        closeConnection();
+        freeSpatialiteCache(spatialiteCache);
+        spatialiteCache = nullptr;
+        return *this;
+    }
+
+    void Database::attachPooled(sqlite3 *handle, void *cache, const std::string &file, const std::string &key,
+                                const std::string &fileId)
+    {
+        if (db != nullptr)
+            throw DBException("Can't attach a pooled connection to " + file + ", one is already open (" + openFile + ")");
+
+        db = handle;
+        openFile = file;
+        spatialiteCache = cache;
+        pooled = true;
+        poolKey = key;
+        poolFileId = fileId;
+    }
+
+    void Database::markPooled(const std::string &key, const std::string &fileId)
+    {
+        pooled = true;
+        poolKey = key;
+        poolFileId = fileId;
+    }
+
+    sqlite3 *Database::detachPooled(void *&cache, std::string &key, std::string &fileId)
+    {
+        sqlite3 *handle = db;
+        if (handle == nullptr)
+            return nullptr;
+
+        cache = spatialiteCache;
+        key = poolKey;
+        fileId = poolFileId;
+
+        db = nullptr;
+        spatialiteCache = nullptr;
+        pooled = false;
+        return handle;
     }
 
     json wktBboxCoordinates(const std::string &wktBbox)

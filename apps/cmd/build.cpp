@@ -8,6 +8,7 @@
 #include <ddb.h>
 #include "dbops.h"
 #include "fs.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -17,11 +18,12 @@ namespace cmd
         // clang-format off
     opts
         .positional_help("[args]")
-        .custom_help("build [-p path/to/file.laz] [--output out_dir]")
-        .add_options()
-        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value((fs::path(DDB_FOLDER) / DDB_BUILD_PATH).string()))
-        ("p,path", "File to process", cxxopts::value<std::string>())
-    	("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+        .custom_help("build [-p path/to/file.laz] [--output out_dir]");
+    cmd::addOutputOption(opts, "Output folder", ddb::io::toUtf8(fs::path(DDB_FOLDER) / DDB_BUILD_PATH));
+    opts.add_options()
+        ("p,path", "File to process", cxxopts::value<std::string>());
+    cmd::addWorkingDirOption(opts);
+    opts.add_options()
     	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"));
 
         // clang-format on
@@ -33,36 +35,29 @@ namespace cmd
         return "Build DroneDB files for efficient streaming over a network.";
     }
 
-    void Build::run(cxxopts::ParseResult &opts)
+    int Build::run(cxxopts::ParseResult &opts)
     {
 
-        try
+        const auto output = opts["output"].as<std::string>();
+        const auto ddbPath = opts["working-dir"].as<std::string>();
+        const auto force = opts["force"].as<bool>();
+
+        if (output.length() == 0)
+            usageError();
+
+        const auto db = ddb::open(ddbPath, true);
+
+        if (!opts.count("path"))
         {
-
-            const auto output = opts["output"].as<std::string>();
-            const auto ddbPath = opts["working-dir"].as<std::string>();
-            const auto force = opts["force"].as<bool>();
-
-            if (output.length() == 0)
-                printHelp();
-
-            const auto db = ddb::open(ddbPath, true);
-
-            if (!opts.count("path"))
-            {
-                buildAll(db.get(), output, force);
-            }
-            else
-            {
-                const auto path = opts["path"].as<std::string>();
-                build(db.get(), path, output, force);
-            }
+            buildAll(db.get(), output, force);
         }
-        catch (ddb::InvalidArgsException &e)
+        else
         {
-            std::cerr << "Error: " << e.what() << std::endl;
-            printHelp();
+            const auto path = opts["path"].as<std::string>();
+            build(db.get(), path, output, force);
         }
+
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

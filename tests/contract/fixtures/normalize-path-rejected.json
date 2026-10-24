@@ -1,0 +1,12 @@
+{
+  "call": "DDBNormalizePath(\".uploads/x\", \"[\\\".uploads\\\"]\")",
+  "description": "No dataset: a path under a reserved first segment",
+  "normalisation": {
+    "placeholders": [],
+    "volatileKeys": []
+  },
+  "output": {
+    "rejected": "reserved"
+  },
+  "schema": "normalize-path.schema.json"
+}

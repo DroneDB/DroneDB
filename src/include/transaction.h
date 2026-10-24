@@ -4,16 +4,15 @@
 #ifndef TRANSACTION_H
 #define TRANSACTION_H
 
-#include "ddb_export.h"
 #include "retrypolicy.h"
 #include "sqlite_database.h"
 
 namespace ddb {
 
 // RAII wrapper for BEGIN/COMMIT/ROLLBACK. Guarantees a matching ROLLBACK on exception, early
-// return or cancellation (I4). Replaces the hand-rolled BEGIN/COMMIT sites across dbops.cpp and
+// return or cancellation (I4). Replaces the hand-rolled BEGIN/COMMIT sites across the index files and
 // metamanager.cpp.
-class DDB_DLL Transaction {
+class Transaction {
 public:
     enum class Mode { Deferred, Immediate, Exclusive };
 

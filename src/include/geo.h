@@ -5,8 +5,7 @@
 #define GEO_H
 
 #include <iostream>
-#include "utils.h"
-#include "ddb_export.h"
+#include "mathutil.h"
 
 namespace ddb
 {
@@ -27,19 +26,19 @@ namespace ddb
     {
         T x;
         T y;
-        DDB_DLL Projected2D_t() : x(0.0), y(0.0) {};
-        DDB_DLL Projected2D_t(T x, T y) : x(x), y(y) {};
+        Projected2D_t() : x(0.0), y(0.0) {};
+        Projected2D_t(T x, T y) : x(x), y(y) {};
 
-        DDB_DLL void rotate(const Projected2D_t &center, double degrees)
+        void rotate(const Projected2D_t &center, double degrees)
         {
             double px = this->x;
             double py = this->y;
-            double radians = utils::deg2rad(degrees);
+            double radians = ddb::deg2rad(degrees);
             x = cos(radians) * (px - center.x) - sin(radians) * (py - center.y) + center.x;
             y = sin(radians) * (px - center.x) + cos(radians) * (py - center.y) + center.y;
         }
 
-        DDB_DLL void transform(double *affine)
+        void transform(double *affine)
         {
             x = static_cast<T>(affine[0] + x * affine[1] + y * affine[2]);
             y = static_cast<T>(affine[3] + x * affine[4] + y * affine[5]);
@@ -61,14 +60,14 @@ namespace ddb
         T max;
         T min;
 
-        DDB_DLL BoundingBox() : max(T()), min(T()) {}
-        DDB_DLL BoundingBox(T min, T max) : max(max), min(min) {}
-        DDB_DLL bool contains(const T &p)
+        BoundingBox() : max(T()), min(T()) {}
+        BoundingBox(T min, T max) : max(max), min(min) {}
+        bool contains(const T &p)
         {
             return contains(p.x, p.y);
         }
         template <typename N>
-        DDB_DLL bool contains(N x, N y)
+        bool contains(N x, N y)
         {
             return x >= min.x &&
                    x <= max.x &&
@@ -88,8 +87,8 @@ namespace ddb
     {
         double latitude;
         double longitude;
-        DDB_DLL Geographic2D() { latitude = longitude = 0.0; }
-        DDB_DLL Geographic2D(double longitude, double latitude) : longitude(longitude), latitude(latitude) {};
+        Geographic2D() { latitude = longitude = 0.0; }
+        Geographic2D(double longitude, double latitude) : longitude(longitude), latitude(latitude) {};
     };
     inline std::ostream &operator<<(std::ostream &os, const Geographic2D &p)
     {
@@ -97,18 +96,18 @@ namespace ddb
         return os;
     }
 
-    DDB_DLL double copysignx(double x, double y);
-    DDB_DLL double remainderx(double x, double y);
-    DDB_DLL double angNormalize(double x);
-    DDB_DLL int latitudeBand(double latitude);
-    DDB_DLL int standardUTMZone(double latitude, double longitude);
+    double copysignx(double x, double y);
+    double remainderx(double x, double y);
+    double angNormalize(double x);
+    int latitudeBand(double latitude);
+    int standardUTMZone(double latitude, double longitude);
 
-    DDB_DLL UTMZone getUTMZone(double latitude, double longitude);
-    DDB_DLL std::string getProjForUTM(const UTMZone &zone);
-    DDB_DLL Projected2D toUTM(double latitude, double longitude, const UTMZone &zone);
+    UTMZone getUTMZone(double latitude, double longitude);
+    std::string getProjForUTM(const UTMZone &zone);
+    Projected2D toUTM(double latitude, double longitude, const UTMZone &zone);
 
-    DDB_DLL Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone);
-    DDB_DLL Geographic2D fromUTM(double x, double y, const UTMZone &zone);
+    Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone);
+    Geographic2D fromUTM(double x, double y, const UTMZone &zone);
 
 }
 

@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "process_runner.h"
 #include "tool_runner_result.h"
@@ -25,12 +24,12 @@ namespace ddb
         //   4. Directories on the system PATH
         // Returns an empty path when no usable binary is found. The result is cached for the
         // lifetime of the process; pass forceRefresh=true to bypass the cache.
-        DDB_DLL fs::path findBuildLodBinary(bool forceRefresh = false);
+        fs::path findBuildLodBinary(bool forceRefresh = false);
 
         // True when a build-lod binary is discoverable (convenience wrapper around
         // findBuildLodBinary). build-lod is MANDATORY for Gaussian Splat (RAD) builds:
         // buildGsplat throws AppException (the build fails) when the tool is absent.
-        DDB_DLL bool isBuildLodAvailable();
+        bool isBuildLodAvailable();
 
         // Runs build-lod to convert a splat source (.ply | .spz | .splat | .ksplat | .sog)
         // into a single Spark RAD LOD file at outputRad, using the web delivery profile:
@@ -46,20 +45,27 @@ namespace ddb
         // integer from 1 to 86400 seconds (24 hours); empty/unset preserves Options
         // deadline (60 minutes by default). Invalid/overflowing values return an
         // actionable permanent failure before changing output files or launching.
-        DDB_DLL bool runBuildLod(const fs::path &input,
-                                 const fs::path &outputRad,
-                                 std::string &errorOut,
-                                 bool quality = true,
-                                 int maxSh = 1,
-                                 const fs::path &binary = fs::path());
+        bool runBuildLod(const fs::path &input,
+                         const fs::path &outputRad,
+                         std::string &errorOut,
+                         bool quality = true,
+                         int maxSh = 1,
+                         const fs::path &binary = fs::path());
+
+        // What to convert and how (the arguments of runBuildLod without its error text)
+        struct BuildLodRequest
+        {
+            fs::path input{};
+            fs::path outputRad{};
+            bool quality = true;
+            int maxSh = 1;
+            fs::path binary{}; // empty: findBuildLodBinary()
+        };
 
         // Native build callers use structured failures; legacy callers retain bool/errorOut.
-        DDB_DLL ToolRunResult runBuildLodResult(const fs::path &input,
-                                                  const fs::path &outputRad,
-                                                  bool quality = true,
-                                                  int maxSh = 1,
-                                                  const fs::path &binary = fs::path(),
-                                                  const process::Options &options = process::Options());
+        ToolRunResult runBuildLodResult(const BuildLodRequest &request,
+                                                  const process::Options &options = process::Options(),
+                                                  const process::IProcessRunner &runner = process::systemProcessRunner());
 
     } // namespace buildlod
 

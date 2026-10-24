@@ -1,0 +1,76 @@
+name: TSan (nightly)
+
+# ThreadSanitizer on the concurrency tests (DQ-01, docs/sanitizers.md). Report-only until the
+# reports are triaged: the job never fails the workflow. tests/tsan.supp suppresses third-party
+# frames only; a report in src/, apps/ or tests/ is a bug to fix.
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tsan:
+    name: TSan (concurrency tests)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-linux-release
+      VCPKG_BUILD_TYPE: release
+      VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
+      TSAN_OPTIONS: halt_on_error=0:second_deadlock_stack=1:suppressions=${{ github.workspace }}/tests/tsan.supp
+    steps:
+      - name: Free Disk Space
+        uses: ShubhamTatvamasi/free-disk-space-action@master
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+      - name: Restore vcpkg binary cache
+        uses: ./.github/actions/vcpkg-binary-cache
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-ubuntu-tsan
+          max-size: 500M
+      - name: Install Linux dependencies
+        run: |
+          chmod +x ./scripts/install-dependencies.sh
+          ./scripts/install-dependencies.sh
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgJsonGlob: vcpkg.json
+          doNotCache: false
+      - name: Configure (Debug -O1, TSan)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 120
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            # Release with -g -O1 (assertions on, no NDEBUG): the CI triplet is release-only, and any other config selects
+            # link interfaces or imported locations the static Qt/vcpkg targets do not provide
+            cmake -S . -B build-tsan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-g -O1" "-DCMAKE_C_FLAGS_RELEASE=-g -O1" -DDDB_ENABLE_TSAN=ON
+      - name: Build the test binaries
+        # The library objects are compiled once for both binaries (src/CMakeLists.txt)
+        run: cmake --build build-tsan --target ddb_unit_tests ddbtest -j$(nproc)
+      - name: Allow the sanitizer runtimes' memory layout
+        # The runner kernel randomizes mmap with 32 bits; the GCC 13 TSan runtime expects at most
+        # 28 and aborts at start-up ("unexpected memory mapping") otherwise.
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: Concurrency tests (unit binary)
+        run: |
+          cd build-tsan
+          ./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:DDB02_Pool.*:DDB02_Open.concurrent*:DDB05_Tiler.concurrent*:Shutdown.*:CancelToken.*:Cancellation.*:CAbiLog.*'
+      - name: Concurrency tests (integration binary)
+        # These test files download their inputs, so they are integration tests (tests/CMakeLists.txt)
+        if: always()
+        run: |
+          cd build-tsan
+          ./ddbtest --gtest_filter='DDB06_*.concurrent*:DDB09_Parallel.*:DDB09_Index.*:IsBuildActiveTest.RealBuildInThread:tiles3dBuild.cleanupNeverStripsTilesFromConcurrentModelBuild:Dq02Defects.Target_RandomHelperGivesEachThreadItsOwnEngine:Dq02Defects.Target_SingletonsAgreeUnderConcurrentFirstUse:Dq02Defects.Target_DsmCache*'

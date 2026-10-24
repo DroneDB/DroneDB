@@ -2,52 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "entry_types.h"
-#include <algorithm>
-#include <cctype>
 #include <vector>
+
+#include "entry_handler.h"
+#include "stringutil.h"
 
 namespace ddb
 {
 
-    std::map<EntryType, std::string> typeMapper{
-        {EntryType::Undefined, "Undefined"},
-        {EntryType::Directory, "Directory"},
-        {EntryType::Generic, "Generic"},
-        {EntryType::GeoImage, "GeoImage"},
-        {EntryType::GeoRaster, "GeoRaster"},
-        {EntryType::PointCloud, "PointCloud"},
-        {EntryType::Image, "Image"},
-        {EntryType::DroneDB, "DroneDB"},
-        {EntryType::Markdown, "Markdown"},
-        {EntryType::Video, "Video"},
-        {EntryType::GeoVideo, "GeoVideo"},
-        {EntryType::Model, "Model"},
-        {EntryType::Panorama, "Panorama"},
-        {EntryType::GeoPanorama, "GeoPanorama"},
-        {EntryType::Vector, "Vector"},
-        {EntryType::GaussianSplat, "GaussianSplat"},
-        {EntryType::Tiles3D, "Tiles3D"}};
+    // The names of the types are those of their handlers (entry_handler.h)
 
     std::string typeToHuman(EntryType t)
     {
-        const auto res = typeMapper.find(t);
-
-        return res != typeMapper.end() ? res->second : "?";
+        const EntryHandler *handler = findEntryHandler(t);
+        return handler != nullptr ? handler->name() : "?";
     }
 
     EntryType typeFromHuman(const std::string &s)
     {
-        std::string lower = s;
-        std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
-
-        for (const auto &pair : typeMapper)
+        const std::string lower = str::toLowerCopy(s);
+        for (const EntryHandler *handler : entryHandlers())
         {
-            std::string typeName = pair.second;
-            std::transform(typeName.begin(), typeName.end(), typeName.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
-            if (typeName == lower)
-                return pair.first;
+            if (str::iequals(handler->name(), lower))
+                return handler->type();
         }
         return EntryType::Undefined;
     }
@@ -55,16 +32,11 @@ namespace ddb
     std::vector<std::string> getEntryTypeNames()
     {
         std::vector<std::string> names;
-        for (const auto &pair : typeMapper)
+        for (const EntryHandler *handler : entryHandlers())
         {
             // Skip Directory and Undefined as they cannot be rescanned
-            if (pair.first != EntryType::Directory && pair.first != EntryType::Undefined)
-            {
-                std::string name = pair.second;
-                std::transform(name.begin(), name.end(), name.begin(),
-                               [](unsigned char c) { return std::tolower(c); });
-                names.push_back(name);
-            }
+            if (handler->type() != EntryType::Directory && handler->type() != EntryType::Undefined)
+                names.push_back(str::toLowerCopy(handler->name()));
         }
         return names;
     }

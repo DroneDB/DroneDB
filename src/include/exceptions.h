@@ -40,8 +40,9 @@ namespace ddb
         std::error_code code_;
     };
 
-    // Only these classified failures can preserve an existing pending build.
-    // This is internal to native builds; the C API still reports a failed job.
+    // Only these classified failures can preserve an existing pending build. The C API reports
+    // the reason (DDBGetLastErrorReason, c_api_util.h): with DDBERR_EXCEPTION from the 1.x
+    // exports (DDBBuild), with DDBERR_RETRYABLE from the ones new in 2.0.
     enum class RetryableBuildReason { LowDiskSpace, NoSpaceOnDevice, IdleTimeout };
     class RetryableBuildException : public AppException
     {
@@ -66,6 +67,11 @@ namespace ddb
     };
     class InvalidArgsException : public AppException
     {
+        using AppException::AppException;
+    };
+    // The requested entry is not in the index. The exports added in 2.0 return it as
+    // DDBERR_NOTFOUND; the older ones keep returning DDBERR_EXCEPTION.
+    class EntryNotFoundException : public AppException {
         using AppException::AppException;
     };
     class GDALException : public AppException
@@ -140,6 +146,17 @@ namespace ddb
     class NotImplementedException : public AppException
     {
         using AppException::AppException;
+    };
+    // A progress callback asked to stop: the C API returns DDBERR_CANCELED from the exports
+    // listed as cancellable in DDBGetCapabilities()
+    class CanceledException : public AppException
+    {
+        using AppException::AppException;
+    };
+    // The work stopped because the library is shutting down (DDBShutdown): DDBERR_SHUTDOWN
+    class ShutdownException : public CanceledException
+    {
+        using CanceledException::CanceledException;
     };
 
     // Build lock specific exceptions

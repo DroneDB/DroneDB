@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "tiler.h"
+#include "randomutil.h"
+#include "mathutil.h"
 
 #include <mutex>
 #include <memory>
@@ -23,7 +25,7 @@ namespace ddb
     {
         if (outputFolder.empty())
         {
-            return "/vsimem/" + utils::generateRandomString(16) + "-" + std::to_string(z) + "-" + std::to_string(x) + "-" + std::to_string(y) + ".png";
+            return "/vsimem/" + randomString(16) + "-" + std::to_string(z) + "-" + std::to_string(x) + "-" + std::to_string(y) + ".png";
         }
         else
         {
@@ -34,29 +36,28 @@ namespace ddb
                 io::createDirectories(dir);
             }
 
-            fs::path p = dir / fs::path(std::to_string(y) + ".png");
-            return p.string();
+            fs::path p = dir / (std::to_string(y) + ".png");
+            return io::toUtf8(p);
         }
     }
 
     Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
                  int tileSize, bool tms)
         : inputPath(inputPath),
-          outputFolder(outputFolder),
+          outputFolder(io::fromUtf8(outputFolder)),
           tileSize(tileSize),
           tms(tms),
           mercator(GlobalMercator(tileSize))
     {
-        if (!fs::exists(inputPath) && !utils::isNetworkPath(inputPath))
+        if (!fs::exists(io::fromUtf8(inputPath)) && !io::isNetworkPath(inputPath))
             throw FSException(inputPath + " does not exist");
-        if (tileSize <= 0 ||
-            std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
+        if (!ddb::isPowerOfTwo(tileSize))
             throw GDALException("Tile size must be a power of 2 greater than 0");
 
-        if (!outputFolder.empty() && !fs::exists(outputFolder))
+        if (!outputFolder.empty() && !fs::exists(io::fromUtf8(outputFolder)))
         {
             // Try to create
-            io::createDirectories(outputFolder);
+            io::createDirectories(io::fromUtf8(outputFolder));
         }
     }
 
@@ -64,7 +65,29 @@ namespace ddb
     {
     }
 
+    std::string Tiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize)
+    {
+        return tile(tz, tx, ty, ImageFormat::Png, outBuffer, outBufferSize);
+    }
+
     std::string Tiler::tile(const TileInfo &t) { return tile(t.tz, t.tx, t.ty); }
+
+    std::string Tiler::writeTile(const RasterImage &image, ImageFormat format, int tz, int tx, int ty,
+                                 uint8_t **outBuffer, int *outBufferSize)
+    {
+        std::string tilePath = getTilePath(tz, tx, ty, true);
+        if (format != ImageFormat::Png)
+        {
+            const auto pos = tilePath.rfind(".png");
+            if (pos != std::string::npos)
+                tilePath.replace(pos, 4, std::string(".") + imageFormatExtension(format));
+        }
+
+        EncodeOptions options;
+        options.format = format;
+        TileEncoder::write(image, options, tilePath, outBuffer, outBufferSize);
+        return outBuffer != nullptr ? "" : tilePath;
+    }
 
     std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const
     {
@@ -103,32 +126,6 @@ namespace ddb
         return b;
     }
 
-    template <typename T>
-    void Tiler::rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize)
-    {
-        double minmax[2];
-        GDALComputeRasterMinMax(hBand, TRUE, minmax);
-
-        // Avoid divide by zero
-        if (minmax[0] == minmax[1])
-            minmax[1] += 0.1;
-
-        LOGD << "Min: " << minmax[0] << " | Max: " << minmax[1];
-
-        // Can still happen according to GDAL for very large values
-        if (minmax[0] == minmax[1])
-            throw GDALException(
-                "Cannot scale values due to source min/max being equal");
-
-        double deltamm = minmax[1] - minmax[0];
-        T *ptr = reinterpret_cast<T *>(buffer);
-
-        for (size_t i = 0; i < bufsize; i++)
-        {
-            ptr[i] = static_cast<T>(((ptr[i] - minmax[0]) / deltamm) * 255.0);
-        }
-    }
-
     int Tiler::tmsToXYZ(int ty, int tz) const
     {
         return static_cast<int>((std::pow(2, tz) - 1)) - ty;
@@ -141,8 +138,8 @@ namespace ddb
 
     GlobalMercator::GlobalMercator(int tileSize) : tileSize(tileSize)
     {
-        originShift = 2.0 * M_PI * 6378137.0 / 2.0;
-        initialResolution = 2.0 * M_PI * 6378137.0 / static_cast<double>(tileSize);
+        originShift = 2.0 * ddb::kPi * 6378137.0 / 2.0;
+        initialResolution = 2.0 * ddb::kPi * 6378137.0 / static_cast<double>(tileSize);
         maxZoomLevel = 99;
     }
 
@@ -171,8 +168,8 @@ namespace ddb
         double lon = mx / originShift * 180.0;
         double lat = my / originShift * 180.0;
 
-        lat = 180.0 / M_PI *
-              (2 * std::atan(std::exp(lat * M_PI / 180.0)) - M_PI / 2.0);
+        lat = ddb::kRadToDeg *
+              (2 * std::atan(std::exp(ddb::deg2rad(lat))) - ddb::kPi / 2.0);
         return Geographic2D(lon, lat);
     }
 

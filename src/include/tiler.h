@@ -9,9 +9,9 @@
 #include <sstream>
 #include <string>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "geo.h"
+#include "tile_encoder.h"
 
 namespace ddb
 {
@@ -82,26 +82,32 @@ namespace ddb
         // Convert from XYZ to TMS
         int xyzToTMS(int ty, int tz) const;
 
-        template <typename T>
-        void rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize);
+        // Encodes image as tile (tz, tx, ty) of this tiler: into *outBuffer when set,
+        // otherwise into the tile file under the output folder (or /vsimem/), whose path
+        // is returned
+        std::string writeTile(const RasterImage &image, ImageFormat format, int tz, int tx, int ty,
+                              uint8_t **outBuffer, int *outBufferSize);
 
     public:
-        DDB_DLL Tiler(const std::string &inputPath,
-                      const std::string &outputFolder, int tileSize = 256,
-                      bool tms = false);
-        DDB_DLL virtual ~Tiler();
+        Tiler(const std::string &inputPath,
+              const std::string &outputFolder, int tileSize = 256,
+              bool tms = false);
+        virtual ~Tiler();
 
-        DDB_DLL std::string getTilePath(int z, int x, int y,
-                                        bool createIfNotExists);
+        std::string getTilePath(int z, int x, int y,
+                                bool createIfNotExists);
 
-        DDB_DLL virtual std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) = 0;
-        DDB_DLL std::string tile(const TileInfo &tile);
+        // PNG tile
+        std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
+        virtual std::string tile(int tz, int tx, int ty, ImageFormat format,
+                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) = 0;
+        std::string tile(const TileInfo &tile);
 
-        DDB_DLL std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
-        DDB_DLL BoundingBox<int> getMinMaxZ() const;
+        std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
+        BoundingBox<int> getMinMaxZ() const;
 
         // Min max tile coordinates for specified zoom level
-        DDB_DLL BoundingBox<Projected2Di> getMinMaxCoordsForZ(int tz) const;
+        BoundingBox<Projected2Di> getMinMaxCoordsForZ(int tz) const;
     };
 
 } // namespace ddb

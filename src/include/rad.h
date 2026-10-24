@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "ddb_export.h"
 #include "fs.h"
 
 namespace ddb
@@ -35,19 +34,19 @@ namespace ddb
     };
 
     // True when the path ends with the canonical .rad delivery extension.
-    DDB_DLL bool isRadPath(const std::string &filename);
+    bool isRadPath(const std::string &filename);
 
     // Decodes up to `maxChunks` leading chunks (coarsest first) of a single-file RAD
     // into display-space splats suitable for rendering a preview. Throws AppException
     // on a malformed or unreadable file.
-    DDB_DLL RadCoarseSplats readRadCoarseSplats(const fs::path &radPath, int maxChunks = 1);
+    RadCoarseSplats readRadCoarseSplats(const fs::path &radPath, int maxChunks = 1);
 
     // Computes the axis-aligned bounding box of every splat centre in the RAD by
     // streaming each chunk's `center` property (bounded memory, exact, in the RAD's
     // coordinate space). Returns false when no centres could be decoded.
-    DDB_DLL bool computeRadBounds(const fs::path &radPath,
-                                  std::array<double, 3> &outMin,
-                                  std::array<double, 3> &outMax);
+    bool computeRadBounds(const fs::path &radPath,
+                          std::array<double, 3> &outMin,
+                          std::array<double, 3> &outMax);
 
 } // namespace ddb
 

@@ -1,20 +1,25 @@
 # Gather source files from subdirectories into SRC_LIST
-#add_subdirectory(utilities)
 add_subdirectory(library)
 
 message(STATUS "SRC_LIST: ${SRC_LIST}")
 
-add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
-
-# On Windows, ensure all symbols are exported automatically from the shared lib
-if(WIN32)
-    set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-endif()
-
-# Define export macro for cross-platform symbol exports in shared library
-target_compile_definitions(${PROJECT_NAME} PRIVATE MODERN_CPP_LIB_EXPORTS)
-
-add_dependencies(${PROJECT_NAME} nxs)
+# libddb is assembled from two object libraries (DQ-03), each compiled once:
+#   ddb_core  every library source except the C API, plus the generated version TU (and the
+#             process initialization, ddb::registerProcess in process_init.cpp)
+#   ddb_capi  the C API: ddb.cpp, the only TU that implements the extern "C" functions of ddb.h,
+#             and c_api_util.cpp, its error mapper and argument helpers (c_api_util.h, private)
+# libddb (SHARED) = ddb_core + ddb_capi. ddbcmd, ddbtest and ddb_unit_tests contain the same
+# objects (ddb_embedded below) and never load libddb: no binary may contain both, otherwise the
+# plog instance and the library's singletons would exist twice in one process.
+#
+# libddb exports the C API and nothing else (DQ-14). Every object is compiled with hidden
+# visibility; only the DDB* functions of ddb.h are marked DDB_DLL (ddb_export.h), and
+# on Linux a version script made from the symbol manifest hides every other symbol, the C++
+# symbols of the static libraries linked into libddb included. The C++ code is reached by
+# linking the objects (ddb_embedded), not through libddb.
+set(DDB_CAPI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/library/ddb.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/library/c_api_util.cpp")
+set(DDB_CORE_SOURCES ${SRC_LIST})
+list(REMOVE_ITEM DDB_CORE_SOURCES ${DDB_CAPI_SOURCES})
 
 # Find and link dependencies from vcpkg
 find_package(Threads REQUIRED)
@@ -27,7 +32,6 @@ find_package(GeoTIFF CONFIG REQUIRED)
 find_package(LibZip CONFIG REQUIRED)
 find_package(plog CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
-find_package(cxxopts CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SpatiaLite REQUIRED)
@@ -39,13 +43,12 @@ find_package(tinyobjloader CONFIG REQUIRED)
 find_package(draco CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
-find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
+find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h" REQUIRED)
 
 # Common libraries
 set(COMMON_LIBS
     pdalcpp
     Threads::Threads
-    cctz::cctz
     Exiv2::exiv2lib
     GDAL::GDAL
     PROJ::proj
@@ -54,7 +57,6 @@ set(COMMON_LIBS
     plog::plog
     cpr::cpr
     nlohmann_json::nlohmann_json
-    cxxopts::cxxopts
     OpenSSL::Crypto
     unofficial::sqlite3::sqlite3
     spatialite::spatialite
@@ -64,72 +66,174 @@ set(COMMON_LIBS
     tinyobjloader::tinyobjloader
     draco::draco
     spz
+    lazperf
     ZLIB::ZLIB
 )
 
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
+# boolinq is header-only and ships no CMake config: an INTERFACE target carries its include
+# dir to libddb (pull.cpp) and the tests (utils.cpp).
+add_library(boolinq INTERFACE)
+target_include_directories(boolinq SYSTEM INTERFACE ${BOOLINQ_INCLUDE_DIRS})
 
-# Exclude kubazip to avoid symbol conflicts with libzip
-# assimp depends on kubazip, but we already link libzip directly
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    LINK_INTERFACE_LIBRARIES ""
-)
-get_target_property(ASSIMP_LINK_LIBRARIES assimp::assimp INTERFACE_LINK_LIBRARIES)
-if(ASSIMP_LINK_LIBRARIES)
-    list(REMOVE_ITEM ASSIMP_LINK_LIBRARIES "kubazip::kubazip")
-    set_target_properties(assimp::assimp PROPERTIES INTERFACE_LINK_LIBRARIES "${ASSIMP_LINK_LIBRARIES}")
-endif()
-
-target_include_directories(${PROJECT_NAME} PRIVATE ${GEOTIFF_INCLUDE_DIR})
-target_include_directories(${PROJECT_NAME} PRIVATE ${Stb_INCLUDE_DIR})
-
-# Include directories (public for external use)
-target_include_directories(${PROJECT_NAME} PUBLIC
+# Usage requirements, defined once (DQ-03, DQ-14):
+#   ddb_c_api       what code that uses libddb as a shared library needs: the folder of ddb.h and
+#                   ddb_export.h, and of the generated ddb_version.h. PUBLIC on ddb. On Windows
+#                   ddb_export.h makes the DDB* declarations dllimport.
+#   ddb_headers     ddb_c_api plus what the C++ headers of the library need: the include
+#                   directories, cctz (timezone.h exposes cctz::time_zone) and the plog mode,
+#                   the same in every module that logs. What the library objects compile with.
+#   ddb_static_api  ddb_headers for code that is linked with the library objects, not with
+#                   libddb: DDB_STATIC_DEFINE makes ddb_export.h declare the DDB* functions
+#                   without dllimport (the CLI commands, the test support and the C TU).
+#   ddb_core_usage  ddb_headers plus every library dependency (COMMON_LIBS): what the library
+#                   objects compile with and what a binary that contains them links.
+#                   ddb links COMMON_LIBS itself (see the note on link order below).
+#   ddb_embed_library()  (below) makes a binary contain the library: ddbcmd, ddbtest and
+#                   ddb_unit_tests.
+add_library(ddb_c_api INTERFACE)
+target_include_directories(ddb_c_api INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${DDB_GENERATED_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:include>
 )
+add_library(ddb_headers INTERFACE)
+target_link_libraries(ddb_headers INTERFACE ddb_c_api)
+add_library(ddb_static_api INTERFACE)
+target_link_libraries(ddb_static_api INTERFACE ddb_headers)
+target_compile_definitions(ddb_static_api INTERFACE DDB_STATIC_DEFINE)
+# vendor/libnexus is public because 3d.h includes <nxs.h> (installed to include/ by libnexus)
+target_include_directories(ddb_headers SYSTEM INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/libnexus>
+)
+target_link_libraries(ddb_headers INTERFACE cctz::cctz)
+# plog's char is UTF-8 everywhere (mio.h, "Path encoding"). Without it MSVC builds read every
+# narrow log string in the ANSI code page. One value for every target: plog's types depend on
+# it.
+target_compile_definitions(ddb_headers INTERFACE PLOG_CHAR_IS_UTF8=1)
+# The logger instance is private to each binary (libddb, ddbcmd, ddbtest, ddb_unit_tests): no two
+# modules of a process share it, and libddb exports nothing but its C API (DQ-14). plog exported
+# its instance through PLOG_GLOBAL (default visibility) and, on Windows, PLOG_EXPORT.
+if(NOT WIN32)
+    target_compile_definitions(ddb_headers INTERFACE PLOG_LOCAL)
+endif()
 
-# Include paths
-find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
+# nxs is link-only here: Qt5::Gui, reached through nxs, adds its static-plugin import sources
+# (INTERFACE_SOURCES) to every target that links it, and the object libraries would each compile
+# their own copy into libddb
+list(TRANSFORM COMMON_LIBS REPLACE "^nxs$" "$<LINK_ONLY:nxs>" OUTPUT_VARIABLE DDB_CORE_LIBS)
+add_library(ddb_core_usage INTERFACE)
+target_link_libraries(ddb_core_usage INTERFACE ${DDB_CORE_LIBS} boolinq ddb_headers)
 
-set (CUSTOM_INCLUDE_DIRS
-        ${BOOLINQ_INCLUDE_DIRS}
-        ${BOOLINQ_INCLUDE_DIRS}/pdal
-        ${CMAKE_SOURCE_DIR}/vendor/libnexus
+# Library sources only: glob.hpp (path_expansion.cpp), and <prefix>/include/pdal because PDAL's own
+# headers include their siblings without the pdal/ prefix (ColorinterpFilter.hpp includes
+# <filters/StatsFilter.hpp>).
+find_path(PDAL_HEADERS_DIR "filters/StatsFilter.hpp" PATH_SUFFIXES pdal REQUIRED)
+
+# ddb_add_library_objects(<name> <sources>...): an object library of libddb sources with the
+# compile settings that apply to library code only: the warnings (counted by the ratchet,
+# scripts/check-warnings.py), hidden visibility and the export macro (only ddb.h's DDB_DLL
+# functions are visible, DQ-14), the MSVC Release debug info and the private third-party
+# include directories (SYSTEM: their warnings are not ours, cmake/Warnings.cmake).
+function(ddb_add_library_objects name)
+    add_library(${name} OBJECT ${ARGN})
+    ddb_msvc_release_debug_info(${name})
+    target_link_libraries(${name} PUBLIC ddb_core_usage PRIVATE ddb_warnings)
+    # DDB_BUILDING_LIBRARY: ddb_export.h makes DDB_DLL an export (it is defined for these objects,
+    # not for the ddb target, which has no source of its own)
+    # ZD_EXPORT empty: vendor/zonedetect is compiled into libddb, but its header declares the API
+    # dllimport on MSVC unless ZD_EXPORT is set, and MSVC exports a definition of a dllimport
+    # function (C4273), so ddb.dll exported the 13 ZD* functions
+    target_compile_definitions(${name} PRIVATE DDB_BUILDING_LIBRARY ZD_EXPORT=)
+    set_target_properties(${name} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    target_include_directories(${name} SYSTEM PRIVATE
+        ${GEOTIFF_INCLUDE_DIR}
+        ${Stb_INCLUDE_DIR}
+        ${PDAL_HEADERS_DIR}
         ${CMAKE_SOURCE_DIR}/vendor/glob
-        )
+    )
+    # One section per function and per datum, so that --gc-sections (ddb_gc_sections) can drop what
+    # the binary does not reach. MSVC does it by default (/Gy, /OPT:REF in a Release link).
+    target_compile_options(${name} PRIVATE
+        $<$<AND:$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>,$<NOT:$<PLATFORM_ID:Darwin>>>:-ffunction-sections -fdata-sections>)
+    add_dependencies(${name} nxs)
+endfunction()
 
-# Propagate the variable to the parent scope
-set(CUSTOM_INCLUDE_DIRS ${CUSTOM_INCLUDE_DIRS} PARENT_SCOPE)
+# ddb_gc_sections(<target>): the linker drops the sections nothing refers to (the library is built
+# with one section per function). Linux/ELF with GNU or Clang only. Stripped, libddb.so is 12 %
+# smaller and ddbcmd 5 % (DQ-14, measured).
+function(ddb_gc_sections target)
+    if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_link_options(${target} PRIVATE LINKER:--gc-sections)
+    endif()
+endfunction()
 
-message(STATUS "lib CUSTOM_INCLUDE_DIRS: ${CUSTOM_INCLUDE_DIRS}")
+ddb_add_library_objects(ddb_core ${DDB_CORE_SOURCES} ${DDB_VERSION_SOURCE})
+ddb_add_library_objects(ddb_capi ${DDB_CAPI_SOURCES})
 
-target_include_directories(${PROJECT_NAME} PUBLIC ${CUSTOM_INCLUDE_DIRS})
+# The symbol manifest (XI-01): include/ddb.symbols lists every exported DDB* function, one per
+# line ('#' starts a comment line). It is the only copy of the list: DDBGetCapabilities() (ddb.cpp)
+# includes it as generated/ddb_symbols.inc, one string literal per name, and scripts/check-abi.py
+# compares it with the symbols libddb exports. A change to the manifest re-runs CMake;
+# file(CONFIGURE) rewrites the include only when its content changes.
+set(DDB_SYMBOLS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/include/ddb.symbols")
+set(DDB_SYMBOLS_MANIFEST "${DDB_SYMBOLS_MANIFEST}" PARENT_SCOPE)  # tests/CMakeLists.txt reads it too
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DDB_SYMBOLS_MANIFEST}")
+# Every line that is not empty or a comment (a comment may hold ';', a list separator)
+file(STRINGS "${DDB_SYMBOLS_MANIFEST}" _ddb_symbols REGEX "^[^#]")
+set(_ddb_symbols_inc "")
+set(_ddb_exported_names "")
+foreach(_symbol IN LISTS _ddb_symbols)
+    if(NOT _symbol MATCHES "^DDB[A-Za-z0-9_]+$")
+        message(FATAL_ERROR "${DDB_SYMBOLS_MANIFEST}: '${_symbol}' is not a DDB* symbol name")
+    endif()
+    string(APPEND _ddb_symbols_inc "\"${_symbol}\",\n")
+    string(APPEND _ddb_exported_names "        ${_symbol};\n")
+endforeach()
+if(_ddb_symbols_inc STREQUAL "")
+    message(FATAL_ERROR "${DDB_SYMBOLS_MANIFEST} lists no symbol")
+endif()
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/generated/ddb_symbols.inc" CONTENT "${_ddb_symbols_inc}")
+target_include_directories(ddb_capi PRIVATE "${CMAKE_BINARY_DIR}/generated")
 
-if(WIN32)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE PLOG_EXPORT)
-else()
-    target_compile_definitions(${PROJECT_NAME} PRIVATE PLOG_GLOBAL)
+add_library(${PROJECT_NAME} SHARED $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>)
+ddb_msvc_release_debug_info(${PROJECT_NAME})
+
+# DDB_DLL (ddb_export.h), the one export macro, is on the DDB* functions of ddb.h only; the library
+# is built with hidden visibility, so nothing else is exported, and on Windows there is no
+# WINDOWS_EXPORT_ALL_SYMBOLS: ddb.dll exports what ddb.h declares.
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+
+# Linux: a version script made from the manifest exports exactly the manifest, whatever the
+# static libraries linked into libddb (cpr, spz, draco, Assimp, ...) export on their own, and
+# also drops the linker's own symbols (_init, _fini, _edata, ...). scripts/check-abi.py exports
+# checks the result (nm -D). The visibility of the objects keeps the C++ symbols of the library
+# itself out; the script is the guarantee for the rest.
+if(UNIX AND NOT APPLE)
+    set(DDB_VERSION_SCRIPT "${CMAKE_BINARY_DIR}/generated/ddb.version")
+    file(CONFIGURE OUTPUT "${DDB_VERSION_SCRIPT}" @ONLY CONTENT
+"{\n    global:\n${_ddb_exported_names}    local:\n        *;\n};\n")
+    target_link_options(${PROJECT_NAME} PRIVATE "LINKER:--version-script=${DDB_VERSION_SCRIPT}")
+    set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS "${DDB_VERSION_SCRIPT}")
 endif()
 
+# COMMON_LIBS directly, in this order, rather than through ddb_core_usage: the order decides which
+# static archive members end up in libddb.so, and an INTERFACE target in between reorders the
+# link line
+target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq ddb_headers PUBLIC ddb_c_api)
+ddb_gc_sections(${PROJECT_NAME})
 
-set(CURL_CA_BUNDLE ${CMAKE_BINARY_DIR}/curl-ca-bundle.crt)
-
-if (WIN32)
-    set(SYSTEM_TEMP_DIR $ENV{TEMP})
-    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-    set(SRC_RELEASE_DIR "${CMAKE_BINARY_DIR}/src/$<CONFIG>")
-else()
-    set(SYSTEM_TEMP_DIR /tmp)
-    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-    set(SRC_RELEASE_DIR "${CMAKE_BINARY_DIR}/src")
-endif()
+# ddb_embed_library(<target>): <target> contains the library instead of loading libddb: the
+# objects of ddb_core and ddb_capi, the libraries they need and DDB_STATIC_DEFINE (ddb_static_api).
+# This is how the CLI and the test binaries reach the C++ code, which libddb does not export.
+function(ddb_embed_library target)
+    target_sources(${target} PRIVATE $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>)
+    target_link_libraries(${target} PRIVATE ddb_core_usage ddb_static_api)
+    ddb_gc_sections(${target})
+endfunction()
 
 find_package(Python3 REQUIRED)
-
-find_program(CURL_EXECUTABLE NAMES curl curl.exe REQUIRED)
-message(STATUS "Found curl: ${CURL_EXECUTABLE}")
 
 # Define a custom target to update sensor data using the Python script
 add_custom_target(
@@ -143,135 +247,113 @@ add_custom_target(
 
 message(STATUS "Build target 'update_sensor_data' is ready.")
 
-if (WIN32)
-    set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj")
-else()
-    set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj4")
-    if(NOT EXISTS "${PROJ_DIR}/proj.db")
-        set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj")
+# Runtime files next to libddb: ddb, nxs, ddbcmd and the test binaries are all built in
+# DDB_RUNTIME_DIR (root CMakeLists.txt), so getDataPath() finds these files whether it looks next
+# to the library or next to the executable. On Windows, libnexus's own post-build step copies
+# the Qt plugins (WebP textures) next to nxs.dll, i.e. to DDB_RUNTIME_DIR/plugins.
+
+# ddb_stage_runtime_dlls(<target>): on Windows, copy the DLLs <target> links to DDB_RUNTIME_DIR
+# after it is built (TARGET_RUNTIME_DLLS: direct dependencies only).
+function(ddb_stage_runtime_dlls target)
+    if(WIN32)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E echo "Staging runtime DLLs for ${target}..."
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    $<TARGET_RUNTIME_DLLS:${target}>
+                    "${DDB_RUNTIME_DIR}"
+            COMMAND_EXPAND_LISTS
+        )
     endif()
-endif()
+endfunction()
 
-if (WIN32)
-    set(LIBNEXUS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/vendor/libnexus/$<CONFIG>")
-else()
-    set(LIBNEXUS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/vendor/libnexus")
-endif()
+# ddb_stage_runtime_files(<target>): everything a binary that contains the library code needs
+# at run time, copied to DDB_RUNTIME_DIR after <target> is built: the data files getDataPath()
+# looks up (PROJ database, GDAL data, sensor data, timezone data) and, on Windows, all the DLLs, so ddb and
+# ddb_unit_tests (which does not depend on ddb) each run on their own.
+function(ddb_stage_runtime_files target)
+    if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "${DDB_RUNTIME_DIR}"
+            COMMENT "Copying PROJ database from ${PROJ_DATA_DIR}"
+        )
+    endif()
 
-# Copy the necessary files to the binary directory after build
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E echo "Copying necessary files to the binary directory..."
-    # TARGET_FILE_DIR resolves to the appropriate output directory:
-    # - config-specific directory for multi-config generators (e.g. VS)
-    # - single output directory for single-config generators (e.g. Ninja)
-    # The copy_directory command is executed for all generator types.
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>" "${OUTPUT_DIR}"
-    # Copy libnexus dll from its output directory
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:nxs>/$<TARGET_FILE_NAME:nxs>" "${OUTPUT_DIR}/"
-)
+    if(GDAL_DATA_DIR)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DSOURCE_DIR=${GDAL_DATA_DIR}
+                -DDEST_DIR=${DDB_RUNTIME_DIR}/gdal
+                -P "${CMAKE_SOURCE_DIR}/cmake/StageGdalData.cmake"
+            COMMENT "Copying GDAL data from ${GDAL_DATA_DIR}"
+        )
+    endif()
 
-# Copy Qt plugins (imageformats, platforms, etc.) for libnexus - required for WebP support on Windows
-if(WIN32)
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:nxs>/plugins" "${OUTPUT_DIR}/plugins"
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite"
+            "${CMAKE_SOURCE_DIR}/data/timezone21.bin"
+            "${CMAKE_SOURCE_DIR}/data/sensor-profiles.json"
+            "${DDB_RUNTIME_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "${DDB_RUNTIME_DIR}/zoneinfo"
     )
-endif()
 
-# Copy PROJ data if available
-if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E echo "Copying PROJ data from ${PROJ_DATA_DIR}..."
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "${OUTPUT_DIR}/proj.db"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/proj.db"
-        COMMENT "Copying PROJ database"
-    )
-endif()
+    if(WIN32)
+        # Automatic copy of ALL required DLLs next to the library and executables (MSVC only).
+        # Avoids endless manual chasing after gdal/proj/curl/zlib/etc.
+        ddb_stage_runtime_dlls(${target})
 
-# Copy other support files.
-# Files are placed in both OUTPUT_DIR (next to the executables) and
-# $<TARGET_FILE_DIR:...> (next to the shared library itself) so that the
-# runtime data-path lookup in getDataPath() succeeds regardless of which
-# directory the DLL is loaded from (e.g. when .NET tests load ddb.dll
-# directly from build/src/ rather than from build/).
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/timezone21.bin" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor-profiles.json" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "${OUTPUT_DIR}/zoneinfo"
-    # Also copy next to the shared library itself
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/timezone21.bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor-profiles.json" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/zoneinfo"
-)
+        # Copy ALL DLLs from vcpkg bin directories to ensure transitive dependencies are included
+        # TARGET_RUNTIME_DLLS only copies direct dependencies, not transitive ones like Qt5's harfbuzz, pcre2, etc.
+        set(VCPKG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin")
+        set(VCPKG_DEBUG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/bin")
+
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E echo "Copying vcpkg DLLs to output directory..."
+            COMMAND "${CMAKE_COMMAND}"
+                -DSOURCE_DIR=$<IF:$<CONFIG:Debug>,${VCPKG_DEBUG_BIN_DIR},${VCPKG_BIN_DIR}>
+                $<$<CONFIG:Debug>:-DFALLBACK_DIR=${VCPKG_BIN_DIR}>
+                -DDEST_DIR=${DDB_RUNTIME_DIR}
+                -P "${CMAKE_SOURCE_DIR}/cmake/CopyDlls.cmake"
+            COMMENT "Copying vcpkg DLLs"
+        )
+    endif()
+endfunction()
+
+ddb_stage_runtime_files(${PROJECT_NAME})
 
 # Windows-specific files
 if (WIN32)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/ddb.bat" "${OUTPUT_DIR}"
-    )
-
-    # Automatic copy of ALL required DLLs next to the executable (MSVC only).
-    # Avoids endless manual chasing after gdal/proj/curl/zlib/etc.
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E echo "Staging runtime DLLs for ${PROJECT_NAME}..."
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
-                $<TARGET_FILE_DIR:${PROJECT_NAME}>
-        COMMAND_EXPAND_LISTS
-    )
-
-    # Copy ALL DLLs from vcpkg bin directories to ensure transitive dependencies are included
-    # TARGET_RUNTIME_DLLS only copies direct dependencies, not transitive ones like Qt5's harfbuzz, pcre2, etc.
-    set(VCPKG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin")
-    set(VCPKG_DEBUG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/bin")
-
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E echo "Copying vcpkg DLLs to output directory..."
-        COMMAND "${CMAKE_COMMAND}"
-            -DSOURCE_DIR=$<IF:$<CONFIG:Debug>,${VCPKG_DEBUG_BIN_DIR},${VCPKG_BIN_DIR}>
-            $<$<CONFIG:Debug>:-DFALLBACK_DIR=${VCPKG_BIN_DIR}>
-            -DDEST_DIR=${OUTPUT_DIR}
-            -P "${CMAKE_SOURCE_DIR}/cmake/CopyDlls.cmake"
-        COMMENT "Copying vcpkg DLLs"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/ddb.bat" "${DDB_RUNTIME_DIR}"
     )
 endif()
 
 
-# Create a unique subdirectory in the system temp directory for our files
-set(TEMP_DIR ${SYSTEM_TEMP_DIR}/cmake_curl_temp_${PROJECT_NAME})
-file(MAKE_DIRECTORY ${TEMP_DIR})
-
-# Add custom command to download the file using curl in the temporary directory
-add_custom_command(
-    OUTPUT ${TEMP_DIR}/cacert.pem
-    COMMAND ${CURL_EXECUTABLE} --retry-all-errors --retry 5 --retry-delay 10 --etag-compare ${TEMP_DIR}/etag.txt --etag-save ${TEMP_DIR}/etag.txt --remote-name https://curl.se/ca/cacert.pem
-    COMMENT "Downloading updated CA certificate if modified"
-    WORKING_DIRECTORY ${TEMP_DIR}
-)
-
-# Copy the downloaded file to the binary directory with the desired name
-add_custom_command(
-    OUTPUT ${CURL_CA_BUNDLE}
-    COMMAND ${CMAKE_COMMAND} -E copy ${TEMP_DIR}/cacert.pem ${CURL_CA_BUNDLE}
-    DEPENDS ${TEMP_DIR}/cacert.pem
-    COMMENT "Copying CA certificate to ${CURL_CA_BUNDLE}"
-)
-
-add_custom_target(
-    download_ca_bundle ALL
-    DEPENDS ${CURL_CA_BUNDLE}
-)
-
-# Make sure the library target depends on the CA bundle
-add_dependencies(${PROJECT_NAME} download_ca_bundle)
-
-add_custom_target(
-    clean_temp
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${TEMP_DIR}
-    COMMENT "Cleaning up temporary directory in system temp folder"
-)
-
-message(STATUS "Build target 'download_ca_bundle' is ready. Temporary files are stored in ${TEMP_DIR}.")
+# CA bundle for libcurl (remote reads in thumbs.cpp and pctiler.cpp, found via getDataPath):
+# Mozilla's roots as published by curl.se, pinned by date and SHA-256 so every build ships the
+# same file. It is fetched at configure time, only when the file is missing or differs.
+# To update: take the newest dated file and its SHA-256 from https://curl.se/docs/caextract.html
+set(DDB_CA_BUNDLE_DATE "2026-10-20")
+set(DDB_CA_BUNDLE_SHA256 "796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe")
+set(CURL_CA_BUNDLE "${CMAKE_BINARY_DIR}/curl-ca-bundle.crt")
+set(_ca_bundle_hash "")
+if(EXISTS "${CURL_CA_BUNDLE}")
+    file(SHA256 "${CURL_CA_BUNDLE}" _ca_bundle_hash)
+endif()
+if(NOT _ca_bundle_hash STREQUAL DDB_CA_BUNDLE_SHA256)
+    set(_ca_bundle_url "https://curl.se/ca/cacert-${DDB_CA_BUNDLE_DATE}.pem")
+    message(STATUS "Downloading CA bundle ${_ca_bundle_url}")
+    # Download next to the target and rename, so a failed download never leaves a bad bundle
+    file(DOWNLOAD "${_ca_bundle_url}" "${CURL_CA_BUNDLE}.download"
+        EXPECTED_HASH SHA256=${DDB_CA_BUNDLE_SHA256}
+        TLS_VERIFY ON
+        STATUS _ca_bundle_status)
+    list(GET _ca_bundle_status 0 _ca_bundle_code)
+    if(NOT _ca_bundle_code EQUAL 0)
+        file(REMOVE "${CURL_CA_BUNDLE}.download")
+        message(FATAL_ERROR "CA bundle download failed: ${_ca_bundle_status}")
+    endif()
+    file(RENAME "${CURL_CA_BUNDLE}.download" "${CURL_CA_BUNDLE}")
+endif()
 
 # set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.${OUTPUT_DIST_EXT}")

@@ -2,7 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "timezone.h"
+#include "../../vendor/zonedetect/library/zonedetect.h"
 
+#include <cstdlib>
+#include <memory>
+#include <vector>
 #include <mutex>
 
 #include "exceptions.h"
@@ -13,7 +17,12 @@ using namespace ddb;
 
 bool Timezone::initialized = false;
 ZoneDetect* Timezone::db = nullptr;
-std::mutex timezoneMutex;
+
+namespace {
+// init() runs its body once per process. A throwing body leaves the flag unset, so the
+// next caller retries, as before; callers never read db while another thread writes it.
+std::once_flag timezoneInitFlag;
+}
 
 [[noreturn]] void onError(int errZD, int errNative) {
     throw TimezoneException("Timezone error: " + std::string(ZDGetErrorString(errZD)) + " (" +
@@ -21,29 +30,39 @@ std::mutex timezoneMutex;
 }
 
 void Timezone::init() {
-    if (initialized)
-        return;
-    std::lock_guard<std::mutex> guard(timezoneMutex);
-
-    ZDSetErrorHandler(onError);
-    fs::path dbPath = io::getDataPath("timezone21.bin");
-    if (dbPath.empty())
-        throw TimezoneException("Cannot find timezone database timezone21.bin");
-    db = ZDOpenDatabase(dbPath.string().c_str());
-    if (!db)
-        throw TimezoneException("Cannot open timezone database ./timezone21.bin");
+    std::call_once(timezoneInitFlag, [] {
+        ZDSetErrorHandler(onError);
+        fs::path dbPath = io::getDataPath("timezone21.bin");
+        if (dbPath.empty())
+            throw TimezoneException("Cannot find timezone database timezone21.bin");
+#ifdef _WIN32
+        // ZoneDetect opens a file name with CreateFileA (ANSI code page): the database is read
+        // here and kept for the process (db is never closed)
+        static std::vector<uint8_t> database;
+        try {
+            database = io::readAllBytes(dbPath);
+        } catch (const FSException &e) {
+            throw TimezoneException(std::string("Cannot open timezone database: ") + e.what());
+        }
+        db = ZDOpenDatabaseFromMemory(database.data(), database.size());
+#else
+        db = ZDOpenDatabase(dbPath.c_str());
+#endif
+        if (!db)
+            throw TimezoneException("Cannot open timezone database ./timezone21.bin");
 
 #ifdef _WIN32
-    // On Windows, set TZDIR environment variable to help cctz find timezone data
-    fs::path zoneInfoPath = io::getDataPath("zoneinfo");
-    if (!zoneInfoPath.empty()) {
-        std::string tzdir = "TZDIR=" + zoneInfoPath.string();
-        LOGD << "Setting TZDIR to: " << zoneInfoPath.string();
-        _putenv(tzdir.c_str());
-    }
+        // On Windows, set TZDIR environment variable to help cctz find timezone data. cctz
+        // opens it with fopen, which follows the CRT locale (UTF-8 after DDBRegisterProcess).
+        fs::path zoneInfoPath = io::getDataPath("zoneinfo");
+        if (!zoneInfoPath.empty()) {
+            LOGD << "Setting TZDIR to: " << io::toUtf8(zoneInfoPath);
+            _putenv_s("TZDIR", io::toUtf8(zoneInfoPath).c_str());
+        }
 #endif
 
-    initialized = true;
+        initialized = true;
+    });
 }
 
 cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude) {
@@ -54,10 +73,10 @@ cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude) {
     float safezone = 0;
     ZoneDetectResult* results =
         ZDLookup(db, static_cast<float>(latitude), static_cast<float>(longitude), &safezone);
-    if (!results) {
-        ZDFreeResults(results);
+    if (!results)
         return cctz::utc_time_zone();
-    }
+    // ZDLookup allocates the results; they were never freed on the normal path
+    const std::unique_ptr<ZoneDetectResult, void (*)(ZoneDetectResult*)> resultsOwner(results, ZDFreeResults);
 
     unsigned int index = 0;
     cctz::time_zone tz = cctz::utc_time_zone();
@@ -107,15 +126,8 @@ cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude) {
     return tz;
 }
 
-double Timezone::getUTCEpoch(int year,
-                             int month,
-                             int day,
-                             int hour,
-                             int minute,
-                             int second,
-                             double msecs,
-                             const cctz::time_zone& tz) {
-    auto time = tz.lookup(cctz::civil_second(year, month, day, hour, minute, second));
+double Timezone::getUTCEpoch(const cctz::civil_second& local, double msecs, const cctz::time_zone& tz) {
+    auto time = tz.lookup(local);
     return static_cast<double>(
                std::chrono::duration_cast<std::chrono::milliseconds>(time.post.time_since_epoch())
                    .count()) +

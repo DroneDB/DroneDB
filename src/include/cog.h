@@ -7,13 +7,12 @@
 #include <string>
 
 #include "basicgeometry.h"
-#include "ddb_export.h"
-#include "json.h"
+#include "json_fwd.h"
 
 namespace ddb {
 
-DDB_DLL void buildCog(const std::string& inputGTiff, const std::string& outputCog);
-DDB_DLL void generateCogStats(const std::string& cogPath);
+void buildCog(const std::string& inputGTiff, const std::string& outputCog);
+void generateCogStats(const std::string& cogPath);
 
 }
 

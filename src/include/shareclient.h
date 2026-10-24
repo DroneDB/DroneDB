@@ -4,32 +4,36 @@
 #ifndef SHARECLIENT_H
 #define SHARECLIENT_H
 
+#include <functional>
 #include <string>
-#include <vector>
-#include <cpr/cpr.h>
-#include "registry.h"
-#include "ddb_export.h"
-#include "mio.h"
+
+#include "fs.h"
+#include "registry_client.h"
 
 namespace ddb
 {
 
+    // Called while a file is uploaded with its name and the bytes sent and to send; false aborts
+    typedef std::function<bool(std::string &fileName, size_t txBytes, size_t totalBytes)> UploadCallback;
+
+    // The three requests of a share (init, upload, commit). None is tried again by the client: an
+    // upload is a body that may have arrived, and the share is a sequence the server tracks by token.
     class ShareClient
     {
 
         std::string token;
-        ddb::Registry *registry;
+        RegistryClient *registry;
         std::string resultUrl;
 
     public:
-        DDB_DLL ShareClient(ddb::Registry *registry);
+        ShareClient(RegistryClient *client);
 
-        DDB_DLL void Init(const std::string &tag, const std::string &password, const std::string &datasetName = "", const std::string &datasetDescription = "");
-        DDB_DLL void Upload(const std::string &path, const fs::path &filePath, const utils::UploadCallback &cb = nullptr);
-        DDB_DLL std::string Commit();
+        void Init(const std::string &tag, const std::string &password, const std::string &datasetName = "", const std::string &datasetDescription = "");
+        void Upload(const std::string &path, const fs::path &filePath, const UploadCallback &cb = nullptr);
+        std::string Commit();
 
-        DDB_DLL std::string getToken() const;
-        DDB_DLL std::string getResultUrl() const;
+        std::string getToken() const;
+        std::string getResultUrl() const;
     };
 
 }

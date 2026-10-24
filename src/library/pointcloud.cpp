@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "pointcloud.h"
+#include "json.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <fstream>
@@ -9,6 +11,7 @@
 #include <sstream>
 #include <cctype>
 
+#include "pdal_inc.h"
 #include <pdal/PipelineManager.hpp>
 #include <pdal/PointRef.hpp>
 #include <pdal/PointTable.hpp>
@@ -16,16 +19,16 @@
 #include <pdal/io/LasWriter.hpp>
 #include <pdal/io/CopcReader.hpp>
 
+#include "coordstransformer.h"
 #include "entry.h"
 #include "exceptions.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "geo.h"
 #include "hash.h"
 #include "logger.h"
 #include "mio.h"
 #include "ply.h"
 #include "untwine_runner.h"
-#include "utils.h"
 
 namespace ddb {
 
@@ -47,15 +50,11 @@ struct TextReaderConfig {
 
 // Trim leading/trailing whitespace and surrounding double quotes from a token
 static std::string trimAndUnquote(const std::string& token) {
-    size_t start = token.find_first_not_of(" \t\r\n");
-    size_t end = token.find_last_not_of(" \t\r\n");
-    if (start == std::string::npos)
-        return "";
-    std::string trimmed = token.substr(start, end - start + 1);
+    std::string_view trimmed = str::trimView(token, " \t\r\n");
     // Strip surrounding double quotes if present
     if (trimmed.size() >= 2 && trimmed.front() == '"' && trimmed.back() == '"')
         trimmed = trimmed.substr(1, trimmed.size() - 2);
-    return trimmed;
+    return std::string(trimmed);
 }
 
 // Check if a line is empty or contains only whitespace
@@ -77,7 +76,7 @@ static bool isSingleInteger(const std::string& line) {
     if (trimmed.empty())
         return false;
     for (char c : trimmed) {
-        if (!std::isdigit(static_cast<unsigned char>(c)))
+        if (!str::isDigitChar(c))
             return false;
     }
     return true;
@@ -86,7 +85,7 @@ static bool isSingleInteger(const std::string& line) {
 // Check if a line contains any alphabetic characters (indicator of a header line)
 static bool containsAlpha(const std::string& line) {
     for (char c : line) {
-        if (std::isalpha(static_cast<unsigned char>(c)))
+        if (str::isAlphaChar(c))
             return true;
     }
     return false;
@@ -94,24 +93,14 @@ static bool containsAlpha(const std::string& line) {
 
 // Split a line by a specific separator. For space, any run of whitespace is one separator.
 static std::vector<std::string> splitBySeparator(const std::string& line, char sep) {
+    // Whitespace-separated: split on runs of spaces/tabs
+    const std::vector<std::string> tokens = sep == ' ' ? str::splitWhitespace(line) : str::split(line, sep);
+
     std::vector<std::string> result;
-    if (sep == ' ') {
-        // Whitespace-separated: split on runs of spaces/tabs
-        std::istringstream iss(line);
-        std::string token;
-        while (iss >> token) {
-            std::string t = trimAndUnquote(token);
-            if (!t.empty())
-                result.push_back(t);
-        }
-    } else {
-        std::string token;
-        std::istringstream iss(line);
-        while (std::getline(iss, token, sep)) {
-            std::string t = trimAndUnquote(token);
-            if (!t.empty())
-                result.push_back(t);
-        }
+    for (const std::string& token : tokens) {
+        std::string t = trimAndUnquote(token);
+        if (!t.empty())
+            result.push_back(std::move(t));
     }
     return result;
 }
@@ -161,7 +150,7 @@ static std::string mapColumnName(const std::string& raw) {
 // Read up to maxLines lines from a file into memory
 static std::vector<std::string> readLeadingLines(const std::string& filename, size_t maxLines) {
     std::vector<std::string> lines;
-    std::ifstream file(filename);
+    std::ifstream file(io::fromUtf8(filename));
     if (!file.is_open())
         return lines;
     std::string line;
@@ -178,7 +167,7 @@ static bool looksLikeHeaderLine(const std::string& line) {
     // Exclude scientific-notation-only alpha (e/E) followed/preceded by digits or signs
     // Conservative: if the line contains any letter other than e/E, it's a header
     for (char c : line) {
-        if (std::isalpha(static_cast<unsigned char>(c)) && c != 'e' && c != 'E')
+        if (str::isAlphaChar(c) && c != 'e' && c != 'E')
             return true;
     }
     // Only e/E present: could be scientific notation, not a header
@@ -352,7 +341,7 @@ TextReaderConfig detectTextFormat(const std::string& filename) {
 }
 
 std::string resolvePointCloudReaderDriver(const std::string& filename) {
-    const io::Path path(filename);
+    const io::Path path(io::fromUtf8(filename));
 
     if (path.checkExtension({"pts"}))
         return "readers.pts";
@@ -407,29 +396,21 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
 
     // We need to convert the bbox to EPSG:<polyboundsSrs>
     if (quickInfo.m_srs.valid()) {
-        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-        OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
-
         std::string proj = quickInfo.m_srs.getProj4();
-        if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE) {
-            OSRDestroySpatialReference(hTgt);
-            OSRDestroySpatialReference(hSrs);
+        const SrsPtr srs = srsFromProj4(proj.c_str());
+        if (!srs) {
             throw GDALException("Cannot import spatial reference system " + proj +
                                 ". Is PROJ available?");
         }
 
-        if (OSRImportFromEPSG(hTgt, polyBoundsSrs) != OGRERR_NONE) {
-            OSRDestroySpatialReference(hTgt);
-            OSRDestroySpatialReference(hSrs);
+        const SrsPtr tgt = srsFromEpsg(polyBoundsSrs);
+        if (!tgt) {
             throw GDALException("Cannot read EPSG:" + std::to_string(polyBoundsSrs) +
                                 ". Is PROJ available?");
         }
 
-        OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
-
-        if (!hTransform) {
-            OSRDestroySpatialReference(hTgt);
-            OSRDestroySpatialReference(hSrs);
+        const auto transform = CoordsTransformer::tryCreate(srsOf(srs), srsOf(tgt));
+        if (!transform) {
             throw GDALException("Cannot create coordinate transformation from " + proj +
                                 " to EPSG:" + std::to_string(polyBoundsSrs));
         }
@@ -441,13 +422,10 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
         double geoMaxY = bbox.maxy;
         double geoMaxZ = bbox.maxz;
 
-        bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
-        bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
+        bool minSuccess = transform->tryTransform(1, &geoMinX, &geoMinY, &geoMinZ);
+        bool maxSuccess = transform->tryTransform(1, &geoMaxX, &geoMaxY, &geoMaxZ);
 
         if (!minSuccess || !maxSuccess) {
-            OCTDestroyCoordinateTransformation(hTransform);
-            OSRDestroySpatialReference(hTgt);
-            OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot transform coordinates " + bbox.toWKT() + " to " +
                                 proj);
         }
@@ -470,22 +448,15 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
             double centroidY = (bbox.miny + bbox.maxy) / 2.0;
             double centroidZ = bbox.minz;
 
-            if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)) {
+            if (transform->tryTransform(1, &centroidX, &centroidY, &centroidZ)) {
                 info.centroid.clear();
                 info.centroid.addPoint(centroidX, centroidY, centroidZ);
             } else {
-                OCTDestroyCoordinateTransformation(hTransform);
-                OSRDestroySpatialReference(hTgt);
-                OSRDestroySpatialReference(hSrs);
                 throw GDALException("Cannot transform coordinates " +
                                     std::to_string(centroidX) + ", " +
                                     std::to_string(centroidY) + " to " + proj);
             }
         }
-
-        OCTDestroyCoordinateTransformation(hTransform);
-        OSRDestroySpatialReference(hTgt);
-        OSRDestroySpatialReference(hSrs);
     }
 }
 
@@ -546,11 +517,11 @@ bool populatePointCloudInfoFromReaderExecution(pdal::Stage& reader, PointCloudIn
 }  // namespace
 
 bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int polyBoundsSrs) {
-    const io::Path path(filename);
+    const io::Path path(io::fromUtf8(filename));
 
     if (path.checkExtension({"ply"})) {
         PlyInfo plyInfo;
-        if (!getPlyInfo(filename, plyInfo))
+        if (!getPlyInfo(io::fromUtf8(filename), plyInfo))
             return false;
         else {
             info.bounds.clear();
@@ -645,15 +616,7 @@ inline void updateGlobalBounds(const PointCloudInfo& info,
 }
 
 bool isCopcPath(const std::string& filename) {
-    if (filename.size() < 9) return false;
-    // Lowercase comparison of trailing ".copc.laz"
-    static const std::string suffix = ".copc.laz";
-    if (filename.size() < suffix.size()) return false;
-    const std::string tail = filename.substr(filename.size() - suffix.size());
-    std::string lc(tail.size(), '\0');
-    std::transform(tail.begin(), tail.end(), lc.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return lc == suffix;
+    return str::endsWithCI(filename, ".copc.laz");
 }
 
 // PDAL-based COPC builder: classic readers.las -> writers.copc pipeline.
@@ -684,11 +647,11 @@ static void buildCopcPdal(const std::vector<std::string>& inputFiles,
         }
 
         pdal::Options wo;
-        wo.add("filename", outPath.string());
+        wo.add("filename", io::toUtf8(outPath));
         wo.add("forward", "all");
         // Preserve any extra dimensions present in the source.
         wo.add("extra_dims", "all");
-        pdal::Stage& writer = mgr.makeWriter(outPath.string(), "writers.copc", *tail, wo);
+        pdal::Stage& writer = mgr.makeWriter(io::toUtf8(outPath), "writers.copc", *tail, wo);
         (void)writer;
 
         mgr.execute();
@@ -709,11 +672,11 @@ static void buildCopcPdal(const std::vector<std::string>& inputFiles,
     }
 
     if (!fs::exists(outPath))
-        throw PDALException("COPC build did not produce output file: " + outPath.string());
+        throw PDALException("COPC build did not produce output file: " + io::toUtf8(outPath));
 }
 
 void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir) {
-    fs::path dest = outdir;
+    fs::path dest = io::fromUtf8(outdir);
     io::assureFolderExists(dest);
 
     fs::path tmpDir = dest / "tmp";
@@ -731,11 +694,11 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     double globalMaxY = std::numeric_limits<double>::lowest();
 
     for (const std::string& f : filenames) {
-        if (!fs::exists(f))
+        if (!fs::exists(io::fromUtf8(f)))
             throw FSException(f + " does not exist");
 
-        const EntryType type = fingerprint(f);
-        if (type != PointCloud)
+        const EntryType type = fingerprint(io::fromUtf8(f));
+        if (type != EntryType::PointCloud)
             throw InvalidArgsException(f + " is not a supported point cloud file");
 
         // Get point cloud info for validation
@@ -757,9 +720,9 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     // formats supported by PDAL's LAS reader (LAS/LAZ natively).
     std::vector<std::string> inputFiles;
     for (const auto& f : filenames) {
-        auto p = io::Path(f);
+        auto p = io::Path(io::fromUtf8(f));
         if (p.checkExtension({"ply", "e57", "pts", "xyz"})) {
-            std::string lasF = (tmpDir / Hash::strCRC64(f)).string() + ".las";
+            std::string lasF = io::toUtf8(tmpDir / Hash::strCRC64(f)) + ".las";
             LOGD << "Converting " << f << " to " << lasF;
             translateToLas(f, lasF);
             inputFiles.push_back(lasF);
@@ -788,9 +751,9 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
 
     // Legacy EPT cleanup: if a previous EPT build is in this folder, remove it. The
     // build pipeline already does this on its side, but we are defensive here too.
-    io::assureIsRemoved(dest / "ept.json");
-    io::assureIsRemoved(dest / "ept-data");
-    io::assureIsRemoved(dest / "ept-hierarchy");
+    io::assureIsRemoved(dest / LegacyEptFileName);
+    io::assureIsRemoved(dest / LegacyEptDataFolder);
+    io::assureIsRemoved(dest / LegacyEptHierarchyFolder);
 
     CopcBackend backend = untwine::resolveBackend(CopcBackend::Auto);
 
@@ -814,132 +777,15 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     buildCopcPdal(inputFiles, outPath, tmpDir);
 }
 
-json PointCloudInfo::toJSON() {
-    json j;
-    j["pointCount"] = pointCount;
-    j["projection"] = wktProjection;
-    j["dimensions"] = dimensions;
-
-    return j;
-}
-
-// Iterates a point view and returns an array with normalized 8bit colors
-std::vector<PointColor> normalizeColors(const std::shared_ptr<pdal::PointView>& point_view) {
-    std::vector<PointColor> result;
-
-    // Check if color dimensions exist in the point cloud
-    pdal::Dimension::IdList dims = point_view->dims();
-    bool hasRed = std::find(dims.begin(), dims.end(), pdal::Dimension::Id::Red) != dims.end();
-    bool hasGreen = std::find(dims.begin(), dims.end(), pdal::Dimension::Id::Green) != dims.end();
-    bool hasBlue = std::find(dims.begin(), dims.end(), pdal::Dimension::Id::Blue) != dims.end();
-
-    // If color dimensions don't exist, return default gray colors
-    if (!hasRed || !hasGreen || !hasBlue) {
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-            PointColor color;
-            color.r = 128; // Default gray color
-            color.g = 128;
-            color.b = 128;
-            result.push_back(color);
-        }
-        return result;
-    }
-
-    bool normalize = false;
-    try {
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-            auto p = point_view->point(idx);
-            uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
-            uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
-            uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
-
-            if (red > 255 || green > 255 || blue > 255) {
-                normalize = true;
-                break;
-            }
-        }
-    } catch (const std::exception& e) {
-        LOGD << "Exception in normalizeColors first pass: " << e.what();
-        // Return default colors if there's an error accessing color fields
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-            PointColor color;
-            color.r = 128;
-            color.g = 128;
-            color.b = 128;
-            result.push_back(color);
-        }
-        return result;
-    }
-
-    try {
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-            auto p = point_view->point(idx);
-            uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
-            uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
-            uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
-            PointColor color;
-
-            if (normalize) {
-                color.r = red >> 8;
-                color.g = green >> 8;
-                color.b = blue >> 8;
-            } else {
-                color.r = static_cast<uint8_t>(red);
-                color.g = static_cast<uint8_t>(green);
-                color.b = static_cast<uint8_t>(blue);
-            }
-
-            result.push_back(color);
-        }
-    } catch (const std::exception& e) {
-        LOGD << "Exception in normalizeColors second pass: " << e.what();
-        // Return default colors if there's an error accessing color fields
-        result.clear();
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-            PointColor color;
-            color.r = 128;
-            color.g = 128;
-            color.b = 128;
-            result.push_back(color);
-        }
-    }
-
-    return result;
-}
-
-std::vector<PointColor> generateZBasedColors(const std::shared_ptr<pdal::PointView>& point_view, double minZ, double maxZ) {
-    std::vector<PointColor> colors;
-    colors.reserve(point_view->size());
-
-    double zRange = maxZ - minZ;
-
-    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-        auto p = point_view->point(idx);
-        auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
-
-        PointColor color;
-        if (zRange > 0) {
-            // Normalize Z to 0-1 range
-            double normalizedZ = (z - minZ) / zRange;
-            // Simple grayscale mapping: lower Z = darker, higher Z = lighter
-            uint8_t intensity = static_cast<uint8_t>(normalizedZ * 255);
-            color.r = intensity;
-            color.g = intensity;
-            color.b = intensity;
-        } else {
-            // All points at same Z level, use gray
-            color.r = 128;
-            color.g = 128;
-            color.b = 128;
-        }
-        colors.push_back(color);
-    }
-
-    return colors;
+void to_json(json& j, const PointCloudInfo& info) {
+    j = json::object();
+    j["pointCount"] = info.pointCount;
+    j["projection"] = info.wktProjection;
+    j["dimensions"] = info.dimensions;
 }
 
 void translateToLas(const std::string& input, const std::string& outputLas) {
-    if (!fs::exists(input))
+    if (!fs::exists(io::fromUtf8(input)))
         throw FSException(input + " does not exist");
 
     try {

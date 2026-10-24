@@ -4,18 +4,20 @@
 
 #include <gtest/gtest.h>
 #include "logger.h"
-#include "ddb.h"
+#include "process_init.h"
 #include "utils.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "win_crash_report.h"
 #include <fstream>
 #include <iostream>
 #include <cstring>
 
 int main(int argc, char **argv)
 {
+    installWindowsCrashReport();
 
-    DDBRegisterProcess(true);
+    ddb::registerProcess(true);
 
 
     bool cleanTestData = false;
@@ -70,6 +72,10 @@ int main(int argc, char **argv)
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - time).count();
 
     std::cout << "Tests finished in " << toHumanReadableTime(duration) << std::endl;
+
+    // Every test thread is joined: GDAL's worker threads are joined now, not left to GDAL's
+    // DllMain after ExitProcess terminated them (process_init.h)
+    ddb::finalizeProcess();
 
     return res;
 

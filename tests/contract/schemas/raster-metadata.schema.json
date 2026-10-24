@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb raster metadata",
+  "description": "DDBGetRasterMetadata: per-band statistics (keys \"1\", \"2\", ...), or one formula's statistics with a histogram (key \"1\")",
+  "type": "object",
+  "required": [
+    "statistics",
+    "algorithms",
+    "colormaps",
+    "autoBands",
+    "detectedSensor"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "statistics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "min",
+          "max",
+          "mean",
+          "std",
+          "percentiles"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "mean": {
+            "type": "number"
+          },
+          "std": {
+            "type": "number"
+          },
+          "percentiles": {
+            "type": "object",
+            "required": [
+              "p2",
+              "p98"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "p2": {
+                "type": "number"
+              },
+              "p98": {
+                "type": "number"
+              }
+            }
+          },
+          "histogram": {
+            "type": "object",
+            "required": [
+              "counts",
+              "edges",
+              "bins"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "counts": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "edges": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "bins": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      }
+    },
+    "algorithms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "expr",
+          "help"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "expr": {
+            "type": "string"
+          },
+          "help": {
+            "type": "string"
+          },
+          "range": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "disabledReason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "colormaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "colors"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            }
+          }
+        }
+      }
+    },
+    "autoBands": {
+      "type": "object",
+      "required": [
+        "filter",
+        "match"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "type": "string"
+        },
+        "match": {
+          "type": "boolean"
+        }
+      }
+    },
+    "detectedSensor": {
+      "type": "string"
+    }
+  }
+}

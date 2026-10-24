@@ -2,10 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "stockpile.h"
+#include "dem.h"
+#include "mathutil.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
-#include "utils.h"
 
 #include <gdal_priv.h>
 #include <ogr_api.h>
@@ -19,6 +21,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <queue>
 #include <stack>
 #include <string>
@@ -27,24 +30,6 @@
 namespace ddb {
 
 namespace {
-
-struct SrsHandle {
-    OGRSpatialReferenceH h = nullptr;
-    explicit SrsHandle(OGRSpatialReferenceH handle = nullptr) : h(handle) {}
-    ~SrsHandle() { if (h) OSRDestroySpatialReference(h); }
-    SrsHandle(const SrsHandle &) = delete;
-    SrsHandle &operator=(const SrsHandle &) = delete;
-};
-
-struct CtHandle {
-    OGRCoordinateTransformationH h = nullptr;
-    ~CtHandle() { if (h) OCTDestroyCoordinateTransformation(h); }
-};
-
-struct DsGuard {
-    GDALDatasetH h = nullptr;
-    ~DsGuard() { if (h) GDALClose(h); }
-};
 
 // Separable 1-D gaussian blur, applied in place on a float grid.
 void gaussianFilter(std::vector<float> &data, int width, int height, float sigma) {
@@ -221,63 +206,44 @@ std::vector<std::pair<double, double>> douglasPeucker(
 
 } // anonymous namespace
 
-std::string detectStockpileJson(const std::string &rasterPath,
-                                double lat, double lon,
-                                double radiusMeters,
-                                float sensitivity) {
-    sensitivity = std::clamp(sensitivity, 0.0f, 1.0f);
-    if (!(radiusMeters > 0.0))
-        throw InvalidArgsException("radius must be positive");
+namespace {
 
-    LOGD << "detectStockpile path=" << rasterPath
-         << " lat=" << lat << " lon=" << lon
-         << " r=" << radiusMeters << " s=" << sensitivity;
+using Ring = std::vector<std::pair<double, double>>;
 
-    // --- Open raster ---
-    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDs) throw AppException("Cannot open raster: " + rasterPath);
-    DsGuard dsGuard{hDs};
-
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None)
-        throw AppException("Raster has no geotransform: " + rasterPath);
-
-    const int rasterW = GDALGetRasterXSize(hDs);
-    const int rasterH = GDALGetRasterYSize(hDs);
-    if (GDALGetRasterCount(hDs) < 1)
-        throw AppException("Raster has no bands");
-
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-    int hasNoData = 0;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
-    const char *projRef = GDALGetProjectionRef(hDs);
-    const std::string projection = projRef ? projRef : "";
-
-    // --- CRS setup (WGS84 <-> raster, WGS84 <-> raster) ---
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
-
-    SrsHandle rasterSrs;
-    bool rasterIsGeographic = false;
-    if (!projection.empty()) {
-        rasterSrs.h = OSRNewSpatialReference(nullptr);
-        char *wktPtr = const_cast<char *>(projection.c_str());
-        if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-            OSRDestroySpatialReference(rasterSrs.h);
-            rasterSrs.h = nullptr;
-        } else {
-            OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
-        }
+// The GeoJSON polygon of a ring of (lon, lat) points
+json polygonJson(const Ring &ring) {
+    json coords = json::array();
+    json outerRing = json::array();
+    for (const auto &p : ring) {
+        outerRing.push_back({p.first, p.second}); // [lon, lat]
     }
+    coords.push_back(outerRing);
+    return { {"type", "Polygon"}, {"coordinates", coords} };
+}
 
-    // Click coordinates in raster CRS.
+// How close to a disc the shape is: 1 for a circle, towards 0 for a thin one
+double compactnessOf(double areaPx, double boundaryPx) {
+    return (boundaryPx > 0)
+        ? std::min(1.0, (4.0 * ddb::kPi * areaPx) / (boundaryPx * boundaryPx))
+        : 0.0;
+}
+
+// The window of the raster around a click, where the search for a pile runs
+struct SearchWindow {
+    int centerCol = 0, centerRow = 0;
+    int startCol = 0, startRow = 0;
+    int width = 0, height = 0;
+    PixelSize pixel;        // meters
+    double pixelMeters = 0; // the mean of both sides
+};
+
+SearchWindow searchWindow(const DemContext &dem, double lat, double lon, double radiusMeters) {
+    const double *gt = dem.gt;
+
+    // --- Click coordinates in raster CRS ---
     double clickX = lon, clickY = lat;
-    if (rasterSrs.h) {
-        CtHandle wgsToRaster;
-        wgsToRaster.h = OCTNewCoordinateTransformation(wgs84.h, rasterSrs.h);
-        if (!wgsToRaster.h || !OCTTransform(wgsToRaster.h, 1, &clickX, &clickY, nullptr))
+    if (const auto wgsToRaster = dem.wgs84ToDem()) {
+        if (!wgsToRaster->tryTransform(1, &clickX, &clickY))
             throw AppException("Cannot project click coordinates into raster CRS");
     }
 
@@ -285,78 +251,72 @@ std::string detectStockpileJson(const std::string &rasterPath,
     if (!GDALInvGeoTransform(gt, invGt))
         throw AppException("Cannot invert geotransform");
 
+    SearchWindow w;
     const double centerColD = invGt[0] + invGt[1] * clickX + invGt[2] * clickY;
     const double centerRowD = invGt[3] + invGt[4] * clickX + invGt[5] * clickY;
-    const int centerCol = static_cast<int>(std::floor(centerColD));
-    const int centerRow = static_cast<int>(std::floor(centerRowD));
+    w.centerCol = static_cast<int>(std::floor(centerColD));
+    w.centerRow = static_cast<int>(std::floor(centerRowD));
 
-    if (centerCol < 0 || centerCol >= rasterW || centerRow < 0 || centerRow >= rasterH)
+    if (w.centerCol < 0 || w.centerCol >= dem.width || w.centerRow < 0 || w.centerRow >= dem.height)
         throw InvalidArgsException("Click point is outside raster bounds");
 
     // Convert radius (meters) to pixels. For projected CRS the pixel size is
     // already in meters; for geographic CRS we approximate using lat.
-    double metersPerPixelX = std::fabs(gt[1]);
-    double metersPerPixelY = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs.h) {
-        const double d2r = M_PI / 180.0;
-        const double mPerDeg = 111320.0; // good-enough WGS84 approximation
-        metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(lat * d2r);
-        metersPerPixelY = std::fabs(gt[5]) * mPerDeg;
-        if (metersPerPixelX < 1e-6) metersPerPixelX = mPerDeg * std::fabs(gt[1]);
-    }
-    const double pixelMeters = 0.5 * (metersPerPixelX + metersPerPixelY);
-    const int radiusPx = std::max(8, static_cast<int>(std::ceil(radiusMeters / pixelMeters)));
+    w.pixel = dem.pixelSizeMeters(lat);
+    w.pixelMeters = 0.5 * (w.pixel.x + w.pixel.y);
+    const int radiusPx = std::max(8, static_cast<int>(std::ceil(radiusMeters / w.pixelMeters)));
 
-    const int startCol = std::max(0, centerCol - radiusPx);
-    const int startRow = std::max(0, centerRow - radiusPx);
-    const int endCol = std::min(rasterW, centerCol + radiusPx + 1);
-    const int endRow = std::min(rasterH, centerRow + radiusPx + 1);
-    const int width = endCol - startCol;
-    const int height = endRow - startRow;
-    if (width < 3 || height < 3)
+    w.startCol = std::max(0, w.centerCol - radiusPx);
+    w.startRow = std::max(0, w.centerRow - radiusPx);
+    const int endCol = std::min(dem.width, w.centerCol + radiusPx + 1);
+    const int endRow = std::min(dem.height, w.centerRow + radiusPx + 1);
+    w.width = endCol - w.startCol;
+    w.height = endRow - w.startRow;
+    if (w.width < 3 || w.height < 3)
         throw InvalidArgsException("Search window too small; increase the radius");
+    return w;
+}
 
-    // --- Read raster window ---
-    std::vector<float> region(static_cast<size_t>(width) * height);
-    if (GDALRasterIO(hBand, GF_Read, startCol, startRow, width, height,
-                     region.data(), width, height, GDT_Float32, 0, 0) != CE_None)
-        throw AppException("Cannot read raster data");
-
-    const auto isValid = [&](float v) {
-        if (!std::isfinite(v)) return false;
-        if (hasNoData && std::fabs(static_cast<double>(v) - noData) < 1e-9) return false;
-        return true;
-    };
-
-    // --- Base plane from outer border ring ---
+// The elevation of the ground around the pile: the median (low sensitivity) or the mean of the
+// valid samples of the outer border ring of the region
+double borderElevation(const DemContext &dem, const std::vector<float> &region, int width, int height,
+                       float sensitivity) {
     std::vector<double> border;
     border.reserve(static_cast<size_t>(width + height) * 2);
     for (int c = 0; c < width; c++) {
-        if (isValid(region[c])) border.push_back(region[c]);
-        if (isValid(region[(height - 1) * width + c])) border.push_back(region[(height - 1) * width + c]);
+        if (dem.isValid(region[c])) border.push_back(region[c]);
+        if (dem.isValid(region[(height - 1) * width + c])) border.push_back(region[(height - 1) * width + c]);
     }
     for (int r = 1; r < height - 1; r++) {
-        if (isValid(region[r * width])) border.push_back(region[r * width]);
-        if (isValid(region[r * width + width - 1])) border.push_back(region[r * width + width - 1]);
+        if (dem.isValid(region[r * width])) border.push_back(region[r * width]);
+        if (dem.isValid(region[r * width + width - 1])) border.push_back(region[r * width + width - 1]);
     }
     if (border.empty())
         throw AppException("Search region contains no valid data");
 
-    double baseElev;
     if (sensitivity < 0.3f) {
         std::sort(border.begin(), border.end());
-        baseElev = border[border.size() / 2]; // median
-    } else {
-        double s = 0;
-        for (double v : border) s += v;
-        baseElev = s / static_cast<double>(border.size());
+        return border[border.size() / 2]; // median
     }
+    double s = 0;
+    for (double v : border) s += v;
+    return s / static_cast<double>(border.size());
+}
 
-    // --- Difference map + smoothing ---
-    std::vector<float> diff(static_cast<size_t>(width) * height, 0.0f);
+// The smoothed difference from the base elevation, and where it exceeds the adaptive threshold
+struct DifferenceMap {
+    std::vector<float> diff;
+    std::vector<uint8_t> binary;
+};
+
+DifferenceMap differenceMap(const DemContext &dem, const std::vector<float> &region, int width, int height,
+                            double baseElev, float sensitivity) {
+    DifferenceMap map;
+    std::vector<float> &diff = map.diff;
+    diff.assign(static_cast<size_t>(width) * height, 0.0f);
     for (size_t i = 0; i < diff.size(); i++) {
-        if (isValid(region[i])) diff[i] = region[i] - static_cast<float>(baseElev);
-        else                    diff[i] = 0.0f;
+        if (dem.isValid(region[i])) diff[i] = region[i] - static_cast<float>(baseElev);
+        else                        diff[i] = 0.0f;
     }
 
     const float sigma = (1.0f - sensitivity) * 10.0f + 1.0f;
@@ -372,15 +332,17 @@ std::string detectStockpileJson(const std::string &rasterPath,
     if (meanAbs < 1e-6) meanAbs = 1e-6;
     const double threshold = meanAbs * (1.5 - sensitivity);
 
-    std::vector<uint8_t> binary(diff.size(), 0);
+    map.binary.assign(diff.size(), 0);
     for (size_t i = 0; i < diff.size(); i++)
-        binary[i] = (diff[i] > threshold) ? 1 : 0;
+        map.binary[i] = (diff[i] > threshold) ? 1 : 0;
+    return map;
+}
 
-    // --- Flood fill from click ---
-    const int localCol = centerCol - startCol;
-    const int localRow = centerRow - startRow;
-    size_t componentSize = 0;
-    auto component = floodFill(binary, width, height, localCol, localRow, componentSize);
+// The connected component of the click (local coordinates); when it is tiny, the click is
+// nudged to the strongest neighbour of the difference map
+std::vector<uint8_t> componentAtClick(const DifferenceMap &map, int width, int height, int localCol,
+                                      int localRow, size_t &componentSize) {
+    auto component = floodFill(map.binary, width, height, localCol, localRow, componentSize);
     if (componentSize < 4) {
         // Try nudging the seed to the strongest neighbour within a small radius
         // (helpful when the click lands slightly off the pile).
@@ -391,12 +353,74 @@ std::string detectStockpileJson(const std::string &rasterPath,
             for (int dx = -nudge; dx <= nudge; dx++) {
                 const int nx = localCol + dx, ny = localRow + dy;
                 if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-                const float v = diff[ny * width + nx];
-                if (binary[ny * width + nx] && v > bestV) { bestV = v; bestX = nx; bestY = ny; }
+                const float v = map.diff[ny * width + nx];
+                if (map.binary[ny * width + nx] && v > bestV) { bestV = v; bestX = nx; bestY = ny; }
             }
         }
-        component = floodFill(binary, width, height, bestX, bestY, componentSize);
+        component = floodFill(map.binary, width, height, bestX, bestY, componentSize);
     }
+    return component;
+}
+
+// Simplifies the contour (map coordinates) with Douglas-Peucker, closes the ring and moves it to
+// WGS84 (lon, lat)
+Ring wgs84Ring(const DemContext &dem, const Ring &contourMap, double epsilon) {
+    auto simplified = douglasPeucker(contourMap, epsilon);
+    if (simplified.size() < 3) simplified = contourMap;
+
+    // Close the polygon ring.
+    if (simplified.front() != simplified.back()) simplified.push_back(simplified.front());
+
+    // Back to WGS84 for GeoJSON output.
+    Ring ring;
+    ring.reserve(simplified.size());
+    if (const auto rasterToWgs = dem.demToWgs84()) {
+        for (auto &p : simplified) {
+            double x = p.first, y = p.second;
+            if (!rasterToWgs->tryTransform(1, &x, &y))
+                throw AppException("Cannot transform contour to WGS84");
+            ring.push_back({x, y}); // lon, lat (traditional GIS order)
+        }
+    } else {
+        ring = simplified; // already WGS84
+    }
+    return ring;
+}
+
+} // anonymous namespace
+
+std::string detectStockpileJson(const std::string &rasterPath,
+                                double lat, double lon,
+                                double radiusMeters,
+                                float sensitivity) {
+    sensitivity = std::clamp(sensitivity, 0.0f, 1.0f);
+    if (!(radiusMeters > 0.0))
+        throw InvalidArgsException("radius must be positive");
+
+    LOGD << "detectStockpile path=" << rasterPath
+         << " lat=" << lat << " lon=" << lon
+         << " r=" << radiusMeters << " s=" << sensitivity;
+
+    // --- Open raster, and the window around the click ---
+    const DemContext dem = openDem(rasterPath);
+    const double *gt = dem.gt;
+    const SearchWindow win = searchWindow(dem, lat, lon, radiusMeters);
+    const int width = win.width;
+    const int height = win.height;
+
+    // --- Read raster window ---
+    const std::vector<float> region = dem.readElevations(win.startCol, win.startRow, width, height);
+
+    // --- Base plane from outer border ring, difference map + smoothing ---
+    const double baseElev = borderElevation(dem, region, width, height, sensitivity);
+    const DifferenceMap map = differenceMap(dem, region, width, height, baseElev, sensitivity);
+    const std::vector<float> &diff = map.diff;
+
+    // --- Flood fill from click ---
+    const int localCol = win.centerCol - win.startCol;
+    const int localRow = win.centerRow - win.startRow;
+    size_t componentSize = 0;
+    const auto component = componentAtClick(map, width, height, localCol, localRow, componentSize);
     if (componentSize < 4)
         throw AppException("No stockpile detected at this location");
 
@@ -406,45 +430,23 @@ std::string detectStockpileJson(const std::string &rasterPath,
         throw AppException("Failed to trace stockpile contour");
 
     // Convert pixels to raster map coordinates.
-    std::vector<std::pair<double, double>> contourMap;
+    Ring contourMap;
     contourMap.reserve(contourPx.size());
     for (const auto &p : contourPx) {
-        const double mx = gt[0] + (startCol + p.first + 0.5) * gt[1]
-                          + (startRow + p.second + 0.5) * gt[2];
-        const double my = gt[3] + (startCol + p.first + 0.5) * gt[4]
-                          + (startRow + p.second + 0.5) * gt[5];
+        const double mx = gt[0] + (win.startCol + p.first + 0.5) * gt[1]
+                          + (win.startRow + p.second + 0.5) * gt[2];
+        const double my = gt[3] + (win.startCol + p.first + 0.5) * gt[4]
+                          + (win.startRow + p.second + 0.5) * gt[5];
         contourMap.push_back({mx, my});
     }
 
     // Douglas-Peucker in map units. Tune epsilon by sensitivity:
     // low sensitivity -> coarser polygon, high sensitivity -> finer polygon.
     const double epsPx = (1.0 - sensitivity) * 5.0 + 0.5;
-    auto simplified = douglasPeucker(contourMap, epsPx * pixelMeters);
-    if (simplified.size() < 3) simplified = contourMap;
-
-    // Close the polygon ring.
-    if (simplified.front() != simplified.back()) simplified.push_back(simplified.front());
-
-    // Back to WGS84 for GeoJSON output.
-    std::vector<std::pair<double, double>> ring;
-    ring.reserve(simplified.size());
-    if (rasterSrs.h) {
-        CtHandle rasterToWgs;
-        rasterToWgs.h = OCTNewCoordinateTransformation(rasterSrs.h, wgs84.h);
-        if (!rasterToWgs.h)
-            throw AppException("Cannot build transform to WGS84");
-        for (auto &p : simplified) {
-            double x = p.first, y = p.second;
-            if (!OCTTransform(rasterToWgs.h, 1, &x, &y, nullptr))
-                throw AppException("Cannot transform contour to WGS84");
-            ring.push_back({x, y}); // lon, lat (traditional GIS order)
-        }
-    } else {
-        ring = simplified; // already WGS84
-    }
+    const Ring ring = wgs84Ring(dem, contourMap, epsPx * win.pixelMeters);
 
     // --- Preliminary volume estimate inside the component ---
-    const double pixelArea = metersPerPixelX * metersPerPixelY;
+    const double pixelArea = win.pixel.x * win.pixel.y;
     double estVolume = 0.0;
     for (size_t i = 0; i < component.size(); i++) {
         if (component[i] && diff[i] > 0) estVolume += diff[i] * pixelArea;
@@ -452,25 +454,13 @@ std::string detectStockpileJson(const std::string &rasterPath,
 
     // Confidence: scale by shape compactness + component size.
     const double areaPx = static_cast<double>(componentSize);
-    const double boundaryPx = static_cast<double>(contourPx.size());
-    const double compactness = (boundaryPx > 0)
-        ? std::min(1.0, (4.0 * M_PI * areaPx) / (boundaryPx * boundaryPx))
-        : 0.0;
+    const double compactness = compactnessOf(areaPx, static_cast<double>(contourPx.size()));
     const double windowArea = static_cast<double>(width) * height;
     const double fillRatio = std::min(1.0, areaPx / windowArea);
     const double confidence = std::clamp(0.4 + 0.4 * compactness + 0.2 * fillRatio, 0.0, 1.0);
 
-    // --- Build GeoJSON polygon ---
-    json coords = json::array();
-    json outerRing = json::array();
-    for (const auto &p : ring) {
-        outerRing.push_back({p.first, p.second}); // [lon, lat]
-    }
-    coords.push_back(outerRing);
-    json polygon = { {"type", "Polygon"}, {"coordinates", coords} };
-
     json result;
-    result["polygon"] = polygon;
+    result["polygon"] = polygonJson(ring);
     result["estimatedVolume"] = estVolume;
     result["confidence"] = confidence;
     result["baseElevation"] = baseElev;
@@ -563,182 +553,86 @@ std::vector<uint8_t> extractComponentMask(const std::vector<int32_t> &labels,
 
 } // anonymous namespace
 
-std::string detectAllStockpilesJson(const std::string &rasterPath,
-                                    float sensitivity,
-                                    double minAreaM2,
-                                    int maxResults) {
-    sensitivity = std::clamp(sensitivity, 0.0f, 1.0f);
-    if (minAreaM2 < 0.0) minAreaM2 = 0.0;
-    if (maxResults <= 0) maxResults = 50;
-    // Hard cap: anti-DoS protection.
-    if (maxResults > 500) maxResults = 500;
 
-    LOGD << "detectAllStockpiles path=" << rasterPath
-         << " s=" << sensitivity << " minArea=" << minAreaM2
-         << " maxResults=" << maxResults;
+namespace {
 
-    // --- Open raster ---
-    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDs) throw AppException("Cannot open raster: " + rasterPath);
-    DsGuard dsGuard{hDs};
+// The raster as the batch detection reads it: shrunk by a power of two when it is huge
+struct ScaledRaster {
+    int scale = 1;
+    int width = 0, height = 0;   // of the shrunk grid
+    PixelSize pixel;             // meters of a pixel of the original raster
+    double cellArea = 0;         // m^2 of a cell of the shrunk grid
+    std::vector<float> samples;
+};
 
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None)
-        throw AppException("Raster has no geotransform: " + rasterPath);
+ScaledRaster readScaled(const DemContext &dem) {
+    const int rasterW = dem.width;
+    const int rasterH = dem.height;
 
-    const int rasterW = GDALGetRasterXSize(hDs);
-    const int rasterH = GDALGetRasterYSize(hDs);
-    if (GDALGetRasterCount(hDs) < 1)
-        throw AppException("Raster has no bands");
-
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-    int hasNoData = 0;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
-    const char *projRef = GDALGetProjectionRef(hDs);
-    const std::string projection = projRef ? projRef : "";
-
-    // --- CRS setup ---
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
-
-    SrsHandle rasterSrs;
-    bool rasterIsGeographic = false;
-    if (!projection.empty()) {
-        rasterSrs.h = OSRNewSpatialReference(nullptr);
-        char *wktPtr = const_cast<char *>(projection.c_str());
-        if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-            OSRDestroySpatialReference(rasterSrs.h);
-            rasterSrs.h = nullptr;
-        } else {
-            OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
-        }
-    }
-
-    // Approx pixel size in meters (for area/volume).
-    double metersPerPixelX = std::fabs(gt[1]);
-    double metersPerPixelY = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs.h) {
-        // Use raster center latitude for the cosine factor.
-        const double centerY = gt[3] + (rasterH / 2.0) * gt[5];
-        const double d2r = M_PI / 180.0;
-        const double mPerDeg = 111320.0;
-        metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(centerY * d2r);
-        metersPerPixelY = std::fabs(gt[5]) * mPerDeg;
-        if (metersPerPixelX < 1e-6) metersPerPixelX = mPerDeg * std::fabs(gt[1]);
-    }
-    const double pixelArea = metersPerPixelX * metersPerPixelY;
+    // Approx pixel size in meters (for area/volume). A geographic raster uses its center latitude
+    // for the cosine factor.
+    const double centerY = dem.gt[3] + (rasterH / 2.0) * dem.gt[5];
+    ScaledRaster r;
+    r.pixel = dem.pixelSizeMeters(centerY);
+    const double pixelArea = r.pixel.x * r.pixel.y;
     if (!(pixelArea > 0))
         throw AppException("Cannot compute pixel area for raster");
 
     // --- Decide reading scale (downsample huge rasters) ---
     // Cap working buffer at ~16M pixels to avoid OOM/DoS.
     const size_t maxPixels = 16ull * 1024ull * 1024ull;
-    int scale = 1;
-    while (static_cast<size_t>(rasterW / scale) * static_cast<size_t>(rasterH / scale) > maxPixels) {
-        scale *= 2;
+    while (static_cast<size_t>(rasterW / r.scale) * static_cast<size_t>(rasterH / r.scale) > maxPixels) {
+        r.scale *= 2;
     }
-    const int width = std::max(3, rasterW / scale);
-    const int height = std::max(3, rasterH / scale);
-    const double pxX = metersPerPixelX * static_cast<double>(scale);
-    const double pxY = metersPerPixelY * static_cast<double>(scale);
-    const double cellArea = pxX * pxY;
+    r.width = std::max(3, rasterW / r.scale);
+    r.height = std::max(3, rasterH / r.scale);
+    r.cellArea = (r.pixel.x * static_cast<double>(r.scale)) * (r.pixel.y * static_cast<double>(r.scale));
 
     LOGD << "detectAll: rasterW=" << rasterW << " rasterH=" << rasterH
-         << " scale=" << scale << " width=" << width << " height=" << height;
+         << " scale=" << r.scale << " width=" << r.width << " height=" << r.height;
 
     // --- Read full raster (downsampled if needed) ---
-    std::vector<float> region(static_cast<size_t>(width) * height);
-    if (GDALRasterIO(hBand, GF_Read, 0, 0, rasterW, rasterH,
-                     region.data(), width, height, GDT_Float32, 0, 0) != CE_None)
-        throw AppException("Cannot read raster data");
+    r.samples = dem.readElevations(0, 0, rasterW, rasterH, r.width, r.height);
+    return r;
+}
 
-    const auto isValid = [&](float v) {
-        if (!std::isfinite(v)) return false;
-        if (hasNoData && std::fabs(static_cast<double>(v) - noData) < 1e-9) return false;
-        return true;
-    };
-
-    // --- Global low-pass base plane ---
-    // Strong smoothing of the elevation gives an approximation of the terrain trend.
-    // Then diff = elevation - trend isolates the prominent positive features.
+// The terrain trend: a strong smoothing of the elevation, with nodata replaced by the median of
+// the valid values to keep the smoothing stable
+std::vector<float> terrainTrend(const DemContext &dem, const ScaledRaster &raster, float sensitivity) {
+    const std::vector<float> &region = raster.samples;
     std::vector<float> trend(region.size(), 0.0f);
-    {
-        // Replace nodata with median of valid values to keep the smoothing stable.
-        std::vector<double> valid;
-        valid.reserve(region.size() / 4);
-        for (float v : region) if (isValid(v)) valid.push_back(v);
-        if (valid.empty())
-            throw AppException("Raster contains no valid elevation data");
-        std::sort(valid.begin(), valid.end());
-        const float fillVal = static_cast<float>(valid[valid.size() / 2]);
-        for (size_t i = 0; i < region.size(); i++) {
-            trend[i] = isValid(region[i]) ? region[i] : fillVal;
-        }
-        // Sigma scales with image size and inversely with sensitivity:
-        // bigger sigma -> smoother trend -> more features come out.
-        const float baseSigma = std::max(8.0f, std::min(width, height) / 16.0f);
-        const float sigmaTrend = baseSigma * (1.5f - sensitivity);
-        gaussianFilter(trend, width, height, sigmaTrend);
-    }
 
-    // --- Difference map ---
-    std::vector<float> diff(region.size(), 0.0f);
+    std::vector<double> valid;
+    valid.reserve(region.size() / 4);
+    for (float v : region) if (dem.isValid(v)) valid.push_back(v);
+    if (valid.empty())
+        throw AppException("Raster contains no valid elevation data");
+    std::sort(valid.begin(), valid.end());
+    const float fillVal = static_cast<float>(valid[valid.size() / 2]);
     for (size_t i = 0; i < region.size(); i++) {
-        if (isValid(region[i])) diff[i] = region[i] - trend[i];
+        trend[i] = dem.isValid(region[i]) ? region[i] : fillVal;
     }
+    // Sigma scales with image size and inversely with sensitivity:
+    // bigger sigma -> smoother trend -> more features come out.
+    const float baseSigma = std::max(8.0f, std::min(raster.width, raster.height) / 16.0f);
+    const float sigmaTrend = baseSigma * (1.5f - sensitivity);
+    gaussianFilter(trend, raster.width, raster.height, sigmaTrend);
+    return trend;
+}
 
-    // Light smoothing on diff to suppress noise.
-    const float sigmaDiff = (1.0f - sensitivity) * 4.0f + 0.5f;
-    gaussianFilter(diff, width, height, sigmaDiff);
+// What a connected component adds up to
+struct ComponentStat {
+    int32_t id = 0;
+    size_t pixelCount = 0;
+    double estVolume = 0.0;
+    double sumX = 0.0; // pixel X centroid accumulator
+    double sumY = 0.0;
+    double maxDiff = 0.0;
+};
 
-    // Adaptive threshold on positive diff (we only care about mounds).
-    double sumPos = 0.0;
-    size_t cntPos = 0;
-    for (float v : diff) {
-        if (v > 0.0f) { sumPos += v; cntPos++; }
-    }
-    if (cntPos == 0) {
-        json result;
-        result["stockpiles"] = json::array();
-        result["totalFound"] = 0;
-        result["sensitivityUsed"] = sensitivity;
-        result["minAreaUsed"] = minAreaM2;
-        return result.dump();
-    }
-    const double meanPos = sumPos / static_cast<double>(cntPos);
-    const double threshold = meanPos * (1.5 - sensitivity);
-
-    std::vector<uint8_t> binary(diff.size(), 0);
-    for (size_t i = 0; i < diff.size(); i++) {
-        if (diff[i] > threshold && isValid(region[i])) binary[i] = 1;
-    }
-
-    // --- Connected components ---
-    int32_t numLabels = 0;
-    auto labels = labelConnectedComponents(binary, width, height, numLabels);
-    LOGD << "detectAll: components=" << numLabels;
-
-    if (numLabels == 0) {
-        json result;
-        result["stockpiles"] = json::array();
-        result["totalFound"] = 0;
-        result["sensitivityUsed"] = sensitivity;
-        result["minAreaUsed"] = minAreaM2;
-        return result.dump();
-    }
-
-    // --- Compute per-component stats ---
-    struct CompStat {
-        int32_t id = 0;
-        size_t pixelCount = 0;
-        double estVolume = 0.0;
-        double sumX = 0.0; // pixel X centroid accumulator
-        double sumY = 0.0;
-        double maxDiff = 0.0;
-    };
-    std::vector<CompStat> stats(numLabels + 1);
+std::vector<ComponentStat> componentStats(const std::vector<int32_t> &labels, const std::vector<float> &diff,
+                                          int width, int height, int32_t numLabels, double cellArea) {
+    std::vector<ComponentStat> stats(numLabels + 1);
     for (int32_t i = 0; i <= numLabels; i++) stats[i].id = i;
 
     for (int y = 0; y < height; y++) {
@@ -755,56 +649,71 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
             if (d > s.maxDiff) s.maxDiff = d;
         }
     }
+    return stats;
+}
 
-    // --- Build coord transformer raster->WGS84 (reused for all components) ---
-    std::unique_ptr<CtHandle> rasterToWgs;
-    if (rasterSrs.h) {
-        rasterToWgs = std::make_unique<CtHandle>();
-        rasterToWgs->h = OCTNewCoordinateTransformation(rasterSrs.h, wgs84.h);
-        if (!rasterToWgs->h)
-            throw AppException("Cannot build transform to WGS84");
-    }
+json emptyDetection(float sensitivity, double minAreaM2) {
+    json result;
+    result["stockpiles"] = json::array();
+    result["totalFound"] = 0;
+    result["sensitivityUsed"] = sensitivity;
+    result["minAreaUsed"] = minAreaM2;
+    return result;
+}
 
-    auto pixelToMap = [&](double px, double py, double &mx, double &my) {
+// A stockpile found by the batch detection
+struct Detection {
+    int32_t id;
+    json entry;
+    double estVolume;
+};
+
+// The batch detection of every component that qualifies: polygon in WGS84, confidence, centroid
+class DetectionBuilder {
+    const DemContext &dem;
+    const ScaledRaster &raster;
+    const std::vector<float> &trend;
+    const std::vector<int32_t> &labels;
+    double meanPos;
+    double epsMeters;
+    std::unique_ptr<CoordsTransformer> rasterToWgs;
+
+    void pixelToMap(double px, double py, double &mx, double &my) const {
         // px, py are in the downsampled grid; convert to original raster coords.
-        const double opx = px * static_cast<double>(scale);
-        const double opy = py * static_cast<double>(scale);
+        const double opx = px * static_cast<double>(raster.scale);
+        const double opy = py * static_cast<double>(raster.scale);
+        const double *gt = dem.gt;
         mx = gt[0] + opx * gt[1] + opy * gt[2];
         my = gt[3] + opx * gt[4] + opy * gt[5];
-    };
+    }
 
-    auto mapToWgs = [&](double mx, double my, double &lon, double &lat) {
+    void mapToWgs(double mx, double my, double &lon, double &lat) const {
         lon = mx; lat = my;
-        if (rasterToWgs && rasterToWgs->h) {
-            if (!OCTTransform(rasterToWgs->h, 1, &lon, &lat, nullptr))
+        if (rasterToWgs) {
+            if (!rasterToWgs->tryTransform(1, &lon, &lat))
                 throw AppException("Cannot transform to WGS84");
         }
-    };
+    }
 
-    // --- For each qualifying component, build polygon + result entry ---
-    struct Detection {
-        int32_t id;
-        json entry;
-        double estVolume;
-    };
-    std::vector<Detection> detections;
-    detections.reserve(numLabels);
+public:
+    DetectionBuilder(const DemContext &demContext, const ScaledRaster &scaled, const std::vector<float> &trendMap,
+                     const std::vector<int32_t> &componentLabels, float sensitivity, double meanPositive)
+        : dem(demContext), raster(scaled), trend(trendMap), labels(componentLabels), meanPos(meanPositive),
+          epsMeters(((1.0 - sensitivity) * 4.0 + 0.5) * 0.5 *
+                    (scaled.pixel.x * scaled.scale + scaled.pixel.y * scaled.scale)),
+          // Coord transformer raster->WGS84 (reused for all components)
+          rasterToWgs(demContext.demToWgs84()) {}
 
-    const double epsPx = (1.0 - sensitivity) * 4.0 + 0.5;
-    const double epsMeters = epsPx * 0.5 * (pxX + pxY);
-
-    for (int32_t lab = 1; lab <= numLabels; lab++) {
-        const auto &s = stats[lab];
-        const double areaM2 = static_cast<double>(s.pixelCount) * cellArea;
-        if (areaM2 < minAreaM2) continue;
-        if (s.pixelCount < 4) continue;
-
+    // The entry of a component, or nothing when its outline cannot be traced
+    std::optional<Detection> build(int32_t lab, const ComponentStat &s, double areaM2) const {
+        const int width = raster.width;
+        const int height = raster.height;
         auto mask = extractComponentMask(labels, lab);
         auto contourPx = traceContour(mask, width, height);
-        if (contourPx.size() < 3) continue;
+        if (contourPx.size() < 3) return std::nullopt;
 
         // Convert to map coords
-        std::vector<std::pair<double, double>> contourMap;
+        Ring contourMap;
         contourMap.reserve(contourPx.size());
         for (const auto &p : contourPx) {
             double mx, my;
@@ -816,7 +725,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
         if (simplified.front() != simplified.back()) simplified.push_back(simplified.front());
 
         // To WGS84
-        std::vector<std::pair<double, double>> ring;
+        Ring ring;
         ring.reserve(simplified.size());
         for (auto &p : simplified) {
             double lon, lat;
@@ -826,10 +735,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
 
         // Confidence: combine compactness and prominence.
         const double areaPx = static_cast<double>(s.pixelCount);
-        const double boundaryPx = static_cast<double>(contourPx.size());
-        const double compactness = (boundaryPx > 0)
-            ? std::min(1.0, (4.0 * M_PI * areaPx) / (boundaryPx * boundaryPx))
-            : 0.0;
+        const double compactness = compactnessOf(areaPx, static_cast<double>(contourPx.size()));
         const double prominence = std::min(1.0, s.maxDiff / std::max(1e-6, meanPos * 4.0));
         const double confidence = std::clamp(0.3 + 0.4 * compactness + 0.3 * prominence, 0.0, 1.0);
 
@@ -846,14 +752,8 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
                           + std::clamp<int>(static_cast<int>(cxPx), 0, width - 1);
         const double baseElev = trend[cIdx];
 
-        json coords = json::array();
-        json outerRing = json::array();
-        for (const auto &p : ring) outerRing.push_back({p.first, p.second});
-        coords.push_back(outerRing);
-        json polygon = { {"type", "Polygon"}, {"coordinates", coords} };
-
         json entry;
-        entry["polygon"] = polygon;
+        entry["polygon"] = polygonJson(ring);
         entry["estimatedVolume"] = s.estVolume;
         entry["confidence"] = confidence;
         entry["baseElevation"] = baseElev;
@@ -861,7 +761,88 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
         entry["areaM2"] = areaM2;
         entry["pixelCount"] = static_cast<uint64_t>(s.pixelCount);
 
-        detections.push_back({ lab, std::move(entry), s.estVolume });
+        return Detection{ lab, std::move(entry), s.estVolume };
+    }
+};
+
+} // anonymous namespace
+
+std::string detectAllStockpilesJson(const std::string &rasterPath,
+                                    float sensitivity,
+                                    double minAreaM2,
+                                    int maxResults) {
+    sensitivity = std::clamp(sensitivity, 0.0f, 1.0f);
+    if (minAreaM2 < 0.0) minAreaM2 = 0.0;
+    if (maxResults <= 0) maxResults = 50;
+    // Hard cap: anti-DoS protection.
+    if (maxResults > 500) maxResults = 500;
+
+    LOGD << "detectAllStockpiles path=" << rasterPath
+         << " s=" << sensitivity << " minArea=" << minAreaM2
+         << " maxResults=" << maxResults;
+
+    // --- Open raster, shrunk and read ---
+    const DemContext dem = openDem(rasterPath);
+    const ScaledRaster raster = readScaled(dem);
+    const int width = raster.width;
+    const int height = raster.height;
+    const std::vector<float> &region = raster.samples;
+
+    // --- Global low-pass base plane ---
+    // Strong smoothing of the elevation gives an approximation of the terrain trend.
+    // Then diff = elevation - trend isolates the prominent positive features.
+    const std::vector<float> trend = terrainTrend(dem, raster, sensitivity);
+
+    // --- Difference map ---
+    std::vector<float> diff(region.size(), 0.0f);
+    for (size_t i = 0; i < region.size(); i++) {
+        if (dem.isValid(region[i])) diff[i] = region[i] - trend[i];
+    }
+
+    // Light smoothing on diff to suppress noise.
+    const float sigmaDiff = (1.0f - sensitivity) * 4.0f + 0.5f;
+    gaussianFilter(diff, width, height, sigmaDiff);
+
+    // Adaptive threshold on positive diff (we only care about mounds).
+    double sumPos = 0.0;
+    size_t cntPos = 0;
+    for (float v : diff) {
+        if (v > 0.0f) { sumPos += v; cntPos++; }
+    }
+    if (cntPos == 0)
+        return emptyDetection(sensitivity, minAreaM2).dump();
+    const double meanPos = sumPos / static_cast<double>(cntPos);
+    const double threshold = meanPos * (1.5 - sensitivity);
+
+    std::vector<uint8_t> binary(diff.size(), 0);
+    for (size_t i = 0; i < diff.size(); i++) {
+        if (diff[i] > threshold && dem.isValid(region[i])) binary[i] = 1;
+    }
+
+    // --- Connected components ---
+    int32_t numLabels = 0;
+    auto labels = labelConnectedComponents(binary, width, height, numLabels);
+    LOGD << "detectAll: components=" << numLabels;
+
+    if (numLabels == 0)
+        return emptyDetection(sensitivity, minAreaM2).dump();
+
+    // --- Compute per-component stats ---
+    const auto stats = componentStats(labels, diff, width, height, numLabels, raster.cellArea);
+
+    // --- For each qualifying component, build polygon + result entry ---
+    const DetectionBuilder builder(dem, raster, trend, labels, sensitivity, meanPos);
+    std::vector<Detection> detections;
+    detections.reserve(numLabels);
+
+    for (int32_t lab = 1; lab <= numLabels; lab++) {
+        const auto &s = stats[lab];
+        const double areaM2 = static_cast<double>(s.pixelCount) * raster.cellArea;
+        if (areaM2 < minAreaM2) continue;
+        if (s.pixelCount < 4) continue;
+
+        if (auto detection = builder.build(lab, s, areaM2))
+            detections.push_back(std::move(*detection));
     }
 
     // Sort by estimated volume desc, truncate to maxResults.

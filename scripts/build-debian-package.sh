@@ -19,12 +19,10 @@ run_with_privilege() {
 # Set necessary environment variables
 echo "Setting up environment variables..."
 if [ -z "$DDB_VERSION" ]; then
-  # If not in a tag, use the git describe output
-  DDB_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
-  if [ -z "$DDB_VERSION" ]; then
-    # Fallback to package.json version if no tag is available
-    DDB_VERSION=$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)
-  fi
+  # Not a release tag: package.json (the version source, as for libddb itself) plus the commit,
+  # as a Debian pre-release ("2.0.0~git19ab8e1" sorts before "2.0.0"). The last tag would name
+  # the package after the previous release.
+  DDB_VERSION="$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)~git$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 fi
 
 # Set VCPKG triplet (can be overridden by environment variable)
@@ -165,6 +163,12 @@ override_dh_strip:
 override_dh_dwz:
 	dh_dwz -XObj2Tiles -Xlibktx.so
 
+# The license texts of the bundled tools ship as they are, next to the other notices:
+# dh_compress would gzip those over 4 KB (dwg2dxf's GPL text), and the package checks
+# (and readers) look for them by name.
+override_dh_compress:
+	dh_compress -X.LICENSE
+
 override_dh_auto_install:
 	# Create directory structure for installed files
 	mkdir -p debian/ddb/usr/bin
@@ -219,6 +223,20 @@ override_dh_auto_install:
 		cp \$(CURDIR)/build/libktx.so debian/ddb/usr/bin/libktx.so; \\
 	fi
 
+	# Optional: copy the LibreDWG dwg2dxf converter if it was built
+	# (scripts/build-libredwg.sh). Installed alongside ddb so that runtime
+	# discovery (cad.cpp::findDwg2DxfBinary -> exe folder, then PATH, which is how
+	# Registry finds it) needs no configuration. GPL-3.0-or-later, invoked only as
+	# a subprocess; its license text ships next to the other notices. Without it,
+	# DWG builds fail with an actionable message; every other format is unaffected.
+	if [ -f \$(CURDIR)/build/dwg2dxf ]; then \\
+		cp \$(CURDIR)/build/dwg2dxf debian/ddb/usr/bin/dwg2dxf; \\
+		chmod +x debian/ddb/usr/bin/dwg2dxf; \\
+		if [ -f \$(CURDIR)/build/dwg2dxf.LICENSE.txt ]; then \\
+			cp \$(CURDIR)/build/dwg2dxf.LICENSE.txt debian/ddb/usr/share/doc/ddb/dwg2dxf.LICENSE.txt; \\
+		fi \\
+	fi
+
 	# Copy PDAL libraries from vcpkg installed directory
 	# Use wildcard to detect the actual SOVERSION (e.g., .so.19, .so.20, etc.)
 	# so the script survives future PDAL ABI bumps without manual updates
@@ -252,6 +270,13 @@ override_dh_auto_install:
 	cp \$(CURDIR)/build/timezone21.bin debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/sensor_data.sqlite debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/curl-ca-bundle.crt debian/ddb/usr/share/ddb/
+
+	# GDAL's data files (tile matrix sets, CSV tables): libddb sets GDAL_DATA to this folder at
+	# start-up (process_init.cpp setupGdalData, through getDataPath), so hosts that never source
+	# /etc/profile.d/ddb.sh (Registry under dotnet, services) find them as well. The build step
+	# stages them without the CMake files of vcpkg's share/gdal (cmake/StageGdalData.cmake).
+	@test -f \$(CURDIR)/build/gdal/gdalvrt.xsd || { echo "ERROR: build/gdal (GDAL data) is missing"; exit 1; }
+	cp -r \$(CURDIR)/build/gdal debian/ddb/usr/share/ddb/gdal
 
 	# Copy license / attribution files (redistribution compliance)
 	mkdir -p debian/ddb/usr/share/doc/ddb
@@ -302,6 +327,29 @@ if [ -f build/Obj2Tiles ]; then
     echo "  $f is byte-identical to the upstream binary."
   done
   rm -rf "$VERIFY_DIR"
+fi
+
+# dwg2dxf (DWG support): when it was built, the package must carry it, its
+# license, and the pinned version (it is our own build, so dh_strip may touch it).
+if [ -f build/dwg2dxf ]; then
+  echo "Verifying packaged dwg2dxf..."
+  DWG_CHECK_DIR=$(mktemp -d)
+  dpkg-deb -x build/package/ddb_*.deb "$DWG_CHECK_DIR"
+  for f in usr/bin/dwg2dxf usr/share/doc/ddb/dwg2dxf.LICENSE.txt; do
+    if [ ! -f "$DWG_CHECK_DIR/$f" ]; then
+      echo "ERROR: /$f is missing from the package"
+      rm -rf "$DWG_CHECK_DIR"
+      exit 1
+    fi
+  done
+  EXPECTED_LIBREDWG="$(tr -d '[:space:]' < scripts/libredwg-version)"
+  if ! "$DWG_CHECK_DIR/usr/bin/dwg2dxf" --version 2>&1 | grep -q "dwg2dxf ${EXPECTED_LIBREDWG}"; then
+    echo "ERROR: packaged dwg2dxf does not report version ${EXPECTED_LIBREDWG}"
+    rm -rf "$DWG_CHECK_DIR"
+    exit 1
+  fi
+  rm -rf "$DWG_CHECK_DIR"
+  echo "  dwg2dxf ${EXPECTED_LIBREDWG} packaged with its license."
 fi
 
 # Regression guard: PDAL >= 19 loads plugins by unversioned soname from the

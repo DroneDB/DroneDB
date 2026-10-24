@@ -6,7 +6,6 @@
 #define BUILDLOCK_H
 
 #include <string>
-#include "ddb_export.h"
 
 #ifdef WIN32
 #include <windows.h>
@@ -73,7 +72,7 @@ namespace ddb {
  * locks, flock() and no-share CreateFile are all per open file). No ThreadLock
  * is needed around a BuildLock.
  */
-class DDB_DLL BuildLock {
+class BuildLock {
 private:
     std::string lockFilePath;  ///< Full path to the lock file
     bool isLocked;             ///< Track lock state for proper cleanup
@@ -198,6 +197,44 @@ public:
      * which specific lock file is being used.
      */
     const std::string& getLockFilePath() const { return lockFilePath; }
+
+    /**
+     * @brief Whether a live BuildLock (of this or another process) holds the lock of an output path
+     *
+     * Side-effect free: the probe never creates, truncates, writes or removes the lock file,
+     * so a listing can ask for many entries without disturbing builds or stale lock files.
+     * Only an existing "{outputPath}.building" is probed; its absence means "not held".
+     * - Linux: open(O_RDONLY) without O_CREAT, then fcntl(F_OFD_GETLK), the query matching the
+     *   F_OFD_SETLK lock that BuildLock takes. No lock is taken, so the probe never makes a
+     *   concurrent acquisition fail. OFD locks of this process are reported as well.
+     * - macOS / BSD: open(O_RDONLY), then a non-blocking shared flock() released at once
+     *   (flock() has no query). For that instant a concurrent BuildLock acquisition fails
+     *   with BuildInProgressException, as it would against a live holder.
+     * - Windows: CreateFile(GENERIC_READ, all sharing, OPEN_EXISTING) closed at once. A live
+     *   holder opened the file without sharing, so the open fails with a sharing violation
+     *   (or access denied while its delete-on-close is pending). For the instant the probe
+     *   handle is open a concurrent BuildLock acquisition fails with BuildInProgressException.
+     *
+     * A file that exists but cannot be probed (permissions, I/O error) is reported as held:
+     * callers use the answer to leave a build alone, never to break into one.
+     *
+     * @param outputPath The output path, as given to the BuildLock constructor
+     * @return true if a live holder has the lock (or its state cannot be read)
+     */
+    static bool isHeld(const std::string& outputPath);
+
+    /**
+     * @brief Remove the lock file of an output path when no live holder has it
+     *
+     * Not a probe: when no live holder exists the lock is taken and released at once, which
+     * removes the stale file safely (unlinked while still locked on Unix, delete-on-close on
+     * Windows). Leaves a missing file missing. Use isHeld() to only ask.
+     *
+     * @param outputPath The output path, as given to the BuildLock constructor
+     * @return true if no live holder has the lock (the stale file, if any, is gone);
+     *         false if a live holder has it or its state cannot be determined
+     */
+    static bool removeIfStale(const std::string& outputPath);
 
     /**
      * @brief Manually release the lock before destructor

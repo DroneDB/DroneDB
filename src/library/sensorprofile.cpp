@@ -2,10 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "sensorprofile.h"
-#include "gdal_inc.h"
+#include "json.h"
+#include "gdal_raii.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "fileversion.h"
 
 #include <fstream>
 #include <algorithm>
@@ -134,21 +136,28 @@ SensorProfileManager& SensorProfileManager::instance() {
     return inst;
 }
 
+void SensorProfileManager::invalidateDetections() {
+    // Detections made with the previous profiles are dropped, and those in progress
+    // are not stored (see detectSensor)
+    generation_++;
+    detections_.clear();
+}
+
 void SensorProfileManager::ensureLoaded() const {
     if (loaded_) return;
 
     // Lazy-load defaults (mutex already held by caller)
     std::string path;
     fs::path dataFile = io::getDataPath("sensor-profiles.json");
-    path = dataFile.string();
+    path = io::toUtf8(dataFile);
 
-    if (path.empty() || !fs::exists(path)) {
+    if (path.empty() || !fs::exists(io::fromUtf8(path))) {
         LOGD << "Sensor profiles file not found, using empty profiles";
         loaded_ = true;
         return;
     }
 
-    std::ifstream ifs(path);
+    std::ifstream ifs(io::fromUtf8(path));
     if (!ifs.is_open()) {
         LOGW << "Cannot open sensor profiles file: " << path;
         loaded_ = true;
@@ -175,20 +184,21 @@ void SensorProfileManager::ensureLoaded() const {
 
 void SensorProfileManager::loadDefaults(const std::string &jsonPath) {
     std::lock_guard<std::mutex> lock(mutex_);
+    invalidateDetections();
 
     std::string path = jsonPath;
     if (path.empty()) {
         fs::path dataFile = io::getDataPath("sensor-profiles.json");
-        path = dataFile.string();
+        path = io::toUtf8(dataFile);
     }
 
-    if (path.empty() || !fs::exists(path)) {
+    if (path.empty() || !fs::exists(io::fromUtf8(path))) {
         LOGD << "Sensor profiles file not found, using empty profiles";
         loaded_ = true;
         return;
     }
 
-    std::ifstream ifs(path);
+    std::ifstream ifs(io::fromUtf8(path));
     if (!ifs.is_open()) {
         throw AppException("Cannot open sensor profiles file: " + path);
     }
@@ -214,6 +224,7 @@ void SensorProfileManager::loadDefaults(const std::string &jsonPath) {
 
 void SensorProfileManager::loadOverrides(const std::string &jsonStr) {
     std::lock_guard<std::mutex> lock(mutex_);
+    invalidateDetections();
 
     ensureLoaded();
 
@@ -285,18 +296,169 @@ bool SensorProfileManager::matchesProfile(const SensorProfile &profile, int band
 }
 
 SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rasterPath) const {
+    // Memoised per file version: a tile or thumbnail request does not reopen the raster
+    // and rescan its metadata, and the lock is not held during the GDAL work
+    const auto version = fileVersion(io::fromUtf8(rasterPath));
+    std::vector<SensorProfile> profiles;
+    uint64_t generation;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ensureLoaded();
+        if (!version.empty()) {
+            for (auto it = detections_.begin(); it != detections_.end(); ++it) {
+                if (it->path != rasterPath) continue;
+                if (it->version != version) {
+                    detections_.erase(it);
+                    break;
+                }
+                detections_.splice(detections_.begin(), detections_, it);
+                return detections_.front().result;
+            }
+        }
+        profiles = profiles_;
+        generation = generation_;
+    }
+
+    auto result = detectSensorUncached(rasterPath, profiles);
+
     std::lock_guard<std::mutex> lock(mutex_);
+    uncachedDetections_++;
+    if (!version.empty() && generation == generation_) {
+        detections_.remove_if([&](const CachedDetection &d) { return d.path == rasterPath; });
+        detections_.push_front(CachedDetection{rasterPath, version, result});
+        if (detections_.size() > MaxCachedDetections)
+            detections_.pop_back();
+    }
+    return result;
+}
 
-    ensureLoaded();
+uint64_t SensorProfileManager::uncachedDetections() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return uncachedDetections_;
+}
 
+namespace {
+
+// Every metadata string of the raster the profiles are matched against: the TIFF description and
+// software, all domains of the dataset, and the metadata of each band
+std::vector<std::string> collectMatchingMetadata(GDALDatasetH hDataset, int bandCount) {
+    std::vector<std::string> allMetadata;
+    const char *mdItem = GDALGetMetadataItem(hDataset, "TIFFTAG_IMAGEDESCRIPTION", nullptr);
+    if (mdItem) allMetadata.push_back(mdItem);
+    mdItem = GDALGetMetadataItem(hDataset, "TIFFTAG_SOFTWARE", nullptr);
+    if (mdItem) allMetadata.push_back(mdItem);
+
+    // Collect all metadata domains
+    const CPLStringList mdDomains(GDALGetMetadataDomainList(hDataset), TRUE);
+    for (int i = 0; i < mdDomains.size(); i++) {
+        CSLConstList md = GDALGetMetadata(hDataset, mdDomains[i]);
+        if (md) {
+            for (int k = 0; md[k] != nullptr; k++) {
+                allMetadata.push_back(md[k]);
+            }
+        }
+    }
+
+    // Also check per-band metadata
+    for (int b = 1; b <= bandCount; b++) {
+        GDALRasterBandH hBand = GDALGetRasterBand(hDataset, b);
+        CSLConstList bmd = GDALGetMetadata(hBand, nullptr);
+        if (bmd) {
+            for (int k = 0; bmd[k] != nullptr; k++) {
+                allMetadata.push_back(bmd[k]);
+            }
+        }
+    }
+    return allMetadata;
+}
+
+// The detection result of a matched profile: its identity, bands and presets, and the default
+// preset
+void describeMatch(SensorDetectionResult &result, const SensorProfile &profile, GDALDatasetH hDataset,
+                   int bandCount) {
+    result.detected = true;
+    result.sensorId = profile.id;
+    result.sensorName = profile.name;
+    result.sensorCategory = profile.sensorCategory;
+    result.bands = profile.bands;
+    result.presets = profile.presets;
+
+    // For generic profiles (no metadata patterns, e.g. "generic-4band"),
+    // prefer actual GDAL band descriptions when available, since the
+    // profile-defined names are only placeholders. This avoids
+    // mis-labeling bands of files that happen to match by band count
+    // alone but whose actual band order differs (e.g. ODM multispectral
+    // orthophoto with Red/Green/NIR/Rededge would otherwise be shown as
+    // Blue/Green/Red/NIR from generic-4band).
+    if (profile.detection.metadataPatterns.empty()) {
+        for (auto &bi : result.bands) {
+            if (bi.index < 1 || bi.index > bandCount) continue;
+            GDALRasterBandH hB = GDALGetRasterBand(hDataset, bi.index);
+            const char *d = GDALGetDescription(hB);
+            if (d != nullptr && *d != '\0') {
+                bi.name = d;
+            }
+        }
+    }
+
+    // Find default preset
+    for (const auto &p : profile.presets) {
+        if (p.isDefault) {
+            result.defaultBandMapping = p.bandMapping;
+            result.defaultPresetId = p.id;
+            break;
+        }
+    }
+    // If no default marked, use the first bands-type preset
+    if (result.defaultPresetId.empty() && !profile.presets.empty()) {
+        for (const auto &p : profile.presets) {
+            if (p.type == "bands" || p.type.empty()) {
+                result.defaultBandMapping = p.bandMapping;
+                result.defaultPresetId = p.id;
+                break;
+            }
+        }
+    }
+}
+
+// The bands of a multi-band non-Byte raster that no profile matched, named from the GDAL
+// descriptions or color interpretations
+void describeUnmatchedBands(SensorDetectionResult &result, GDALDatasetH hDataset, int bandCount,
+                            bool lastBandIsAlpha) {
+    result.detected = true;
+    result.sensorCategory = "multispectral";
+
+    int lastDataBand = lastBandIsAlpha ? bandCount - 1 : bandCount;
+    for (int i = 1; i <= lastDataBand; i++) {
+        GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i);
+        BandInfo bi;
+        bi.index = i;
+
+        const char *desc = GDALGetDescription(hBand);
+        std::string name = (desc != nullptr) ? std::string(desc) : std::string();
+        if (name.empty()) {
+            GDALColorInterp ci = GDALGetRasterColorInterpretation(hBand);
+            const char *ciName = GDALGetColorInterpretationName(ci);
+            if (ciName != nullptr) name = ciName;
+        }
+        bi.name = name;
+        bi.domain = "optical";
+        result.bands.push_back(bi);
+    }
+}
+
+}  // namespace
+
+SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::string &rasterPath,
+                                                                 const std::vector<SensorProfile> &profiles) const {
     SensorDetectionResult result;
 
-    GDALDatasetH hDataset = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDataset) return result;
+    auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) return result;
+    GDALDatasetH hDataset = datasetHandle(dataset);
 
     int bandCount = GDALGetRasterCount(hDataset);
     if (bandCount == 0) {
-        GDALClose(hDataset);
         return result;
     }
 
@@ -314,100 +476,25 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
 
     // RGBA disambiguation: 4-band Byte with alpha → not multispectral
     if (bandCount == 4 && dt == GDT_Byte && lastBandIsAlpha) {
-        GDALClose(hDataset);
         result.detected = false;
         return result;
     }
 
     // 3-band Byte with no wavelength metadata → standard RGB
     if (bandCount == 3 && dt == GDT_Byte) {
-        GDALClose(hDataset);
         result.detected = false;
         return result;
     }
 
     // Collect metadata for matching
-    std::vector<std::string> allMetadata;
-    const char *mdItem = GDALGetMetadataItem(hDataset, "TIFFTAG_IMAGEDESCRIPTION", nullptr);
-    if (mdItem) allMetadata.push_back(mdItem);
-    mdItem = GDALGetMetadataItem(hDataset, "TIFFTAG_SOFTWARE", nullptr);
-    if (mdItem) allMetadata.push_back(mdItem);
-
-    // Collect all metadata domains
-    char **mdDomains = GDALGetMetadataDomainList(hDataset);
-    if (mdDomains) {
-        for (int i = 0; mdDomains[i] != nullptr; i++) {
-            char **md = GDALGetMetadata(hDataset, mdDomains[i]);
-            if (md) {
-                for (int k = 0; md[k] != nullptr; k++) {
-                    allMetadata.push_back(md[k]);
-                }
-            }
-        }
-        CSLDestroy(mdDomains);
-    }
-
-    // Also check per-band metadata
-    for (int b = 1; b <= bandCount; b++) {
-        GDALRasterBandH hBand = GDALGetRasterBand(hDataset, b);
-        char **bmd = GDALGetMetadata(hBand, nullptr);
-        if (bmd) {
-            for (int k = 0; bmd[k] != nullptr; k++) {
-                allMetadata.push_back(bmd[k]);
-            }
-        }
-    }
+    const std::vector<std::string> allMetadata = collectMatchingMetadata(hDataset, bandCount);
 
     // Try matching profiles (already sorted by priority descending)
-    for (const auto &profile : profiles_) {
+    for (const auto &profile : profiles) {
         if (profile.sensorCategory != "multispectral" && profile.sensorCategory != "thermal") continue;
 
         if (matchesProfile(profile, bandCount, dataType, allMetadata, lastBandIsAlpha)) {
-            result.detected = true;
-            result.sensorId = profile.id;
-            result.sensorName = profile.name;
-            result.sensorCategory = profile.sensorCategory;
-            result.bands = profile.bands;
-            result.presets = profile.presets;
-
-            // For generic profiles (no metadata patterns, e.g. "generic-4band"),
-            // prefer actual GDAL band descriptions when available, since the
-            // profile-defined names are only placeholders. This avoids
-            // mis-labeling bands of files that happen to match by band count
-            // alone but whose actual band order differs (e.g. ODM multispectral
-            // orthophoto with Red/Green/NIR/Rededge would otherwise be shown as
-            // Blue/Green/Red/NIR from generic-4band).
-            if (profile.detection.metadataPatterns.empty()) {
-                for (auto &bi : result.bands) {
-                    if (bi.index < 1 || bi.index > bandCount) continue;
-                    GDALRasterBandH hB = GDALGetRasterBand(hDataset, bi.index);
-                    const char *d = GDALGetDescription(hB);
-                    if (d != nullptr && *d != '\0') {
-                        bi.name = d;
-                    }
-                }
-            }
-
-            // Find default preset
-            for (const auto &p : profile.presets) {
-                if (p.isDefault) {
-                    result.defaultBandMapping = p.bandMapping;
-                    result.defaultPresetId = p.id;
-                    break;
-                }
-            }
-            // If no default marked, use the first bands-type preset
-            if (result.defaultPresetId.empty() && !profile.presets.empty()) {
-                for (const auto &p : profile.presets) {
-                    if (p.type == "bands" || p.type.empty()) {
-                        result.defaultBandMapping = p.bandMapping;
-                        result.defaultPresetId = p.id;
-                        break;
-                    }
-                }
-            }
-
-            GDALClose(hDataset);
+            describeMatch(result, profile, hDataset, bandCount);
             return result;
         }
     }
@@ -418,33 +505,13 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
     // downstream consumers (getRasterInfoJson, autoDetectFilter) can work with
     // the detected sensor even without a matching profile.
     if (bandCount > 3 && dt != GDT_Byte) {
-        result.detected = true;
-        result.sensorCategory = "multispectral";
+        describeUnmatchedBands(result, hDataset, bandCount, lastBandIsAlpha);
 
-        int lastDataBand = lastBandIsAlpha ? bandCount - 1 : bandCount;
-        for (int i = 1; i <= lastDataBand; i++) {
-            GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i);
-            BandInfo bi;
-            bi.index = i;
-
-            const char *desc = GDALGetDescription(hBand);
-            std::string name = (desc != nullptr) ? std::string(desc) : std::string();
-            if (name.empty()) {
-                GDALColorInterp ci = GDALGetRasterColorInterpretation(hBand);
-                const char *ciName = GDALGetColorInterpretationName(ci);
-                if (ciName != nullptr) name = ciName;
-            }
-            bi.name = name;
-            bi.domain = "optical";
-            result.bands.push_back(bi);
-        }
-
-        GDALClose(hDataset);
+        dataset.reset();
         result.defaultBandMapping = getFallbackMapping(rasterPath, bandCount);
         return result;
     }
 
-    GDALClose(hDataset);
     return result;
 }
 
@@ -471,8 +538,9 @@ BandMapping SensorProfileManager::getBandMappingForPreset(const std::string &ras
 BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPath, int bandCount) const {
     BandMapping bm;
 
-    GDALDatasetH hDataset = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDataset) return bm;
+    auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) return bm;
+    GDALDatasetH hDataset = datasetHandle(dataset);
 
     int nBands = (bandCount > 0) ? bandCount : GDALGetRasterCount(hDataset);
 
@@ -486,7 +554,7 @@ BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPa
         else if (ci == GCI_BlueBand && bBand == 0) bBand = i;
     }
 
-    GDALClose(hDataset);
+    dataset.reset();
 
     if (rBand > 0 && gBand > 0 && bBand > 0) {
         bm.r = rBand;
@@ -507,8 +575,9 @@ BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPa
 std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPath) const {
     auto det = detectSensor(rasterPath);
 
-    GDALDatasetH hDataset = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDataset) throw GDALException("Cannot open " + rasterPath);
+    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) throw GDALException("Cannot open " + rasterPath);
+    GDALDatasetH hDataset = datasetHandle(dataset);
 
     int bandCount = GDALGetRasterCount(hDataset);
     GDALRasterBandH hBand1 = GDALGetRasterBand(hDataset, 1);
@@ -530,16 +599,15 @@ std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPat
         const char *wkt = GDALGetProjectionRef(hDataset);
         std::string crs;
         if (wkt && *wkt) {
-            OGRSpatialReferenceH hSrs = OSRNewSpatialReference(wkt);
+            const SrsPtr hSrs(OSRNewSpatialReference(wkt));
             if (hSrs) {
-                const char *authName = OSRGetAuthorityName(hSrs, nullptr);
-                const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
+                const char *authName = OSRGetAuthorityName(hSrs.get(), nullptr);
+                const char *authCode = OSRGetAuthorityCode(hSrs.get(), nullptr);
                 if (authName && *authName && authCode && *authCode) {
                     crs = std::string(authName) + ":" + authCode;
                 } else {
                     crs = wkt;
                 }
-                OSRDestroySpatialReference(hSrs);
             }
         }
         result["crs"] = crs;
@@ -601,8 +669,6 @@ std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPat
         result["defaultPreset"] = nullptr;
         result["detectedSensor"] = nullptr;
     }
-
-    GDALClose(hDataset);
 
     return result.dump();
 }

@@ -1,0 +1,23 @@
+{
+  "call": "DDBInfo([<root>/a.txt], format=\"json\", recursive=false, maxRecursionDepth=0, geometry=\"auto\", withHash=true, stopOnError=true)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "depth"
+    ]
+  },
+  "output": [
+    {
+      "depth": 0,
+      "hash": "457ca8f0e0b21bbad706ae2c3f7bfaace967212b6c8cbf5cfeb478e388560ff7",
+      "mtime": 1700000000,
+      "path": "file://<root>/a.txt",
+      "size": 31,
+      "type": 2
+    }
+  ],
+  "schema": "entries.schema.json"
+}

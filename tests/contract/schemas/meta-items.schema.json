@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb meta items",
+  "description": "DDBMetaGet of a plural key (a key ending in s holds a list)",
+  "type": "array",
+  "items": {
+    "$ref": "meta-item.schema.json"
+  }
+}

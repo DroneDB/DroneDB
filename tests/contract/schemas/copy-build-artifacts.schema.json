@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb build copy",
+  "description": "DDBCopyBuildArtifacts (XI-04, new in 2.0): what the destination has after the copy",
+  "type": "object",
+  "required": [
+    "hash",
+    "artifacts",
+    "pending"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "build-artifacts.schema.json#/$defs/artifact"
+      }
+    },
+    "pending": {
+      "type": "boolean",
+      "description": "The destination has a pending marker for the hash"
+    }
+  }
+}

@@ -31,11 +31,11 @@ namespace cmd
         return "Modify EXIF values in files.";
     }
 
-    void SetExif::run(cxxopts::ParseResult &opts)
+    int SetExif::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            usageError();
         }
 
         if (opts.count("gps"))
@@ -43,16 +43,16 @@ namespace cmd
             auto gps = opts["gps"].as<std::vector<double>>();
             if (gps.size() != 3)
             {
-                printHelp();
+                usageError();
             }
         }
 
         auto input = opts["input"].as<std::vector<std::string>>();
         ddb::ExifEditor exifEditor(input);
 
-        if (!exifEditor.canEdit())
+        if (!exifEditor.canEdit(std::cerr))
         {
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
 
         if (opts.count("gps-alt"))
@@ -75,6 +75,7 @@ namespace cmd
             auto gps = opts["gps"].as<std::vector<double>>();
             exifEditor.SetGPS(gps[0], gps[1], gps[2]);
         }
+        return EXIT_SUCCESS;
     }
 
 }

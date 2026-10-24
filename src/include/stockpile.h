@@ -5,7 +5,6 @@
 #define STOCKPILE_H
 
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -38,10 +37,10 @@ namespace ddb {
  * Throws InvalidArgsException for bad user input,
  * AppException for GDAL/IO errors or when no stockpile is found.
  */
-DDB_DLL std::string detectStockpileJson(const std::string &rasterPath,
-                                        double lat, double lon,
-                                        double radiusMeters,
-                                        float sensitivity);
+std::string detectStockpileJson(const std::string &rasterPath,
+                                double lat, double lon,
+                                double radiusMeters,
+                                float sensitivity);
 
 /**
  * Auto-detect ALL stockpile footprints by full-DEM scan.
@@ -75,10 +74,10 @@ DDB_DLL std::string detectStockpileJson(const std::string &rasterPath,
  * @param minAreaM2   Minimum component area in square meters (>=0)
  * @param maxResults  Maximum number of stockpiles returned (>0, server-capped to 500)
  */
-DDB_DLL std::string detectAllStockpilesJson(const std::string &rasterPath,
-                                            float sensitivity,
-                                            double minAreaM2,
-                                            int maxResults);
+std::string detectAllStockpilesJson(const std::string &rasterPath,
+                                    float sensitivity,
+                                    double minAreaM2,
+                                    int maxResults);
 
 } // namespace ddb
 

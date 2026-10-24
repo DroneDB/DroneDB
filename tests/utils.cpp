@@ -2,22 +2,48 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "utils.h"
+#include "randomutil.h"
+
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
 
 #include <boolinq/boolinq.h>
+
+#include "dbops.h"
+#include "ddb.h"
+#include "gdal_inc.h"
+#include "gtest/gtest.h"
+#include "hash.h"
+#include "json.h"
+
+std::filesystem::path writeFile(const std::filesystem::path &path, const std::string &content)
+{
+    if (path.has_parent_path())
+        std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary);
+    out << content;
+    return path;
+}
+
+std::filesystem::path writeFile(const std::filesystem::path &path, const std::vector<uint8_t> &content)
+{
+    return writeFile(path, std::string(content.begin(), content.end()));
+}
 
 void fileWriteAllText(const fs::path &path, const std::string &content)
 {
     if (exists(path))
         fs::remove(path);
 
-    std::ofstream out(path, std::ofstream::out);
-    out << content;
+    writeFile(path, content);
 }
 
 fs::path makeTree(const std::vector<ddb::SimpleEntry> &entries)
 {
     const auto tempFolder =
-        fs::temp_directory_path() / "diff_test" / ddb::utils::generateRandomString(8);
+        fs::temp_directory_path() / "diff_test" / ddb::randomString(8);
 
     create_directories(tempFolder);
 
@@ -125,7 +151,7 @@ std::vector<ddb::SimpleEntry> getEntries(const fs::path &path)
 
 std::string calculateHash(const fs::path &file)
 {
-    return Hash::fileSHA256(file.string());
+    return ddb::Hash::fileSHA256(file.string());
 }
 
 void createFile(const fs::path& filePath) {
@@ -173,4 +199,128 @@ std::string toHumanReadableTime(long long timeMs) {
 
     return result;
 
+}
+
+IndexFixture::IndexFixture(const std::string &testArea, const std::filesystem::path &folder, bool recreateArea)
+    : ta(testArea, recreateArea), root(ta.getFolder(folder))
+{
+    ddb::initIndex(root.string());
+    db = ddb::open(root.string(), false);
+}
+
+std::filesystem::path makeIndex(const std::string &testArea, const std::filesystem::path &folder, bool recreateArea)
+{
+    IndexFixture index(testArea, folder, recreateArea);
+    writeFile(index.root / "a.txt", "alpha");
+    ddb::addToIndex(index.db.get(), {(index.root / "a.txt").string()});
+    return index.root;
+}
+
+void insertEntry(ddb::Database *db, const std::string &path, const std::string &hash, ddb::EntryType type)
+{
+    auto q = db->query("INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
+                       "VALUES (?, ?, ?, '{}', 0, 1, ?)");
+    q->bind(1, path);
+    q->bind(2, hash);
+    q->bind(3, static_cast<int>(type));
+    q->bind(4, static_cast<int>(std::count(path.begin(), path.end(), '/')));
+    q->execute();
+}
+
+bool loadEntry(ddb::Database *db, const std::string &path, ddb::Entry &out)
+{
+    auto entry = ddb::getEntry(db, path);
+    if (entry)
+        out = std::move(*entry);
+    return entry.has_value();
+}
+
+bool loadEntryWithMeta(ddb::Database *db, const std::string &path, ddb::Entry &out)
+{
+    auto entry = ddb::getEntryWithMeta(db, path);
+    if (entry)
+        out = std::move(*entry);
+    return entry.has_value();
+}
+
+std::string hashOf(ddb::Database *db, const std::string &path)
+{
+    ddb::Entry e;
+    return loadEntry(db, path, e) ? e.hash : "<missing>";
+}
+
+std::string indexedHash(ddb::Database *db, const std::string &path)
+{
+    ddb::Entry e;
+    EXPECT_TRUE(loadEntry(db, path, e)) << path << " is not indexed";
+    return e.hash;
+}
+
+int openDatasetCount()
+{
+    GDALDatasetH *datasets = nullptr;
+    int count = 0;
+    GDALGetOpenDatasets(&datasets, &count);
+    return count;
+}
+
+void setEnv(const std::string &name, const std::string &value)
+{
+#ifdef _WIN32
+    _putenv_s(name.c_str(), value.c_str());
+#else
+    setenv(name.c_str(), value.c_str(), 1);
+#endif
+}
+
+void unsetEnv(const std::string &name)
+{
+#ifdef _WIN32
+    _putenv_s(name.c_str(), "");
+#else
+    unsetenv(name.c_str());
+#endif
+}
+
+EnvVarGuard::EnvVarGuard(std::string name) : name_(std::move(name))
+{
+    if (const char *value = std::getenv(name_.c_str()))
+        saved_ = value;
+}
+
+EnvVarGuard::EnvVarGuard(std::string name, const std::string &value) : EnvVarGuard(std::move(name))
+{
+    setEnv(name_, value);
+}
+
+EnvVarGuard::~EnvVarGuard()
+{
+    restore();
+}
+
+void EnvVarGuard::restore()
+{
+    if (restored_)
+        return;
+    restored_ = true;
+    if (saved_)
+        setEnv(name_, *saved_);
+    else
+        unsetEnv(name_);
+}
+
+ScopedProcessConfig::ScopedProcessConfig(const std::string &configJson)
+{
+    const json config = json::parse(configJson);
+    for (const auto &item : config.items())
+        names_.push_back(item.key());
+    EXPECT_EQ(DDBConfigure(configJson.c_str()), DDBERR_NONE) << configJson << ": " << DDBGetLastError();
+}
+
+ScopedProcessConfig::~ScopedProcessConfig()
+{
+    json reset = json::object();
+    for (const auto &name : names_)
+        reset[name] = nullptr;
+    EXPECT_EQ(DDBConfigure(reset.dump().c_str()), DDBERR_NONE) << DDBGetLastError();
 }

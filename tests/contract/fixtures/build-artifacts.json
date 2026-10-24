@@ -1,0 +1,110 @@
+{
+  "call": "DDBBuild(<root>, \"ortho.tif\"), then DDBGetBuildArtifacts(<root>, [\"ortho.tif\", \"layer.geojson\", \"cloud.las\", \"a.txt\", \"sub\", \"missing.tif\"])",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": [
+    {
+      "build": {
+        "artifacts": [
+          {
+            "downloadName": "cog.tif",
+            "kind": "file",
+            "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
+            "path": "cog/cog.tif",
+            "role": "raster.cog"
+          }
+        ],
+        "buildable": true,
+        "hash": "d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": "<root>/.ddb/build/d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+        "source": "ortho.tif",
+        "state": "complete"
+      },
+      "exists": true,
+      "hash": "d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+      "path": "ortho.tif",
+      "type": 4
+    },
+    {
+      "build": {
+        "artifacts": [],
+        "buildable": true,
+        "hash": "6ff9caf347f675d2b45a6d9aa600a0b337f23c193c971302e55bca4a2151bde4",
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": "<root>/.ddb/build/6ff9caf347f675d2b45a6d9aa600a0b337f23c193c971302e55bca4a2151bde4",
+        "source": "layer.geojson",
+        "state": "none"
+      },
+      "exists": true,
+      "hash": "6ff9caf347f675d2b45a6d9aa600a0b337f23c193c971302e55bca4a2151bde4",
+      "path": "layer.geojson",
+      "type": 14
+    },
+    {
+      "build": {
+        "artifacts": [],
+        "buildable": true,
+        "hash": "76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": "<root>/.ddb/build/76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+        "source": "cloud.las",
+        "state": "none"
+      },
+      "exists": true,
+      "hash": "76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+      "path": "cloud.las",
+      "type": 5
+    },
+    {
+      "build": {
+        "artifacts": [],
+        "buildable": false,
+        "hash": null,
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": null,
+        "source": null,
+        "state": "none"
+      },
+      "exists": true,
+      "hash": "457ca8f0e0b21bbad706ae2c3f7bfaace967212b6c8cbf5cfeb478e388560ff7",
+      "path": "a.txt",
+      "type": 2
+    },
+    {
+      "build": {
+        "artifacts": [],
+        "buildable": false,
+        "hash": null,
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": null,
+        "source": null,
+        "state": "none"
+      },
+      "exists": true,
+      "hash": null,
+      "path": "sub",
+      "type": 1
+    },
+    {
+      "exists": false,
+      "path": "missing.tif"
+    }
+  ],
+  "schema": "build-artifacts.schema.json"
+}

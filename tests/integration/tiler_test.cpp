@@ -1,0 +1,326 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include "ddb.h"
+#include "exceptions.h"
+#include "gdaltiler.h"
+#include "hash.h"
+#include "mio.h"
+#include "pointcloud.h"
+#include "test.h"
+#include "testarea.h"
+#include "testfs.h"
+#include "tile_test_support.h"
+#include "tilerhelper.h"
+#include "userprofile.h"
+#include <algorithm>
+#include <chrono>
+#include <csignal>
+#include <limits>
+#include <utility>
+#include <vector>
+#ifndef WIN32
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cerrno>
+#endif
+
+namespace {
+
+using namespace ddb;
+
+TEST(testTiler, RGB) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        testDataUrl("brighton/odm_orthophoto.tif"),
+        "ortho.tif");
+    fs::path tileDir = ta.getFolder("tiles");
+
+    GDALTiler t(ortho.string(), tileDir.string());
+
+    t.tile(19, 128168, 339545);
+
+    EXPECT_TRUE(fs::exists(tileDir / "19" / "128168" / "339545.png"));
+}
+
+TEST(testTiler, DSM) {
+    TestArea ta(TEST_NAME);
+    fs::path dsm =
+        ta.downloadTestAsset(testDataUrl("brighton/dsm.tif"),
+                             "dsm.tif");
+    fs::path tileDir = ta.getFolder("tiles");
+
+    GDALTiler t(dsm.string(), tileDir.string());
+    t.tile(21, 512674, 1358189);
+    t.tile(20, 256337, 679094);
+
+    EXPECT_TRUE(fs::exists(tileDir / "21" / "512674" / "1358189.png"));
+    EXPECT_TRUE(fs::exists(tileDir / "20" / "256337" / "679094.png"));
+
+    fs::path tmsTileDir = ta.getFolder("tmsTiles");
+    GDALTiler tms(dsm.string(), tmsTileDir.string(), 256, true);
+    tms.tile(20, 256337, 369481);
+
+    EXPECT_TRUE(fs::exists(tmsTileDir / "20" / "256337" / "369481.png"));
+
+    // TODO: more tests
+    //      - edge cases
+    //      - out of bounds
+    //      - different tile sizes
+}
+
+// Northern-hemisphere TMS rows at z24 (256 px) and z23 (512 px) used to overflow
+// int in GlobalMercator::tileBounds, emitting fully transparent tiles.
+TEST(testTiler, DeepZoomNotBlank) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        testDataUrl("brighton/odm_orthophoto.tif"),
+        "ortho.tif");
+
+    for (const auto &[tz, tileSize] : std::vector<std::pair<int, int>>{{24, 256}, {23, 512}, {26, 256}}) {
+        GDALTiler t(ortho.string(), "", tileSize);
+        const auto b = t.getMinMaxCoordsForZ(tz);
+        const int tx = (b.min.x + b.max.x) / 2;
+        const int ty = (b.min.y + b.max.y) / 2;
+        ASSERT_GT(static_cast<double>(ty) * tileSize, static_cast<double>(std::numeric_limits<int>::max()));
+
+        uint8_t *buffer = nullptr;
+        int bufSize = 0;
+        t.tile(tz, tx, ty, &buffer, &bufSize);
+        ASSERT_GT(bufSize, 0);
+
+        const std::string memPath = "/vsimem/deepzoom_" + std::to_string(tz) + "_" + std::to_string(tileSize) + ".png";
+        VSIFCloseL(VSIFileFromMemBuffer(memPath.c_str(), buffer, bufSize, TRUE));
+        GDALDatasetH ds = GDALOpen(memPath.c_str(), GA_ReadOnly);
+        ASSERT_NE(ds, nullptr);
+        const int bands = GDALGetRasterCount(ds);
+        std::vector<uint8_t> alpha(static_cast<size_t>(tileSize) * tileSize);
+        ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(ds, bands), GF_Read, 0, 0, tileSize, tileSize,
+                               alpha.data(), tileSize, tileSize, GDT_Byte, 0, 0), CE_None);
+        GDALClose(ds);
+        VSIUnlink(memPath.c_str());
+
+        const bool anyOpaque = std::any_of(alpha.begin(), alpha.end(), [](uint8_t a) { return a > 0; });
+        EXPECT_TRUE(anyOpaque) << "Blank tile at z" << tz << " size " << tileSize;
+    }
+}
+
+TEST(testTiler, image) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        testDataUrl("brighton/point_cloud.laz"),
+        "point_cloud.laz");
+
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+
+    fs::path outTile =
+        TilerHelper::getTile(testTile(copcPath, 20, 256337, 369481, 256, true, true, ta.getFolder()));
+
+    EXPECT_TRUE(fs::exists(outTile));
+
+    /* I'm disabling this test because it is flaky on some systems
+    uint8_t *buffer;
+    int bufSize;
+    TilerHelper::getTile(inMemory(testTile(copcPath, 20, 256337, 369481, 256, true, true), &buffer, &bufSize));
+
+    EXPECT_TRUE(bufSize > 0);
+    EXPECT_EQ(io::Path(outTile).getSize(), bufSize);
+
+    fs::path outMemoryTile = ta.getPath("output-memory.png");
+
+    std::ofstream of(outMemoryTile.string(), std::ios::out | std::ios::binary | std::ios::trunc);
+    of.write(reinterpret_cast<char *>(buffer), bufSize);
+    of.close();
+
+    #ifndef _WIN32
+
+    EXPECT_EQ(Hash::fileSHA256(outMemoryTile.string()),
+              Hash::fileSHA256(outTile.string()));
+
+    #endif
+
+    DDBVSIFree(buffer);
+    */
+}
+
+TEST(testTiler, toledoPointCloud) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        testDataUrl("point-clouds/toledo.laz"),
+        "point_cloud.laz");
+
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+
+    // Test tiles from Toledo dataset coordinates
+    struct ToledoTileTest {
+        int z, x, y;
+    };
+
+    std::vector<ToledoTileTest> testTiles = {{18, 70123, 97753},
+                                             {20, 280496, 391011},
+                                             {22, 1121992, 1564041}};
+
+    for (const auto& tile : testTiles) {
+        fs::path outTile =
+            TilerHelper::getTile(testTile(copcPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder()));
+
+        EXPECT_TRUE(fs::exists(outTile))
+            << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
+        EXPECT_GT(io::Path(outTile).getSize(), 0)
+            << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " is empty";
+    }
+}
+
+MANUAL_TEST(tilerBenchmark, lewis) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        testDataUrl("point-clouds/lewis.laz"),
+        "point_cloud.laz");
+
+    std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+
+    std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> timeElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    std::cout << "COPC build time: " << timeElapsed.count() << " seconds" << std::endl;
+
+    // Test tiles from Toledo dataset coordinates
+    struct LewisTileTest {
+        int z, x, y;
+    };
+
+    std::vector<LewisTileTest> testTiles = {
+        {17, 35720, 48948},   {17, 35720, 48947},   {17, 35719, 48948},   {17, 35720, 48949},
+        {17, 35721, 48948},   {17, 35719, 48947},   {17, 35719, 48949},   {17, 35721, 48947},
+        {17, 35721, 48949},   {17, 35718, 48948},   {17, 35718, 48947},   {17, 35718, 48949},
+
+        {18, 71440, 97897},   {18, 71440, 97896},   {18, 71441, 97897},   {18, 71441, 97896},
+        {18, 71439, 97897},   {18, 71440, 97898},   {18, 71439, 97896},   {18, 71441, 97898},
+        {18, 71440, 97895},   {18, 71439, 97898},   {18, 71442, 97897},   {18, 71441, 97895},
+        {18, 71442, 97896},   {18, 71439, 97895},   {18, 71442, 97898},   {18, 71442, 97895},
+
+        {19, 142881, 195794}, {19, 142880, 195794}, {19, 142881, 195793}, {19, 142880, 195793},
+        {19, 142881, 195795}, {19, 142880, 195795}, {19, 142882, 195794},
+
+        {20, 285762, 391588}, {20, 285761, 391588}, {20, 285762, 391589}, {20, 285761, 391589},
+        {20, 285762, 391587}, {20, 285761, 391587}, {20, 285763, 391588}, {20, 285760, 391588},
+        {20, 285763, 391589}, {20, 285760, 391589}, {20, 285763, 391587}, {20, 285760, 391587},
+        {20, 285762, 391590}, {20, 285761, 391590}, {20, 285762, 391586}, {20, 285761, 391586},
+        {20, 285763, 391590}, {20, 285760, 391590}, {20, 285763, 391586}, {20, 285760, 391586}};
+
+    start = std::chrono::high_resolution_clock::now();
+
+    for (const auto& tile : testTiles) {
+        fs::path outTile =
+            TilerHelper::getTile(testTile(copcPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder()));
+
+        EXPECT_TRUE(fs::exists(outTile))
+            << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
+        EXPECT_GT(io::Path(outTile).getSize(), 0)
+            << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " is empty";
+    }
+
+    end = std::chrono::high_resolution_clock::now();
+    timeElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    std::cout << "Tile generation time: " << timeElapsed.count() << " seconds" << std::endl;
+}
+
+TEST(testTiler, userCache) {
+    TestArea ta(TEST_NAME);
+    fs::path image = ta.downloadTestAsset(
+        testDataUrl("test-datasets/drone_dataset_brighton_beach/DJI_0018.JPG"),
+        "DJI_0032.JPG");
+    fs::path tileDir = ta.getFolder("tiles");
+    fs::path tile = TilerHelper::getFromUserCache(testTile(image, 20, 256335, 369483, 512, true, true));
+
+    EXPECT_TRUE(io::Path(tile).getSize() > 0);
+}
+
+TEST(testTiler, MultipleZoomLevels) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        testDataUrl("ortho/wro.tif"),
+        "wro.tif");
+    fs::path tileDir = ta.getFolder("tiles");
+
+    GDALTiler t(ortho.string(), tileDir.string(), 256, true);
+
+    // Test tiles from the provided table
+    struct TileTest {
+        int z, x, y;
+        int tileSize;
+    };
+
+    std::vector<TileTest> testTiles = {{14, 16174, 10245, 256},
+                                       {18, 258796, 163923, 256},
+                                       {18, 258797, 163923, 256},
+                                       {18, 258796, 163922, 256},
+                                       {18, 258797, 163922, 256},
+                                       {19, 517593, 327846, 256},
+                                       {20, 1035186, 655693, 256},
+                                       {20, 1035187, 655693, 256},
+                                       {20, 1035186, 655694, 256}};
+
+    for (const auto& tile : testTiles) {
+        t.tile(tile.z, tile.x, tile.y);
+
+        fs::path expectedTile = tileDir / std::to_string(tile.z) / std::to_string(tile.x) /
+                                (std::to_string(tile.y) + ".png");
+
+        EXPECT_TRUE(fs::exists(expectedTile))
+            << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
+    }
+}
+
+#ifndef WIN32
+/**
+ * @brief A download truncated by a write error (e.g. disk full) must not be
+ *        renamed into the tiles cache
+ *
+ * Runs the download in a child capped by RLIMIT_FSIZE so the transfer is cut
+ * short mid-write; toGeoTIFF must throw and leave neither the cache entry nor
+ * a stale temp file behind.
+ */
+TEST(testTilerHelper, FailedDownloadIsNotCached) {
+    const std::string url =
+        testDataUrl("brighton/odm_orthophoto.tif");
+    const fs::path cached = UserProfile::get()->getTilesDir() /
+                            fs::path(Hash::strCRC64(url) + ".tif");
+    io::assureIsRemoved(cached);
+
+    pid_t child = fork();
+    ASSERT_NE(child, -1);
+    if (child == 0) {
+        // Make writes fail past 64 KB instead of killing the process, so the
+        // ofstream failbit path is exercised
+        std::signal(SIGXFSZ, SIG_IGN);
+        struct rlimit rl;
+        rl.rlim_cur = rl.rlim_max = 64 * 1024;
+        setrlimit(RLIMIT_FSIZE, &rl);
+        try {
+            TilerHelper::toGeoTIFF(url, 256, false);
+            _exit(1);  // a >64 KB transfer truncated at 64 KB must not succeed
+        } catch (const NetException&) {
+            _exit(0);
+        } catch (...) {
+            _exit(2);
+        }
+    }
+
+    int status = 0;
+    waitpid(child, &status, 0);
+    ASSERT_TRUE(WIFEXITED(status)) << "child killed by signal";
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+
+    EXPECT_FALSE(fs::exists(cached));
+    io::assureIsRemoved(cached);
+}
+#endif
+
+}  // namespace

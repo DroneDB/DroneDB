@@ -2,11 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "thermal.h"
+#include "stringutil.h"
 #include "exif.h"
 #include "exceptions.h"
+#include "coordstransformer.h"
+#include "gdal_raii.h"
 #include "logger.h"
 #include "sensorprofile.h"
+#include "mio.h"
 
+#include <optional>
 #include <exiv2/exiv2.hpp>
 #include <gdal_priv.h>
 #include <cpl_conv.h>
@@ -40,14 +45,14 @@ static const std::vector<std::pair<std::string, std::string>> thermalSensorPatte
 bool isThermalImageFromExif(const std::string &make, const std::string &model) {
     std::string makeLower = make;
     std::string modelLower = model;
-    std::transform(makeLower.begin(), makeLower.end(), makeLower.begin(), ::tolower);
-    std::transform(modelLower.begin(), modelLower.end(), modelLower.begin(), ::tolower);
+    str::toLower(makeLower);
+    str::toLower(modelLower);
 
     for (const auto &pattern : thermalSensorPatterns) {
         std::string patMake = pattern.first;
         std::string patModel = pattern.second;
-        std::transform(patMake.begin(), patMake.end(), patMake.begin(), ::tolower);
-        std::transform(patModel.begin(), patModel.end(), patModel.begin(), ::tolower);
+        str::toLower(patMake);
+        str::toLower(patModel);
 
         if (makeLower.find(patMake) != std::string::npos) {
             if (patModel.empty()) return true;
@@ -69,29 +74,13 @@ struct FlirSegmentInfo {
     bool found = false;
 };
 
-static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
-    FlirSegmentInfo info;
-
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) return info;
-
-    // Read entire file into memory for simpler parsing
-    file.seekg(0, std::ios::end);
-    size_t fileSize = static_cast<size_t>(file.tellg());
-    file.seekg(0, std::ios::beg);
-
-    if (fileSize < 20) return info;
-
-    std::vector<uint8_t> data(fileSize);
-    file.read(reinterpret_cast<char*>(data.data()), fileSize);
-    file.close();
+// The offset just after the "FLIR\0" magic of an APP1 segment, when the file has one
+static std::optional<size_t> findFlirMagic(const std::vector<uint8_t> &data) {
+    const size_t fileSize = data.size();
 
     // Search for FLIR FFF record marker within APP1 segments
     // Pattern: FF E1 (APP1 marker) ... "FLIR\0" magic
     const uint8_t flirMagic[] = { 'F', 'L', 'I', 'R', 0x00 };
-
-    size_t flirSegmentStart = 0;
-    bool foundMagic = false;
 
     for (size_t i = 0; i < fileSize - 10; i++) {
         // Check for APP1 marker: 0xFF 0xE1
@@ -102,57 +91,20 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
             // Check for FLIR magic after length
             if (i + 4 + 5 <= fileSize &&
                 std::memcmp(&data[i + 4], flirMagic, 5) == 0) {
-                flirSegmentStart = i + 4 + 5; // After "FLIR\0"
-                foundMagic = true;
                 LOGD << "Found FLIR APP1 segment at offset " << i << ", length " << segLen;
-                break;
+                return i + 4 + 5; // After "FLIR\0"
             }
         }
     }
+    return std::nullopt;
+}
 
-    if (!foundMagic) {
-        LOGD << "No FLIR APP1 segment found in " << filePath;
-        return info;
-    }
-
-    // After FLIR magic, skip 3 bytes (segment index info)
-    // Then look for FFF record directory
-    size_t pos = flirSegmentStart + 3;
-
-    // Search for raw thermal data record type (0x0001 = RawData)
-    // The FFF record directory has entries of 32 bytes each
-    // Record type at offset 0 (uint16 BE), followed by various fields
-    // We look for the raw data embedded in the FLIR segment
-
-    // Simplified approach: scan for patterns that indicate raw thermal data
-    // In FLIR FFF format, raw thermal data is typically UInt16 Little-Endian
-    // preceded by width/height metadata
-
-    // Look for a secondary FLIR marker or raw data indicator
-    // The typical FLIR R-JPEG has the raw data at a specific offset
-    // encoded in the FFF record directory
-
-    // Parse FFF header
-    if (pos + 64 > fileSize) return info;
-
-    // Skip to raw data record - in most FLIR R-JPEGs, the raw data
-    // follows a recognizable pattern. We search for the raw data record.
-
-    // FLIR FFF Record Directory parsing:
-    // After the FLIR magic + 3 bytes, there are records.
-    // Each record: type(2) + ... + dataOffset(4) + dataLength(4) at specific positions
-
-    // Actually, the FLIR segment after magic+3 contains:
-    // [1 byte: segment sequence number]  - already skipped as part of +3
-    // Then: direct raw thermal data or FFF sub-segments
-
-    // For DJI thermal images, the structure is simpler:
-    // The thermal data is embedded directly as raw UInt16 values
-    // We need to find resolution from EXIF and locate raw block
-
+// The dimensions of the raw thermal image: from the FLIR XMP, else the largest of the common
+// thermal camera resolutions that fits in the data after the FLIR header (remainingData bytes)
+static void findRawDimensions(const std::string &filePath, size_t remainingData, FlirSegmentInfo &info) {
     // Try to extract width/height from XMP/EXIF first
     try {
-        auto exivImage = Exiv2::ImageFactory::open(filePath);
+        auto exivImage = openExivImage(io::fromUtf8(filePath));
         if (exivImage.get()) {
             exivImage->readMetadata();
             ExifParser parser(exivImage.get());
@@ -178,7 +130,6 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
             {1280, 1024}, {384, 288}, {640, 480}
         };
 
-        size_t remainingData = fileSize - pos;
         for (const auto &s : commonSizes) {
             size_t expectedSize = static_cast<size_t>(s.w) * s.h * 2; // UInt16
             if (remainingData >= expectedSize) {
@@ -188,16 +139,14 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
             }
         }
     }
+}
 
-    if (info.rawWidth == 0 || info.rawHeight == 0) return info;
-
-    // Search for the raw thermal data blob
-    // It's typically a contiguous block of rawWidth * rawHeight * 2 bytes
+// Search for the raw thermal data blob: a contiguous block of rawWidth * rawHeight * 2 bytes
+// near the beginning of the FLIR APP1 data area
+static void locateRawData(const std::vector<uint8_t> &data, size_t flirSegmentStart, FlirSegmentInfo &info) {
+    const size_t fileSize = data.size();
     size_t expectedRawSize = static_cast<size_t>(info.rawWidth) * info.rawHeight * 2;
 
-    // Scan the FLIR segment area for the raw data
-    // The raw data is usually near the beginning of the FLIR segment
-    // Look in the FLIR APP1 data area
     for (size_t searchPos = flirSegmentStart; searchPos + expectedRawSize <= fileSize; searchPos++) {
         // Heuristic: raw thermal data typically has values in a reasonable range
         // Check first few pixels to validate
@@ -216,7 +165,45 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
             break;
         }
     }
+}
 
+// Locates the raw UInt16 thermal block of a FLIR or DJI R-JPEG. The FFF record directory is not
+// parsed: the segment after the magic and 3 index bytes holds the raw values directly (DJI) or
+// FFF sub-segments, so the block is found by its size (from the XMP, or a common sensor size)
+// and the range of its values.
+static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
+    FlirSegmentInfo info;
+
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    if (!file.is_open()) return info;
+
+    // Read entire file into memory for simpler parsing
+    file.seekg(0, std::ios::end);
+    size_t fileSize = static_cast<size_t>(file.tellg());
+    file.seekg(0, std::ios::beg);
+
+    if (fileSize < 20) return info;
+
+    std::vector<uint8_t> data(fileSize);
+    file.read(reinterpret_cast<char*>(data.data()), fileSize);
+    file.close();
+
+    const auto flirSegmentStart = findFlirMagic(data);
+    if (!flirSegmentStart) {
+        LOGD << "No FLIR APP1 segment found in " << filePath;
+        return info;
+    }
+
+    // After FLIR magic, skip 3 bytes (segment index info)
+    size_t pos = *flirSegmentStart + 3;
+
+    // Parse FFF header
+    if (pos + 64 > fileSize) return info;
+
+    findRawDimensions(filePath, fileSize - pos, info);
+    if (info.rawWidth == 0 || info.rawHeight == 0) return info;
+
+    locateRawData(data, *flirSegmentStart, info);
     return info;
 }
 
@@ -228,7 +215,7 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
     // Method 1: Try FLIR APP1 segment extraction (FLIR R-JPEG format)
     FlirSegmentInfo seg = findFlirSegment(filePath);
     if (seg.found) {
-        std::ifstream file(filePath, std::ios::binary);
+        std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
         if (!file.is_open()) return result;
 
         file.seekg(seg.rawDataOffset);
@@ -247,8 +234,9 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
     // Method 2: GDAL fallback (DJI R-JPEG, thermal GeoTIFF, etc.)
     LOGD << "No FLIR segment found, trying GDAL fallback for " << filePath;
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (!hDs) return result;
+    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset) return result;
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     int w = GDALGetRasterXSize(hDs);
     int h = GDALGetRasterYSize(hDs);
@@ -283,7 +271,6 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
         }
     }
 
-    GDALClose(hDs);
     return result;
 }
 
@@ -293,7 +280,7 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
     ThermalCalibration cal;
 
     try {
-        auto exivImage = Exiv2::ImageFactory::open(filePath);
+        auto exivImage = openExivImage(io::fromUtf8(filePath));
         if (!exivImage.get()) return cal;
         exivImage->readMetadata();
         ExifParser parser(exivImage.get());
@@ -422,8 +409,9 @@ std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalC
 bool isDirectTemperatureRaster(const std::string &filePath) {
     if (!isThermalImage(filePath)) return false;
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (!hDs) return false;
+    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset) return false;
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     bool isDirect = false;
     if (GDALGetRasterCount(hDs) == 1) {
@@ -432,16 +420,17 @@ bool isDirectTemperatureRaster(const std::string &filePath) {
         isDirect = (dt == GDT_Float32 || dt == GDT_Float64);
     }
 
-    GDALClose(hDs);
     return isDirect;
 }
 
 // ---- Detection ----
 
-bool isThermalImage(const std::string &filePath) {
-    // Method 1: Check EXIF Make/Model
+namespace {
+
+// Methods 1-3: the EXIF make and model, the FLIR XMP namespace, the DJI thermal tags
+bool hasThermalExifOrXmp(const std::string &filePath) {
     try {
-        auto exivImage = Exiv2::ImageFactory::open(filePath);
+        auto exivImage = openExivImage(io::fromUtf8(filePath));
         if (exivImage.get()) {
             exivImage->readMetadata();
             ExifParser parser(exivImage.get());
@@ -465,140 +454,166 @@ bool isThermalImage(const std::string &filePath) {
     } catch (const std::exception &e) {
         LOGD << "isThermalImage: EXIF/XMP probing failed: " << e.what();
     }
+    return false;
+}
+
+// What the GDAL metadata of a single-band raster says: every metadata string in lowercase, the
+// unit, and the scale and offset
+struct ThermalSignals {
+    std::string allMeta;
+    std::string unitStr;
+    std::string unitLower;
+    int hasScale = FALSE, hasOffset = FALSE;
+    double scale = 0, offset = 0;
+};
+
+ThermalSignals readThermalSignals(GDALDatasetH hDs) {
+    // Collect all metadata strings for keyword scanning
+    std::vector<std::string> metaStrings;
+
+    // Dataset-level metadata across all domains
+    const CPLStringList mdDomains(GDALGetMetadataDomainList(hDs), TRUE);
+    for (int d = 0; d < mdDomains.size(); d++) {
+        CSLConstList md = GDALGetMetadata(hDs, mdDomains[d]);
+        if (md) {
+            for (int k = 0; md[k] != nullptr; k++)
+                metaStrings.push_back(md[k]);
+        }
+    }
+
+    // Band-level metadata and description
+    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+    const char *bandDesc = GDALGetDescription(hBand);
+    if (bandDesc && bandDesc[0]) metaStrings.push_back(bandDesc);
+
+    CSLConstList bmd = GDALGetMetadata(hBand, nullptr);
+    if (bmd) {
+        for (int k = 0; bmd[k] != nullptr; k++)
+            metaStrings.push_back(bmd[k]);
+    }
+
+    ThermalSignals signals;
+
+    // Band unit info
+    const char *unitType = GDALGetRasterUnitType(hBand);
+    signals.unitStr = unitType ? unitType : "";
+
+    // Scale/offset (e.g., Landsat Collection 2: scale=0.00341802, offset=149.0)
+    signals.scale = GDALGetRasterScale(hBand, &signals.hasScale);
+    signals.offset = GDALGetRasterOffset(hBand, &signals.hasOffset);
+
+    // Build a single lowercase string for keyword search
+    for (const auto &s : metaStrings) {
+        signals.allMeta += s;
+        signals.allMeta += ' ';
+    }
+    str::toLower(signals.allMeta);
+
+    signals.unitLower = signals.unitStr;
+    str::toLower(signals.unitLower);
+    return signals;
+}
+
+// Whether the signals describe a thermal raster: a DEM's keywords and units rule it out, then
+// thermal keywords, units and the Landsat scale/offset pattern make it one
+bool looksThermal(const ThermalSignals &signals) {
+    const std::string &allMeta = signals.allMeta;
+    const std::string &unitStr = signals.unitStr;
+    const std::string &unitLower = signals.unitLower;
+
+    // DEM negative signals - reject early
+    static const std::vector<std::string> demKeywords = {
+        "dem", "dtm", "dsm", "elevation", "height"
+    };
+    static const std::vector<std::string> demUnits = {
+        "m", "ft", "meter", "meters", "feet", "foot"
+    };
+    static const std::vector<std::string> demCrsKeywords = {
+        "vertical", "geoid", "ellipsoid height"
+    };
+
+    for (const auto &kw : demKeywords) {
+        if (allMeta.find(kw) != std::string::npos) {
+            LOGD << "GDAL metadata contains DEM keyword '" << kw << "', not thermal";
+            return false;
+        }
+    }
+    for (const auto &u : demUnits) {
+        if (unitLower == u) {
+            LOGD << "Band unit '" << unitStr << "' indicates DEM, not thermal";
+            return false;
+        }
+    }
+    for (const auto &kw : demCrsKeywords) {
+        if (allMeta.find(kw) != std::string::npos) {
+            LOGD << "GDAL metadata contains vertical CRS keyword '" << kw << "', not thermal";
+            return false;
+        }
+    }
+
+    // Thermal positive signals
+    static const std::vector<std::string> thermalKeywords = {
+        "thermal", "temperature", "surface_temperature",
+        "lst", "tir", "brightness_temperature", "bt", "lwir"
+    };
+    static const std::vector<std::string> thermalUnits = {
+        "kelvin", "celsius", "degc", "degk",
+        "\xc2\xb0""c", "\xc2\xb0""k"  // UTF-8 for °C, °K
+    };
+
+    for (const auto &kw : thermalKeywords) {
+        if (allMeta.find(kw) != std::string::npos) {
+            LOGD << "GDAL metadata contains thermal keyword '" << kw << "'";
+            return true;
+        }
+    }
+    for (const auto &u : thermalUnits) {
+        if (unitLower.find(u) != std::string::npos) {
+            LOGD << "Band unit '" << unitStr << "' indicates thermal";
+            return true;
+        }
+    }
+    if (unitLower == "k") {
+        LOGD << "Band unit 'K' indicates Kelvin (thermal)";
+        return true;
+    }
+
+    // Landsat-style thermal scale/offset pattern
+    if (signals.hasScale && signals.hasOffset && signals.scale > 0.001 && signals.scale < 0.01 &&
+        signals.offset > 100 && signals.offset < 200) {
+        LOGD << "Scale/offset pattern (scale=" << signals.scale << ", offset=" << signals.offset
+             << ") consistent with Landsat thermal encoding";
+        return true;
+    }
+    return false;
+}
+
+// Method 5: GDAL metadata classification for labeled thermal rasters
+// (e.g., Landsat surface temperature, processed thermal GeoTIFFs)
+// Uses explicit metadata signals; avoids value-range heuristics to prevent
+// false positives on DEMs or other single-band Float32 rasters.
+bool isThermalByGdalMetadata(const std::string &filePath) {
+    auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset) return false;
+    GDALDatasetH hDs = datasetHandle(dataset);
+    if (GDALGetRasterCount(hDs) != 1) return false;
+
+    const ThermalSignals signals = readThermalSignals(hDs);
+    dataset.reset();
+    return looksThermal(signals);
+}
+
+} // anonymous namespace
+
+bool isThermalImage(const std::string &filePath) {
+    // Methods 1-3: EXIF Make/Model, FLIR XMP namespace, DJI thermal tags
+    if (hasThermalExifOrXmp(filePath)) return true;
 
     // Method 4: Check for FLIR APP1 segment
     FlirSegmentInfo seg = findFlirSegment(filePath);
     if (seg.found) return true;
 
-    // Method 5: GDAL metadata classification for labeled thermal rasters
-    // (e.g., Landsat surface temperature, processed thermal GeoTIFFs)
-    // Uses explicit metadata signals; avoids value-range heuristics to prevent
-    // false positives on DEMs or other single-band Float32 rasters.
-    {
-        GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-        if (hDs) {
-            int nBands = GDALGetRasterCount(hDs);
-            if (nBands == 1) {
-                // Collect all metadata strings for keyword scanning
-                std::vector<std::string> metaStrings;
-
-                // Dataset-level metadata across all domains
-                char **mdDomains = GDALGetMetadataDomainList(hDs);
-                if (mdDomains) {
-                    for (int d = 0; mdDomains[d] != nullptr; d++) {
-                        char **md = GDALGetMetadata(hDs, mdDomains[d]);
-                        if (md) {
-                            for (int k = 0; md[k] != nullptr; k++)
-                                metaStrings.push_back(md[k]);
-                        }
-                    }
-                    CSLDestroy(mdDomains);
-                }
-
-                // Band-level metadata and description
-                GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-                const char *bandDesc = GDALGetDescription(hBand);
-                if (bandDesc && bandDesc[0]) metaStrings.push_back(bandDesc);
-
-                char **bmd = GDALGetMetadata(hBand, nullptr);
-                if (bmd) {
-                    for (int k = 0; bmd[k] != nullptr; k++)
-                        metaStrings.push_back(bmd[k]);
-                }
-
-                // Band unit info
-                const char *unitType = GDALGetRasterUnitType(hBand);
-                std::string unitStr = unitType ? unitType : "";
-
-                // Scale/offset (e.g., Landsat Collection 2: scale=0.00341802, offset=149.0)
-                int hasScale = FALSE, hasOffset = FALSE;
-                double scale = GDALGetRasterScale(hBand, &hasScale);
-                double offset = GDALGetRasterOffset(hBand, &hasOffset);
-
-                GDALClose(hDs);
-
-                // Build a single lowercase string for keyword search
-                std::string allMeta;
-                for (const auto &s : metaStrings) {
-                    allMeta += s;
-                    allMeta += ' ';
-                }
-                std::transform(allMeta.begin(), allMeta.end(), allMeta.begin(), ::tolower);
-
-                std::string unitLower = unitStr;
-                std::transform(unitLower.begin(), unitLower.end(), unitLower.begin(), ::tolower);
-
-                // DEM negative signals - reject early
-                static const std::vector<std::string> demKeywords = {
-                    "dem", "dtm", "dsm", "elevation", "height"
-                };
-                static const std::vector<std::string> demUnits = {
-                    "m", "ft", "meter", "meters", "feet", "foot"
-                };
-                static const std::vector<std::string> demCrsKeywords = {
-                    "vertical", "geoid", "ellipsoid height"
-                };
-
-                for (const auto &kw : demKeywords) {
-                    if (allMeta.find(kw) != std::string::npos) {
-                        LOGD << "GDAL metadata contains DEM keyword '" << kw << "', not thermal";
-                        return false;
-                    }
-                }
-                for (const auto &u : demUnits) {
-                    if (unitLower == u) {
-                        LOGD << "Band unit '" << unitStr << "' indicates DEM, not thermal";
-                        return false;
-                    }
-                }
-                for (const auto &kw : demCrsKeywords) {
-                    if (allMeta.find(kw) != std::string::npos) {
-                        LOGD << "GDAL metadata contains vertical CRS keyword '" << kw << "', not thermal";
-                        return false;
-                    }
-                }
-
-                // Thermal positive signals
-                static const std::vector<std::string> thermalKeywords = {
-                    "thermal", "temperature", "surface_temperature",
-                    "lst", "tir", "brightness_temperature", "bt", "lwir"
-                };
-                static const std::vector<std::string> thermalUnits = {
-                    "kelvin", "celsius", "degc", "degk",
-                    "\xc2\xb0""c", "\xc2\xb0""k"  // UTF-8 for °C, °K
-                };
-
-                for (const auto &kw : thermalKeywords) {
-                    if (allMeta.find(kw) != std::string::npos) {
-                        LOGD << "GDAL metadata contains thermal keyword '" << kw << "'";
-                        return true;
-                    }
-                }
-                for (const auto &u : thermalUnits) {
-                    if (unitLower.find(u) != std::string::npos) {
-                        LOGD << "Band unit '" << unitStr << "' indicates thermal";
-                        return true;
-                    }
-                }
-                if (unitLower == "k") {
-                    LOGD << "Band unit 'K' indicates Kelvin (thermal)";
-                    return true;
-                }
-
-                // Landsat-style thermal scale/offset pattern
-                if (hasScale && hasOffset && scale > 0.001 && scale < 0.01 &&
-                    offset > 100 && offset < 200) {
-                    LOGD << "Scale/offset pattern (scale=" << scale << ", offset=" << offset
-                         << ") consistent with Landsat thermal encoding";
-                    return true;
-                }
-            } else {
-                GDALClose(hDs);
-            }
-        }
-    }
-
-    return false;
+    return isThermalByGdalMetadata(filePath);
 }
 
 // ---- Helper: read temperature data from file (R-JPEG or GeoTIFF) ----
@@ -608,8 +623,8 @@ TemperatureData readTemperatureData(const std::string &filePath) {
     TemperatureData td;
 
     // Try as GeoTIFF first (direct temperature or GDAL-readable)
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
+    if (const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+        GDALDatasetH hDs = datasetHandle(dataset);
         int nBands = GDALGetRasterCount(hDs);
         td.width = GDALGetRasterXSize(hDs);
         td.height = GDALGetRasterYSize(hDs);
@@ -630,7 +645,6 @@ TemperatureData readTemperatureData(const std::string &filePath) {
                 if (GDALRasterIO(hBand, GF_Read, 0, 0, td.width, td.height,
                                  td.temperatures.data(), td.width, td.height,
                                  GDT_Float32, 0, 0) == CE_None) {
-                    GDALClose(hDs);
                     return td;
                 }
             } else if (dt == GDT_UInt16) {
@@ -655,12 +669,10 @@ TemperatureData readTemperatureData(const std::string &filePath) {
                             td.temperatures[p] = static_cast<float>(raw.data[p]);
                         }
                     }
-                    GDALClose(hDs);
                     return td;
                 }
             }
         }
-        GDALClose(hDs);
     }
 
     // Try R-JPEG extraction
@@ -689,33 +701,26 @@ TemperatureData readTemperatureData(const std::string &filePath) {
 // ---- Helper: convert pixel to geo coordinates ----
 void pixelToGeo(double px, double py, const double geoTransform[6],
                 const std::string &projection, double &geoX, double &geoY) {
-    double mapX = geoTransform[0] + geoTransform[1] * px + geoTransform[2] * py;
-    double mapY = geoTransform[3] + geoTransform[4] * px + geoTransform[5] * py;
+    // Map coordinates are the result whenever the projection cannot be transformed to WGS84
+    geoX = geoTransform[0] + geoTransform[1] * px + geoTransform[2] * py;
+    geoY = geoTransform[3] + geoTransform[4] * px + geoTransform[5] * py;
 
-    if (!projection.empty()) {
-        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-        OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-        char* wktPtr = const_cast<char*>(projection.c_str());
+    if (projection.empty())
+        return;
 
-        if (OSRImportFromWkt(hSrs, &wktPtr) == OGRERR_NONE &&
-            OSRImportFromEPSG(hWgs84, 4326) == OGRERR_NONE) {
-            OGRCoordinateTransformationH hCT = OCTNewCoordinateTransformation(hSrs, hWgs84);
-            if (hCT) {
-                if (OCTTransform(hCT, 1, &mapX, &mapY, nullptr)) {
-                    geoX = mapX;
-                    geoY = mapY;
-                } else {
-                    geoX = mapX;
-                    geoY = mapY;
-                }
-                OCTDestroyCoordinateTransformation(hCT);
+    const SrsPtr hSrs = srsFromWkt(projection.c_str());
+    const SrsPtr hWgs84 = srsFromEpsg(4326);
+
+    if (hSrs && hWgs84) {
+        const auto toWgs84 = CoordsTransformer::tryCreate(srsOf(hSrs), srsOf(hWgs84));
+        if (toWgs84) {
+            double x = geoX;
+            double y = geoY;
+            if (toWgs84->tryTransform(1, &x, &y)) {
+                geoX = x;
+                geoY = y;
             }
         }
-        OSRDestroySpatialReference(hWgs84);
-        OSRDestroySpatialReference(hSrs);
-    } else {
-        geoX = mapX;
-        geoY = mapY;
     }
 }
 

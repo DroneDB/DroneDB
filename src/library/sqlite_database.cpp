@@ -5,15 +5,16 @@
 #include <cassert>
 #include <string>
 
+#include "cancellation.h"
+#include "stringutil.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "sqlite_database.h"
-#include "utils.h"
 
 namespace ddb
 {
 
-    SqliteDatabase::SqliteDatabase() : db(nullptr) {}
+    SqliteDatabase::SqliteDatabase() = default;
 
     SqliteDatabase &SqliteDatabase::open(const std::string &file)
     {
@@ -22,6 +23,8 @@ namespace ddb
         LOGD << "Opening connection to " << file;
         if (sqlite3_open(file.c_str(), &db) != SQLITE_OK)
             throw DBException("Can't open database: " + file);
+        // Statements stop when the work of the thread running them is canceled (DQ-15)
+        cancel::installSqliteProgressHandler(db);
 
         this->openFile = file;
         this->afterOpen();
@@ -36,6 +39,12 @@ namespace ddb
 
     SqliteDatabase &SqliteDatabase::close()
     {
+        closeConnection();
+        return *this;
+    }
+
+    void SqliteDatabase::closeConnection()
+    {
         if (db != nullptr)
         {
             LOGD << "Closing connection to " << openFile;
@@ -46,15 +55,16 @@ namespace ddb
                 LOGD << "sqlite3_close_v2 returned " << rc;
             db = nullptr;
         }
-
-        return *this;
     }
 
     SqliteDatabase &SqliteDatabase::reopen()
     {
         if (openFile.empty() || db == nullptr)
             throw DBException("Cannot reopen unopened database");
-        return this->close().open(openFile);
+        // A new connection, never one kept by close(): reopen() is used to read a schema
+        // changed through writable_schema, which an existing connection does not reparse
+        closeConnection();
+        return this->open(openFile);
     }
 
     SqliteDatabase &SqliteDatabase::exec(const std::string &sql)
@@ -68,6 +78,8 @@ namespace ddb
         {
             const std::string error(errMsg ? errMsg : sqlite3_errstr(rc));
             sqlite3_free(errMsg);
+            if (rc == SQLITE_INTERRUPT)
+                cancel::throwIfCanceled();
             if (rc == SQLITE_BUSY || rc == SQLITE_LOCKED)
                 throw DBBusyException(error);
             throw SQLException(error);
@@ -101,6 +113,12 @@ namespace ddb
         return sqlite3_changes(db);
     }
 
+    std::string SqliteDatabase::getJournalMode() const
+    {
+        auto q = this->query("PRAGMA journal_mode");
+        return q->fetch() ? q->getText(0) : "";
+    }
+
     void SqliteDatabase::setJournalMode(const std::string &mode)
     {
         this->exec("PRAGMA journal_mode=" + mode + ";");
@@ -123,7 +141,7 @@ namespace ddb
             if (sqlDef.size() > 0 && sqlDef.find(columnDefBefore + ",") != std::string::npos)
             {
                 // Old definition
-                utils::stringReplace(sqlDef, columnDefBefore, columnDefAfter);
+                str::replaceAll(sqlDef, columnDefBefore, columnDefAfter);
 
                 this->setWritableSchema(true);
                 q = this->query("UPDATE sqlite_master SET sql = ? WHERE type = 'table' and name = ?");
@@ -157,9 +175,16 @@ namespace ddb
         this->query("PRAGMA user_version = " + std::to_string(version))->execute();
     }
 
+    bool SqliteDatabase::isReadOnly() const
+    {
+        if (db == nullptr)
+            throw DBException("Cannot check read-only state, db is not open");
+        return sqlite3_db_readonly(db, "main") == 1;
+    }
+
     SqliteDatabase::~SqliteDatabase()
     {
-        this->close();
+        this->closeConnection();
     }
 
 }

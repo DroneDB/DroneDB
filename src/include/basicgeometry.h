@@ -7,8 +7,7 @@
 
 #include <string>
 #include <iomanip>
-#include "json.h"
-#include "ddb_export.h"
+#include "json_fwd.h"
 
 namespace ddb
 {
@@ -18,9 +17,9 @@ namespace ddb
         double x;
         double y;
         double z;
-        DDB_DLL Point(double x, double y, double z) : x(x), y(y), z(z) {}
-        DDB_DLL Point(double x, double y) : x(x), y(y), z(0.0) {}
-        DDB_DLL Point() : x(0.0), y(0.0), z(0.0) {}
+        Point(double x, double y, double z) : x(x), y(y), z(z) {}
+        Point(double x, double y) : x(x), y(y), z(0.0) {}
+        Point() : x(0.0), y(0.0), z(0.0) {}
     };
     inline std::ostream &operator<<(std::ostream &os, const Point &p)
     {
@@ -30,17 +29,17 @@ namespace ddb
 
     struct BasicGeometry
     {
-        DDB_DLL BasicGeometry() {}
+        BasicGeometry() {}
 
-        DDB_DLL void addPoint(const Point &p);
-        DDB_DLL void addPoint(double x, double y, double z);
-        DDB_DLL Point getPoint(int index);
-        DDB_DLL bool empty() const;
-        DDB_DLL void clear();
-        DDB_DLL int size() const;
+        void addPoint(const Point &p);
+        void addPoint(double x, double y, double z);
+        Point getPoint(int index);
+        bool empty() const;
+        void clear();
+        int size() const;
 
-        DDB_DLL virtual std::string toWkt() const = 0;
-        DDB_DLL virtual json toGeoJSON() const = 0;
+        virtual std::string toWkt() const = 0;
+        virtual json toGeoJSON() const = 0;
 
         std::vector<Point> points;
 
@@ -60,14 +59,14 @@ namespace ddb
 
     struct BasicPointGeometry : BasicGeometry
     {
-        DDB_DLL virtual std::string toWkt() const override;
-        DDB_DLL virtual json toGeoJSON() const override;
+        virtual std::string toWkt() const override;
+        virtual json toGeoJSON() const override;
     };
 
     struct BasicPolygonGeometry : BasicGeometry
     {
-        DDB_DLL virtual std::string toWkt() const override;
-        DDB_DLL virtual json toGeoJSON() const override;
+        virtual std::string toWkt() const override;
+        virtual json toGeoJSON() const override;
     };
 
     enum BasicGeometryType
@@ -77,7 +76,7 @@ namespace ddb
         BGPolygon
     };
 
-    DDB_DLL BasicGeometryType getBasicGeometryTypeFromName(const std::string &name);
+    BasicGeometryType getBasicGeometryTypeFromName(const std::string &name);
 
 }
 

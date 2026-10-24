@@ -1,0 +1,120 @@
+# libddb symbol manifest (XI-01): every function libddb exports whose name starts with DDB.
+#
+# Format: one symbol name per line, sorted in byte order (LC_ALL=C sort), no duplicates. Lines
+# starting with '#' are comments.
+#
+# This file is the only copy of the list. DDBGetCapabilities() returns it ("symbols", embedded by
+# src/CMakeLists.txt) and every release publishes it next to ddb.h. There is no ABI version in
+# it: the ABI is the MAJOR and MINOR of the library version (package.json, ddb_version.h).
+# scripts/check-abi.py (CI) fails when the library exports a different list, when an export is
+# removed since the previous release without a MAJOR bump of package.json, and when one is
+# added without a MINOR (or MAJOR) bump.
+# Adding an export: declare it in ddb.h, list it here, bump the MINOR of package.json once per
+# release.
+#
+DDBAdd
+DDBAddWithHints
+DDBAddWithOptions
+DDBAlignRaster
+DDBAppendPassword
+DDBApplyDelta
+DDBApplyDeltaEx
+DDBBuild
+DDBCalculateVolume
+DDBCancel
+DDBChattr
+DDBCheckpoint
+DDBCleanup
+DDBClearPasswords
+DDBComputeDeltaLocals
+DDBConfigure
+DDBCopyBuildArtifacts
+DDBCountVector
+DDBCreateCancelToken
+DDBDelta
+DDBDescribeVector
+DDBDetectAllStockpiles
+DDBDetectStockpile
+DDBExportRaster
+DDBExportRaster2
+DDBFree
+DDBFreeCancelToken
+DDBGenerateContours
+DDBGenerateMemoryThumbnail
+DDBGenerateMemoryThumbnailEx
+DDBGenerateThumbnail
+DDBGet
+DDBGetAbiVersion
+DDBGetBuildArtifacts
+DDBGetBuildStatus
+DDBGetCapabilities
+DDBGetEffectiveConfig
+DDBGetEntryTypes
+DDBGetLastError
+DDBGetLastErrorReason
+DDBGetPendingBuildInfo
+DDBGetRasterAreaStats
+DDBGetRasterInfo
+DDBGetRasterMetadata
+DDBGetRasterPointValue
+DDBGetRasterProfile
+DDBGetRasterValueInfo
+DDBGetStamp
+DDBGetStampChecksum
+DDBGetTag
+DDBGetVersion
+DDBInfo
+DDBInit
+DDBIsBuildActive
+DDBIsBuildComplete
+DDBIsBuildPending
+DDBIsBuildable
+DDBList
+DDBListEntries
+DDBListEntriesEx
+DDBMakeCadPrj
+DDBMaskBorders
+DDBMemoryTile
+DDBMemoryTileEx
+DDBMemoryTileFmt
+DDBMergeMultispectral
+DDBMetaAdd
+DDBMetaDump
+DDBMetaGet
+DDBMetaList
+DDBMetaRemove
+DDBMetaRestore
+DDBMetaSet
+DDBMetaUnset
+DDBMoveEntry
+DDBNormalizePath
+DDBPreviewMergeMultispectral
+DDBQueryRasterPoint
+DDBQueryVector
+DDBQueryVectorEx
+DDBRegisterProcess
+DDBReleaseConnections
+DDBRemove
+DDBRenderRasterIndex
+DDBRenderRasterRegion
+DDBRenderRasterRegionEx
+DDBRescan
+DDBRescanEx
+DDBResolveBuildFile
+DDBSearch
+DDBSetLastError
+DDBSetLogCallback
+DDBSetTag
+DDBSetThreadCancelToken
+DDBSetThreadOperation
+DDBShutdown
+DDBStac
+DDBStacData
+DDBStacItemCollection
+DDBStacItemCollectionData
+DDBStatus
+DDBTile
+DDBVSIFree
+DDBValidateAlignRaster
+DDBValidateMergeMultispectral
+DDBVerifyPassword

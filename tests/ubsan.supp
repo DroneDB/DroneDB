@@ -1,0 +1,21 @@
+# UndefinedBehaviorSanitizer suppressions for the ASan+UBSan build (DQ-01, docs/sanitizers.md).
+#
+# Vendored third-party code only: submodules are not patched in this repository. A report in
+# src/, apps/ or tests/ is a bug to fix, not to list here. Each entry says what it is and why
+# it is not ours.
+
+# corto (vendor/libnexus/vendor/nexus/src/corto), the nexus mesh codec used by buildNexus():
+# - it reads and writes integers through casted byte pointers at unaligned offsets of its
+#   stream buffers (cstream.h OutStream::write<T>/InStream::read<T>): the intended behaviour
+#   on x86-64 and ARM64;
+# - its normal predictor (normal_attribute.cpp NormalAttr::preDelta) converts estimated
+#   normals to octahedral ints; an estimated normal that is not finite (zero-area or
+#   unreferenced geometry) becomes INT_MIN, so the deltas and the bit-width arithmetic
+#   overflow (point.h operator-=, cstream.h encodeArray, bitstream.cpp BitStream::write
+#   shifts by 32);
+# - OutStream::push() calls memcpy(pos, nullptr, 0) for empty arrays.
+# The round trip is covered by the file3d tests. Upstream: cnr-isti-vclab/corto.
+alignment:corto/
+signed-integer-overflow:corto/
+shift-exponent:corto/
+nonnull-attribute:corto/

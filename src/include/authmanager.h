@@ -24,13 +24,13 @@ namespace ddb
         void WriteToDisk();
 
     public:
-        DDB_DLL AuthManager(const fs::path &authFile);
+        AuthManager(const fs::path &authFile);
 
-        DDB_DLL void saveCredentials(const std::string &url, const AuthCredentials &creds);
-        DDB_DLL AuthCredentials loadCredentials(const std::string &url);
-        DDB_DLL bool deleteCredentials(const std::string &url);
+        void saveCredentials(const std::string &url, const AuthCredentials &creds);
+        AuthCredentials loadCredentials(const std::string &url);
+        bool deleteCredentials(const std::string &url);
 
-        DDB_DLL std::vector<std::string> getAuthenticatedRegistryUrls();
+        std::vector<std::string> getAuthenticatedRegistryUrls();
     };
 
 }

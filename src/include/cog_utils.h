@@ -5,13 +5,12 @@
 #define COG_UTILS_H
 
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb {
 
 // Check if a GeoTIFF file is already an optimized Cloud Optimized GeoTIFF
 // Returns true if the file is already optimized and doesn't need rebuild
-DDB_DLL bool isOptimizedCog(const std::string& inputPath);
+bool isOptimizedCog(const std::string& inputPath);
 
 }
 

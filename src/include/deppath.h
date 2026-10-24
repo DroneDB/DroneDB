@@ -17,13 +17,15 @@
 //     produced by a converter in a temp folder are checked for absolute
 //     references only.
 // Unsatisfiable references fail the build (plain AppException) instead of
-// leaving it pending; see buildInternal() in build.cpp.
+// leaving it pending; see buildInternal() in build_dispatch.cpp.
 
 #include <cctype>
 #include <string>
 #include <system_error>
 
 #include "fs.h"
+#include "stringutil.h"
+#include "mio.h"
 
 namespace ddb {
 namespace deppath {
@@ -36,7 +38,7 @@ inline std::string normalize(const std::string& ref) {
         if (c == '\\')
             c = '/';
 
-    std::string out = fs::path(s).lexically_normal().generic_string();
+    std::string out = io::toGenericUtf8(io::fromUtf8(s).lexically_normal());
 
     // lexically_normal keeps a trailing separator ("dir/" -> "dir/"); a file
     // reference never needs it.
@@ -53,16 +55,11 @@ inline bool isAbsolute(const std::string& ref) {
         return false;
     if (ref[0] == '/' || ref[0] == '\\')
         return true;  // POSIX root, UNC prefix, or a root-relative Windows path
-    if (ref.size() >= 2 && std::isalpha(static_cast<unsigned char>(ref[0])) && ref[1] == ':')
+    if (ref.size() >= 2 && ddb::str::isAlphaChar(ref[0]) && ref[1] == ':')
         return true;  // drive letter ("C:\x", "C:/x", "C:x")
-    if (ref.size() >= 5) {
-        std::string scheme = ref.substr(0, 5);
-        for (auto& c : scheme)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (scheme == "file:")
-            return true;
-    }
-    const fs::path p(ref);
+    if (ddb::str::startsWithCI(ref, "file:"))
+        return true;
+    const fs::path p = io::fromUtf8(ref);
     return p.is_absolute() || p.has_root_name() || p.has_root_directory();
 }
 
@@ -93,11 +90,11 @@ inline bool isInside(const fs::path& p, const fs::path& root) {
 // form stored in ".pending" (e.g. "sub/m.mtl", "sub/mats/tex.png").
 // `sourceEntryPath` is the dataset-relative path of the source file.
 inline std::string toDatasetRelative(const std::string& sourceEntryPath, const std::string& name) {
-    const fs::path parent = fs::path(normalize(sourceEntryPath)).parent_path();
+    const fs::path parent = io::fromUtf8(normalize(sourceEntryPath)).parent_path();
     const std::string n = normalize(name);
     if (parent.empty())
         return n;
-    return normalize((parent / fs::path(n)).generic_string());
+    return normalize(io::toGenericUtf8(parent / io::fromUtf8(n)));
 }
 
 }  // namespace deppath

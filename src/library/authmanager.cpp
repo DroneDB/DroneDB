@@ -3,7 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "../../vendor/base64/base64.h"
 #include "authmanager.h"
+#include "exceptions.h"
 #include "logger.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -15,21 +17,23 @@ namespace ddb
             std::ifstream fin(authFile);
             try
             {
-                LOGD << "Read " << authFile.string();
+                LOGD << "Read " << io::toUtf8(authFile);
                 fin >> auth;
             }
             catch (const json::exception &e)
             {
-                LOGD << "Error reading " << authFile.string() << ": " << e.what();
+                LOGD << "Error reading " << io::toUtf8(authFile) << ": " << e.what();
             }
         }
     }
 
+    // The file holds passwords (base64 is an encoding, not protection): owner only (0600), and
+    // replaced atomically so a crash or a full disk never leaves a half-written credentials file
+    // that the next run would read as empty and overwrite. Throws FSException.
     void AuthManager::WriteToDisk()
     {
-        std::ofstream fout(authFile);
-        fout << auth;
-        LOGD << "Wrote " << authFile;
+        io::writeFileAtomic(authFile, auth.dump(), "credentials file", true);
+        LOGD << "Wrote " << io::toUtf8(authFile);
     }
 
     AuthManager::AuthManager(const fs::path &authFile) : authFile(authFile)
@@ -41,7 +45,15 @@ namespace ddb
         {
             LOGD << "Initializing " << authFile;
             auth["auths"] = {};
-            WriteToDisk();
+            try
+            {
+                WriteToDisk();
+            }
+            catch (const FSException &e)
+            {
+                // Nothing to lose yet: a read-only profile folder only fails the saves that follow
+                LOGW << "Cannot create " << io::toUtf8(authFile) << ": " << e.what();
+            }
         }
     }
 
@@ -64,8 +76,10 @@ namespace ddb
         if (auth["auths"].contains(url))
         {
             const std::string userpwd = Base64::decode(auth["auths"][url]["auth"]);
-            const size_t colonpos = userpwd.rfind(":");
-            if (colonpos > 0)
+            // "user:password": a user name has no colon (HTTP Basic, RFC 7617; Registry's names are
+            // letters and digits) while a password may have any: split at the first one
+            const size_t colonpos = userpwd.find(':');
+            if (colonpos != std::string::npos && colonpos > 0)
             {
                 LOGD << "Found username and password for " << url;
                 ac.username = userpwd.substr(0, colonpos);

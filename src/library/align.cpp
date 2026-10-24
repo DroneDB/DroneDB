@@ -2,12 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "align.h"
-#include "gdal_inc.h"
+#include "mathutil.h"
+#include "gdal_raii.h"
+#include "gtiff_options.h"
+#include "raster_utils.h"
 #include "cog.h"        // buildCog() - DRY reuse of the COG pattern
 #include "exceptions.h"
 #include "logger.h"
 #include "json.h"
 #include "fs.h"          // fs::absolute - used by applyWarp() for VRT path resolution
+#include "mio.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,10 +19,6 @@
 #include <random>
 #include <utility>
 #include <vector>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 namespace ddb {
 
@@ -45,6 +45,36 @@ struct Similarity2D {
     }
 };
 
+// The extent of a raster in map units, normalized so that x0 < x1 and y0 < y1 regardless of the
+// sign of the pixel sizes (west-up and south-up geotransforms have negative ones)
+struct Extent {
+    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+
+    static Extent of(GDALDatasetH hDs, const double gt[6]) {
+        Extent e;
+        e.x0 = gt[0];
+        e.x1 = gt[0] + gt[1] * GDALGetRasterXSize(hDs);
+        e.y0 = gt[3] + gt[5] * GDALGetRasterYSize(hDs);
+        e.y1 = gt[3];
+        if (e.x1 < e.x0) std::swap(e.x0, e.x1);
+        if (e.y1 < e.y0) std::swap(e.y0, e.y1);
+        return e;
+    }
+
+    // The area both extents cover (empty or inverted when they do not meet)
+    Extent overlap(const Extent &o) const {
+        return {std::max(x0, o.x0), std::max(y0, o.y0), std::min(x1, o.x1), std::min(y1, o.y1)};
+    }
+
+    // How much of this extent the other one covers, in percent
+    double overlapPercent(const Extent &o) const {
+        const double ox = std::max(0.0, std::min(x1, o.x1) - std::max(x0, o.x0));
+        const double oy = std::max(0.0, std::min(y1, o.y1) - std::max(y0, o.y0));
+        const double area = (x1 - x0) * (y1 - y0);
+        return (area > 0) ? 100.0 * (ox * oy) / area : 0.0;
+    }
+};
+
 // ─── B  Raster to common float32 grid ───────────────────────────────────────
 
 static bool detectIsDem(GDALDatasetH hDs) {
@@ -68,13 +98,13 @@ struct RasterGrid {
  *   DEM   → standardized elevation: (v − μ) / σ
  */
 static RasterGrid readToCommonGrid(GDALDatasetH hDs,
-                                   double x0, double y0,
-                                   double x1, double y1,
+                                   const Extent &area,
                                    double targetGsd,
                                    bool isDem)
 {
+    const double x0 = area.x0, y0 = area.y0, x1 = area.x1, y1 = area.y1;
     double gt[6];
-    GDALGetGeoTransform(hDs, gt);
+    requireGeoTransform(hDs, gt);
 
     // Source window in pixels
     int px0 = static_cast<int>(std::floor((x0 - gt[0]) / gt[1]));
@@ -107,7 +137,7 @@ static RasterGrid readToCommonGrid(GDALDatasetH hDs,
     std::vector<float> signal(static_cast<size_t>(outW) * outH);
     if (isDem) {
         double sum = 0, sum2 = 0;
-        for (float v : bands[0]) { sum += v; sum2 += v * (double)v; }
+        for (float v : bands[0]) { sum += v; sum2 += v * static_cast<double>(v); }
         double count = static_cast<double>(outW) * outH;
         double mean = sum / count;
         double stdv = std::sqrt(std::max(0.0, sum2 / count - mean * mean));
@@ -142,25 +172,25 @@ struct IntegralImages {
 
     IntegralImages() = default;
     IntegralImages(const std::vector<float> &img, int w, int h)
-        : sat((size_t)(w + 1) * (h + 1), 0.0), sat2((size_t)(w + 1) * (h + 1), 0.0), W(w), H(h)
+        : sat(static_cast<size_t>(w + 1) * (h + 1), 0.0), sat2(static_cast<size_t>(w + 1) * (h + 1), 0.0), W(w), H(h)
     {
         for (int r = 0; r < h; r++) {
             for (int c = 0; c < w; c++) {
-                double v = img[(size_t)r * w + c];
-                size_t idx = (size_t)(r + 1) * (w + 1) + (c + 1);
-                sat [idx] = v       + sat [(size_t)r * (w + 1) + (c + 1)] + sat [(size_t)(r + 1) * (w + 1) + c] - sat [(size_t)r * (w + 1) + c];
-                sat2[idx] = v * v   + sat2[(size_t)r * (w + 1) + (c + 1)] + sat2[(size_t)(r + 1) * (w + 1) + c] - sat2[(size_t)r * (w + 1) + c];
+                double v = img[static_cast<size_t>(r) * w + c];
+                size_t idx = static_cast<size_t>(r + 1) * (w + 1) + (c + 1);
+                sat [idx] = v       + sat [static_cast<size_t>(r) * (w + 1) + (c + 1)] + sat [static_cast<size_t>(r + 1) * (w + 1) + c] - sat [static_cast<size_t>(r) * (w + 1) + c];
+                sat2[idx] = v * v   + sat2[static_cast<size_t>(r) * (w + 1) + (c + 1)] + sat2[static_cast<size_t>(r + 1) * (w + 1) + c] - sat2[static_cast<size_t>(r) * (w + 1) + c];
             }
         }
     }
 
     double boxSum (int r0, int c0, int r1, int c1) const noexcept {
-        return sat [(size_t)(r1 + 1) * (W + 1) + (c1 + 1)] - sat [(size_t)r0 * (W + 1) + (c1 + 1)]
-             - sat [(size_t)(r1 + 1) * (W + 1) + c0]       + sat [(size_t)r0 * (W + 1) + c0];
+        return sat [static_cast<size_t>(r1 + 1) * (W + 1) + (c1 + 1)] - sat [static_cast<size_t>(r0) * (W + 1) + (c1 + 1)]
+             - sat [static_cast<size_t>(r1 + 1) * (W + 1) + c0]       + sat [static_cast<size_t>(r0) * (W + 1) + c0];
     }
     double boxSum2(int r0, int c0, int r1, int c1) const noexcept {
-        return sat2[(size_t)(r1 + 1) * (W + 1) + (c1 + 1)] - sat2[(size_t)r0 * (W + 1) + (c1 + 1)]
-             - sat2[(size_t)(r1 + 1) * (W + 1) + c0]       + sat2[(size_t)r0 * (W + 1) + c0];
+        return sat2[static_cast<size_t>(r1 + 1) * (W + 1) + (c1 + 1)] - sat2[static_cast<size_t>(r0) * (W + 1) + (c1 + 1)]
+             - sat2[static_cast<size_t>(r1 + 1) * (W + 1) + c0]       + sat2[static_cast<size_t>(r0) * (W + 1) + c0];
     }
 };
 
@@ -211,7 +241,7 @@ static void fft1d(std::vector<std::complex<double>> &a, bool inverse) {
         if (i < j) std::swap(a[i], a[j]);
     }
     for (size_t len = 2; len <= n; len <<= 1) {
-        double ang = 2.0 * M_PI / static_cast<double>(len) * (inverse ? 1.0 : -1.0);
+        double ang = 2.0 * ddb::kPi / static_cast<double>(len) * (inverse ? 1.0 : -1.0);
         std::complex<double> wlen(std::cos(ang), std::sin(ang));
         for (size_t i = 0; i < n; i += len) {
             std::complex<double> w(1.0, 0.0);
@@ -232,14 +262,14 @@ static void fft1d(std::vector<std::complex<double>> &a, bool inverse) {
 static void fft2d(std::vector<std::complex<double>> &m, int n, bool inverse) {
     std::vector<std::complex<double>> line(static_cast<size_t>(n));
     for (int r = 0; r < n; ++r) {
-        for (int c = 0; c < n; ++c) line[c] = m[(size_t)r * n + c];
+        for (int c = 0; c < n; ++c) line[c] = m[static_cast<size_t>(r) * n + c];
         fft1d(line, inverse);
-        for (int c = 0; c < n; ++c) m[(size_t)r * n + c] = line[c];
+        for (int c = 0; c < n; ++c) m[static_cast<size_t>(r) * n + c] = line[c];
     }
     for (int c = 0; c < n; ++c) {
-        for (int r = 0; r < n; ++r) line[r] = m[(size_t)r * n + c];
+        for (int r = 0; r < n; ++r) line[r] = m[static_cast<size_t>(r) * n + c];
         fft1d(line, inverse);
-        for (int r = 0; r < n; ++r) m[(size_t)r * n + c] = line[r];
+        for (int r = 0; r < n; ++r) m[static_cast<size_t>(r) * n + c] = line[r];
     }
 }
 
@@ -271,10 +301,10 @@ static std::pair<double, double> phaseCorrelate(const RasterGrid &src,
     std::vector<std::complex<double>> FS(N, {0.0, 0.0}), FR(N, {0.0, 0.0});
     for (int r = 0; r < src.height; ++r)
         for (int c = 0; c < src.width; ++c)
-            FS[(size_t)r * nfft + c] = std::complex<double>(src.data[(size_t)r * src.width + c] - mS, 0.0);
+            FS[static_cast<size_t>(r) * nfft + c] = std::complex<double>(src.data[static_cast<size_t>(r) * src.width + c] - mS, 0.0);
     for (int r = 0; r < ref.height; ++r)
         for (int c = 0; c < ref.width; ++c)
-            FR[(size_t)r * nfft + c] = std::complex<double>(ref.data[(size_t)r * ref.width + c] - mR, 0.0);
+            FR[static_cast<size_t>(r) * nfft + c] = std::complex<double>(ref.data[static_cast<size_t>(r) * ref.width + c] - mR, 0.0);
 
     fft2d(FS, nfft, false);
     fft2d(FR, nfft, false);
@@ -310,7 +340,7 @@ static std::pair<double, double> phaseCorrelate(const RasterGrid &src,
                 int ddr = std::abs(r - pr); ddr = std::min(ddr, nfft - ddr);
                 int ddc = std::abs(c - pc); ddc = std::min(ddc, nfft - ddc);
                 if (ddr <= exclude && ddc <= exclude) continue;
-                sum += std::abs(cp[(size_t)r * nfft + c].real());
+                sum += std::abs(cp[static_cast<size_t>(r) * nfft + c].real());
                 cnt++;
             }
         }
@@ -331,6 +361,12 @@ struct NccMatch {
     float  score = -1.f;       // NCC peak ∈ [-1, 1]
 };
 
+/** The patch of the source to look for: its top-left pixel and size, and how far to search. */
+struct PatchQuery {
+    int srcRow = 0, srcCol = 0;
+    int patchSize = 0, searchRadius = 0;
+};
+
 /**
  * Searches the template srcGrid[srcRow,srcCol : srcRow+patchSize, ...]
  * in the refGrid window centered on (srcRow+seedDr, srcCol+seedDc) ± searchRadius.
@@ -338,10 +374,11 @@ struct NccMatch {
 static NccMatch matchPatch(const RasterGrid    &srcGrid,
                            const IntegralImages &refII,
                            const RasterGrid    &refGrid,
-                           int srcRow, int srcCol,
-                           int patchSize, int searchRadius,
+                           const PatchQuery    &query,
                            double seedDr, double seedDc)
 {
+    const int srcRow = query.srcRow, srcCol = query.srcCol;
+    const int patchSize = query.patchSize, searchRadius = query.searchRadius;
     int n = patchSize * patchSize;
 
     // Extract source patch and compute μ, σ
@@ -349,9 +386,9 @@ static NccMatch matchPatch(const RasterGrid    &srcGrid,
     double pSum = 0, pSum2 = 0;
     for (int r = 0; r < patchSize; r++)
         for (int c = 0; c < patchSize; c++) {
-            float v = srcGrid.data[(size_t)(srcRow + r) * srcGrid.width + (srcCol + c)];
-            patch[(size_t)r * patchSize + c] = v;
-            pSum += v; pSum2 += v * (double)v;
+            float v = srcGrid.data[static_cast<size_t>(srcRow + r) * srcGrid.width + (srcCol + c)];
+            patch[static_cast<size_t>(r) * patchSize + c] = v;
+            pSum += v; pSum2 += v * static_cast<double>(v);
         }
     double pMean = pSum / n;
     double pStd  = std::sqrt(std::max(0.0, pSum2 / n - pMean * pMean));
@@ -371,7 +408,7 @@ static NccMatch matchPatch(const RasterGrid    &srcGrid,
     if (mapRows <= 0 || mapCols <= 0) return {};
 
     NccMatch best;
-    std::vector<float> nccMap((size_t)mapRows * mapCols, -2.f);
+    std::vector<float> nccMap(static_cast<size_t>(mapRows) * mapCols, -2.f);
 
     for (int rr = rr0; rr <= rr1; rr++) {
         for (int rc = rc0; rc <= rc1; rc++) {
@@ -385,11 +422,11 @@ static NccMatch matchPatch(const RasterGrid    &srcGrid,
             double cross = 0;
             for (int r = 0; r < patchSize; r++)
                 for (int c = 0; c < patchSize; c++)
-                    cross += (patch[(size_t)r * patchSize + c] - pMean) *
-                             (refGrid.data[(size_t)(rr + r) * refGrid.width + (rc + c)] - refMean);
+                    cross += (patch[static_cast<size_t>(r) * patchSize + c] - pMean) *
+                             (refGrid.data[static_cast<size_t>(rr + r) * refGrid.width + (rc + c)] - refMean);
 
             float ncc = static_cast<float>(cross / (n * pStd * refStd));
-            nccMap[(size_t)(rr - rr0) * mapCols + (rc - rc0)] = ncc;
+            nccMap[static_cast<size_t>(rr - rr0) * mapCols + (rc - rc0)] = ncc;
             if (ncc > best.score) {
                 best.score = ncc;
                 best.dr = rr - srcRow;
@@ -402,9 +439,9 @@ static NccMatch matchPatch(const RasterGrid    &srcGrid,
     int pr = static_cast<int>(best.dr + srcRow) - rr0;
     int pc = static_cast<int>(best.dc + srcCol) - rc0;
     if (pr > 0 && pr < mapRows - 1 && pc > 0 && pc < mapCols - 1) {
-        float ym1 = nccMap[(size_t)(pr - 1) * mapCols + pc], yp1 = nccMap[(size_t)(pr + 1) * mapCols + pc];
-        float xm1 = nccMap[(size_t)pr * mapCols + (pc - 1)], xp1 = nccMap[(size_t)pr * mapCols + (pc + 1)];
-        float c0  = nccMap[(size_t)pr * mapCols + pc];
+        float ym1 = nccMap[static_cast<size_t>(pr - 1) * mapCols + pc], yp1 = nccMap[static_cast<size_t>(pr + 1) * mapCols + pc];
+        float xm1 = nccMap[static_cast<size_t>(pr) * mapCols + (pc - 1)], xp1 = nccMap[static_cast<size_t>(pr) * mapCols + (pc + 1)];
+        float c0  = nccMap[static_cast<size_t>(pr) * mapCols + pc];
         float denR = 2 * c0 - ym1 - yp1, denC = 2 * c0 - xm1 - xp1;
         if (denR > 1e-9f) best.dr += 0.5f * (ym1 - yp1) / denR;
         if (denC > 1e-9f) best.dc += 0.5f * (xm1 - xp1) / denC;
@@ -507,12 +544,13 @@ static void applyWarp(const std::string &sourcePath,
 {
     // Resolve to an absolute path so the VRT SimpleSource can find the file
     // regardless of any cwd change between the VRT creation and the warp read.
-    const std::string absSrcPath = fs::absolute(sourcePath).string();
-    GDALDatasetH hSrc = GDALOpen(absSrcPath.c_str(), GA_ReadOnly);
-    if (!hSrc) throw GDALException("Cannot open " + sourcePath);
+    const std::string absSrcPath = io::toUtf8(fs::absolute(io::fromUtf8(sourcePath)));
+    const auto src = adoptDataset(GDALOpen(absSrcPath.c_str(), GA_ReadOnly));
+    if (!src) throw GDALException("Cannot open " + sourcePath);
+    GDALDatasetH hSrc = datasetHandle(src);
 
     double gt[6];
-    GDALGetGeoTransform(hSrc, gt);
+    requireGeoTransform(hSrc, gt);
 
     double co = sim.cosTheta, si = sim.sinTheta, sc = sim.scale;
     double ngt[6];
@@ -530,29 +568,26 @@ static void applyWarp(const std::string &sourcePath,
     // size). The VRT driver stores the source path as a SimpleSource reference;
     // hSrc is kept open until after GDALWarp so the file remains accessible.
     GDALDriverH hVrtDrv = GDALGetDriverByName("VRT");
-    if (!hVrtDrv) { GDALClose(hSrc); throw GDALException("VRT driver unavailable"); }
-    GDALDatasetH hVrt = GDALCreateCopy(hVrtDrv, "", hSrc, FALSE,
-                                       nullptr, nullptr, nullptr);
-    if (!hVrt) { GDALClose(hSrc); throw GDALException("Cannot create VRT wrapper for warp"); }
-    GDALSetGeoTransform(hVrt, ngt);
-    GDALSetProjection(hVrt, targetCrs.c_str());
+    if (!hVrtDrv) throw GDALException("VRT driver unavailable");
+    // Declared after src: closed before it
+    auto vrt = adoptDataset(GDALCreateCopy(hVrtDrv, "", hSrc, FALSE,
+                                           nullptr, nullptr, nullptr));
+    if (!vrt) throw GDALException("Cannot create VRT wrapper for warp");
+    GDALDatasetH hVrt = datasetHandle(vrt);
+    if (GDALSetGeoTransform(hVrt, ngt) != CE_None || GDALSetProjection(hVrt, targetCrs.c_str()) != CE_None)
+        throw GDALException("Cannot georeference the VRT wrapper for warp");
 
     // GDALWarp → temporary LZW GTiff
-    char **args = nullptr;
-    args = CSLAddString(args, "-of");    args = CSLAddString(args, "GTiff");
-    args = CSLAddString(args, "-t_srs"); args = CSLAddString(args, targetCrs.c_str());
-    args = CSLAddString(args, "-r");     args = CSLAddString(args, "bilinear");
-    args = CSLAddString(args, "-co");    args = CSLAddString(args, "COMPRESS=LZW");
-    args = CSLAddString(args, "-co");    args = CSLAddString(args, "BIGTIFF=IF_SAFER");
+    CPLStringList args;
+    args.AddString("-of");    args.AddString("GTiff");
+    args.AddString("-t_srs"); args.AddString(targetCrs.c_str());
+    args.AddString("-r");     args.AddString("bilinear");
+    GtiffOptions().compress(GtiffOptions::Codec::Lzw).bigTiffIfSafer().appendTo(args);
 
-    GDALWarpAppOptions *wOpts = GDALWarpAppOptionsNew(args, nullptr);
-    CSLDestroy(args);
-    GDALDatasetH hOut = GDALWarp(tmpPath.c_str(), nullptr, 1, &hVrt, wOpts, nullptr);
-    GDALWarpAppOptionsFree(wOpts);
-    GDALClose(hVrt);
-    GDALClose(hSrc);
-    if (!hOut) throw GDALException("GDALWarp failed for aligned output: " + tmpPath);
-    GDALClose(hOut);
+    const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
+    const auto out = adoptDataset(
+        GDALWarp(tmpPath.c_str(), nullptr, 1, &hVrt, wOpts.get(), nullptr));
+    if (!out) throw GDALException("GDALWarp failed for aligned output: " + tmpPath);
 }
 
 // ─── J  DEM Z offset ────────────────────────────────────────────────────────
@@ -560,9 +595,11 @@ static void applyWarp(const std::string &sourcePath,
 static double computeZOffset(const std::string &alignedPath,
                              const std::string &referencePath)
 {
-    GDALDatasetH hA = GDALOpen(alignedPath.c_str(),   GA_ReadOnly);
-    GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
-    if (!hA || !hR) { if (hA) GDALClose(hA); if (hR) GDALClose(hR); return 0.0; }
+    auto alignedDs = adoptDataset(GDALOpen(alignedPath.c_str(),   GA_ReadOnly));
+    auto refDs     = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+    if (!alignedDs || !refDs) return 0.0;
+    GDALDatasetH hA = datasetHandle(alignedDs);
+    GDALDatasetH hR = datasetHandle(refDs);
 
     // Both rasters share the source CRS at this point (the reference is
     // reprojected upstream when needed). Sample the *geographic* overlap on a
@@ -572,20 +609,13 @@ static double computeZOffset(const std::string &alignedPath,
     // extents differ, biasing the median offset.
     double gtA[6], gtR[6];
     if (GDALGetGeoTransform(hA, gtA) != CE_None || GDALGetGeoTransform(hR, gtR) != CE_None) {
-        GDALClose(hA); GDALClose(hR); return 0.0;
+        return 0.0;
     }
 
-    double aX0 = gtA[0], aX1 = gtA[0] + gtA[1] * GDALGetRasterXSize(hA);
-    double aY0 = gtA[3] + gtA[5] * GDALGetRasterYSize(hA), aY1 = gtA[3];
-    double rX0 = gtR[0], rX1 = gtR[0] + gtR[1] * GDALGetRasterXSize(hR);
-    double rY0 = gtR[3] + gtR[5] * GDALGetRasterYSize(hR), rY1 = gtR[3];
-    if (aX1 < aX0) std::swap(aX0, aX1);
-    if (aY1 < aY0) std::swap(aY0, aY1);
-    if (rX1 < rX0) std::swap(rX0, rX1);
-    if (rY1 < rY0) std::swap(rY0, rY1);
-    const double ox0 = std::max(aX0, rX0), ox1 = std::min(aX1, rX1);
-    const double oy0 = std::max(aY0, rY0), oy1 = std::min(aY1, rY1);
-    if (ox1 <= ox0 || oy1 <= oy0) { GDALClose(hA); GDALClose(hR); return 0.0; }
+    const Extent overlap = Extent::of(hA, gtA).overlap(Extent::of(hR, gtR));
+    const double ox0 = overlap.x0, ox1 = overlap.x1;
+    const double oy0 = overlap.y0, oy1 = overlap.y1;
+    if (ox1 <= ox0 || oy1 <= oy0) return 0.0;
 
     double gsd = std::max(std::abs(gtA[1]), std::abs(gtR[1]));
     if (gsd <= 0) gsd = std::max(ox1 - ox0, oy1 - oy0) / 512.0;
@@ -613,17 +643,16 @@ static double computeZOffset(const std::string &alignedPath,
 
     std::vector<float> bufA, bufR;
     const bool readOk = readOverlap(hA, gtA, bufA) && readOverlap(hR, gtR, bufR);
-    int hasNdA; const double ndA = GDALGetRasterNoDataValue(GDALGetRasterBand(hA, 1), &hasNdA);
-    int hasNdR; const double ndR = GDALGetRasterNoDataValue(GDALGetRasterBand(hR, 1), &hasNdR);
-    GDALClose(hA); GDALClose(hR);
+    const BandNodata ndA = readBandNodata(GDALGetRasterBand(hA, 1));
+    const BandNodata ndR = readBandNodata(GDALGetRasterBand(hR, 1));
+    alignedDs.reset(); refDs.reset();
     if (!readOk) return 0.0;
 
     std::vector<float> diffs;
     diffs.reserve(bufA.size());
     for (size_t i = 0; i < bufA.size(); i++) {
         if (std::isnan(bufA[i]) || std::isnan(bufR[i])) continue;
-        if (hasNdA && std::abs(bufA[i] - static_cast<float>(ndA)) < 1e-3f) continue;
-        if (hasNdR && std::abs(bufR[i] - static_cast<float>(ndR)) < 1e-3f) continue;
+        if (isNodata(bufA[i], ndA) || isNodata(bufR[i], ndR)) continue;
         diffs.push_back(bufR[i] - bufA[i]);
     }
     if (diffs.empty()) return 0.0;
@@ -631,22 +660,24 @@ static double computeZOffset(const std::string &alignedPath,
     return diffs[diffs.size() / 2];
 }
 
-static void addZOffset(const std::string &path, double zOffset) {
+void applyZOffset(const std::string &path, double zOffset) {
     if (std::abs(zOffset) < 1e-6) return;
-    GDALDatasetH hDs = GDALOpen(path.c_str(), GA_Update);
-    if (!hDs) return;
+    const auto dataset = adoptDataset(GDALOpen(path.c_str(), GA_Update));
+    if (!dataset) throw GDALException("Cannot open " + path + " to apply the vertical offset");
+    GDALDatasetH hDs = datasetHandle(dataset);
     GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
     int W = GDALGetRasterXSize(hDs), H = GDALGetRasterYSize(hDs);
-    int hasNd; double nd = GDALGetRasterNoDataValue(hBand, &hasNd);
+    const BandNodata nd = readBandNodata(hBand);
     std::vector<float> row(W);
     for (int r = 0; r < H; r++) {
-        GDALRasterIO(hBand, GF_Read, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
+        if (GDALRasterIO(hBand, GF_Read, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0) != CE_None)
+            throw GDALException("Cannot read row " + std::to_string(r) + " of " + path);
         for (float &v : row)
-            if (!hasNd || std::abs(v - static_cast<float>(nd)) > 1e-3f)
+            if (!isNodata(v, nd))
                 v += static_cast<float>(zOffset);
-        GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
+        if (GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0) != CE_None)
+            throw GDALException("Cannot write row " + std::to_string(r) + " of " + path);
     }
-    GDALClose(hDs);
 }
 
 // ─── K  Public API ──────────────────────────────────────────────────────────
@@ -656,12 +687,12 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
 {
     AlignValidationResult r;
 
-    GDALDatasetH hS = GDALOpen(sourcePath.c_str(),    GA_ReadOnly);
-    GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
-    if (!hS) { r.errors.push_back("Cannot open source: " + sourcePath); return r; }
-    if (!hR) { GDALClose(hS); r.errors.push_back("Cannot open reference: " + referencePath); return r; }
-
-    auto cleanup = [&] { GDALClose(hS); GDALClose(hR); };
+    const auto srcDs = adoptDataset(GDALOpen(sourcePath.c_str(),    GA_ReadOnly));
+    const auto refDs = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+    if (!srcDs) { r.errors.push_back("Cannot open source: " + sourcePath); return r; }
+    if (!refDs) { r.errors.push_back("Cannot open reference: " + referencePath); return r; }
+    GDALDatasetH hS = datasetHandle(srcDs);
+    GDALDatasetH hR = datasetHandle(refDs);
 
     r.summary.sourceCrs    = GDALGetProjectionRef(hS) ? GDALGetProjectionRef(hS) : "";
     r.summary.referenceCrs = GDALGetProjectionRef(hR) ? GDALGetProjectionRef(hR) : "";
@@ -679,23 +710,19 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
                              ", reference=" + r.summary.referenceType + "): alignment may be inaccurate");
 
     double gts[6], gtr[6];
-    GDALGetGeoTransform(hS, gts); GDALGetGeoTransform(hR, gtr);
+    const bool sourceHasGeoTransform = GDALGetGeoTransform(hS, gts) == CE_None;
+    const bool referenceHasGeoTransform = GDALGetGeoTransform(hR, gtr) == CE_None;
+    if (!sourceHasGeoTransform) r.errors.push_back("Source has no geotransform");
+    if (!referenceHasGeoTransform) r.errors.push_back("Reference has no geotransform");
+    if (!sourceHasGeoTransform || !referenceHasGeoTransform) {
+        r.ok = false;
+        return r;
+    }
     r.summary.sourceGsdM    = std::abs(gts[1]);
     r.summary.referenceGsdM = std::abs(gtr[1]);
 
     // bbox overlap (no reprojection for validation only)
-    double sX0 = gts[0], sX1 = gts[0] + gts[1] * GDALGetRasterXSize(hS);
-    double sY0 = gts[3] + gts[5] * GDALGetRasterYSize(hS), sY1 = gts[3];
-    double rX0 = gtr[0], rX1 = gtr[0] + gtr[1] * GDALGetRasterXSize(hR);
-    double rY0 = gtr[3] + gtr[5] * GDALGetRasterYSize(hR), rY1 = gtr[3];
-    if (sX1 < sX0) std::swap(sX0, sX1);
-    if (sY1 < sY0) std::swap(sY0, sY1);
-    if (rX1 < rX0) std::swap(rX0, rX1);
-    if (rY1 < rY0) std::swap(rY0, rY1);
-    double ox = std::max(0.0, std::min(sX1, rX1) - std::max(sX0, rX0));
-    double oy = std::max(0.0, std::min(sY1, rY1) - std::max(sY0, rY0));
-    double sArea = (sX1 - sX0) * (sY1 - sY0);
-    r.summary.overlapPercent = (sArea > 0) ? 100.0 * (ox * oy) / sArea : 0.0;
+    r.summary.overlapPercent = Extent::of(hS, gts).overlapPercent(Extent::of(hR, gtr));
     // When CRS differ the envelopes are in incompatible coordinate systems;
     // the raw overlap percentage is meaningless and must not block validation -
     // alignRaster() will reproject the reference before checking real overlap.
@@ -703,133 +730,154 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
         r.errors.push_back("Insufficient overlap (" +
                            std::to_string(static_cast<int>(r.summary.overlapPercent)) + "%)");
 
-    cleanup();
     r.ok = r.errors.empty();
     return r;
 }
 
-AlignResult alignRaster(const std::string &sourcePath,
-                        const std::string &referencePath,
-                        const std::string &outputPath,
-                        const AlignOptions &opts)
-{
-    AlignResult result;
-    result.mode = (opts.mode == AlignMode::Similarity) ? "similarity" : "translation";
+namespace {
 
-    // 1. Validation
-    auto val = validateAlignRaster(sourcePath, referencePath);
-    if (!val.ok) throw AppException("Alignment validation failed: " + val.errors[0]);
+// Reprojects the reference into the CRS of the source, into tmpReproj
+void reprojectReference(const std::string &referencePath, const std::string &sourceCrs,
+                        const std::string &tmpReproj) {
+    LOGD << "Reprojecting reference to source CRS";
+    CPLStringList args;
+    args.AddString("-t_srs");
+    args.AddString(sourceCrs.c_str());
+    const auto refSrc = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+    if (!refSrc) throw GDALException("Cannot open reference for reprojection");
+    GDALDatasetH hR = datasetHandle(refSrc);
+    const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
+    if (!adoptDataset(GDALWarp(tmpReproj.c_str(), nullptr, 1, &hR, wOpts.get(), nullptr)))
+        throw GDALException("Reference reprojection failed");
+}
 
-    // 2. Optional reprojection of the reference into the source CRS
-    std::string effectiveRef = referencePath;
-    std::string tmpReproj;
-    struct TmpGuard { std::string f; ~TmpGuard() { if (!f.empty()) VSIUnlink(f.c_str()); } };
-    TmpGuard refGuard;
+// What both alignment modes work from: the files, and the source and the reference read onto one
+// grid of the area they share
+struct AlignInputs {
+    std::string sourcePath;
+    std::string referencePath;   // as given
+    std::string effectiveReference; // in the CRS of the source
+    std::string outputPath;
+    std::string sourceCrs;
+    bool isDem = false;
+    double targetGsd = 0;
+    RasterGrid srcGrid, refGrid;
+};
 
-    if (val.summary.crsMismatch) {
-        tmpReproj = outputPath + ".ref_reproj_tmp.tif";
-        refGuard.f = tmpReproj;
-        LOGD << "Reprojecting reference to source CRS";
-        char **args = nullptr;
-        args = CSLAddString(args, "-t_srs");
-        args = CSLAddString(args, val.summary.sourceCrs.c_str());
-        GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
-        if (!hR) throw GDALException("Cannot open reference for reprojection");
-        GDALWarpAppOptions *wOpts = GDALWarpAppOptionsNew(args, nullptr);
-        CSLDestroy(args);
-        GDALDatasetH hOut = GDALWarp(tmpReproj.c_str(), nullptr, 1, &hR, wOpts, nullptr);
-        GDALWarpAppOptionsFree(wOpts); GDALClose(hR);
-        if (!hOut) throw GDALException("Reference reprojection failed");
-        GDALClose(hOut);
-        effectiveRef = tmpReproj;
-    }
+AlignInputs loadInputs(const std::string &sourcePath, const std::string &referencePath,
+                       const std::string &effectiveRef, const std::string &outputPath,
+                       const AlignValidationResult &val) {
+    AlignInputs in;
+    in.sourcePath = sourcePath;
+    in.referencePath = referencePath;
+    in.effectiveReference = effectiveRef;
+    in.outputPath = outputPath;
+    in.sourceCrs = val.summary.sourceCrs;
 
-    // 3. Overlap bbox + common GSD
-    GDALDatasetH hS = GDALOpen(sourcePath.c_str(),   GA_ReadOnly);
-    GDALDatasetH hR = GDALOpen(effectiveRef.c_str(), GA_ReadOnly);
-    if (!hS || !hR) {
-        if (hS) GDALClose(hS);
-        if (hR) GDALClose(hR);
+    // Overlap bbox + common GSD
+    // Owned: readToCommonGrid throws (empty window, failed RasterIO) while both are open
+    auto srcDs = adoptDataset(GDALOpen(sourcePath.c_str(),   GA_ReadOnly));
+    auto refDs = adoptDataset(GDALOpen(effectiveRef.c_str(), GA_ReadOnly));
+    if (!srcDs || !refDs)
         throw GDALException("Cannot reopen datasets for grid extraction");
-    }
+    GDALDatasetH hS = datasetHandle(srcDs);
+    GDALDatasetH hR = datasetHandle(refDs);
     double gts[6], gtr[6];
-    GDALGetGeoTransform(hS, gts); GDALGetGeoTransform(hR, gtr);
+    requireGeoTransform(hS, gts);
+    requireGeoTransform(hR, gtr);
 
-    double sX0 = gts[0], sX1 = gts[0] + gts[1] * GDALGetRasterXSize(hS);
-    double sY0 = gts[3] + gts[5] * GDALGetRasterYSize(hS), sY1 = gts[3];
-    double rX0 = gtr[0], rX1 = gtr[0] + gtr[1] * GDALGetRasterXSize(hR);
-    double rY0 = gtr[3] + gtr[5] * GDALGetRasterYSize(hR), rY1 = gtr[3];
-    // Normalize so that X0 < X1 and Y0 < Y1 regardless of pixel-size sign
-    // (handles west-up or south-up geotransforms with negative pixel sizes).
-    if (sX1 < sX0) std::swap(sX0, sX1);
-    if (sY1 < sY0) std::swap(sY0, sY1);
-    if (rX1 < rX0) std::swap(rX0, rX1);
-    if (rY1 < rY0) std::swap(rY0, rY1);
-    double ox0 = std::max(sX0, rX0), ox1 = std::min(sX1, rX1);
-    double oy0 = std::max(sY0, rY0), oy1 = std::min(sY1, rY1);
+    const Extent src = Extent::of(hS, gts);
+    const Extent ref = Extent::of(hR, gtr);
+    const Extent ov = src.overlap(ref);
 
     // When the CRS differed, validateAlignRaster() could not check the real
     // overlap (the envelopes were in incompatible coordinate systems). Now that
     // the reference shares the source CRS, verify the overlap and fail fast with
     // a clear message instead of relying on a later "empty window" error.
     if (val.summary.crsMismatch) {
-        const double ovX = std::max(0.0, ox1 - ox0);
-        const double ovY = std::max(0.0, oy1 - oy0);
-        const double srcArea = (sX1 - sX0) * (sY1 - sY0);
-        const double overlapPct = (srcArea > 0) ? 100.0 * (ovX * ovY) / srcArea : 0.0;
+        const double overlapPct = src.overlapPercent(ref);
         if (overlapPct < 5.0) {
-            GDALClose(hS); GDALClose(hR);
             throw AppException("Insufficient overlap after reprojection (" +
                                std::to_string(static_cast<int>(overlapPct)) + "%)");
         }
     }
 
-    bool isDem = detectIsDem(hS);
+    in.isDem = detectIsDem(hS);
     // Use the worst (coarsest) GSD for the common grid
-    double targetGsd = std::max(std::abs(gts[1]), std::abs(gtr[1]));
+    in.targetGsd = std::max(std::abs(gts[1]), std::abs(gtr[1]));
 
-    RasterGrid srcGrid = readToCommonGrid(hS, ox0, oy0, ox1, oy1, targetGsd, isDem);
-    RasterGrid refGrid = readToCommonGrid(hR, ox0, oy0, ox1, oy1, targetGsd, isDem);
-    GDALClose(hS); GDALClose(hR);
+    in.srcGrid = readToCommonGrid(hS, ov, in.targetGsd, in.isDem);
+    in.refGrid = readToCommonGrid(hR, ov, in.targetGsd, in.isDem);
+    srcDs.reset();
+    refDs.reset();
 
-    LOGD << "Common grid: " << srcGrid.width << "x" << srcGrid.height
-         << " @ GSD=" << targetGsd << " type=" << (isDem ? "dem" : "ortho");
+    LOGD << "Common grid: " << in.srcGrid.width << "x" << in.srcGrid.height
+         << " @ GSD=" << in.targetGsd << " type=" << (in.isDem ? "dem" : "ortho");
+    return in;
+}
 
-    // ── TRANSLATION MODE ──────────────────────────────────────────────────────
-    if (opts.mode == AlignMode::Translation) {
-        double peakStrength = 0.0;
-        auto pc = phaseCorrelate(srcGrid, refGrid, &peakStrength);
-        double dc = pc.first, dr = pc.second;
-        // (dc, dr) is the src→ref displacement in common-grid pixels.
-        // Map to map units through the common grid transform (same convention as
-        // the similarity tie points): T.x = dc·gt[1], T.y = dr·gt[5].
-        Similarity2D sim;
-        sim.t.x = dc * srcGrid.gt[1];
-        sim.t.y = dr * srcGrid.gt[5];
-        LOGD << "Phase correlation: dc=" << dc << " dr=" << dr
-             << " → tx=" << sim.t.x << " ty=" << sim.t.y << " m";
-
-        std::string tmpWarp = outputPath + ".warp_tmp.tif";
-        TmpGuard warpGuard{tmpWarp};
-        applyWarp(sourcePath, tmpWarp, sim, val.summary.sourceCrs);
-        if (isDem) {
-            result.shiftZ = computeZOffset(tmpWarp, effectiveRef);
-            addZOffset(tmpWarp, result.shiftZ);
-        }
-        buildCog(tmpWarp, outputPath);
-
-        result.success    = true;
-        result.txMapUnits = sim.t.x;
-        result.tyMapUnits = sim.t.y;
-        // Map the peak-to-sidelobe strength to a saturating [0,1] confidence
-        // (PSR ~ 10 => 0.5, higher => closer to 1). Replaces the previous fixed
-        // 0.8 so callers can distinguish a sharp, reliable match from a weak one.
-        result.confidence = std::clamp(peakStrength / (peakStrength + 10.0), 0.0, 1.0);
-        return result;
+// Applies the transform to the source and writes the COG: warp into a temporary file, DEM Z
+// offset, then buildCog; sets result.shiftZ for a DEM
+void writeAligned(const AlignInputs &in, const Similarity2D &sim, AlignResult &result) {
+    std::string tmpWarp = in.outputPath + ".warp_tmp.tif";
+    const io::ScopedTempDir warpGuard(io::fromUtf8(tmpWarp));
+    applyWarp(in.sourcePath, tmpWarp, sim, in.sourceCrs);
+    if (in.isDem) {
+        result.shiftZ = computeZOffset(tmpWarp, in.effectiveReference);
+        applyZOffset(tmpWarp, result.shiftZ);
     }
+    buildCog(tmpWarp, in.outputPath);
+}
 
-    // ── SIMILARITY MODE ───────────────────────────────────────────────────────
+AlignResult alignByTranslation(const AlignInputs &in, AlignResult result) {
+    double peakStrength = 0.0;
+    auto pc = phaseCorrelate(in.srcGrid, in.refGrid, &peakStrength);
+    double dc = pc.first, dr = pc.second;
+    // (dc, dr) is the src→ref displacement in common-grid pixels.
+    // Map to map units through the common grid transform (same convention as
+    // the similarity tie points): T.x = dc·gt[1], T.y = dr·gt[5].
+    Similarity2D sim;
+    sim.t.x = dc * in.srcGrid.gt[1];
+    sim.t.y = dr * in.srcGrid.gt[5];
+    LOGD << "Phase correlation: dc=" << dc << " dr=" << dr
+         << " → tx=" << sim.t.x << " ty=" << sim.t.y << " m";
 
+    writeAligned(in, sim, result);
+
+    result.success    = true;
+    result.txMapUnits = sim.t.x;
+    result.tyMapUnits = sim.t.y;
+    // Map the peak-to-sidelobe strength to a saturating [0,1] confidence
+    // (PSR ~ 10 => 0.5, higher => closer to 1). Replaces the previous fixed
+    // 0.8 so callers can distinguish a sharp, reliable match from a weak one.
+    result.confidence = std::clamp(peakStrength / (peakStrength + 10.0), 0.0, 1.0);
+    return result;
+}
+
+// The tie points of the NCC matches of the textured patches of the source
+std::vector<TiePoint> matchTiePoints(const AlignInputs &in, const AlignOptions &opts,
+                                     const std::vector<PatchCandidate> &patches, const IntegralImages &refII,
+                                     double seedDr, double seedDc) {
+    const RasterGrid &srcGrid = in.srcGrid;
+    std::vector<TiePoint> tiePoints;
+    tiePoints.reserve(patches.size());
+    double halfPatch = opts.patchSize / 2.0;
+    for (auto &p : patches) {
+        auto m = matchPatch(srcGrid, refII, in.refGrid, {p.row, p.col, opts.patchSize, opts.searchRadius},
+                            seedDr, seedDc);
+        if (m.score < 0.3f) continue;
+        Vec2 srcMap { srcGrid.gt[0] + (p.col + halfPatch) * srcGrid.gt[1],
+                      srcGrid.gt[3] + (p.row + halfPatch) * srcGrid.gt[5] };
+        Vec2 refMap { srcGrid.gt[0] + (p.col + halfPatch + m.dc) * srcGrid.gt[1],
+                      srcGrid.gt[3] + (p.row + halfPatch + m.dr) * srcGrid.gt[5] };
+        tiePoints.push_back({srcMap, refMap});
+    }
+    return tiePoints;
+}
+
+AlignResult alignBySimilarity(const AlignInputs &in, const AlignOptions &opts, AlignResult result) {
+    const RasterGrid &srcGrid = in.srcGrid;
+    const RasterGrid &refGrid = in.refGrid;
     IntegralImages srcII(srcGrid.data, srcGrid.width, srcGrid.height);
     IntegralImages refII(refGrid.data, refGrid.width, refGrid.height);
 
@@ -848,24 +896,11 @@ AlignResult alignRaster(const std::string &sourcePath,
         result.warningMessage = "No texture patches found; trying translation mode";
         AlignOptions fallback = opts;
         fallback.mode = AlignMode::Translation;
-        return alignRaster(sourcePath, referencePath, outputPath, fallback);
+        return alignRaster(in.sourcePath, in.referencePath, in.outputPath, fallback);
     }
 
     // NCC matching
-    std::vector<TiePoint> tiePoints;
-    tiePoints.reserve(patches.size());
-    double halfPatch = opts.patchSize / 2.0;
-    for (auto &p : patches) {
-        auto m = matchPatch(srcGrid, refII, refGrid,
-                            p.row, p.col, opts.patchSize, opts.searchRadius,
-                            seedDr, seedDc);
-        if (m.score < 0.3f) continue;
-        Vec2 srcMap { srcGrid.gt[0] + (p.col + halfPatch) * srcGrid.gt[1],
-                      srcGrid.gt[3] + (p.row + halfPatch) * srcGrid.gt[5] };
-        Vec2 refMap { srcGrid.gt[0] + (p.col + halfPatch + m.dc) * srcGrid.gt[1],
-                      srcGrid.gt[3] + (p.row + halfPatch + m.dr) * srcGrid.gt[5] };
-        tiePoints.push_back({srcMap, refMap});
-    }
+    const std::vector<TiePoint> tiePoints = matchTiePoints(in, opts, patches, refII, seedDr, seedDc);
     LOGD << "Tie points before RANSAC: " << tiePoints.size();
 
     if (static_cast<int>(tiePoints.size()) < opts.minInliers) {
@@ -874,7 +909,7 @@ AlignResult alignRaster(const std::string &sourcePath,
         LOGW << result.warningMessage;
         AlignOptions fallback = opts;
         fallback.mode = AlignMode::Translation;
-        return alignRaster(sourcePath, referencePath, outputPath, fallback);
+        return alignRaster(in.sourcePath, in.referencePath, in.outputPath, fallback);
     }
 
     // RANSAC
@@ -903,25 +938,51 @@ AlignResult alignRaster(const std::string &sourcePath,
     double confidence  = inlierRatio * std::exp(-rmse / (3.0 * opts.ransacThreshold));
 
     // Apply and write output
-    std::string tmpWarp = outputPath + ".warp_tmp.tif";
-    TmpGuard warpGuard{tmpWarp};
-    applyWarp(sourcePath, tmpWarp, sim, val.summary.sourceCrs);
-    if (isDem) {
-        result.shiftZ = computeZOffset(tmpWarp, effectiveRef);
-        addZOffset(tmpWarp, result.shiftZ);
-    }
-    buildCog(tmpWarp, outputPath);
+    writeAligned(in, sim, result);
 
     result.success      = true;
     result.txMapUnits   = sim.t.x;
     result.tyMapUnits   = sim.t.y;
-    result.thetaDeg     = std::atan2(sim.sinTheta, sim.cosTheta) * 180.0 / M_PI;
+    result.thetaDeg     = ddb::rad2deg(std::atan2(sim.sinTheta, sim.cosTheta));
     result.scale        = sim.scale;
     result.inlierCount  = inlierCount;
     result.inlierRatio  = inlierRatio;
     result.rmseMapUnits = rmse;
     result.confidence   = confidence;
     return result;
+}
+
+}  // namespace
+
+AlignResult alignRaster(const std::string &sourcePath,
+                        const std::string &referencePath,
+                        const std::string &outputPath,
+                        const AlignOptions &opts)
+{
+    AlignResult result;
+    result.mode = (opts.mode == AlignMode::Similarity) ? "similarity" : "translation";
+
+    // 1. Validation
+    auto val = validateAlignRaster(sourcePath, referencePath);
+    if (!val.ok) throw AppException("Alignment validation failed: " + val.errors[0]);
+
+    // 2. Optional reprojection of the reference into the source CRS
+    std::string effectiveRef = referencePath;
+    std::string tmpReproj;
+    io::ScopedTempDir refGuard;
+
+    if (val.summary.crsMismatch) {
+        tmpReproj = outputPath + ".ref_reproj_tmp.tif";
+        refGuard.reset(io::fromUtf8(tmpReproj));
+        reprojectReference(referencePath, val.summary.sourceCrs, tmpReproj);
+        effectiveRef = tmpReproj;
+    }
+
+    // 3. The overlap of both rasters on one grid, then the estimate
+    const AlignInputs in = loadInputs(sourcePath, referencePath, effectiveRef, outputPath, val);
+    if (opts.mode == AlignMode::Translation)
+        return alignByTranslation(in, result);
+    return alignBySimilarity(in, opts, result);
 }
 
 std::string alignResultToJson(const AlignResult &r) {

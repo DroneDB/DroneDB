@@ -2,22 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <exiv2/exiv2.hpp>
-#include <algorithm>
 #include <cmath>
-#include <limits>
 #include "dbops.h"
+#include "json.h"
+#include "stringutil.h"
+#include "mathutil.h"
 #include "entry.h"
+#include "entry_handler.h"
 
 #include "ddb.h"
 #include "constants.h"
 
 #include "mio.h"
-#include "pointcloud.h"
-#include "ply.h"
-#include "3d.h"
-#include "tiles3d.h"
-#include "gsplat.h"
-#include "thermal.h"
 #include "gdal_priv.h"
 #include "cpl_conv.h"
 #include "ogr_spatialref.h"
@@ -25,11 +21,6 @@
 
 namespace ddb
 {
-
-    // Forward declaration - defined after parseEntry()
-    static void parseVectorEntry(const fs::path &path, Entry &entry);
-    static void parseModelEntry(const fs::path &path, Entry &entry);
-    static void parseTiles3DEntry(const fs::path &path, Entry &entry);
 
     void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash)
     {
@@ -44,7 +35,7 @@ namespace ddb
         try
         {
             if (!fs::exists(path))
-                throw FSException(path.string() + " does not exist");
+                throw FSException(io::toUtf8(path) + " does not exist");
         }
         catch (const fs::filesystem_error &e)
         {
@@ -77,680 +68,22 @@ namespace ddb
             }
             catch (const fs::filesystem_error &e)
             {
-                LOGD << "Cannot check " << path.string() << " .ddb presence: " << e.what();
+                LOGD << "Cannot check " << io::toUtf8(path) << " .ddb presence: " << e.what();
             }
         }
         else
         {
             if (entry.hash == "" && withHash)
-                entry.hash = Hash::fileSHA256(path.string());
+                entry.hash = Hash::fileSHA256(io::toUtf8(path));
 
             entry.size = p.getSize();
             entry.type = fingerprint(p.get(), ctx);
 
-            bool pano = entry.type == EntryType::Panorama || entry.type == EntryType::GeoPanorama;
-            bool image = entry.type == EntryType::Image || entry.type == EntryType::GeoImage || pano;
-            bool video = entry.type == EntryType::Video || entry.type == EntryType::GeoVideo;
-
-            if (image || video)
-            {
-                // Reuse ExifParser from context if available (populated by fingerprint)
-                ExifParser *e = nullptr;
-                std::unique_ptr<Exiv2::Image> localExivImage;
-                std::unique_ptr<ExifParser> localParser;
-
-                if (ctx.populated && ctx.parser)
-                {
-                    e = ctx.parser.get();
-                }
-                else
-                {
-                    // Fallback: open file if context not populated
-                    try
-                    {
-                        localExivImage = Exiv2::ImageFactory::open(path.string());
-                        if (!localExivImage.get())
-                            throw IndexException("Cannot open " + path.string());
-
-                        localExivImage->readMetadata();
-                        localParser = std::make_unique<ExifParser>(localExivImage.get());
-                        e = localParser.get();
-                    }
-                    catch (Exiv2::Error &)
-                    {
-                        LOGD << "Cannot read EXIF data: " << path.string();
-                        e = nullptr;
-                    }
-                }
-
-                // Extract image dimensions even without EXIF tags,
-                // since pixelWidth()/pixelHeight() read from the file structure.
-                // Note: video dimensions still require XMP metadata (Xmp.video.Width/Height);
-                // metadata-independent video probing is not currently supported.
-                if (e)
-                {
-                    ImageSize imageSize(0, 0);
-                    if (image)
-                        imageSize = e->extractImageSize();
-                    else if (video)
-                        imageSize = e->extractVideoSize();
-
-                    if (imageSize.width > 0 && imageSize.height > 0)
-                    {
-                        entry.properties["width"] = imageSize.width;
-                        entry.properties["height"] = imageSize.height;
-                    }
-                }
-
-                if (e && e->hasTags())
-                {
-                    SensorSize sensorSize;
-                    Focal focal;
-                    CameraOrientation cameraOri;
-
-                    entry.properties["captureTime"] = e->extractCaptureTime();
-
-                    if (image)
-                    {
-                        entry.properties["orientation"] = e->extractImageOrientation();
-                        entry.properties["make"] = e->extractMake();
-                        entry.properties["model"] = e->extractModel();
-                        entry.properties["sensor"] = e->extractSensor();
-
-                        // Detect thermal sensor
-                        {
-                            std::string make = entry.properties.value("make", "");
-                            std::string model = entry.properties.value("model", "");
-                            if (isThermalImageFromExif(make, model)) {
-                                entry.properties["sensorCategory"] = "thermal";
-                                LOGD << "Detected thermal sensor: " << make << " " << model;
-                            }
-                        }
-
-                        if (e->extractSensorSize(sensorSize))
-                        {
-                            entry.properties["sensorWidth"] = sensorSize.width;
-                            entry.properties["sensorHeight"] = sensorSize.height;
-                        }
-
-                        if (e->computeFocal(focal))
-                        {
-                            entry.properties["focalLength"] = focal.length;
-                            entry.properties["focalLength35"] = focal.length35;
-                        }
-
-                        bool hasCameraOri = e->extractCameraOrientation(cameraOri);
-                        entry.properties["cameraYaw"] = cameraOri.yaw;
-                        entry.properties["cameraPitch"] = cameraOri.pitch;
-                        entry.properties["cameraRoll"] = cameraOri.roll;
-                        entry.properties["hasCameraOrientation"] = hasCameraOri;
-                        LOGD << "Camera Orientation: " << cameraOri;
-
-                        // Extract flight speed
-                        FlightSpeed flightSpeed;
-                        if (e->extractFlightSpeed(flightSpeed))
-                        {
-                            entry.properties["flightSpeed"] = flightSpeed.horizontal();
-                            entry.properties["flightSpeed3D"] = flightSpeed.magnitude();
-                            entry.properties["flightSpeedX"] = flightSpeed.x;
-                            entry.properties["flightSpeedY"] = flightSpeed.y;
-                            entry.properties["flightSpeedZ"] = flightSpeed.z;
-                            LOGD << "Flight Speed: " << flightSpeed;
-                        }
-
-                        // Extract GPS accuracy
-                        GpsAccuracy gpsAccuracy;
-                        if (e->extractGpsAccuracy(gpsAccuracy))
-                        {
-                            if (gpsAccuracy.xyAccuracy >= 0) entry.properties["gpsXYAccuracy"] = gpsAccuracy.xyAccuracy;
-                            if (gpsAccuracy.zAccuracy >= 0) entry.properties["gpsZAccuracy"] = gpsAccuracy.zAccuracy;
-                            if (gpsAccuracy.dop >= 0) entry.properties["gpsDop"] = gpsAccuracy.dop;
-                            LOGD << "GPS Accuracy: " << gpsAccuracy;
-                        }
-
-                        // Extract GPS direction and track
-                        GpsDirection gpsDirection;
-                        if (e->extractGpsDirection(gpsDirection))
-                        {
-                            if (gpsDirection.hasImgDirection)
-                            {
-                                entry.properties["gpsImgDirection"] = gpsDirection.imgDirection;
-                                entry.properties["gpsImgDirectionRef"] = gpsDirection.imgDirectionRef;
-                            }
-                            if (gpsDirection.hasTrack)
-                            {
-                                entry.properties["gpsTrack"] = gpsDirection.track;
-                                entry.properties["gpsTrackRef"] = gpsDirection.trackRef;
-                            }
-                            LOGD << "GPS Direction: " << gpsDirection;
-                        }
-                    }
-
-                    // Reuse geo from context if already extracted by fingerprint
-                    GeoLocation geo;
-                    bool hasGeo = false;
-                    if (ctx.populated && ctx.hasGeo)
-                    {
-                        geo = ctx.geo;
-                        hasGeo = true;
-                    }
-                    else
-                    {
-                        hasGeo = e->extractGeo(geo);
-                    }
-
-                    if (hasGeo)
-                    {
-                        entry.point_geom.addPoint(geo.longitude, geo.latitude, geo.altitude);
-                        LOGD << "POINT GEOM: " << entry.point_geom.toWkt();
-
-                        // e->printAllTags();
-
-                        // Estimate image footprint
-                        if (image && !pano)
-                        {
-                            double relAltitude = 0.0;
-
-                            if (e->extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0)
-                            {
-                                calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
-                            }
-                        }
-                    }
-
-                    if (pano)
-                    {
-                        PanoramaInfo pInfo;
-                        if (e->extractPanoramaInfo(pInfo))
-                        {
-                            entry.properties["projectionType"] = pInfo.projectionType;
-                            entry.properties["croppedWidth"] = pInfo.croppedWidth;
-                            entry.properties["croppedHeight"] = pInfo.croppedHeight;
-                            entry.properties["croppedX"] = pInfo.croppedX;
-                            entry.properties["croppedY"] = pInfo.croppedY;
-                            entry.properties["poseHeading"] = pInfo.poseHeading;
-                            entry.properties["posePitch"] = pInfo.posePitch;
-                            entry.properties["poseRoll"] = pInfo.poseRoll;
-                        }
-                    }
-                }
-                else if (e)
-                {
-                    LOGD << "No XMP/EXIF data found in " << path.string();
-                }
-            }
-            else if (entry.type == EntryType::GeoRaster)
-            {
-
-                LOGV << "Processing GeoRaster file: " << path.string();
-
-                GDALDatasetH hDataset;
-                hDataset = GDALOpen(path.string().c_str(), GA_ReadOnly);
-                if (!hDataset)
-                {
-                    LOGV << "GDAL failed to open dataset: " << path.string();
-                    throw GDALException("Cannot open " + path.string() + " for reading");
-                }
-
-                LOGV << "GDAL successfully opened dataset";
-
-                int width = GDALGetRasterXSize(hDataset);
-                int height = GDALGetRasterYSize(hDataset);
-
-                LOGV << "Raster dimensions - Width: " << width << ", Height: " << height;
-
-                entry.properties["width"] = width;
-                entry.properties["height"] = height;
-
-                double geotransform[6];
-                CPLErr geoTransformResult = GDALGetGeoTransform(hDataset, geotransform);
-                LOGV << "GDALGetGeoTransform result: " << (geoTransformResult == CE_None ? "Success" : "Failed");
-
-                if (geoTransformResult == CE_None)
-                {
-                    LOGV << "Geotransform values: ["
-                         << geotransform[0] << ", " << geotransform[1] << ", " << geotransform[2] << ", "
-                         << geotransform[3] << ", " << geotransform[4] << ", " << geotransform[5] << "]";
-
-                    entry.properties["geotransform"] = json::array();
-                    for (int i = 0; i < 6; i++)
-                        entry.properties["geotransform"].push_back(geotransform[i]);
-
-                    const char* projectionRef = GDALGetProjectionRef(hDataset);
-                    LOGV << "GDALGetProjectionRef result: " << (projectionRef != NULL ? "Found" : "NULL");
-
-                    if (projectionRef != NULL)
-                    {
-                        std::string wkt = projectionRef;
-                        LOGV << "WKT string length: " << wkt.length();
-                        LOGV << "WKT content: " << wkt;
-
-                        if (!wkt.empty())
-                        {
-                            LOGV << "Setting projection property";
-                            // Set projection
-                            entry.properties["projection"] = wkt;
-
-                            // Get lat/lon extent of raster
-                            char *wktp = const_cast<char *>(wkt.c_str());
-                            OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-                            OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-                            LOGV << "Created spatial reference objects";
-
-                            OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
-                            LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
-
-                            if (importResult != OGRERR_NONE)
-                            {
-                                LOGV << "Failed to import WKT, cleaning up spatial references";
-                                OSRDestroySpatialReference(hWgs84);
-                                OSRDestroySpatialReference(hSrs);
-                                throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
-                            }
-
-                            if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
-                            {
-                                LOGV << "Failed to import WGS84 EPSG, cleaning up spatial references";
-                                OSRDestroySpatialReference(hWgs84);
-                                OSRDestroySpatialReference(hSrs);
-                                throw GDALException("Cannot read WGS84 spatial reference system for " + path.string() + ". Is PROJ available?");
-                            }
-
-                            LOGV << "OSRImportFromEPSG result: Success";
-
-                            OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
-                            LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");
-
-                            if (hTransform != nullptr)
-                            {
-                                LOGV << "Computing corner coordinates";
-
-                                auto ul = getRasterCoordinate(hTransform, geotransform, 0.0, 0.0);
-                                LOGV << "Upper Left: " << ul.longitude << ", " << ul.latitude;
-
-                                auto ur = getRasterCoordinate(hTransform, geotransform, width, 0);
-                                LOGV << "Upper Right: " << ur.longitude << ", " << ur.latitude;
-
-                                auto lr = getRasterCoordinate(hTransform, geotransform, width, height);
-                                LOGV << "Lower Right: " << lr.longitude << ", " << lr.latitude;
-
-                                auto ll = getRasterCoordinate(hTransform, geotransform, 0.0, height);
-                                LOGV << "Lower Left: " << ll.longitude << ", " << ll.latitude;
-
-                                LOGV << "Adding points to polygon geometry";
-                                entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
-                                entry.polygon_geom.addPoint(ur.longitude, ur.latitude, 0.0);
-                                entry.polygon_geom.addPoint(lr.longitude, lr.latitude, 0.0);
-                                entry.polygon_geom.addPoint(ll.longitude, ll.latitude, 0.0);
-                                entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
-
-                                auto center = getRasterCoordinate(hTransform, geotransform, width / 2.0, height / 2.0);
-                                LOGV << "Center point: " << center.longitude << ", " << center.latitude;
-                                entry.point_geom.addPoint(center.longitude, center.latitude, 0.0);
-
-                                OCTDestroyCoordinateTransformation(hTransform);
-                                LOGV << "Destroyed coordinate transformation";
-                            }
-                            else
-                            {
-                                LOGV << "Failed to create coordinate transformation";
-                            }
-
-                            OSRDestroySpatialReference(hWgs84);
-                            OSRDestroySpatialReference(hSrs);
-                            LOGV << "Cleaned up spatial reference objects";
-                        }
-                        else
-                        {
-                            LOGD << "Projection is empty";
-                        }
-                    }
-                    else
-                    {
-                        LOGV << "No projection reference found in dataset";
-                    }
-                }
-                else
-                {
-                    LOGV << "No geotransform found in dataset";
-                }
-
-                int bandCount = GDALGetRasterCount(hDataset);
-                LOGV << "Number of raster bands: " << bandCount;
-
-                entry.properties["bands"] = json::array();
-                for (int i = 0; i < bandCount; i++)
-                {
-                    LOGV << "Processing band " << (i + 1) << " of " << bandCount;
-
-                    GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i + 1);
-                    if (hBand != nullptr)
-                    {
-                        auto b = json::object();
-
-                        GDALDataType dataType = GDALGetRasterDataType(hBand);
-                        const char* dataTypeName = GDALGetDataTypeName(dataType);
-                        LOGV << "Band " << (i + 1) << " data type: " << dataTypeName;
-                        b["type"] = dataTypeName;
-
-                        GDALColorInterp colorInterp = GDALGetRasterColorInterpretation(hBand);
-                        const char* colorInterpName = GDALGetColorInterpretationName(colorInterp);
-                        LOGV << "Band " << (i + 1) << " color interpretation: " << colorInterpName;
-                        b["colorInterp"] = colorInterpName;
-
-                        entry.properties["bands"].push_back(b);
-                    }
-                    else
-                    {
-                        LOGV << "Failed to get band " << (i + 1);
-                    }
-                }
-
-                LOGV << "Closing GDAL dataset";
-                GDALClose(hDataset);
-                LOGV << "GeoRaster processing completed successfully";
-            }
-            else if (entry.type == EntryType::PointCloud)
-            {
-                PointCloudInfo info;
-                if (getPointCloudInfo(path.string(), info))
-                {
-                    entry.properties = info.toJSON();
-                    entry.polygon_geom = info.polyBounds;
-                    entry.point_geom = info.centroid;
-                }
-            }
-            else if (entry.type == EntryType::GaussianSplat)
-            {
-                // Lightweight metadata only (no full decode): splat count + SH degree.
-                // Georeferencing (and therefore footprint geometry) is established at
-                // build time from an ODX coords file; a freshly indexed splat renders
-                // in local space until then.
-                GaussianSplatInfo info;
-                if (getGaussianSplatInfo(path.string(), info))
-                {
-                    entry.properties = info.toJSON();
-                    entry.properties["georeferenced"] = false;
-                }
-            }
-            else if (entry.type == EntryType::Vector)
-            {
-                parseVectorEntry(path, entry);
-            }
-            else if (entry.type == EntryType::Model)
-            {
-                parseModelEntry(path, entry);
-            }
-            else if (entry.type == EntryType::Tiles3D)
-            {
-                parseTiles3DEntry(path, entry);
-            }
+            entryHandler(entry.type).parseMetadata(path, entry, ctx);
         }
     }
 
-    static void parseVectorEntry(const fs::path &path, Entry &entry)
-    {
-        // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
-        // Best-effort: any failure leaves the entry indexed without geometry but
-        // never aborts the parse (a corrupted vector file should not block ddb add).
-        // Declared outside try so that the catch block can release them on error.
-        GDALDatasetH hDS = nullptr;
-        OGRSpatialReferenceH hWgs84 = nullptr;
-        try
-        {
-            hDS = GDALOpenEx(path.string().c_str(),
-                             GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                             nullptr, nullptr, nullptr);
-            if (hDS == nullptr)
-            {
-                LOGD << "Vector parse: GDAL cannot open " << path.string();
-                return;
-            }
-
-            // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
-            // Convex envelope in WGS84 across all layers.
-            OGREnvelope totalEnv;
-            totalEnv.MinX = totalEnv.MinY =  std::numeric_limits<double>::max();
-            totalEnv.MaxX = totalEnv.MaxY = -std::numeric_limits<double>::max();
-            bool haveEnv = false;
-
-            const int layerCount = GDALDatasetGetLayerCount(hDS);
-            auto layersArr = json::array();
-
-            for (int i = 0; i < layerCount; i++)
-            {
-                OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
-                if (hLayer == nullptr) continue;
-
-                OGREnvelope env;
-                if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE)
-                {
-                    LOGD << "Vector parse: layer " << i << " has no extent";
-                    continue;
-                }
-
-                OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
-                OGREnvelope envWgs84 = env;
-
-                if (hSrs != nullptr)
-                {
-                    OSRSetAxisMappingStrategy(hSrs, OAMS_TRADITIONAL_GIS_ORDER);
-
-                    // Check if reprojection is needed (skip if already WGS84).
-                    const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
-                    const char *authName = OSRGetAuthorityName(hSrs, nullptr);
-                    bool isWgs84 = (authName && authCode &&
-                                    std::string(authName) == "EPSG" &&
-                                    std::string(authCode) == "4326");
-
-                    if (!isWgs84)
-                    {
-                        if (hWgs84 == nullptr)
-                        {
-                            hWgs84 = OSRNewSpatialReference(nullptr);
-                            if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
-                            {
-                                LOGD << "Vector parse: failed to import EPSG:4326";
-                                OSRDestroySpatialReference(hWgs84);
-                                hWgs84 = nullptr;
-                            }
-                            else
-                            {
-                                OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
-                            }
-                        }
-
-                        if (hWgs84 != nullptr)
-                        {
-                            OGRCoordinateTransformationH hT =
-                                OCTNewCoordinateTransformation(hSrs, hWgs84);
-                            if (hT != nullptr)
-                            {
-                                // Transform all 4 corners (a single rectangle in src
-                                // CRS can become a curved quadrilateral in WGS84).
-                                double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
-                                double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
-                                if (OCTTransform(hT, 4, xs, ys, nullptr))
-                                {
-                                    envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
-                                    envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
-                                    envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
-                                    envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
-                                }
-                                else
-                                {
-                                    LOGD << "Vector parse: layer " << i << " transform failed";
-                                }
-                                OCTDestroyCoordinateTransformation(hT);
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    LOGD << "Vector parse: layer " << i << " has no SRS, assuming WGS84";
-                }
-
-                // Per-layer metadata
-                auto layerJson = json::object();
-                const char *layerName = OGR_L_GetName(hLayer);
-                layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
-
-                OGRwkbGeometryType gType = OGR_L_GetGeomType(hLayer);
-                layerJson["geometryType"] = OGRGeometryTypeToName(gType);
-
-                GIntBig fc = OGR_L_GetFeatureCount(hLayer, FALSE);
-                layerJson["featureCount"] = static_cast<int64_t>(fc);
-                layerJson["extent"] = {envWgs84.MinX, envWgs84.MinY, envWgs84.MaxX, envWgs84.MaxY};
-
-                layersArr.push_back(layerJson);
-
-                // Accumulate global envelope
-                if (!haveEnv)
-                {
-                    totalEnv = envWgs84;
-                    haveEnv = true;
-                }
-                else
-                {
-                    totalEnv.MinX = std::min(totalEnv.MinX, envWgs84.MinX);
-                    totalEnv.MinY = std::min(totalEnv.MinY, envWgs84.MinY);
-                    totalEnv.MaxX = std::max(totalEnv.MaxX, envWgs84.MaxX);
-                    totalEnv.MaxY = std::max(totalEnv.MaxY, envWgs84.MaxY);
-                }
-            }
-
-            if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
-            hWgs84 = nullptr;
-
-            entry.properties["vector"] = {
-                {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
-                {"layers", layersArr}};
-
-            GDALClose(hDS);
-
-            if (haveEnv)
-            {
-                // Populate polygon_geom as 5-point closed ring in CCW order.
-                entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);
-                entry.polygon_geom.addPoint(totalEnv.MaxX, totalEnv.MinY, 0.0);
-                entry.polygon_geom.addPoint(totalEnv.MaxX, totalEnv.MaxY, 0.0);
-                entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MaxY, 0.0);
-                entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);
-
-                entry.point_geom.addPoint((totalEnv.MinX + totalEnv.MaxX) / 2.0,
-                                          (totalEnv.MinY + totalEnv.MaxY) / 2.0,
-                                          0.0);
-            }
-        }
-        catch (const std::exception &e)
-        {
-            // Release GDAL/OSR resources that may have been opened before the exception.
-            if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
-            if (hDS != nullptr) GDALClose(hDS);
-            LOGD << "Vector parse warning: " << e.what();
-            entry.properties["warning"] = std::string("vector parse failed: ") + e.what();
-        }
-    }
-
-    static void parseModelEntry(const fs::path &path, Entry &entry)
-    {
-        // Georeferencing for 3D models is optional and lives in a sidecar (the
-        // OpenDroneMap reference_lla.json and friends resolved by detectModelGeoref).
-        // When present we flag the model as georeferenced and derive a WGS84 footprint
-        // from its local bounds, so it behaves like every other geo entry (footprint on
-        // the dataset map, globe in the unified viewer). Best-effort: any failure leaves
-        // the model indexed in local space rather than aborting the parse.
-        try
-        {
-            const auto georef = detectModelGeoref(path.string());
-            if (!georef.has_value())
-            {
-                entry.properties["georeferenced"] = false;
-                return;
-            }
-
-            entry.properties["georeferenced"] = true;
-
-            // Origin point: the model's local ENU frame is centered here.
-            entry.point_geom.clear();
-            entry.point_geom.addPoint(georef->longitude, georef->latitude, georef->altitude);
-
-            // Footprint: offset the model's local X/Y bounds (East/North meters) around
-            // the origin with an equirectangular approximation (accurate at model scale).
-            ModelInfo info;
-            if (getModelInfo(path.string(), info) && info.hasBounds)
-            {
-                constexpr double DEG2RAD = 0.017453292519943295;
-                constexpr double METERS_PER_DEG_LAT = 111320.0;
-                const double cosLat = std::cos(georef->latitude * DEG2RAD);
-                // Guard against the poles (cosLat -> 0) to keep the longitude span finite.
-                const double metersPerDegLon = METERS_PER_DEG_LAT * std::max(0.01, std::abs(cosLat));
-
-                const double west = georef->longitude + info.minX / metersPerDegLon;
-                const double east = georef->longitude + info.maxX / metersPerDegLon;
-                const double south = georef->latitude + info.minY / METERS_PER_DEG_LAT;
-                const double north = georef->latitude + info.maxY / METERS_PER_DEG_LAT;
-
-                // 5-point closed ring in CCW order, matching point-cloud/vector footprints.
-                entry.polygon_geom.clear();
-                entry.polygon_geom.addPoint(west, south, 0.0);
-                entry.polygon_geom.addPoint(east, south, 0.0);
-                entry.polygon_geom.addPoint(east, north, 0.0);
-                entry.polygon_geom.addPoint(west, north, 0.0);
-                entry.polygon_geom.addPoint(west, south, 0.0);
-            }
-        }
-        catch (const std::exception &e)
-        {
-            LOGD << "Model parse warning: " << e.what();
-            entry.properties["warning"] = std::string("model parse failed: ") + e.what();
-        }
-    }
-
-    static void parseTiles3DEntry(const fs::path &path, Entry &entry)
-    {
-        // Reads tileset.json from the .3tz (ZIP) root and, when the tileset is
-        // georeferenced (WGS84 region or ECEF bounding volume), derives a WGS84
-        // footprint so the entry gets a map footprint and the unified viewer opens
-        // it in globe mode. Best-effort: any failure leaves the archive indexed in
-        // local space rather than aborting the parse.
-        try
-        {
-            Tiles3DInfo info;
-            if (!getTiles3DInfo(path.string(), info))
-            {
-                entry.properties["georeferenced"] = false;
-                return;
-            }
-
-            entry.properties["georeferenced"] = info.georeferenced;
-            if (!info.assetVersion.empty())
-                entry.properties["tilesetVersion"] = info.assetVersion;
-            entry.properties["geometricError"] = info.geometricError;
-
-            if (info.georeferenced && info.hasBounds)
-            {
-                entry.point_geom.clear();
-                entry.point_geom.addPoint(info.centerLon, info.centerLat, info.centerAlt);
-
-                // 5-point closed ring (CCW), matching point-cloud/model footprints.
-                entry.polygon_geom.clear();
-                entry.polygon_geom.addPoint(info.west, info.south, 0.0);
-                entry.polygon_geom.addPoint(info.east, info.south, 0.0);
-                entry.polygon_geom.addPoint(info.east, info.north, 0.0);
-                entry.polygon_geom.addPoint(info.west, info.north, 0.0);
-                entry.polygon_geom.addPoint(info.west, info.south, 0.0);
-            }
-        }
-        catch (const std::exception &e)
-        {
-            LOGD << "Tiles3D parse warning: " << e.what();
-            entry.properties["georeferenced"] = false;
-        }
-    }
-
-    Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y)
+    Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, const double *geotransform, double x, double y)
     {
         double dfGeoX = geotransform[0] + geotransform[1] * x + geotransform[2] * y;
         double dfGeoY = geotransform[3] + geotransform[4] * x + geotransform[5] * y;
@@ -792,14 +125,14 @@ namespace ddb
         }
 
         // From drone to...
-        double bottom = relAltitude * tan(utils::deg2rad(90.0 + pitch) - 0.5 * yView);
-        double top = relAltitude * tan(utils::deg2rad(90.0 + pitch) + 0.5 * yView);
-        double left = relAltitude * tan(utils::deg2rad(cameraOri.roll) - 0.5 * xView);
-        double right = relAltitude * tan(utils::deg2rad(cameraOri.roll) + 0.5 * xView);
+        double bottom = relAltitude * tan(ddb::deg2rad(90.0 + pitch) - 0.5 * yView);
+        double top = relAltitude * tan(ddb::deg2rad(90.0 + pitch) + 0.5 * yView);
+        double left = relAltitude * tan(ddb::deg2rad(cameraOri.roll) - 0.5 * xView);
+        double right = relAltitude * tan(ddb::deg2rad(cameraOri.roll) + 0.5 * xView);
         // ... of picture.
 
-        //    LOGD << "xView: " << utils::rad2deg(xView);
-        //    LOGD << "yView: " << utils::rad2deg(yView);
+        //    LOGD << "xView: " << ddb::rad2deg(xView);
+        //    LOGD << "yView: " << ddb::rad2deg(yView);
         //    LOGD << "bottom: " << bottom;
         //    LOGD << "top: " << top;
         //    LOGD << "left: " << left;
@@ -835,60 +168,51 @@ namespace ddb
         geom.addPoint(ul.longitude, ul.latitude, groundHeight);
     }
 
-    void Entry::toJSON(json &j) const
+    void to_json(json &j, const Entry &e)
     {
-        j["path"] = this->path;
-        if (this->hash != "")
-            j["hash"] = this->hash;
-        j["type"] = this->type;
-        if (!this->properties.empty())
-            j["properties"] = this->properties;
-        j["mtime"] = this->mtime;
-        j["size"] = this->size;
-        j["depth"] = this->depth;
+        j["path"] = e.path;
+        if (e.hash != "")
+            j["hash"] = e.hash;
+        j["type"] = e.type;
+        if (!e.properties.empty())
+            j["properties"] = e.properties;
+        j["mtime"] = e.mtime;
+        j["size"] = e.size;
+        j["depth"] = e.depth;
 
-        if (!this->point_geom.empty())
-            j["point_geom"] = this->point_geom.toGeoJSON();
-        if (!this->polygon_geom.empty())
-            j["polygon_geom"] = this->polygon_geom.toGeoJSON();
+        if (!e.point_geom.empty())
+            j["point_geom"] = e.point_geom.toGeoJSON();
+        if (!e.polygon_geom.empty())
+            j["polygon_geom"] = e.polygon_geom.toGeoJSON();
 
-        if (!this->meta.empty())
-            j["meta"] = this->meta;
+        if (!e.meta.empty())
+            j["meta"] = e.meta;
     }
 
-    std::string Entry::toJSONString() const
+    void from_json(const json &j, Entry &e)
     {
-        json j;
-        toJSON(j);
-        std::stringstream s;
-        s << j;
-        return s.str();
-    }
-
-    void Entry::fromJSON(const json &j)
-    {
-        j.at("path").get_to(this->path);
+        j.at("path").get_to(e.path);
         if (j.contains("hash") && !j.at("hash").is_null())
-            j.at("hash").get_to(this->hash);
-        j.at("type").get_to(this->type);
-        j.at("size").get_to(this->size);
-        j.at("depth").get_to(this->depth);
-        j.at("mtime").get_to(this->mtime);
+            j.at("hash").get_to(e.hash);
+        j.at("type").get_to(e.type);
+        j.at("size").get_to(e.size);
+        j.at("depth").get_to(e.depth);
+        j.at("mtime").get_to(e.mtime);
 
         // TODO: Add
         // j.at("properties").get_to(e.properties);
     }
 
-    bool Entry::toGeoJSON(json &j, BasicGeometryType type)
+    std::optional<json> Entry::toGeoJSON(BasicGeometryType type) const
     {
         // Only export entries that have valid geometries
-        std::vector<BasicGeometry *> geoms;
+        std::vector<const BasicGeometry *> geoms;
         if (!point_geom.empty() && (type == BasicGeometryType::BGAuto || type == BasicGeometryType::BGPoint))
             geoms.push_back(&point_geom);
         if (!polygon_geom.empty() && (type == BasicGeometryType::BGAuto || type == BasicGeometryType::BGPolygon))
             geoms.push_back(&polygon_geom);
         if (geoms.size() == 0)
-            return false;
+            return std::nullopt;
 
         json p;
         p["path"] = this->path;
@@ -899,39 +223,41 @@ namespace ddb
         p["size"] = this->size;
 
         // Populate properties
-        for (json::iterator it = this->properties.begin(); it != this->properties.end(); ++it)
+        for (auto it = this->properties.begin(); it != this->properties.end(); ++it)
         {
             p[it.key()] = it.value();
         }
 
         // QGIS does not support GeometryCollections, so we only output the first
         // available geometry
-        j = geoms[0]->toGeoJSON();
+        json j = geoms[0]->toGeoJSON();
         j["properties"] = p;
         if (!this->meta.empty())
             j["properties"]["meta"] = this->meta;
 
-        return true;
+        // Constructed in place: a json converts to std::optional<json> in two ways (the optional's
+        // converting constructor and json's own conversion operator), and compilers disagree on which
+        return std::optional<json>(std::in_place, std::move(j));
     }
 
-    std::string Entry::toString()
+    std::string Entry::toString() const
     {
         std::ostringstream s;
         s << "Path: " << this->path << "\n";
         if (this->hash != "")
             s << "SHA256: " << this->hash << "\n";
-        s << "Type: " << typeToHuman(this->type) << " (" << this->type << ")" << "\n";
+        s << "Type: " << typeToHuman(this->type) << " (" << entryTypeValue(this->type) << ")" << "\n";
 
-        for (json::iterator it = this->properties.begin(); it != this->properties.end(); ++it)
+        for (auto it = this->properties.begin(); it != this->properties.end(); ++it)
         {
             std::string k = it.key();
             if (k.length() > 0)
-                k[0] = std::toupper(k[0]);
+                k[0] = str::toUpperChar(k[0]);
 
             if (k == "Bands")
             {
                 s << k << ": " << it.value().size() << " [";
-                for (json::iterator b = it.value().begin(); b != it.value().end(); b++)
+                for (auto b = it.value().begin(); b != it.value().end(); b++)
                 {
                     auto band = b.value();
                     s << band["colorInterp"].get<std::string>() << "(" << band["type"].get<std::string>() << ")";
@@ -962,7 +288,7 @@ namespace ddb
     {
         try
         {
-            const auto db = ddb::open(ddbPath.string(), false);
+            const auto db = ddb::open(io::toUtf8(ddbPath), false);
 
             // The size of the database is the sum of all entries' sizes
             auto q = db->query("SELECT SUM(size) FROM entries");
@@ -992,134 +318,10 @@ namespace ddb
         ctx.exivImage.reset();
         ctx.parser.reset();
 
-        EntryType type = EntryType::Generic;
-        io::Path p(path);
+        if (const EntryHandler *handler = findEntryHandlerByExtension(path))
+            return handler->detect(path, ctx);
 
-        if (p.checkExtension({"md"}))
-            return EntryType::Markdown;
-
-        bool pointCloud = p.checkExtension({"laz", "las", "e57", "pts", "xyz"});
-
-        if (pointCloud)
-            return EntryType::PointCloud;
-
-        // Gaussian Splat binary formats (a splat-flavoured .ply is detected via identifyPly below).
-        if (p.checkExtension({"spz", "splat", "ksplat"}))
-        {
-            // The extension is an explicit signal; a lightweight content check only logs a
-            // warning when the bytes look unexpected, never reclassifies the file.
-            if (p.checkExtension({"spz"}) && !looksLikeSpz(path))
-                LOGD << "File has .spz extension but no NGSP/gzip magic: " << path.string();
-            else if (p.checkExtension({"splat"}) && !looksLikeSplatBinary(path))
-                LOGD << "File has .splat extension but size is not a multiple of 32: " << path.string();
-            return EntryType::GaussianSplat;
-        }
-
-        if (p.checkExtension({"ply"}))
-        {
-            // Could be a mesh, a plain point cloud, or a Gaussian Splat
-            return identifyPly(path);
-        }
-
-        if (p.checkExtension({"obj"}))
-            return EntryType::Model;
-
-        // A .gltf/.glb can also carry point geometry (3D Gaussian Splat tiles) or lines,
-        // neither of which yields a buildable model: classify from the declared primitives.
-        if (p.checkExtension({"gltf", "glb"}))
-            return identifyGltf(path);
-
-        // OGC 3D Tiles archive (.3tz, a ZIP container with tileset.json at its root).
-        // The extension is the signal; ZIP validity is checked when the footprint is
-        // read (parseEntry) and when the archive is extracted at build time.
-        if (p.checkExtension({"3tz"}))
-            return EntryType::Tiles3D;
-
-        // Check for vector files
-        if (p.checkExtension({"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"}))
-            return EntryType::Vector;
-
-        bool jpg = p.checkExtension({"jpg", "jpeg"});
-        bool dng = p.checkExtension({"dng"});
-        bool tif = p.checkExtension({"tif", "tiff"});
-        bool nongeoImage = p.checkExtension({"png", "gif", "webp"});
-        bool video = p.checkExtension({"mp4", "mov", "webm", "m4v", "avi", "mkv"});
-
-        bool georaster = false;
-
-        if (tif)
-        {
-            GDALDatasetH hDataset;
-            hDataset = GDALOpen(p.string().c_str(), GA_ReadOnly);
-            if (hDataset != NULL)
-            {
-                const char *proj = GDALGetProjectionRef(hDataset);
-                if (proj != NULL)
-                {
-                    georaster = std::string(proj) != "";
-                }
-                GDALClose(hDataset);
-            }
-            else
-            {
-                LOGD << "Cannot open " << p.string().c_str() << " for georaster test";
-            }
-        }
-
-        bool image = (jpg || tif || dng || nongeoImage) && !georaster;
-
-        if (image || video)
-        {
-            // A normal image or video by default (refined later)
-            type = image ? EntryType::Image : EntryType::Video;
-
-            try
-            {
-                ctx.exivImage = Exiv2::ImageFactory::open(path.string());
-                if (!ctx.exivImage.get())
-                    throw IndexException("Cannot open " + path.string());
-
-                ctx.exivImage->readMetadata();
-                ctx.parser = std::make_unique<ExifParser>(ctx.exivImage.get());
-                ctx.populated = true;
-
-                if (type == EntryType::Image)
-                {
-                    // Panorama?
-                    if (ctx.exivImage->pixelWidth() / ctx.exivImage->pixelHeight() >= 2)
-                        type = EntryType::Panorama;
-                }
-
-                if (ctx.parser->hasTags())
-                {
-                    if (ctx.parser->extractGeo(ctx.geo))
-                    {
-                        ctx.hasGeo = true;
-                        if (type == EntryType::Image)
-                            type = EntryType::GeoImage;
-                        else if (type == EntryType::Video)
-                            type = EntryType::GeoVideo;
-                        else if (type == EntryType::Panorama)
-                            type = EntryType::GeoPanorama;
-                    }
-                    else
-                    {
-                        // Not a georeferenced image, just a plain image
-                    }
-                }
-            }
-            catch (Exiv2::Error &)
-            {
-                LOGD << "Cannot read EXIF data: " << path.string();
-                ctx.populated = false;
-            }
-        }
-        else if (georaster)
-        {
-            type = EntryType::GeoRaster;
-        }
-
-        return type;
+        return EntryType::Generic;
     }
 
 }

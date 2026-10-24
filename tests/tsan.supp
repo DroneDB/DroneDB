@@ -1,0 +1,36 @@
+# ThreadSanitizer suppressions for the TSan build (DQ-01, docs/sanitizers.md).
+#
+# Third-party code only. vcpkg dependencies are prebuilt without TSan instrumentation, so TSan
+# cannot see their atomics, memory barriers or internal locks; vendored submodules are not
+# patched here. A report with a frame in src/, apps/ or tests/ that is not explained by one of
+# the entries below is a bug to fix, never an entry to add. Patterns name third-party
+# functions: TSan suppresses a report when any frame of either access matches.
+
+# glibc: spatialite_init_ex() (libspatialite, run by Database::afterOpen for every connection)
+# calls setlocale(LC_NUMERIC, "POSIX"). glibc serialises setlocale() calls with its internal
+# __libc_setlocale_lock, which TSan cannot see, so two connections opening at once look like a
+# race on the LC_ALL name string (setname/new_composite_name).
+race:setlocale
+
+# SQLite: the WAL-index header is read without a lock by design; walIndexTryHdr() reads two
+# copies separated by memory barriers and retries when they differ (sqlite3.c, "WAL-index
+# header"). The barriers are in uninstrumented code.
+race:walIndexTryHdr
+race:walIndexWriteHdr
+
+# libcurl via PDAL: PDAL's Connector (io/private/connector/Connector.cpp, used by readers.copc)
+# builds a User-Agent with curl_version() for every reader, and curl_version() rewrites a
+# static buffer (lib/version.c) with the same bytes on each call. Concurrent tile renders open
+# concurrent COPC readers.
+race:curl_version
+
+# cctz: TimeZoneMutex() is a function-local static (time_zone_impl.cc); its thread-safe
+# initialisation guard runs in uninstrumented code, so the first lock after another thread
+# created the mutex looks unsynchronised.
+race:TimeZoneMutex
+
+# GDAL: a lock-order inversion between two mutexes that are both locked from uninstrumented
+# GDAL code on a GDAL worker thread (created by CPLCreateJoinableThread), one of them through
+# the job-queue condition variable in CPLWorkerThreadPool::GetNextJob
+# (port/cpl_worker_thread_pool.cpp). No DroneDB frame is in any of its stacks.
+deadlock:CPLWorkerThreadPool

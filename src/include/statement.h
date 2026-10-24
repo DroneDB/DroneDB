@@ -8,44 +8,53 @@
 #include <sqlite3.h>
 #include <string>
 #include "logger.h"
-#include "ddb_export.h"
 
+// Owns one prepared statement (finalized by the destructor). Move-only: a copy would
+// finalize the same sqlite3_stmt twice. A moved-from Statement owns nothing and may only be
+// destroyed or assigned to.
 class Statement
 {
-  sqlite3 *db;
+  sqlite3 *db = nullptr;
   std::string query;
 
-  bool hasRow;
-  bool done;
+  bool hasRow = false;
+  bool done = false;
 
-  sqlite3_stmt *stmt;
+  sqlite3_stmt *stmt = nullptr;
 
   void bindCheck(int ret);
   Statement &step();
 
 public:
-  DDB_DLL Statement(sqlite3 *db, const std::string &query);
-  DDB_DLL ~Statement();
+  Statement(sqlite3 *db, const std::string &query);
+  ~Statement();
 
-  DDB_DLL Statement &bind(int paramNum, const std::string &value);
-  DDB_DLL Statement &bind(int paramNum, int value);
-  DDB_DLL Statement &bind(int paramNum, long long value);
+  Statement(const Statement &) = delete;
+  Statement &operator=(const Statement &) = delete;
+  Statement(Statement &&other) noexcept;
+  Statement &operator=(Statement &&other) noexcept;
 
-  DDB_DLL bool fetch();
+  Statement &bind(int paramNum, const std::string &value);
+  Statement &bind(int paramNum, int value);
+  Statement &bind(int paramNum, long long value);
+  Statement &bind(int paramNum, double value);
 
-  DDB_DLL int getInt(int columnId);
-  DDB_DLL long long getInt64(int columnId);
-  DDB_DLL std::string getText(int columnId);
-  DDB_DLL double getDouble(int columnId);
-  DDB_DLL const void *getBlob(int columnId);
+  bool fetch();
 
-  DDB_DLL int getColumnsCount() const;
+  // Readers of the current row: they do not change the statement
+  int getInt(int columnId) const;
+  long long getInt64(int columnId) const;
+  std::string getText(int columnId) const;
+  double getDouble(int columnId) const;
+  const void *getBlob(int columnId) const;
+
+  int getColumnsCount() const;
   // TODO: more
 
-  DDB_DLL void reset();
-  DDB_DLL void execute();
+  void reset();
+  void execute();
 
-  DDB_DLL std::string getQuery() const;
+  std::string getQuery() const;
 };
 
 #endif // STATEMENT_H

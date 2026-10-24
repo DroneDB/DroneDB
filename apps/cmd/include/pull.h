@@ -5,18 +5,18 @@
 #ifndef PULL_CMD_H
 #define PULL_CMD_H
 
-#include "command.h"
+#include "credentials.h"
 
 namespace cmd
 {
 
-  class Pull : public Command
+  class Pull : public RegistryCommand
   {
 
   public:
-    Pull() {}
+    explicit Pull(RegistryServices registryServices = {}) : RegistryCommand(std::move(registryServices)) {}
 
-    virtual void run(cxxopts::ParseResult &opts) override;
+    virtual int run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;
     virtual std::string description() override;
   };

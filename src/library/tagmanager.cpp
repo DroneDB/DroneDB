@@ -3,6 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "tagmanager.h"
+#include <fstream>
+
+#include "json.h"
 
 #include "ddb.h"
 #include "mio.h"
@@ -14,21 +17,15 @@
 namespace ddb
 {
 
-    std::string TagManager::getTag()
+    std::string TagManager::getTag() const
     {
-        const auto path = db->ddbDirectory() / TAGSFILE;
+        const auto path = db->ddbDirectory() / kTagsFile;
 
         LOGD << "Path = " << path;
 
+        // Reading a tag never writes: a dataset without a tags file has no tag
         if (!exists(path))
-        {
-            LOGD << "Path does not exist, creating empty file";
-
-            std::ofstream out(path, std::ios_base::out);
-            out << "{}";
-            out.close();
             return "";
-        }
 
         std::ifstream i(path);
         json j;
@@ -40,9 +37,10 @@ namespace ddb
         TagComponents t = RegistryUtils::parseTag(j["tag"]);
         return t.tag();
     }
+
     void TagManager::setTag(const std::string &tag)
     {
-        const auto path = db->ddbDirectory() / TAGSFILE;
+        const auto path = db->ddbDirectory() / kTagsFile;
 
         const auto tg = RegistryUtils::parseTag(tag);
 

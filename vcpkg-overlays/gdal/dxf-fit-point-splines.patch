@@ -1,0 +1,95 @@
+--- a/ogr/ogrsf_frmts/dxf/ogrdxflayer.cpp
++++ b/ogr/ogrsf_frmts/dxf/ogrdxflayer.cpp
+@@ -2158,6 +2158,10 @@
+     std::vector<double> adfControlPoints(FORTRAN_INDEXING, 0.0);
+     std::vector<double> adfKnots(FORTRAN_INDEXING, 0.0);
+     std::vector<double> adfWeights(FORTRAN_INDEXING, 0.0);
++    // Fit points (11/21/31), 0-based. Used only when the spline has no control
++    // points (fit-point-only SPLINE, e.g. written by LibreDWG dwg2dxf or ezdxf).
++    std::vector<double> adfFitPoints;
++    bool bInsertNullZFit = false;
+     int nDegree = -1;
+     int nControlPoints = -1;
+     int nKnots = -1;
+@@ -2192,6 +2196,26 @@
+                 bInsertNullZ = false;
+                 break;
+ 
++            case 11:
++                if (bInsertNullZFit)
++                {
++                    adfFitPoints.push_back(0.0);
++                    bInsertNullZFit = false;
++                }
++                adfFitPoints.push_back(CPLAtof(szLineBuf));
++                break;
++
++            case 21:
++                adfFitPoints.push_back(CPLAtof(szLineBuf));
++                bInsertNullZFit = true;
++                break;
++
++            case 31:
++                adfFitPoints.push_back(CPLAtof(szLineBuf));
++                bHasZ = true;
++                bInsertNullZFit = false;
++                break;
++
+             case 40:
+             {
+                 double dfVal = CPLAtof(szLineBuf);
+@@ -2268,6 +2292,54 @@
+     {
+         adfControlPoints.push_back(0.0);
+     }
++    if (bInsertNullZFit)
++    {
++        adfFitPoints.push_back(0.0);
++    }
++
++    // A spline defined by fit points only is valid DXF (group 74 > 0, 73 = 0),
++    // but has no control points to evaluate. Approximate the curve through the
++    // fit points with a Catmull-Rom interpolation instead of dropping it.
++    if (static_cast<int>(adfControlPoints.size()) == FORTRAN_INDEXING &&
++        adfFitPoints.size() >= 6 && adfFitPoints.size() % 3 == 0)
++    {
++        const size_t nFit = adfFitPoints.size() / 3;
++        const auto fit = [&adfFitPoints](size_t i, int c)
++        { return adfFitPoints[i * 3 + c]; };
++        auto poLS = std::make_unique<OGRLineString>();
++        constexpr int nSegments = 8;
++        for (size_t i = 0; i + 1 < nFit; i++)
++        {
++            const size_t i0 = i == 0 ? 0 : i - 1;
++            const size_t i3 = i + 2 < nFit ? i + 2 : nFit - 1;
++            for (int k = 0; k < nSegments; k++)
++            {
++                const double t = static_cast<double>(k) / nSegments;
++                const double t2 = t * t, t3 = t2 * t;
++                double v[3];
++                for (int c = 0; c < 3; c++)
++                {
++                    const double p0 = fit(i0, c), p1 = fit(i, c),
++                                 p2 = fit(i + 1, c), p3 = fit(i3, c);
++                    v[c] = 0.5 * (2 * p1 + (-p0 + p2) * t +
++                                  (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
++                                  (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
++                }
++                if (bHasZ)
++                    poLS->addPoint(v[0], v[1], v[2]);
++                else
++                    poLS->addPoint(v[0], v[1]);
++            }
++        }
++        if (bHasZ)
++            poLS->addPoint(fit(nFit - 1, 0), fit(nFit - 1, 1), fit(nFit - 1, 2));
++        else
++            poLS->addPoint(fit(nFit - 1, 0), fit(nFit - 1, 1));
++
++        poFeature->SetGeometryDirectly(poLS.release());
++        PrepareLineStyle(poFeature.get());
++        return poFeature.release();
++    }
+ 
+     if (static_cast<int>(adfControlPoints.size() % 3) != FORTRAN_INDEXING)
+     {

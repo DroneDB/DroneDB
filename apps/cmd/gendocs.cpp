@@ -5,6 +5,7 @@
 #include "include/cmdlist.h"
 #include "fs.h"
 #include "include/gendocs.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -15,31 +16,32 @@ namespace cmd
         for (int i = 0; i < argc; i++)
         {
             if (std::string(argv[i]) == "--outfile" && i + 1 < argc)
-                outfile = fs::path(argv[i + 1]);
+                outfile = ddb::io::fromUtf8(argv[i + 1]);
         }
 
-        std::cout << "Generating docs in " << outfile.string() << std::endl;
+        std::cout << "Generating docs in " << ddb::io::toUtf8(outfile) << std::endl;
         std::cout << "===============================" << std::endl;
 
-        std::cout << "W\t" << outfile.string() << std::endl;
+        std::cout << "W\t" << ddb::io::toUtf8(outfile) << std::endl;
 
         // Ensure path exists and create it if not
         if (!fs::exists(outfile.parent_path()))
         {
-            std::cout << "Creating directory " << outfile.parent_path().string() << std::endl;
+            std::cout << "Creating directory " << ddb::io::toUtf8(outfile.parent_path()) << std::endl;
             fs::create_directories(outfile.parent_path());
         }
 
-        std::ofstream f(outfile.string(), std::ios::out | std::ios::trunc);
+        std::ofstream f(outfile, std::ios::out | std::ios::trunc);
 
-        for (auto &cmd : commands)
+        const auto &registry = CommandRegistry::builtin();
+        for (const auto &name : registry.names())
         {
-            f << "### " << cmd.first << std::endl
+            f << "### " << name << std::endl
               << std::endl
               << "```" << std::endl;
 
             std::stringstream ss;
-            cmd.second->printHelp(ss, false);
+            registry.create(name)->printHelp(ss);
             ss.seekg(0, std::ios::beg);
 
             std::string line;

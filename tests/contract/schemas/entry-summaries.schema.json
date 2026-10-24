@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb entry summaries",
+  "description": "DDBListEntries with withDetails=false, sorted by path",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "path",
+      "type",
+      "mtime",
+      "size",
+      "depth"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "type": "string"
+      },
+      "hash": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "type": {
+        "$ref": "entry.schema.json#/$defs/entryType"
+      },
+      "mtime": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Unix epoch seconds (integer)"
+      },
+      "size": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "depth": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  }
+}

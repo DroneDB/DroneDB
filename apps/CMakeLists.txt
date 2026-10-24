@@ -2,35 +2,26 @@ set(CMD_SRC_LIST "")
 
 add_subdirectory(cmd)
 
-add_executable(${PROJECT_NAME}cmd main.cpp ${CMD_SRC_LIST})
+# cxxopts parses the command line; only the CLI uses it, libddb does not
+find_package(cxxopts CONFIG REQUIRED)
 
-# Link the static library version
-target_link_libraries(${PROJECT_NAME}cmd PRIVATE ${PROJECT_NAME})
+# The commands, the registry and the handler that maps their exceptions to exit codes (DQ-12):
+# an object library, so the unit tests (tests/unit/dq12_cli_test.cpp) link the same objects the
+# CLI is made of. They use the library's headers (ddb_static_api): the CLI is linked with the
+# library objects, not with libddb, which exports nothing but its C API (DQ-14).
+add_library(ddb_cli_commands OBJECT ${CMD_SRC_LIST})
+target_include_directories(ddb_cli_commands PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(ddb_cli_commands PUBLIC ddb_static_api cxxopts::cxxopts PRIVATE ddb_warnings)
 
-message(STATUS "DDB: CUSTOM_INCLUDE_DIRS: ${CUSTOM_INCLUDE_DIRS}")
+# crash_handlers + segvcatch are CLI-only: they replace process-wide signal handlers,
+# which libddb must never do inside a host process (DDB-11 B6).
+add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
+    ${CMAKE_SOURCE_DIR}/vendor/segvcatch/segvcatch.cpp $<TARGET_OBJECTS:ddb_cli_commands>)
 
-target_include_directories(${PROJECT_NAME}cmd PRIVATE ${CUSTOM_INCLUDE_DIRS})
-
-if(WIN32)
-    target_compile_definitions(${PROJECT_NAME}cmd PRIVATE PLOG_EXPORT)
-    set_target_properties(${PROJECT_NAME}cmd PROPERTIES ENABLE_EXPORTS 1)
-else()
-    target_compile_definitions(${PROJECT_NAME}cmd PRIVATE PLOG_GLOBAL)
-endif()
-
-if (WIN32)
-    # For the ddb executable:
-    add_custom_command(TARGET ${PROJECT_NAME}cmd POST_BUILD
-        # Copy the exe directly to the build directory
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:${PROJECT_NAME}cmd>"
-            "${CMAKE_BINARY_DIR}/$<TARGET_FILE_NAME:${PROJECT_NAME}cmd>"
-    )
-else()
-    # For the ddb executable:
-    add_custom_command(TARGET ${PROJECT_NAME}cmd POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_BINARY_DIR}/apps"
-            "${CMAKE_BINARY_DIR}"
-    )
-endif()
+# The CLI contains the library (ddb_embed_library, src/CMakeLists.txt): it uses C++ internals that
+# libddb does not export. libddb stays a dependency of the target so that a build of ddbcmd also
+# stages everything next to it (libddb for the hosts, the data files and, on Windows, the DLLs):
+# the packages ship ddbcmd and libddb from the same folder.
+ddb_embed_library(${PROJECT_NAME}cmd)
+target_link_libraries(${PROJECT_NAME}cmd PRIVATE cxxopts::cxxopts ddb_warnings)
+add_dependencies(${PROJECT_NAME}cmd ${PROJECT_NAME})

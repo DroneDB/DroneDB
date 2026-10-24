@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb build artifacts",
+  "description": "DDBGetBuildArtifacts (XI-04, new in 2.0): one item per input path, in input order. $defs/build is also the \"build\" object of DDBListEntriesEx, $defs/artifact an artifact of the manifest (ddb.h, build manifest).",
+  "type": "array",
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "required": [
+          "path",
+          "exists"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "exists": {
+            "const": false
+          }
+        }
+      },
+      {
+        "type": "object",
+        "required": [
+          "path",
+          "exists",
+          "hash",
+          "type",
+          "build"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "exists": {
+            "const": true
+          },
+          "hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the file; null for a folder"
+          },
+          "type": {
+            "$ref": "entry.schema.json#/$defs/entryType"
+          },
+          "build": {
+            "$ref": "#/$defs/build"
+          }
+        }
+      }
+    ]
+  },
+  "$defs": {
+    "build": {
+      "type": "object",
+      "required": [
+        "buildable",
+        "source",
+        "hash",
+        "root",
+        "state",
+        "missingDependencies",
+        "lastAttempt",
+        "retryAfter",
+        "artifacts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "buildable": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Dataset-relative path of the entry the artifacts belong to (the main file of a sidecar); null when not buildable"
+        },
+        "hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The hash of source, which names its build; null when not buildable"
+        },
+        "root": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Absolute build root of source (UTF-8); null when not buildable"
+        },
+        "state": {
+          "enum": [
+            "none",
+            "pending",
+            "building",
+            "complete"
+          ]
+        },
+        "missingDependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "From the pending marker: dataset-relative names; [] without a marker"
+        },
+        "lastAttempt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "From the pending marker: Unix epoch seconds (integer); null without a marker"
+        },
+        "retryAfter": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "From the pending marker: when DDBBuild with pendingOnly (and no force) retries the build, lastAttempt + libddb's retry backoff, Unix epoch seconds (integer); due when now >= retryAfter; null exactly when lastAttempt is"
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifact"
+          },
+          "description": "The artifacts that exist, in the entry type's order, the primary output first"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "role",
+        "path",
+        "kind",
+        "mediaType"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+\\.[a-z0-9]+$",
+          "description": "What the artifact is for (raster.cog, vector.mvt, ...); new roles are only ever added"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative to the build root, '/'-separated"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "dir"
+          ]
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Of the file a client opens: the file, or the index of a directory"
+        },
+        "downloadName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "File name offered for a download; absent when the artifact is not offered"
+        },
+        "index": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The descriptor file of a directory, relative to path"
+        },
+        "legacy": {
+          "const": true,
+          "description": "An output of an older layout, read only; absent otherwise"
+        }
+      }
+    }
+  }
+}

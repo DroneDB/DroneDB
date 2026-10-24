@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "plyconv.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <cctype>
@@ -22,6 +23,7 @@
 #include "deppath.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -125,15 +127,15 @@ namespace ddb
         {
         public:
             BodyReader(const fs::path &file, uint64_t offset, PlyFormat format)
-                : in(file.string(), std::ios::binary), ascii(format == PlyFormat::Ascii),
+                : in(file, std::ios::binary), ascii(format == PlyFormat::Ascii),
                   swap((format == PlyFormat::BinaryBigEndian) != hostIsBigEndian()),
                   buf(kIoChunk)
             {
                 if (!in.is_open())
-                    throw FSException("Cannot open " + file.string());
+                    throw FSException("Cannot open " + io::toUtf8(file));
                 in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
                 if (!in)
-                    throw FSException("Cannot seek to the body of " + file.string());
+                    throw FSException("Cannot seek to the body of " + io::toUtf8(file));
             }
 
             // Reads one value of type t into v (as a double: exact for every PLY
@@ -261,10 +263,10 @@ namespace ddb
             explicit TextWriter(const fs::path &p) : path(p)
             {
                 errno = 0;
-                out.open(p.string(), std::ios::binary | std::ios::trunc);
+                out.open(p, std::ios::binary | std::ios::trunc);
                 const int systemError = errno;
                 if (!out.is_open())
-                    throw FSException("Cannot write " + p.string(),
+                    throw FSException("Cannot write " + io::toUtf8(p),
                                       std::error_code(systemError, std::generic_category()));
                 data.reserve(kIoChunk + 4096);
             }
@@ -285,7 +287,7 @@ namespace ddb
                     out.write(data.data(), static_cast<std::streamsize>(data.size()));
                     const int systemError = errno;
                     if (!out)
-                        throw FSException("Cannot write " + path.string(),
+                        throw FSException("Cannot write " + io::toUtf8(path),
                                           std::error_code(systemError, std::generic_category()));
                     data.clear();
                 }
@@ -293,7 +295,7 @@ namespace ddb
                 out.flush();
                 const int systemError = errno;
                 if (!out)
-                    throw FSException("Cannot flush " + path.string(),
+                    throw FSException("Cannot flush " + io::toUtf8(path),
                                       std::error_code(systemError, std::generic_category()));
             }
 
@@ -304,7 +306,7 @@ namespace ddb
                 out.close();
                 const int systemError = errno;
                 if (out.fail())
-                    throw FSException("Cannot close " + path.string(),
+                    throw FSException("Cannot close " + io::toUtf8(path),
                                       std::error_code(systemError, std::generic_category()));
             }
 
@@ -342,24 +344,24 @@ namespace ddb
         fs::path resolvePlyTexture(const fs::path &ply, const std::string &rawName, const std::string &datasetRoot)
         {
             if (rawName.empty())
-                throw AppException("PLY " + ply.string() + " has an empty TextureFile comment");
+                throw AppException("PLY " + io::toUtf8(ply) + " has an empty TextureFile comment");
 
             if (deppath::isAbsolute(rawName))
-                throw AppException("PLY " + ply.string() + " references the texture '" + rawName +
+                throw AppException("PLY " + io::toUtf8(ply) + " references the texture '" + rawName +
                                    "' by an absolute path, which can never be satisfied");
 
             const std::string name = deppath::normalize(rawName);
             if (name.empty() || name == "." || deppath::isAbsolute(name))
-                throw AppException("PLY " + ply.string() + " has an invalid TextureFile '" + rawName + "'");
+                throw AppException("PLY " + io::toUtf8(ply) + " has an invalid TextureFile '" + rawName + "'");
 
-            const fs::path resolved = ply.parent_path() / fs::path(name);
-            if (!datasetRoot.empty() && !deppath::isInside(resolved, fs::path(datasetRoot)))
-                throw AppException("PLY " + ply.string() + " references the texture '" + rawName +
+            const fs::path resolved = ply.parent_path() / io::fromUtf8(name);
+            if (!datasetRoot.empty() && !deppath::isInside(resolved, io::fromUtf8(datasetRoot)))
+                throw AppException("PLY " + io::toUtf8(ply) + " references the texture '" + rawName +
                                    "' outside the dataset, which can never be satisfied");
 
             std::error_code ec;
             if (!fs::is_regular_file(resolved, ec))
-                throw BuildDepMissingException("Missing texture " + name + " for " + ply.filename().string(),
+                throw BuildDepMissingException("Missing texture " + name + " for " + io::toUtf8(ply.filename()),
                                                name);
             return resolved;
         }
@@ -371,26 +373,18 @@ namespace ddb
         {
             const std::string reason = plyUnsupportedTextureReason(h);
             if (!reason.empty())
-                throw AppException("Cannot convert " + ply.filename().string() + " with its texture: " + reason);
+                throw AppException("Cannot convert " + io::toUtf8(ply.filename()) + " with its texture: " + reason);
         }
 
         // File name used for the copied texture next to the OBJ: the basename with
         // whitespace replaced (OBJ/MTL readers split `map_Kd` on whitespace).
         std::string sanitizedFilename(const fs::path &path)
         {
-            std::string n = path.filename().string();
+            std::string n = io::toUtf8(path.filename());
             for (auto &c : n)
-                if (std::isspace(static_cast<unsigned char>(c)))
+                if (str::isSpaceChar(c))
                     c = '_';
             return n;
-        }
-
-        bool sameFile(const fs::path &a, const fs::path &b)
-        {
-            if (fs::absolute(a).lexically_normal() == fs::absolute(b).lexically_normal())
-                return true;
-            std::error_code ec;
-            return fs::equivalent(a, b, ec) && !ec;
         }
 
         // ------------------------------------------------------------------
@@ -417,7 +411,7 @@ namespace ddb
 
         std::string ctx(const fs::path &ply)
         {
-            return "Cannot convert " + ply.filename().string() + " to OBJ: ";
+            return "Cannot convert " + io::toUtf8(ply.filename()) + " to OBJ: ";
         }
 
         bool isColorType(PlyScalarType t)
@@ -432,7 +426,7 @@ namespace ddb
                 throw AppException(ctx(ply) + "unsupported or missing format '" + h.formatName +
                                    "' (expected ascii, binary_little_endian or binary_big_endian)");
             if (h.version != "1.0")
-                LOGD << "PLY " << ply.string() << " declares version '" << h.version << "', reading it as 1.0";
+                LOGD << "PLY " << io::toUtf8(ply) << " declares version '" << h.version << "', reading it as 1.0";
 
             Plan plan;
             plan.vertexElement = h.findElement("vertex");
@@ -506,7 +500,7 @@ namespace ddb
             }
             else if (unsupportedColor >= 0)
             {
-                LOGD << "PLY " << ply.string() << ": ignoring vertex colour property '"
+                LOGD << "PLY " << io::toUtf8(ply) << ": ignoring vertex colour property '"
                      << ve.properties[unsupportedColor].name << "' of unsupported type '"
                      << typeNameOf(ve.properties[unsupportedColor]) << "'";
             }
@@ -589,7 +583,7 @@ namespace ddb
                     res.info.maxZ = maxZ;
                 }
                 if (degenerate > 0)
-                    LOGD << "Skipped " << degenerate << " face(s) with fewer than 3 corners in " << ply.string();
+                    LOGD << "Skipped " << degenerate << " face(s) with fewer than 3 corners in " << io::toUtf8(ply);
             }
 
         private:
@@ -867,33 +861,30 @@ namespace ddb
 
         fs::path objPathFor(const std::string &outputBase)
         {
-            fs::path p(outputBase);
-            std::string ext = p.extension().string();
-            std::transform(ext.begin(), ext.end(), ext.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (ext == ".obj")
+            fs::path p = io::fromUtf8(outputBase);
+            if (io::lowerExtension(p) == "obj")
                 return p;
-            return fs::path(outputBase + ".obj");
+            return io::fromUtf8(outputBase + ".obj");
         }
 
     } // namespace
 
     std::string getPlyTexture(const std::string &inputPly, const std::string &datasetRoot)
     {
-        const fs::path ply(inputPly);
+        const fs::path ply = io::fromUtf8(inputPly);
         if (!fs::exists(ply))
             throw FSException(inputPly + " does not exist");
         const PlyHeader h = readPlyHeader(ply);
         if (!h.hasTextureFile)
             return "";
         throwIfUnsupportedTexture(ply, h);
-        return resolvePlyTexture(ply, h.textureFilename, datasetRoot).string();
+        return io::toUtf8(resolvePlyTexture(ply, h.textureFilename, datasetRoot));
     }
 
     PlyToObjResult convertPlyToObj(const std::string &inputPly, const std::string &outputBase,
                                    const PlyToObjOptions &opts)
     {
-        const fs::path ply(inputPly);
+        const fs::path ply = io::fromUtf8(inputPly);
         if (!fs::exists(ply))
             throw FSException(inputPly + " does not exist");
 
@@ -912,65 +903,65 @@ namespace ddb
 
         PlyToObjResult res;
         const fs::path objPath = objPathFor(outputBase);
-        if (!texture.empty() && sameFile(objPath, texture))
-            throw AppException(ctx(ply) + "OBJ output would overwrite the source texture: " + objPath.string());
+        if (!texture.empty() && io::isSamePath(objPath, texture))
+            throw AppException(ctx(ply) + "OBJ output would overwrite the source texture: " + io::toUtf8(objPath));
         const fs::path outDir = objPath.parent_path();
         if (!outDir.empty())
         {
             std::error_code ec;
             fs::create_directories(outDir, ec);
             if (ec)
-                throw FSException("Cannot create " + outDir.string() + ": " + ec.message(), ec);
+                throw FSException("Cannot create " + io::toUtf8(outDir) + ": " + ec.message(), ec);
         }
 
         OutputGuard guard;
-        res.objPath = objPath.string();
+        res.objPath = io::toUtf8(objPath);
 
         std::string mtlName;
         if (!texture.empty())
         {
-            fs::path mtlPath = outDir / sanitizedFilename(fs::path(objPath).replace_extension(".mtl"));
+            fs::path mtlPath = outDir / io::fromUtf8(sanitizedFilename(fs::path(objPath).replace_extension(".mtl")));
             // A source texture may have any extension. Choose a distinct material
             // filename before opening it, including when outputs share its folder.
-            while (sameFile(mtlPath, texture) || sameFile(mtlPath, objPath))
-                mtlPath = outDir / (mtlPath.stem().string() + "_material.mtl");
+            while (io::isSamePath(mtlPath, texture) || io::isSamePath(mtlPath, objPath))
+                mtlPath = outDir / io::concat(mtlPath.stem(), "_material.mtl");
             std::string texName = sanitizedFilename(texture);
-            fs::path texDst = outDir / texName;
-            while (sameFile(texDst, objPath) || sameFile(texDst, mtlPath))
+            fs::path texDst = outDir / io::fromUtf8(texName);
+            while (io::isSamePath(texDst, objPath) || io::isSamePath(texDst, mtlPath))
             {
                 texName = "texture_" + texName;
-                texDst = outDir / texName;
+                texDst = outDir / io::fromUtf8(texName);
             }
 
             guard.add(mtlPath);
             {
                 TextWriter mtl(mtlPath);
-                mtl.buffer() += "# Generated by DroneDB from " + ply.filename().string() + "\n";
+                mtl.buffer() += "# Generated by DroneDB from " + io::toUtf8(ply.filename()) + "\n";
                 mtl.buffer() += "newmtl material0\n";
                 mtl.buffer() += "map_Kd " + texName + "\n";
                 mtl.close();
             }
 
             std::error_code ec;
-            const bool same = sameFile(texture, texDst);
+            const bool same = io::isSamePath(texture, texDst);
             if (!same)
             {
                 guard.add(texDst);
                 fs::copy_file(texture, texDst, fs::copy_options::overwrite_existing, ec);
                 if (ec)
-                    throw FSException("Cannot copy texture " + texture.string() + " to " + texDst.string() + ": " +
+                    throw FSException("Cannot copy texture " + io::toUtf8(texture) + " to " + io::toUtf8(texDst) + ": " +
                                       ec.message(), ec);
             }
 
-            mtlName = mtlPath.filename().string();
-            res.mtlPath = mtlPath.string();
-            res.texturePath = texDst.string();
+            mtlName = io::toUtf8(mtlPath.filename());
+            res.mtlPath = io::toUtf8(mtlPath);
+            res.texturePath = io::toUtf8(texDst);
         }
 
         guard.add(objPath);
         {
             TextWriter obj(objPath);
-            obj.buffer() += "# Converted from " + ply.filename().string() + " by DroneDB\n";
+            obj.buffer() += "# Converted from " + io::toUtf8(ply.filename()) + " by DroneDB\n";
             if (!mtlName.empty())
             {
                 obj.buffer() += "mtllib " + mtlName + "\n";

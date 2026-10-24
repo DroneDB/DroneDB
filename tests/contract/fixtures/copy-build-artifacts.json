@@ -1,0 +1,24 @@
+{
+  "call": "DDBBuild(<root>, \"ortho.tif\"), then DDBCopyBuildArtifacts(<root>, <root2>, <hash of ortho.tif>), <root2> a dataset with ortho.tif",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "artifacts": [
+      {
+        "downloadName": "cog.tif",
+        "kind": "file",
+        "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
+        "path": "cog/cog.tif",
+        "role": "raster.cog"
+      }
+    ],
+    "hash": "d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+    "pending": false
+  },
+  "schema": "copy-build-artifacts.schema.json"
+}
