@@ -54,18 +54,29 @@ struct Conflict {
 // the SHA-256 the caller computed (e.g. while it received the file)
 using VerifiedHashes = std::unordered_map<std::string, std::string>;
 
+/// How a delta is applied to a dataset
+struct DeltaApplication {
+    /// Where the added files are (a temporary folder on the volume of the dataset): they are
+    /// moved, not copied
+    fs::path sourcePath;
+    MergeStrategy mergeStrategy = DontMerge;
+    /// The metadata of the source dataset, from which the metadata the delta adds is restored
+    json sourceMetaDump = json::array();
+    /// Every added file is checked against the hash in the delta before anything changes, and a
+    /// mismatch throws; the index stores the delta's hashes
+    bool verifyHashes = true;
+    /// A file here is not read again: its entry must name a file the delta adds, with the delta's
+    /// hash, or applyDelta throws InvalidArgsException before anything changes (also without
+    /// verifyHashes)
+    VerifiedHashes verifiedHashes;
+};
+
 /**
- * Applies a delta to `destination`, taking the added files from `sourcePath` (moved, not
- * copied). With verifyHashes, every added file is checked against the hash in the delta
- * before anything changes, and a mismatch throws; the index stores the delta's hashes.
- * A file in verifiedHashes is not read again: its entry must name a file the delta adds,
- * with the delta's hash, or applyDelta throws InvalidArgsException before anything
- * changes (also without verifyHashes).
+ * Applies a delta to `destination`, as `application` says. What it does to the files is
+ * written to `out` (one "A", "U" or "D" line per file). Returns the conflicts.
  */
-DDB_DLL std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination,
-                                         const MergeStrategy mergeStrategy, const json &sourceMetaDump,
-                                         std::ostream &out = std::cout, bool verifyHashes = true,
-                                         const VerifiedHashes &verifiedHashes = {});
+DDB_DLL std::vector<Conflict> applyDelta(const Delta &d, Database *destination,
+                                         const DeltaApplication &application, std::ostream &out);
 DDB_DLL void ensureParentFolderExists(const fs::path &folder);
 DDB_DLL std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *destination,
                                                                 const std::string &hlDestFolder);

@@ -84,53 +84,64 @@ void checkDeltaPaths(const Delta& d) {
         check(rem.path);
 }
 
-// Whether a delta entry can be applied over the destination's version of `path`: there is
-// none, it already matches, or it did not change since the stamp the delta was computed
-// from (`baseHash`). Otherwise both sides changed it: the merge strategy decides.
-bool canApply(Database* destination,
-              const std::string& path,
-              const std::string& hash,
-              const std::optional<std::string>& baseHash,
-              const MergeStrategy mergeStrategy,
-              const ConflictType conflictType,
-              std::vector<Conflict>& conflicts,
-              bool& indexed) {
-    const auto existing = getEntry(destination, path);
-    indexed = existing.has_value();
-    if (!indexed || hash == existing->hash || (baseHash && *baseHash == existing->hash))
-        return true;
+// Decides whether delta entries can be applied over the destination's version of a path, by the
+// merge strategy; the entries it refuses because both sides changed them are its conflicts
+class ApplyPolicy {
+  public:
+    ApplyPolicy(Database* destination, MergeStrategy mergeStrategy, std::vector<Conflict>& conflicts)
+        : destination_(destination), mergeStrategy_(mergeStrategy), conflicts_(conflicts) {}
 
-    switch (mergeStrategy) {
-        case MergeStrategy::DontMerge:
-            conflicts.push_back(Conflict(path, conflictType));
-            return false;
-        case MergeStrategy::KeepOurs:
-            return false;
-        case MergeStrategy::KeepTheirs:
-        default:
-            return true;
+    struct Verdict {
+        bool apply;    // the delta entry may be applied
+        bool indexed;  // the destination has an entry at the path
+    };
+
+    // A delta entry can be applied over the destination's version of `path`: there is none, it
+    // already matches, or it did not change since the stamp the delta was computed from
+    // (`baseHash`). Otherwise both sides changed it: the merge strategy decides.
+    Verdict check(const std::string& path, const std::string& hash, const std::optional<std::string>& baseHash,
+                  ConflictType conflictType) {
+        const auto existing = getEntry(destination_, path);
+        const bool indexed = existing.has_value();
+        if (!indexed || hash == existing->hash || (baseHash && *baseHash == existing->hash))
+            return {true, indexed};
+
+        switch (mergeStrategy_) {
+            case MergeStrategy::DontMerge:
+                conflicts_.push_back(Conflict(path, conflictType));
+                return {false, indexed};
+            case MergeStrategy::KeepOurs:
+                return {false, indexed};
+            case MergeStrategy::KeepTheirs:
+            default:
+                return {true, indexed};
+        }
     }
-}
+
+  private:
+    Database* destination_;
+    MergeStrategy mergeStrategy_;
+    std::vector<Conflict>& conflicts_;
+};
 
 }  // namespace
 
 std::vector<Conflict> applyDelta(const Delta& d,
-                                 const fs::path& sourcePath,
                                  Database* destination,
-                                 const MergeStrategy mergeStrategy,
-                                 const json& sourceMetaDump,
-                                 std::ostream& out,
-                                 bool verifyHashes,
-                                 const VerifiedHashes& verifiedHashes) {
+                                 const DeltaApplication& application,
+                                 std::ostream& out) {
+    const fs::path& sourcePath = application.sourcePath;
+    const json& sourceMetaDump = application.sourceMetaDump;
     std::vector<Conflict> conflicts;
-    const auto unverifiedFiles = filesToVerify(d, verifiedHashes);
+    ApplyPolicy policy(destination, application.mergeStrategy, conflicts);
+    const auto unverifiedFiles = filesToVerify(d, application.verifiedHashes);
 
     // File operations
     if (d.adds.size() > 0 || d.removes.size() > 0) {
         const fs::path destPath = destination->rootDirectory();
 
         checkDeltaPaths(d);
-        if (verifyHashes)
+        if (application.verifyHashes)
             verifyDeltaHashes(unverifiedFiles, sourcePath);
 
         // Removes. We don't check whether the file has been modified on the FS, perhaps we should?
@@ -142,14 +153,13 @@ std::vector<Conflict> applyDelta(const Delta& d,
                 continue;
 
             // rem.hash is the hash in the destination stamp
-            bool indexed;
-            if (!canApply(destination, rem.path, rem.hash, rem.hash, mergeStrategy,
-                          ConflictType::RemoteDeleteLocalModified, conflicts, indexed))
+            const auto verdict = policy.check(rem.path, rem.hash, rem.hash, ConflictType::RemoteDeleteLocalModified);
+            if (!verdict.apply)
                 continue;
 
             const auto dest = destPath / io::fromUtf8(rem.path);
             if (fs::exists(dest)) {
-                if (indexed)
+                if (verdict.indexed)
                     indexedRemovals.push_back(io::toUtf8(dest));
                 fileRemovals.push_back(&rem);
             }
@@ -184,9 +194,7 @@ std::vector<Conflict> applyDelta(const Delta& d,
                 if (add.path.empty())
                     continue;
 
-                bool indexed;
-                if (!canApply(destination, add.path, add.hash, add.baseHash, mergeStrategy,
-                              ConflictType::BothModified, conflicts, indexed))
+                if (!policy.check(add.path, add.hash, add.baseHash, ConflictType::BothModified).apply)
                     continue;
 
                 const auto dest = destPath / io::fromUtf8(add.path);

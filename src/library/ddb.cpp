@@ -917,14 +917,13 @@ static json applyDeltaConflicts(const char* delta,
 
     const auto ddb = ddb::open(std::string(ddbPath), false);
     std::stringstream ss;
-    const auto adc = applyDelta(d,
-                                pathArg(sourcePath),
-                                ddb.get(),
-                                static_cast<MergeStrategy>(mergeStrategy),
-                                metaDump,
-                                ss,
-                                verifyHashes,
-                                verified);
+    DeltaApplication application;
+    application.sourcePath = pathArg(sourcePath);
+    application.mergeStrategy = static_cast<MergeStrategy>(mergeStrategy);
+    application.sourceMetaDump = metaDump;
+    application.verifyHashes = verifyHashes;
+    application.verifiedHashes = verified;
+    const auto adc = applyDelta(d, ddb.get(), application, ss);
 
     json j = json::array();
     for (auto& c : adc)

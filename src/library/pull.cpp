@@ -83,7 +83,11 @@ void pullDataset(RegistryClient& client, const std::string& path, const MergeStr
     // before we download the files
 
     // Apply changes to local files
-    auto conflicts = applyDelta(delta, tempNewFolder, db.get(), mergeStrategy, remoteMetaDump, out);
+    DeltaApplication application;
+    application.sourcePath = tempNewFolder;
+    application.mergeStrategy = mergeStrategy;
+    application.sourceMetaDump = remoteMetaDump;
+    auto conflicts = applyDelta(delta, db.get(), application, out);
     io::assureIsRemoved(tempNewFolder);
 
     if (conflicts.size() == 0) {

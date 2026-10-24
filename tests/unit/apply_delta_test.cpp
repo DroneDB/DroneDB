@@ -104,14 +104,23 @@ namespace
         std::vector<Conflict> apply(const Delta &d, MergeStrategy strategy = MergeStrategy::KeepTheirs,
                                     bool verify = true, std::ostream &out = std::cout)
         {
-            return applyDelta(d, source, db.get(), strategy, json::array(), out, verify);
+            DeltaApplication application;
+            application.sourcePath = source;
+            application.mergeStrategy = strategy;
+            application.verifyHashes = verify;
+            return applyDelta(d, db.get(), application, out);
         }
 
         // applyDelta for a caller that verified `verified` itself (XI-05)
         std::vector<Conflict> applyVerified(const Delta &d, const VerifiedHashes &verified, bool verify = true)
         {
             std::ostringstream out;
-            return applyDelta(d, source, db.get(), MergeStrategy::KeepTheirs, json::array(), out, verify, verified);
+            DeltaApplication application;
+            application.sourcePath = source;
+            application.mergeStrategy = MergeStrategy::KeepTheirs;
+            application.verifyHashes = verify;
+            application.verifiedHashes = verified;
+            return applyDelta(d, db.get(), application, out);
         }
 
         // DDBApplyDeltaEx on this dataset (the fixture's connection is closed first); the
