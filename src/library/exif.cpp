@@ -970,7 +970,13 @@ namespace ddb
             const std::vector<uint8_t> data = io::readAllBytes(path);
             auto memory = std::make_unique<Exiv2::MemIo>();
             memory->write(data.data(), data.size());
-            return Exiv2::ImageFactory::open(std::move(memory));
+            // Like the path overload (the one used for an ASCII path and on every other
+            // platform): data of no known image type is an Exiv2::Error, which the callers
+            // handle, where the BasicIo overload returns nullptr
+            auto image = Exiv2::ImageFactory::open(std::move(memory));
+            if (!image)
+                throw Exiv2::Error(Exiv2::ErrorCode::kerFileContainsUnknownImageType, utf8);
+            return image;
         }
         return Exiv2::ImageFactory::open(utf8);
 #else
