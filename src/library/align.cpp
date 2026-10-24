@@ -660,7 +660,7 @@ static double computeZOffset(const std::string &alignedPath,
     return diffs[diffs.size() / 2];
 }
 
-static void addZOffset(const std::string &path, double zOffset) {
+void applyZOffset(const std::string &path, double zOffset) {
     if (std::abs(zOffset) < 1e-6) return;
     const auto dataset = adoptDataset(GDALOpen(path.c_str(), GA_Update));
     if (!dataset) return;
@@ -814,7 +814,7 @@ void writeAligned(const AlignInputs &in, const Similarity2D &sim, AlignResult &r
     applyWarp(in.sourcePath, tmpWarp, sim, in.sourceCrs);
     if (in.isDem) {
         result.shiftZ = computeZOffset(tmpWarp, in.effectiveReference);
-        addZOffset(tmpWarp, result.shiftZ);
+        applyZOffset(tmpWarp, result.shiftZ);
     }
     buildCog(tmpWarp, in.outputPath);
 }

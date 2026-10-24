@@ -76,6 +76,10 @@ DDB_DLL AlignResult alignRaster(
     const std::string &outputPath,
     const AlignOptions &opts = {});
 
+/** Adds zOffset to every sample of band 1 of the DEM at path, in place (nodata stays as it is);
+ *  an offset below 1e-6 leaves the file alone. */
+DDB_DLL void applyZOffset(const std::string &path, double zOffset);
+
 DDB_DLL std::string alignResultToJson(const AlignResult &r);
 DDB_DLL std::string alignValidationToJson(const AlignValidationResult &r);
 
