@@ -65,7 +65,6 @@ struct SensorProfile {
 struct SensorDetectionResult {
     bool detected = false;
     std::string sensorId;
-    std::string sensorName;
     std::string sensorCategory;
     BandMapping defaultBandMapping;
     std::vector<BandInfo> bands;
@@ -79,7 +78,8 @@ public:
 
     // Detection is memoised per file version (fileVersion)
     SensorDetectionResult detectSensor(const std::string &rasterPath) const;
-    // Detections that opened the raster (cache misses), for tests and diagnostics
+    // Detections that opened the raster (cache misses). Tests read it to check that a repeated
+    // detection is served from the cache and that a rewritten raster is detected again.
     uint64_t uncachedDetections() const;
     BandMapping getDefaultBandMapping(const std::string &rasterPath) const;
     BandMapping getBandMappingForPreset(const std::string &rasterPath, const std::string &presetId) const;

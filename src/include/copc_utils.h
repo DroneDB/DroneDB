@@ -47,7 +47,7 @@ namespace ddb
     struct CopcIndex
     {
         double spacing = 0;                     // point spacing of the root node
-        double centerX = 0, centerY = 0, centerZ = 0, halfSize = 0; // root cube
+        double centerX = 0, centerY = 0, halfSize = 0; // root cube
         int pointFormat = 0;                    // LAS point data format (6, 7 or 8)
         int pointSize = 0;                      // bytes per point record
         double scale[3] = {1, 1, 1};

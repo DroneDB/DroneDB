@@ -239,7 +239,6 @@ void describeMatch(SensorDetectionResult &result, const SensorProfile &profile, 
                    int bandCount) {
     result.detected = true;
     result.sensorId = profile.id;
-    result.sensorName = profile.name;
     result.sensorCategory = profile.sensorCategory;
     result.bands = profile.bands;
     result.presets = profile.presets;

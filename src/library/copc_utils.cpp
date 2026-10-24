@@ -163,7 +163,6 @@ namespace ddb
         const uint8_t *info = vlr + VlrHeaderSize;
         h.centerX = readLE<double>(info);
         h.centerY = readLE<double>(info + 8);
-        h.centerZ = readLE<double>(info + 16);
         h.halfSize = readLE<double>(info + 24);
         h.spacing = readLE<double>(info + 32);
         const auto rootOffset = readLE<uint64_t>(info + 40);

@@ -88,7 +88,6 @@ namespace ddb
         std::string version;    // raw version token (e.g. "1.0")
         std::vector<PlyElement> elements; // in header (and body) order
         std::vector<std::string> comments; // text after `comment `, trimmed, in order
-        std::vector<std::string> objInfo;  // text after `obj_info `, trimmed, in order
         // True when a `comment TextureFile ...` line exists.
         bool hasTextureFile = false;
         // Text after `comment TextureFile ` (rest of the line, trimmed) of the first

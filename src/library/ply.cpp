@@ -268,8 +268,6 @@ namespace ddb
                         applyFormatLine(h, tokens);
                     else if (kw == "comment")
                         applyCommentLine(h, line, tokens);
-                    else if (kw == "obj_info")
-                        h.objInfo.push_back(restAfterTokens(line, 1));
                     else if (kw == "element")
                         wellFormed = applyElementLine(h, line, tokens, error);
                     else if (kw == "property")
