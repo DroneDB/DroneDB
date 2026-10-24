@@ -150,7 +150,20 @@ function(ddb_add_library_objects name)
         ${PDAL_HEADERS_DIR}
         ${CMAKE_SOURCE_DIR}/vendor/glob
     )
+    # One section per function and per datum, so that --gc-sections (ddb_gc_sections) can drop what
+    # the binary does not reach. MSVC does it by default (/Gy, /OPT:REF in a Release link).
+    target_compile_options(${name} PRIVATE
+        $<$<AND:$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>,$<NOT:$<PLATFORM_ID:Darwin>>>:-ffunction-sections -fdata-sections>)
     add_dependencies(${name} nxs)
+endfunction()
+
+# ddb_gc_sections(<target>): the linker drops the sections nothing refers to (the library is built
+# with one section per function). Linux/ELF with GNU or Clang only. libddb.so is 13 % smaller
+# stripped, ddbcmd 8 % (DQ-14, measured; docs in the proposal).
+function(ddb_gc_sections target)
+    if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_link_options(${target} PRIVATE LINKER:--gc-sections)
+    endif()
 endfunction()
 
 ddb_add_library_objects(ddb_core ${DDB_CORE_SOURCES} ${DDB_VERSION_SOURCE})
@@ -206,6 +219,7 @@ endif()
 # static archive members end up in libddb.so, and an INTERFACE target in between reorders the
 # link line
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq ddb_headers PUBLIC ddb_c_api)
+ddb_gc_sections(${PROJECT_NAME})
 
 # ddb_embed_library(<target>): <target> contains the library instead of loading libddb: the
 # objects of ddb_core and ddb_capi, the libraries they need and DDB_STATIC_DEFINE (ddb_static_api).
@@ -213,6 +227,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq ddb_headers
 function(ddb_embed_library target)
     target_sources(${target} PRIVATE $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>)
     target_link_libraries(${target} PRIVATE ddb_core_usage ddb_static_api)
+    ddb_gc_sections(${target})
 endfunction()
 
 find_package(Python3 REQUIRED)
