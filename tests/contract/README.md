@@ -306,3 +306,8 @@ Registry has to adopt first.
   `DDBRegisterProcess` returns a code. Registry's start-up handshake has to expect major 2. The
   schema now requires `abi.major` >= 2. Every other mention of "ABI 1.1" in this file and in the
   schemas now says "new in 2.0" (the same exports). No other fixture changed.
+
+* 2026-10-24: `raster-metadata` and `raster-metadata-formula` list one more colormap at the end of
+  `colormaps`: `ryg` ("Red-Yellow-Green (pure)", `#ff0000` ... `#00ff00`), the ramp of the
+  vegetation-index map layer, which now renders through the shared formula engine (DQ-06). Additive;
+  the other colormaps and their order did not change.

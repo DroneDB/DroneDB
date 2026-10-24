@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <cmath>
@@ -24,6 +25,8 @@
 
 #include "raster_region.h"
 #include "raster_cache.h"
+#include "vegetation.h"
+#include "vis_render.h"
 #include "tile_encoder.h"
 #include "exceptions.h"
 #include "logger.h"
@@ -389,44 +392,32 @@ namespace ddb
 
     // ---------------------------------------------------------------------
     // Spectral index rendering (NDVI/NDRE/NDWI/EVI/SAVI)
+    //
+    // The arithmetic, the nodata handling and the colormap lookup are those of the shared
+    // formula engine (VegetationEngine, vis_render.h): the thumbnails, the tiles and this layer
+    // render a vegetation index through one implementation. What is the layer's own is the
+    // choice of the formulas, the fixed band mapping and the colormap.
     // ---------------------------------------------------------------------
     namespace
     {
-        struct IndexFormula
-        {
-            // 1-based band indices for typical 5-band aerial multispectral
-            // (R=1, G=2, B=3, RedEdge=4, NIR=5). Falls back gracefully when
-            // fewer bands are present.
-            int b1; // first operand band
-            int b2; // second operand band
-            int b3; // optional third (EVI); 0 = unused
-            // type: 0=(b1-b2)/(b1+b2); 1=SAVI; 2=EVI
-            int kind;
-            double L; // SAVI/EVI tuning
-        };
+        // The formulas of the engine the layer renders (case-insensitive names)
+        constexpr std::array<const char *, 5> kIndexFormulas = {"NDVI", "NDRE", "NDWI", "EVI", "SAVI"};
 
-        IndexFormula resolveIndex(const std::string &n)
+        // The bands of a typical 5-band aerial multispectral raster: R=1, G=2, B=3, RedEdge=4,
+        // NIR=5. Every index above reads the NIR band, so a raster needs all five.
+        constexpr const char *kIndexBandMapping = "RGBReN";
+        constexpr int kIndexBands = 5;
+
+        // The ramp the layer has always used (red, yellow, green over [-1, 1]), in the engine's table
+        constexpr const char *kIndexColormap = "ryg";
+
+        const char *resolveIndexFormula(const std::string &n)
         {
             std::string u = n;
             str::toUpper(u);
-            if (u == "NDVI") return {5, 1, 0, 0, 0.0};        // (NIR-R)/(NIR+R)
-            if (u == "NDRE") return {5, 4, 0, 0, 0.0};        // (NIR-RE)/(NIR+RE)
-            if (u == "NDWI") return {2, 5, 0, 0, 0.0};        // (G-NIR)/(G+NIR)
-            if (u == "SAVI") return {5, 1, 0, 1, 0.5};        // ((NIR-R)/(NIR+R+L))*(1+L)
-            if (u == "EVI")  return {5, 1, 3, 2, 0.0};        // 2.5*(NIR-R)/(NIR+6R-7.5B+1)
+            for (const char *formula : kIndexFormulas)
+                if (u == formula) return formula;
             throw InvalidArgsException("Unknown spectral index: " + n);
-        }
-
-        // Map index value in [-1,1] to RGB (red→yellow→green ramp).
-        void rampNdvi(double v, uint8_t &r, uint8_t &g, uint8_t &b, uint8_t &a)
-        {
-            if (std::isnan(v)) { r = g = b = 0; a = 0; return; }
-            double t = (v + 1.0) * 0.5;
-            if (t < 0.0) t = 0.0; else if (t > 1.0) t = 1.0;
-            // 0=red, 0.5=yellow, 1=green
-            if (t < 0.5) { r = 255; g = static_cast<uint8_t>(t * 2.0 * 255); b = 0; }
-            else          { r = static_cast<uint8_t>((1.0 - t) * 2.0 * 255); g = 255; b = 0; }
-            a = 255;
         }
     } // anon
 
@@ -443,7 +434,7 @@ namespace ddb
         if (!outBytes || !outSize)
             throw InvalidArgsException("renderRasterIndex: outBytes/outSize null");
 
-        const IndexFormula idx = resolveIndex(indexName);
+        const char *formulaId = resolveIndexFormula(indexName);
         const FormatInfo fi = resolveFormat(format);
         const std::string srs = bboxSrs.empty() ? std::string("EPSG:4326") : bboxSrs;
 
@@ -451,8 +442,7 @@ namespace ddb
         const auto source = RasterCache::instance().acquireDataset(inputPath);
         GDALDatasetH hSrc = source->handle();
 
-        const int srcBands = GDALGetRasterCount(hSrc);
-        if (srcBands < std::max({idx.b1, idx.b2, idx.b3})) {
+        if (GDALGetRasterCount(hSrc) < kIndexBands) {
             throw InvalidArgsException("Raster has insufficient bands for " + indexName);
         }
 
@@ -490,71 +480,18 @@ namespace ddb
         }
         GDALDatasetH hWarp = datasetHandle(warp);
 
-        // Step 2: read required bands as Float32 buffers and capture their
-        // nodata values so that nodata pixels can be rendered as transparent
-        // (alpha = 0) instead of being colorized as if they were valid
-        // numeric samples.
+        // Step 2: the shared engine reads the bands of the warped window as Float32, leaves the
+        // nodata and transparent pixels out of the formula (they are rendered with alpha = 0
+        // instead of being colorized as if they were valid samples) and colorizes the values
+        // over the range of the formula.
         const size_t npx = static_cast<size_t>(width) * height;
-        std::vector<float> b1(npx), b2(npx), b3;
-        if (idx.b3 > 0) b3.resize(npx);
-        BandNodata nd1, nd2, nd3;
-
-        auto readBand = [&](int bi, float *dst, BandNodata &nd) {
-            GDALRasterBandH hB = GDALGetRasterBand(hWarp, bi);
-            if (!hB) throw GDALException("Missing band " + std::to_string(bi));
-            CPLErr e = GDALRasterIO(hB, GF_Read, 0, 0, width, height,
-                                    dst, width, height, GDT_Float32, 0, 0);
-            if (e != CE_None) throw GDALException("RasterIO failed for band " + std::to_string(bi));
-            nd = readBandNodata(hB);
-        };
-        readBand(idx.b1, b1.data(), nd1);
-        readBand(idx.b2, b2.data(), nd2);
-        if (idx.b3 > 0) readBand(idx.b3, b3.data(), nd3);
+        const FormulaPlan plan = planFormula(hWarp, formulaId,
+                                             VegetationEngine::parseFilter(kIndexBandMapping, kIndexBands),
+                                             kIndexColormap, true);
+        const RasterWindow window{0, 0, width, height, width, height};
+        std::vector<uint8_t> rgba = renderPlannedFormulaRgba(hWarp, plan, window, "");
         warp.reset();
         vsiTif.reset();
-
-        // Helper to detect nodata in a single sample (NaN is always nodata here).
-        auto isND = [](float v, const BandNodata &nd) { return std::isnan(v) || isNodata(v, nd); };
-
-        // Step 3: compute the index per-pixel into RGBA byte buffer.
-        std::vector<uint8_t> rgba(static_cast<size_t>(npx) * 4);
-        for (int i = 0; i < npx; ++i) {
-            double v;
-            const double v1 = b1[i], v2 = b2[i];
-            const bool nodataHere =
-                isND(b1[i], nd1) || isND(b2[i], nd2) ||
-                (idx.b3 > 0 && isND(b3[i], nd3));
-            if (nodataHere) {
-                v = std::nan("");
-            } else {
-                switch (idx.kind) {
-                    case 0: { // simple normalized difference
-                        const double sum = v1 + v2;
-                        v = (sum == 0.0) ? std::nan("") : (v1 - v2) / sum;
-                        break;
-                    }
-                    case 1: { // SAVI
-                        const double denom = v1 + v2 + idx.L;
-                        v = (denom == 0.0) ? std::nan("") : ((v1 - v2) / denom) * (1.0 + idx.L);
-                        break;
-                    }
-                    case 2: { // EVI
-                        const double v3 = b3[i];
-                        const double denom = v1 + 6.0 * v2 - 7.5 * v3 + 1.0;
-                        v = (denom == 0.0) ? std::nan("") : 2.5 * (v1 - v2) / denom;
-                        break;
-                    }
-                    default: v = std::nan("");
-                }
-            }
-            uint8_t r, g, b, a;
-            rampNdvi(v, r, g, b, a);
-            const size_t off = static_cast<size_t>(i) * 4;
-            rgba[off + 0] = r;
-            rgba[off + 1] = g;
-            rgba[off + 2] = b;
-            rgba[off + 3] = a;
-        }
 
         // Step 4: write to a /vsimem dataset of the requested format.
         // JPEG cannot carry an alpha band, so for that format we composite

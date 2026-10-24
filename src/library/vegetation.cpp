@@ -678,6 +678,20 @@ void VegetationEngine::initColormaps() {
         }
         colormaps_.push_back(c);
     }
+
+    // Pure red-yellow-green: the ramp of the vegetation-index map layer (renderRasterIndex),
+    // kept as it looked before that layer moved onto this engine
+    {
+        Colormap c;
+        c.id = "ryg";
+        c.name = "Red-Yellow-Green (pure)";
+        interpolateColormap(c.entries, {
+            {0.0f, 255, 0, 0},
+            {0.5f, 255, 255, 0},
+            {1.0f, 0, 255, 0}
+        });
+        colormaps_.push_back(c);
+    }
 }
 
 } // namespace ddb

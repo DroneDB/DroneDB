@@ -50,7 +50,7 @@ src/library/plyconv.cpp -Wdangling-else 3
 src/library/plyconv.cpp -Wshadow 5
 src/library/process_runner.cpp -Wdangling-else 1
 src/library/raster_analysis.cpp -Wconversion 4
-src/library/raster_region.cpp -Wsign-compare 2
+src/library/raster_region.cpp -Wsign-compare 1
 src/library/raster_region.cpp -Wunused-result 2
 src/library/sqlite_database.cpp -Wdangling-else 1
 src/library/statement.cpp -Wshadow 2

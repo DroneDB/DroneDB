@@ -398,6 +398,18 @@
     ],
     "id": "greys",
     "name": "Greys"
+   },
+   {
+    "colors": [
+     "#ff0000",
+     "#ff6600",
+     "#ffcc00",
+     "#cbff00",
+     "#66ff00",
+     "#00ff00"
+    ],
+    "id": "ryg",
+    "name": "Red-Yellow-Green (pure)"
    }
   ],
   "detectedSensor": "",
@@ -1311,6 +1323,18 @@
     ],
     "id": "greys",
     "name": "Greys"
+   },
+   {
+    "colors": [
+     "#ff0000",
+     "#ff6600",
+     "#ffcc00",
+     "#cbff00",
+     "#66ff00",
+     "#00ff00"
+    ],
+    "id": "ryg",
+    "name": "Red-Yellow-Green (pure)"
    }
   ],
   "detectedSensor": "",
@@ -2256,6 +2280,18 @@
     ],
     "id": "greys",
     "name": "Greys"
+   },
+   {
+    "colors": [
+     "#ff0000",
+     "#ff6600",
+     "#ffcc00",
+     "#cbff00",
+     "#66ff00",
+     "#00ff00"
+    ],
+    "id": "ryg",
+    "name": "Red-Yellow-Green (pure)"
    }
   ],
   "detectedSensor": "",
@@ -2691,6 +2727,18 @@
     ],
     "id": "greys",
     "name": "Greys"
+   },
+   {
+    "colors": [
+     "#ff0000",
+     "#ff6600",
+     "#ffcc00",
+     "#cbff00",
+     "#66ff00",
+     "#00ff00"
+    ],
+    "id": "ryg",
+    "name": "Red-Yellow-Green (pure)"
    }
   ],
   "detectedSensor": "",
@@ -3624,6 +3672,18 @@
     ],
     "id": "greys",
     "name": "Greys"
+   },
+   {
+    "colors": [
+     "#ff0000",
+     "#ff6600",
+     "#ffcc00",
+     "#cbff00",
+     "#66ff00",
+     "#00ff00"
+    ],
+    "id": "ryg",
+    "name": "Red-Yellow-Green (pure)"
    }
   ],
   "detectedSensor": "",

@@ -168,17 +168,17 @@ namespace ddb
                 values[std::min(values.size() - 1, static_cast<size_t>(values.size() * 0.98))]};
     }
 
-    std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
-                                           const RasterWindow &window, const ThumbVisParams &visParams)
+    std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+                                                  const RasterWindow &window, const std::string &rescale)
     {
-        const FormulaPlan plan = planFormula(ds, rasterPath, visParams.formula, visParams.bandFilter,
-                                             visParams.colormap, true);
+        if (plan.colormap == nullptr)
+            throw InvalidArgsException("renderPlannedFormulaRgba: the plan has no colormap");
         FormulaBuffers buffers;
         computeFormulaValues(ds, plan, window, buffers);
 
         // Display range: explicit, the formula's own, or p2-p98 of the rendered values
         std::pair<float, float> range;
-        if (const auto fixed = fixedDisplayRange(visParams.rescale, *plan.formula))
+        if (const auto fixed = fixedDisplayRange(rescale, *plan.formula))
         {
             range = *fixed;
         }
@@ -196,5 +196,13 @@ namespace ddb
         VegetationEngine::instance().applyColormap(buffers.result.data(), rgba.data(), window.outPixels(),
                                                    *plan.colormap, range.first, range.second, NODATA_SENTINEL);
         return rgba;
+    }
+
+    std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
+                                           const RasterWindow &window, const ThumbVisParams &visParams)
+    {
+        const FormulaPlan plan = planFormula(ds, rasterPath, visParams.formula, visParams.bandFilter,
+                                             visParams.colormap, true);
+        return renderPlannedFormulaRgba(ds, plan, window, visParams.rescale);
     }
 }

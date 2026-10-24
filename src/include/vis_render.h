@@ -93,6 +93,12 @@ namespace ddb
     /// (0, 1) when there are none
     DDB_DLL std::pair<float, float> percentileDisplayRange(std::vector<float> &values);
 
+    /// Renders the planned formula (the plan has a colormap) over window of ds: RGBA interleaved,
+    /// outPixels() * 4 bytes, nodata transparent. The display range is the explicit "min,max"
+    /// rescale, else the range of the formula, else the p2-p98 of the computed values.
+    DDB_DLL std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+                                                          const RasterWindow &window, const std::string &rescale);
+
     /// Renders visParams.formula (a vegetation index) over window of ds with its
     /// colormap: RGBA interleaved, outPixels() * 4 bytes, nodata transparent.
     DDB_DLL std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
