@@ -85,6 +85,16 @@ namespace ddb
         return out;
     }
 
+    // The argument list of a GDAL utility (GDALTranslateOptionsNew...): a CPLStringList that
+    // owns a copy of every string, so nothing is cast away from a std::string. Pass .List().
+    inline CPLStringList cslFromStrings(const std::vector<std::string> &strings)
+    {
+        CPLStringList list;
+        for (const auto &s : strings)
+            list.AddString(s.c_str());
+        return list;
+    }
+
     // Takes a string that GDAL allocated (exportToWkt, OSRExportToProj4...): returns a copy and
     // frees it, also when the copy throws. "" for null.
     inline std::string takeGdalString(char *s)

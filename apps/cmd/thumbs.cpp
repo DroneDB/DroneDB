@@ -44,7 +44,8 @@ namespace cmd
         const auto thumbSize = opts["size"].as<int>();
         const auto useCrc = opts["use-crc"].count();
 
-        ddb::generateThumbs(input, ddb::io::fromUtf8(output), thumbSize, useCrc);
+        ddb::generateThumbs(input, ddb::io::fromUtf8(output), thumbSize, useCrc, [](const auto &thumb)
+                            { std::cout << ddb::io::toUtf8(thumb) << std::endl; });
         return EXIT_SUCCESS;
     }
 
