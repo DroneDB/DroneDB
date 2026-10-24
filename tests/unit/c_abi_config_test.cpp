@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // DQ-15 (XI-06): the C ABI of the process configuration, DDBConfigure and DDBGetEffectiveConfig
-// (ABI 1.1 exports: an invalid argument is DDBERR_INVALIDARGS, outputs are written on
+// (exports new in 2.0: an invalid argument is DDBERR_INVALIDARGS, outputs are written on
 // DDBERR_NONE only). The output shape is pinned by the effective-config contract fixture
 // (contract_test.cpp); that DDBConfigure works before DDBRegisterProcess is tested in its own
 // process (tests/helpers/config_probe.cpp, integration).

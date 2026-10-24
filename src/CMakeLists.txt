@@ -82,6 +82,7 @@ add_library(ddb_headers INTERFACE)
 # vendor/libnexus is public because 3d.h includes <nxs.h> (installed to include/ by libnexus)
 target_include_directories(ddb_headers INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${DDB_GENERATED_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:include>
 )
 target_include_directories(ddb_headers SYSTEM INTERFACE

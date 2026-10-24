@@ -41,8 +41,8 @@ namespace ddb
     };
 
     // Only these classified failures can preserve an existing pending build. The C API reports
-    // the reason (DDBGetLastErrorReason, c_api_util.h): with DDBERR_EXCEPTION from the ABI 1.0
-    // exports (DDBBuild), with DDBERR_RETRYABLE from the ABI 1.1 ones.
+    // the reason (DDBGetLastErrorReason, c_api_util.h): with DDBERR_EXCEPTION from the 1.x
+    // exports (DDBBuild), with DDBERR_RETRYABLE from the ones new in 2.0.
     enum class RetryableBuildReason { LowDiskSpace, NoSpaceOnDevice, IdleTimeout };
     class RetryableBuildException : public AppException
     {
@@ -69,7 +69,7 @@ namespace ddb
     {
         using AppException::AppException;
     };
-    // The requested entry is not in the index. The exports added in ABI 1.1 return it as
+    // The requested entry is not in the index. The exports added in 2.0 return it as
     // DDBERR_NOTFOUND; the older ones keep returning DDBERR_EXCEPTION.
     class EntryNotFoundException : public AppException {
         using AppException::AppException;

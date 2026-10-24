@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 (XI-07): DDBShutdown (ABI 1.1).
+// DQ-15 (XI-07): DDBShutdown (new in 2.0).
 //
 //  - once DDBShutdown started, every call but the exempt accessors returns DDBERR_SHUTDOWN
 //    without running; the exempt accessors keep working and keep the last error;
@@ -228,8 +228,8 @@ TEST_F(Shutdown, fromAProgressCallbackIsInvalidArgs) {
     EXPECT_FALSE(capi::shutdownStarted());
 }
 
-// A call in flight that stops because of the shutdown reports SHUTDOWN, also from an ABI 1.0
-// export (kFrozenCodes)
+// A call in flight that stops because of the shutdown reports SHUTDOWN, also from an export of 1.x
+// (kFrozenCodes)
 TEST_F(Shutdown, aCallStoppedByTheShutdownReportsShutdown) {
     EXPECT_EQ(capi::guarded([] { throw ShutdownException("stopped: libddb is shutting down"); }), DDBERR_SHUTDOWN);
     EXPECT_STREQ(DDBGetLastError(), "stopped: libddb is shutting down");

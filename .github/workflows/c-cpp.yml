@@ -94,9 +94,10 @@ jobs:
           echo "GITHUB_SHA=${GITHUB_SHA}"
           ls -la
       - name: Check the ABI version and the release tag
-        # XI-01 (scripts/check-abi.py), before the build so a bad tag fails fast: a change to
-        # src/include/ddb.symbols since the previous release tag needs a DDB_ABI_MINOR bump (a
-        # removed symbol a DDB_ABI_MAJOR bump), and a v* tag must equal package.json "version".
+        # XI-01 (scripts/check-abi.py), before the build so a bad tag fails fast. The library,
+        # the C ABI and the release have one version, package.json "version" (semver): a change
+        # to src/include/ddb.symbols since the previous release tag needs a higher MINOR for an
+        # added export and a higher MAJOR for a removed one, and a v* tag must equal the version.
         # fetch-depth: 0 above fetches the tags the base is found from.
         shell: bash
         run: |
@@ -180,7 +181,7 @@ jobs:
         run: python3 scripts/check-warnings.py build/build.log --build-dir build
       - name: Check the exported symbols (libddb.so == src/include/ddb.symbols)
         # XI-01: the defined DDB* dynamic symbols (nm -D) equal the manifest, which also matches
-        # ddb.h (its '# abi' line, every DDB_DLL declaration)
+        # ddb.h (every DDB_DLL declaration)
         run: python3 scripts/check-abi.py exports --library build/libddb.so
       - name: clang-tidy on changed lines (report-only)
         # Findings are annotated on the PR but do not fail the job yet (scripts/lint-changed-lines.py).
@@ -417,7 +418,7 @@ jobs:
             build/package/*.deb
           retention-days: 90
 
-  # Every release asset (the .deb, the Windows zip, the LibreDWG source, ddb.h, ddb.symbols and
+  # Every release asset (the .deb, the Windows zip, the LibreDWG source, ddb.h, ddb_version.h, ddb.symbols and
   # SHA256SUMS) goes to the release only after the build jobs passed: they upload artifacts only,
   # this job is the one that writes to the release.
   release_assets:
@@ -444,18 +445,21 @@ jobs:
       - name: Checkout (ddb.h and the symbol manifest of the tag)
         uses: actions/checkout@v4
       - name: Collect the ABI files and write SHA256SUMS
-        # XI-01: every release publishes the C header, the symbol manifest and SHA256SUMS, one line
-        # per release asset (the globs of the upload steps), by file name, so a consumer pins the
-        # exact download and checks it with sha256sum -c. Written before any upload: a missing
-        # asset or a duplicate name fails the job before the release changes.
+        # XI-01: every release publishes the C header (ddb.h and the ddb_version.h it includes,
+        # generated from package.json by the same CMake code a build uses: the ABI is the MAJOR
+        # and MINOR of the version), the symbol manifest and SHA256SUMS, one line per release
+        # asset (the globs of the upload steps), by file name, so a consumer pins the exact
+        # download and checks it with sha256sum -c. Written before any upload: a missing asset
+        # or a duplicate name fails the job before the release changes.
         shell: bash
         run: |
           set -euo pipefail
           abi="${RUNNER_TEMP}/ddb-abi"
           mkdir -p "$abi"
           cp src/include/ddb.h src/include/ddb.symbols "$abi/"
+          cmake -DDDB_SOURCE_DIR="$PWD" -DDDB_OUTPUT="$abi/ddb_version.h" -P cmake/GenerateVersionHeader.cmake
           assets=("${RUNNER_TEMP}"/libredwg-out/source/* "${RUNNER_TEMP}"/ddb-windows/*.zip
-                  "${RUNNER_TEMP}"/ddb-package/*.deb "$abi/ddb.h" "$abi/ddb.symbols")
+                  "${RUNNER_TEMP}"/ddb-package/*.deb "$abi/ddb.h" "$abi/ddb_version.h" "$abi/ddb.symbols")
           for f in "${assets[@]}"; do
             (cd "$(dirname "$f")" && sha256sum -- "$(basename "$f")")
           done > "${RUNNER_TEMP}/SHA256SUMS"
@@ -488,7 +492,7 @@ jobs:
           file_glob: true
           tag: ${{ github.ref }}
           overwrite: true
-      - name: Upload ddb.h, ddb.symbols and SHA256SUMS to Release
+      - name: Upload ddb.h, ddb_version.h, ddb.symbols and SHA256SUMS to Release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}

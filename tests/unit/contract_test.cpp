@@ -431,7 +431,7 @@ namespace
             contract::takeJson(out));
     }
 
-    // XI-09: data-only STAC (ABI 1.1). Registry owns every STAC id and URL, so these outputs leave
+    // XI-09: data-only STAC (new in 2.0). Registry owns every STAC id and URL, so these outputs leave
     // out the members built from them
     TEST_F(ContractFixtures, StacData) {
         const std::string r = root.string();
@@ -531,7 +531,7 @@ namespace
         EXPECT_EQ(DDBStac(r.c_str(), "missing.tif", kCollectionRoot, nullptr, kCatalogRoot, &out),
                   DDBERR_EXCEPTION);
 
-        // ABI 1.1 exports: an invalid argument is DDBERR_INVALIDARGS
+        // exports new in 2.0: an invalid argument is DDBERR_INVALIDARGS
         EXPECT_EQ(DDBStacData(nullptr, "", &out), DDBERR_INVALIDARGS);
         EXPECT_EQ(DDBStacData(r.c_str(), "", nullptr), DDBERR_INVALIDARGS);
         EXPECT_EQ(DDBStacItemCollectionData(nullptr, "", "", 10, 0, &out), DDBERR_INVALIDARGS);

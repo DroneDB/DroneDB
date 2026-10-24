@@ -27,7 +27,7 @@ using namespace ddb;
 
 #define ASSERT_DDB_OK(call) ASSERT_EQ((call), DDBERR_NONE) << #call << ": " << DDBGetLastError()
 
-// Expects the call to fail with DDBERR_INVALIDARGS (DDBNormalizePath is an ABI 1.1 export) and a
+// Expects the call to fail with DDBERR_INVALIDARGS (DDBNormalizePath is an export new in 2.0) and a
 // message of its own in DDBGetLastError()
 #define EXPECT_DDB_INVALIDARGS(call)                    \
     do {                                                \

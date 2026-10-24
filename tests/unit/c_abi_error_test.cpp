@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-10 (XI-02, XI-03): the error contract of the C API (ABI 1.1).
+// DQ-10 (XI-02, XI-03): the error contract of the C API (new in 2.0).
 //
 //  - the last error is per thread, whole (no length limit), cleared on entry of every call and
 //    set for every code but DDBERR_NONE; the exempt accessors never touch it;
-//  - one mapper (c_api_util.h) turns every exception into a code: the exports of ABI 1.0 keep
-//    the codes they always returned (RETURN-CODE FREEZE), the exports added in ABI 1.1 also
+//  - one mapper (c_api_util.h) turns every exception into a code: the exports of 1.x keep
+//    the codes they always returned (RETURN-CODE FREEZE), the exports added in 2.0 also
 //    return DDBERR_INVALIDARGS and DDBERR_RETRYABLE; DDBGetLastErrorReason says why a failure
 //    is retryable, whatever the code;
 //  - outputs are written only on DDBERR_NONE, and a buffer of a failed call is freed;
@@ -127,7 +127,7 @@ TEST(LastError, belongsToTheCallingThread) {
     EXPECT_EQ(DDBGetLastError(), mine);
 }
 
-// Deprecated, kept exported (ABI 1.1): replaces the message, clears the reason; NULL clears
+// Deprecated, kept exported (new in 2.0): replaces the message, clears the reason; NULL clears
 TEST(LastError, setLastErrorIsDeprecatedButWorks) {
     DDBSetLastError("set by the caller");
     EXPECT_STREQ(DDBGetLastError(), "set by the caller");
@@ -139,8 +139,8 @@ TEST(LastError, setLastErrorIsDeprecatedButWorks) {
 // ------------------------------------------------------------------ the mapper: code table
 
 struct Expected {
-    DDBErr frozen;  // the code of an ABI 1.0 export (kFrozenCodes)
-    DDBErr abi11;   // the code of an ABI 1.1 export (kAbi11Codes)
+    DDBErr frozen;     // the code of an export of 1.x (kFrozenCodes)
+    DDBErr newExport;  // the code of an export new in 2.0 (kNewExportCodes)
     std::string message;
     std::string reason;
 };
@@ -152,7 +152,7 @@ void expectMapping(const char* what, Throw&& thrower, const Expected& expected) 
     EXPECT_EQ(DDBGetLastError(), expected.message);
     EXPECT_EQ(DDBGetLastErrorReason(), expected.reason);
 
-    EXPECT_EQ(capi::guarded<capi::kAbi11Codes>(thrower), expected.abi11);
+    EXPECT_EQ(capi::guarded<capi::kNewExportCodes>(thrower), expected.newExport);
     EXPECT_EQ(DDBGetLastError(), expected.message);
     EXPECT_EQ(DDBGetLastErrorReason(), expected.reason);
 }
@@ -170,7 +170,7 @@ TEST(ErrorMapper, codeTable) {
                   {DDBERR_EXCEPTION, DDBERR_BUILDINPROGRESS, "locked", ""});
     expectMapping("CanceledException", [] { throw CanceledException("stop"); },
                   {DDBERR_EXCEPTION, DDBERR_CANCELED, "stop", ""});
-    // Every export returns SHUTDOWN once DDBShutdown started (ABI 1.1)
+    // Every export returns SHUTDOWN once DDBShutdown started (new in 2.0)
     expectMapping("ShutdownException", [] { throw ShutdownException("shutting down"); },
                   {DDBERR_SHUTDOWN, DDBERR_SHUTDOWN, "shutting down", ""});
     expectMapping("InvalidArgsException", [] { throw InvalidArgsException("bad"); },
@@ -212,17 +212,17 @@ TEST(ErrorMapper, successClearsAndReturnsNone) {
     EXPECT_STREQ(DDBGetLastError(), "");
 }
 
-// The exports with a code of their own in ABI 1.0, and the frozen EXCEPTION of the others
+// The exports with a code of their own in 1.x, and the frozen EXCEPTION of the others
 TEST(ErrorMapper, frozenCodesOfTheExports) {
     const Dataset ds(TEST_NAME);
     char* out = kUntouched;
 
-    // DDBGet: NOTFOUND (ABI 1.0); DDBStac: EXCEPTION for the same failure
+    // DDBGet: NOTFOUND (1.x); DDBStac: EXCEPTION for the same failure
     EXPECT_EQ(DDBGet(ds.path().c_str(), "missing.txt", &out), DDBERR_NOTFOUND);
     EXPECT_EQ(DDBStac(ds.path().c_str(), "missing.txt", "", "", "", &out), DDBERR_EXCEPTION);
     EXPECT_EQ(out, kUntouched);
 
-    // DDBBuild: BUILDDEPMISSING (ABI 1.0), with a message
+    // DDBBuild: BUILDDEPMISSING (1.x), with a message
     const auto shp = ds.root / "roads.shp";
     writeFile(shp, "not a real shapefile: its .shx and .dbf are missing");
     char* added = nullptr;
@@ -233,13 +233,13 @@ TEST(ErrorMapper, frozenCodesOfTheExports) {
     EXPECT_EQ(DDBBuild(ds.path().c_str(), "roads.shp", nullptr, false, false), DDBERR_BUILDDEPMISSING);
     EXPECT_STRNE(DDBGetLastError(), "");
 
-    // Invalid arguments of an ABI 1.0 export: still EXCEPTION
+    // Invalid arguments of an export of 1.x: still EXCEPTION
     EXPECT_EQ(DDBGet(nullptr, "a.txt", &out), DDBERR_EXCEPTION);
     EXPECT_EQ(DDBBuild(nullptr, nullptr, nullptr, false, false), DDBERR_EXCEPTION);
     DDBReleaseConnections(ds.path().c_str(), nullptr);
 }
 
-// A retryable failure of DDBBuild (ABI 1.0): DDBERR_EXCEPTION, with the reason
+// A retryable failure of DDBBuild (1.x): DDBERR_EXCEPTION, with the reason
 TEST(ErrorMapper, retryableReasonOfAFrozenExport) {
     const Dataset ds(TEST_NAME);
     testutils::GeoRasterSpec spec;

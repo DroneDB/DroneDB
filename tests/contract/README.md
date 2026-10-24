@@ -10,7 +10,7 @@ suite runs against the pinned libddb in Registry's CI, and a nightly job runs it
 latest DroneDB artifacts). DroneDB's CI does not run Registry: it tests its own documented output,
 which is what the tests of this folder do.
 
-The fixtures record the outputs **as they are today** (libddb 1.12.2, ABI 1.0). Nothing was
+The fixtures record the outputs **as they are today** (libddb 1.12.2). Nothing was
 renamed or retyped for them, including the mixed casing:
 
 * `point_geom` and `polygon_geom` are snake_case; the entry `properties` keys (`captureTime`,
@@ -114,7 +114,7 @@ Each fixture file holds:
 
 ## Data-only STAC
 
-`DDBStacData` and `DDBStacItemCollectionData` (XI-09, ABI 1.1) return the documents of `DDBStac`
+`DDBStacData` and `DDBStacItemCollectionData` (XI-09, new in 2.0) return the documents of `DDBStac`
 (with `id` NULL) and `DDBStacItemCollection` without any member built from a URL or an ID, which
 Registry owns: no `id`, `collection` or `links`, and no asset `href`. Every other member is the
 same, value for value (`ContractFixtures.StacDataIsStacWithoutUrlsAndIds` compares them). A
@@ -133,7 +133,7 @@ change).
 ## Build manifest
 
 `DDBGetEntryTypes`, `DDBGetBuildArtifacts`, `DDBResolveBuildFile`, `DDBCopyBuildArtifacts` and
-`DDBListEntriesEx` (XI-04, ABI 1.1) let a host serve builds without knowing their layout
+`DDBListEntriesEx` (XI-04, new in 2.0) let a host serve builds without knowing their layout
 (decision D8). The vocabulary and the fields are documented in `ddb.h` ("Build manifest");
 `build-artifacts.schema.json` holds the shared shapes: `$defs/build` (the build object of an
 entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
@@ -252,38 +252,38 @@ Registry has to adopt first.
 ### Changes
 
 * 2026-10-21: baseline (DroneDB `fixes-and-optimizations` after `7ee39d2`).
-* 2026-10-21: `capabilities` added (XI-01, ABI 1.1). Its `symbols` list is
+* 2026-10-21: `capabilities` added (XI-01, new in 2.0). Its `symbols` list is
   `src/include/ddb.symbols`, so every new export updates this fixture too.
 * 2026-10-21: `normalize-path`, `normalize-path-rejected` and `vectors/entry-paths.json` added
-  (XI-09, ABI 1.1: `DDBNormalizePath`); `capabilities` lists the new export.
+  (XI-09, new in 2.0: `DDBNormalizePath`); `capabilities` lists the new export.
 * 2026-10-21: `stac-data-collection`, `stac-data-item-georaster`, `stac-data-item-image` and
-  `stac-data-item-collection` added with their schemas (XI-09, ABI 1.1: `DDBStacData`,
+  `stac-data-item-collection` added with their schemas (XI-09, new in 2.0: `DDBStacData`,
   `DDBStacItemCollectionData`); `capabilities` lists the new exports. The shared parts of
   `stac-item.schema.json` (`stacExtensions`, `geometry`, `bbox`, `properties`) and
   `stac-collection.schema.json` (`extent`) moved to their `$defs`, unchanged, so the data-only
   schemas reference them.
 * 2026-10-21: `capabilities` gains the error codes `INVALIDARGS` (7), `RETRYABLE` (8) and
   `SHUTDOWN` (9), the `errorReasons` array (the reasons of `DDBGetLastErrorReason`) and the new
-  export `DDBGetLastErrorReason` (XI-02, DQ-10, ABI 1.1).
+  export `DDBGetLastErrorReason` (XI-02, DQ-10, new in 2.0).
 
 * 2026-10-21: `build-artifacts`, `build-artifacts-pending`, `list-entries-ex`,
   `resolve-build-file`, `copy-build-artifacts` and `entry-types` added with their schemas
-  (XI-04, ABI 1.1: `DDBGetBuildArtifacts`, `DDBListEntriesEx`, `DDBResolveBuildFile`,
+  (XI-04, new in 2.0: `DDBGetBuildArtifacts`, `DDBListEntriesEx`, `DDBResolveBuildFile`,
   `DDBCopyBuildArtifacts`, `DDBGetEntryTypes`; see [Build manifest](#build-manifest));
   `capabilities` lists the new exports. The existing fixtures did not change.
 
-* 2026-10-21: `effective-config` added with its schema (DQ-15, XI-06, ABI 1.1: `DDBConfigure`,
+* 2026-10-21: `effective-config` added with its schema (DQ-15, XI-06, new in 2.0: `DDBConfigure`,
   `DDBGetEffectiveConfig`); `capabilities` lists the new exports. The existing fixtures did not
   change.
 
-* 2026-10-21: `capabilities` lists the new exports of DQ-15 (XI-07, XI-08, ABI 1.1):
+* 2026-10-21: `capabilities` lists the new exports of DQ-15 (XI-07, XI-08, new in 2.0):
   `DDBShutdown`, `DDBCreateCancelToken`, `DDBCancel`, `DDBFreeCancelToken`,
   `DDBSetThreadCancelToken`, `DDBSetLogCallback`, `DDBSetThreadOperation`. Its `cancellable` list
   now names the exports whose work checks a cancel token (the render paths, the thumbnails,
   `DDBExportRaster`/`DDBExportRaster2`, `DDBBuild`) instead of `DDBExportRaster2` only; the
   schema describes it so. The other fixtures did not change.
 
-* 2026-10-21: `capabilities` lists the new export `DDBApplyDeltaEx` (XI-05, ABI 1.1). Its output
+* 2026-10-21: `capabilities` lists the new export `DDBApplyDeltaEx` (XI-05, new in 2.0). Its output
   is the conflict list of `DDBApplyDelta` (a JSON array of paths), so it has no fixture of its
   own. The other fixtures did not change.
 
@@ -299,3 +299,10 @@ Registry has to adopt first.
   rendered from the file like an `Image`). `Video` and `GeoVideo` stay `"none"`. A value of an
   existing field changes (the schema's enum already allows it): Registry follows the field, so a
   Registry on the new libddb renders panorama thumbnails again. No other fixture changed.
+
+* 2026-10-24: `capabilities` reports `abi` `{"major": 2, "minor": 0}` (it was 1.1): the library, its
+  C ABI and the release have one version, the `version` of `package.json` (2.0.0), and the ABI is
+  its MAJOR and MINOR. The change from 1.1 to 2.0 is a MAJOR bump: the `ddbLastError` variable is gone and
+  `DDBRegisterProcess` returns a code. Registry's start-up handshake has to expect major 2. The
+  schema now requires `abi.major` >= 2. Every other mention of "ABI 1.1" in this file and in the
+  schemas now says "new in 2.0" (the same exports). No other fixture changed.

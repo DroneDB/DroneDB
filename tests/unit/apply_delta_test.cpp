@@ -637,7 +637,7 @@ namespace
             EXPECT_EQ(hashOf(f.db.get(), "a.txt"), "<missing>") << v;
         }
 
-        // The other arguments: as DDBApplyDelta, with the ABI 1.1 code
+        // The other arguments: as DDBApplyDelta, with the 2.0 code
         const auto deltaJson = json(d).dump();
         const auto root = f.root.string();
         const auto source = f.source.string();

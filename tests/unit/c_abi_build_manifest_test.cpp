@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // XI-04: the C ABI of the build manifest (DDBGetEntryTypes, DDBGetBuildArtifacts,
-// DDBResolveBuildFile, DDBCopyBuildArtifacts, DDBListEntriesEx). They are ABI 1.1 exports, so an
+// DDBResolveBuildFile, DDBCopyBuildArtifacts, DDBListEntriesEx). They are exports new in 2.0, so an
 // invalid argument is DDBERR_INVALIDARGS, a missing entry or file DDBERR_NOTFOUND, a running
 // build DDBERR_BUILDINPROGRESS and a full disk DDBERR_RETRYABLE; outputs are written on
 // DDBERR_NONE only. The JSON shapes are pinned by the contract fixtures (contract_test.cpp).
@@ -182,7 +182,7 @@ namespace
         EXPECT_EQ(state[0]["build"]["retryAfter"], 1700000060) << "the copied marker keeps its retry time";
     }
 
-    // The options struct (XI-03): structSize first, at least the ABI 1.1 size; a newer caller's
+    // The options struct (XI-03): structSize first, at least the 2.0 size; a newer caller's
     // unknown fields must be zero
     TEST(CAbiBuildManifest, ListEntriesEx)
     {

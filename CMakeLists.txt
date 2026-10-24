@@ -52,10 +52,11 @@ endif()
 # Consider position-independent code for all targets (especially for shared libs)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Read version
-file(READ "package.json" PACKAGE_JSON)
-string(REGEX MATCH "\"version\": \"[0-9]+\\.[0-9]+\\.[0-9]+" APP_VERSION ${PACKAGE_JSON})
-string(SUBSTRING ${APP_VERSION} 12 -1 APP_VERSION)
+# Read version (package.json is the one source: the library, the C ABI and the release share it)
+include("${CMAKE_SOURCE_DIR}/cmake/DdbVersion.cmake")
+ddb_read_version("${CMAKE_SOURCE_DIR}/package.json")
+# A new version re-runs CMake: the version is read here, at configure time
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/package.json")
 
 # Read git commit
 set(GIT_REV "")
@@ -79,6 +80,13 @@ message("DDB Version: ${DAPP_VERSION}")
 # when the content changes; like the old defines, the hash is read at configure time.
 set(DDB_VERSION_SOURCE "${CMAKE_BINARY_DIR}/generated/version.cpp")
 configure_file("${CMAKE_SOURCE_DIR}/src/library/version.cpp.in" "${DDB_VERSION_SOURCE}" @ONLY)
+
+# The C ABI follows the version (ddb_version.h, included by ddb.h). The header is generated into
+# its own include folder so it can be installed next to ddb.h; an installed ddb.h never refers
+# to the build tree.
+set(DDB_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated/include")
+ddb_generate_version_header("${CMAKE_SOURCE_DIR}/package.json"
+    "${CMAKE_SOURCE_DIR}/src/library/ddb_version.h.in" "${DDB_GENERATED_INCLUDE_DIR}/ddb_version.h")
 
 # Find PROJ data folder (vcpkg: share/proj or share/proj4)
 find_path(PROJ_DATA_DIR
@@ -154,6 +162,10 @@ install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}cmd
 
 # Install public headers
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/include/
+    DESTINATION include
+)
+# ddb.h includes ddb_version.h (generated from package.json): installed next to it
+install(FILES "${DDB_GENERATED_INCLUDE_DIR}/ddb_version.h"
     DESTINATION include
 )
 

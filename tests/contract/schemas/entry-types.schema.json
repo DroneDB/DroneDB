@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb entry types",
-  "description": "DDBGetEntryTypes (XI-04, ABI 1.1): one item per registered entry type, by id",
+  "description": "DDBGetEntryTypes (XI-04, new in 2.0): one item per registered entry type, by id",
   "type": "array",
   "minItems": 1,
   "items": {

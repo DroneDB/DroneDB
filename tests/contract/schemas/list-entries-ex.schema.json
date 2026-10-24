@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb entry list with builds",
-  "description": "DDBListEntriesEx with withBuild=true (XI-04, ABI 1.1), sorted by path: the entries of DDBListEntries (entry.schema.json; with withDetails=false only path, hash, type, mtime, size and depth), each with its build object",
+  "description": "DDBListEntriesEx with withBuild=true (XI-04, new in 2.0), sorted by path: the entries of DDBListEntries (entry.schema.json; with withDetails=false only path, hash, type, mtime, size and depth), each with its build object",
   "type": "array",
   "items": {
     "type": "object",

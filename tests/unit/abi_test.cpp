@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// XI-01: the ABI handshake. DDBGetAbiVersion() encodes DDB_ABI_MAJOR/DDB_ABI_MINOR, and
+// XI-01: the ABI handshake. The library, the C ABI and the release have one version, the
+// "version" of package.json: ddb_version.h is generated from it, and the ABI is its MAJOR and
+// MINOR. DDBGetAbiVersion() encodes DDB_ABI_MAJOR/DDB_ABI_MINOR, and
 // DDBGetCapabilities() returns the version, the error codes, the cancellable exports and the
 // symbol manifest (src/include/ddb.symbols, embedded at build time). Both are exempt accessors:
 // they never change the last error. scripts/check-abi.py checks the same manifest against the
@@ -27,8 +29,6 @@ namespace
     struct Manifest
     {
         std::vector<std::string> symbols; // in file order
-        int major = -1;                   // the '# abi MAJOR.MINOR' line
-        int minor = -1;
     };
 
     // src/include/ddb.symbols (DDB_SYMBOLS_MANIFEST, tests/CMakeLists.txt)
@@ -45,15 +45,7 @@ namespace
             if (line.empty())
                 continue;
             if (line[0] == '#')
-            {
-                int major = 0, minor = 0;
-                if (std::sscanf(line.c_str(), "# abi %d.%d", &major, &minor) == 2)
-                {
-                    manifest.major = major;
-                    manifest.minor = minor;
-                }
                 continue;
-            }
             manifest.symbols.push_back(line);
         }
         return manifest;
@@ -71,17 +63,35 @@ namespace
         const uint32_t version = DDBGetAbiVersion();
         EXPECT_EQ(version >> 16, static_cast<uint32_t>(DDB_ABI_MAJOR));
         EXPECT_EQ(version & 0xFFFFu, static_cast<uint32_t>(DDB_ABI_MINOR));
-        // The handshake starts at ABI 1.1: 1.0 is every release without it
-        EXPECT_EQ(DDB_ABI_MAJOR, 1);
-        EXPECT_GE(DDB_ABI_MINOR, 1);
-        EXPECT_GE(version, 0x00010001u);
     }
 
-    TEST(AbiVersion, manifestDeclaresTheHeaderVersion)
+    // Pinned: 2.0.0 is the first release with the handshake and the C ABI of the one version.
+    // A new minor or major release changes this on purpose, together with the capabilities
+    // fixture (tests/contract/fixtures/capabilities.json).
+    TEST(AbiVersion, is2_0)
     {
-        const Manifest manifest = readManifest();
-        EXPECT_EQ(manifest.major, DDB_ABI_MAJOR);
-        EXPECT_EQ(manifest.minor, DDB_ABI_MINOR);
+        EXPECT_EQ(DDB_ABI_MAJOR, 2);
+        EXPECT_EQ(DDB_ABI_MINOR, 0);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x00020000u);
+    }
+
+    // The one source of the version is package.json: the macros ddb_version.h generates from it
+    // (CMake, at configure time) are the same numbers, and the ABI is the MAJOR and the MINOR
+    TEST(AbiVersion, macrosEqualPackageJson)
+    {
+        std::ifstream in(DDB_PACKAGE_JSON);
+        ASSERT_TRUE(in.good()) << DDB_PACKAGE_JSON;
+        const std::string version = json::parse(in)["version"];
+        int major = -1, minor = -1, patch = -1;
+        ASSERT_EQ(std::sscanf(version.c_str(), "%d.%d.%d", &major, &minor, &patch), 3) << version;
+        EXPECT_EQ(DDB_VERSION_MAJOR, major);
+        EXPECT_EQ(DDB_VERSION_MINOR, minor);
+        EXPECT_EQ(DDB_VERSION_PATCH, patch);
+        EXPECT_EQ(std::string(DDB_VERSION_STRING), version);
+        EXPECT_EQ(DDB_ABI_MAJOR, major);
+        EXPECT_EQ(DDB_ABI_MINOR, minor);
+        // The loaded library reports the version it was built from (DDBGetVersion adds the commit)
+        EXPECT_EQ(std::string(DDBGetVersion()).rfind(version, 0), 0u) << DDBGetVersion();
     }
 
     TEST(Capabilities, reportsTheAbiAndVersion)
@@ -123,7 +133,7 @@ namespace
         EXPECT_EQ(capabilities()["errorCodes"], expected);
     }
 
-    // The reasons DDBGetLastErrorReason returns (ABI 1.1): sorted, unique, the documented names
+    // The reasons DDBGetLastErrorReason returns (new in 2.0): sorted, unique, the documented names
     TEST(Capabilities, errorReasonsAreTheDocumentedNames)
     {
         const json reasons = capabilities()["errorReasons"];

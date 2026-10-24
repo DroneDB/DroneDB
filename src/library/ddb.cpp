@@ -78,7 +78,7 @@
 using namespace ddb;
 // Every export is one call of the mapper (c_api_util.h): guarded, guardedOutput or guardedBuffer.
 // The template argument names the codes besides NONE and EXCEPTION it may return: none means
-// kFrozenCodes (ABI 1.0 exports), kAbi11Codes is for the exports added in ABI 1.1.
+// kFrozenCodes (exports of 1.x), kNewExportCodes is for the exports added in 2.0.
 using capi::codeBit;
 using capi::guarded;
 using capi::guardedBuffer;
@@ -86,7 +86,7 @@ using capi::guardedOutput;
 using capi::isNullOrEmptyOrWhitespace;
 using capi::isValidNonEmptyStringParam;
 using capi::isValidStringParam;
-using capi::kAbi11Codes;
+using capi::kNewExportCodes;
 using capi::kFrozenCodes;
 using capi::optStr;
 using capi::parseJsonArg;
@@ -242,11 +242,11 @@ const char* DDBGetCapabilities() {
 // ------------------------------------------------------------------ process configuration
 
 DDBErr DDBConfigure(const char* configJson) {
-    return guarded<kAbi11Codes>([&] { ProcessConfig::get().configure(parseJsonArg(configJson)); });
+    return guarded<kNewExportCodes>([&] { ProcessConfig::get().configure(parseJsonArg(configJson)); });
 }
 
 DDBErr DDBGetEffectiveConfig(char** output) {
-    return guardedOutput<kAbi11Codes>(output, [&] {
+    return guardedOutput<kNewExportCodes>(output, [&] {
         requireOutput(output);
         return ProcessConfig::get().effective();
     });
@@ -267,7 +267,7 @@ static cancel::Token* tokenOf(DDBCancelToken* token) noexcept {
 }
 
 DDBErr DDBCreateCancelToken(DDBCancelToken** token) {
-    return guardedOutput<kAbi11Codes>(token, [&] {
+    return guardedOutput<kNewExportCodes>(token, [&] {
         requireOutput(token);
         return reinterpret_cast<DDBCancelToken*>(cancel::Token::create());
     });
@@ -275,7 +275,7 @@ DDBErr DDBCreateCancelToken(DDBCancelToken** token) {
 
 DDBErr DDBCancel(DDBCancelToken* token) {
     // A host cancels its requests while it shuts down: allowed in any state
-    return guarded<kAbi11Codes, capi::CallKind::Unrestricted>([&] {
+    return guarded<kNewExportCodes, capi::CallKind::Unrestricted>([&] {
         requireOutput(token, "No cancel token provided");
         tokenOf(token)->cancel(cancel::kCanceledByToken);
     });
@@ -289,7 +289,7 @@ DDBErr DDBFreeCancelToken(DDBCancelToken* token) {
 }
 
 DDBErr DDBSetThreadCancelToken(DDBCancelToken* token) {
-    return guarded<kAbi11Codes, capi::CallKind::Setting>([&] { cancel::setThreadToken(tokenOf(token)); });
+    return guarded<kNewExportCodes, capi::CallKind::Setting>([&] { cancel::setThreadToken(tokenOf(token)); });
 }
 
 // ------------------------------------------------------------------ logging (XI-08)
@@ -301,17 +301,17 @@ static_assert(DDB_LOG_TRACE == logfwd::kTrace && DDB_LOG_DEBUG == logfwd::kDebug
 static_assert(std::is_same_v<DDBLogCallback, logfwd::Callback>, "DDBLogCallback is log_forwarding's callback");
 
 DDBErr DDBSetLogCallback(DDBLogCallback callback, int minLevel, void* userData) {
-    return guarded<kAbi11Codes, capi::CallKind::Setting>([&] { logfwd::setCallback(callback, minLevel, userData); });
+    return guarded<kNewExportCodes, capi::CallKind::Setting>([&] { logfwd::setCallback(callback, minLevel, userData); });
 }
 
 DDBErr DDBSetThreadOperation(uint64_t opId) {
-    return guarded<kAbi11Codes, capi::CallKind::Setting>([&] { logfwd::setThreadOperation(opId); });
+    return guarded<kNewExportCodes, capi::CallKind::Setting>([&] { logfwd::setThreadOperation(opId); });
 }
 
 // ------------------------------------------------------------------ files and index
 
 DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output) {
-    return guardedOutput<kAbi11Codes>(output, [&] {
+    return guardedOutput<kNewExportCodes>(output, [&] {
         if (path == nullptr)
             throw InvalidArgsException("No path provided");
         requireOutput(output);
@@ -571,7 +571,7 @@ DDBErr DDBListEntries(const char* ddbPath, const char* folder, bool recursive, c
 
 DDBErr DDBListEntriesEx(const char* ddbPath, const char* folder, const char* namePattern, const char* types,
                         const DDBListEntriesOptions* options, char** output) {
-    return guardedOutput<kAbi11Codes>(output, [&] {
+    return guardedOutput<kNewExportCodes>(output, [&] {
         requireDdbPath(ddbPath);
         const auto opts = requireOptions(options, sizeof(DDBListEntriesOptions), "options");
         if (opts.reserved != 0)
@@ -941,7 +941,7 @@ DDBErr DDBApplyDeltaEx(const char* delta,
                        const char* sourceMetaDump,
                        const char* verifiedHashesJson,
                        char** conflicts) {
-    return guardedOutput<kAbi11Codes>(conflicts, [&] {
+    return guardedOutput<kNewExportCodes>(conflicts, [&] {
         return applyDeltaConflicts(delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump, verifiedHashesJson,
                                    conflicts);
     });
@@ -1058,7 +1058,7 @@ DDBErr DDBMoveEntry(const char* ddbPath, const char* source, const char* dest) {
 // ------------------------------------------------------------------ builds
 
 DDBErr DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly) {
-    // The two build codes DDBBuild has always returned (ABI 1.0)
+    // The two build codes DDBBuild has always returned (1.x)
     constexpr auto kBuildCodes =
         kFrozenCodes | codeBit(DDBERR_BUILDDEPMISSING) | codeBit(DDBERR_BUILDINPROGRESS);
     return guarded<kBuildCodes>([&] {
@@ -1183,14 +1183,14 @@ DDBErr DDBGetBuildStatus(const char* ddbPath, const char** paths, int numPaths, 
 // ------------------------------------------------------------------ build manifest (XI-04)
 
 DDBErr DDBGetEntryTypes(char** output) {
-    return guardedOutput<kAbi11Codes>(output, [&] {
+    return guardedOutput<kNewExportCodes>(output, [&] {
         requireOutput(output);
         return entryTypesJson();
     });
 }
 
 DDBErr DDBGetBuildArtifacts(const char* ddbPath, const char** paths, int numPaths, char** output) {
-    return guardedOutput<kAbi11Codes>(output, [&] {
+    return guardedOutput<kNewExportCodes>(output, [&] {
         requireDdbPath(ddbPath);
         const auto pathList = capi::toStringList(paths, numPaths);
         requireOutput(output);
@@ -1201,7 +1201,7 @@ DDBErr DDBGetBuildArtifacts(const char* ddbPath, const char** paths, int numPath
 }
 
 DDBErr DDBResolveBuildFile(const char* ddbPath, const char* hash, const char* path, char** outPath) {
-    return guardedOutput<kAbi11Codes>(outPath, [&] {
+    return guardedOutput<kNewExportCodes>(outPath, [&] {
         requireDdbPath(ddbPath);
         requireText(hash, "No hash provided");
         requireText(path, "No path provided");
@@ -1214,7 +1214,7 @@ DDBErr DDBResolveBuildFile(const char* ddbPath, const char* hash, const char* pa
 
 DDBErr DDBCopyBuildArtifacts(const char* sourceDdbPath, const char* destinationDdbPath, const char* hash,
                              char** output) {
-    return guardedOutput<kAbi11Codes>(output, [&] {
+    return guardedOutput<kNewExportCodes>(output, [&] {
         requireText(sourceDdbPath, "No source directory provided");
         requireText(destinationDdbPath, "No destination directory provided");
         requireText(hash, "No hash provided");
@@ -1437,7 +1437,7 @@ DDBErr DDBStacItemCollection(const char* ddbPath,
 }
 
 DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output) {
-    return guardedOutput<kAbi11Codes>(output, [&] {
+    return guardedOutput<kNewExportCodes>(output, [&] {
         requireDdbPath(ddbPath);
         requireOutput(output);
 
@@ -1451,7 +1451,7 @@ DDBErr DDBStacItemCollectionData(const char* ddbPath,
                                  int limit,
                                  int offset,
                                  char** output) {
-    return guardedOutput<kAbi11Codes>(output, [&] {
+    return guardedOutput<kNewExportCodes>(output, [&] {
         requireDdbPath(ddbPath);
         requireOutput(output);
 
@@ -2200,7 +2200,7 @@ DDBErr DDBExportRaster2(const char* inputPath, const char* outputPath,
                         const char* colormap, const char* rescale,
                         int tileSize,
                         DDBProgressCallback progress, void* progressUserData) {
-    // DDBExportRaster2 has always returned DDBERR_CANCELED (ABI 1.0)
+    // DDBExportRaster2 has always returned DDBERR_CANCELED (1.x)
     return guarded<kFrozenCodes | codeBit(DDBERR_CANCELED)>([&] {
         exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter, colormap, rescale,
                          tileSize, progress, progressUserData);

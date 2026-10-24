@@ -76,15 +76,15 @@ constexpr CodeSet codeSet(Codes... codes) noexcept {
 }
 
 // The codes an export returns, besides DDBERR_NONE and DDBERR_EXCEPTION (RETURN-CODE FREEZE).
-// The exports of ABI 1.0 keep the codes they returned before the mapper: DDBERR_BUSY for database
+// The exports of 1.x keep the codes they returned before the mapper: DDBERR_BUSY for database
 // contention, plus the code a few of them always returned for one failure (DDBGet NOTFOUND,
 // DDBBuild BUILDDEPMISSING/BUILDINPROGRESS, DDBExportRaster2 CANCELED: see ddb.cpp). Any other
 // failure stays DDBERR_EXCEPTION, with its own message and reason. DDBERR_INVALIDARGS and
-// DDBERR_RETRYABLE are returned by the exports added in ABI 1.1 only; the older exports switch
-// in a later ABI, together with Registry (RQ-08).
+// DDBERR_RETRYABLE are returned by the exports added in 2.0 only; the older exports switch
+// in a later version, together with Registry (RQ-08).
 inline constexpr CodeSet kFrozenCodes = codeSet(DDBERR_BUSY);
-// The exports added in ABI 1.1: every code a failure maps to
-inline constexpr CodeSet kAbi11Codes = codeSet(DDBERR_BUSY,
+// The exports added in 2.0: every code a failure maps to
+inline constexpr CodeSet kNewExportCodes = codeSet(DDBERR_BUSY,
                                                DDBERR_NOTFOUND,
                                                DDBERR_INVALIDARGS,
                                                DDBERR_RETRYABLE,
@@ -121,7 +121,7 @@ constexpr DDBErr restrictCode(DDBErr code, CodeSet allowed) noexcept {
 
 // Sets the last error from the exception being handled (call it inside a catch block only) and
 // returns its code, restricted to allowed. The message and the reason are those of the failure
-// whatever the code: a retryable failure of an ABI 1.0 export returns DDBERR_EXCEPTION with its
+// whatever the code: a retryable failure of an export of 1.x returns DDBERR_EXCEPTION with its
 // reason.
 DDBErr reportCurrentException(CodeSet allowed) noexcept;
 

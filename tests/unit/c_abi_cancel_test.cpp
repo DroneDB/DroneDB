@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 (XI-07): cancel tokens through the C API (ABI 1.1): DDBCreateCancelToken, DDBCancel,
+// DQ-15 (XI-07): cancel tokens through the C API (new in 2.0): DDBCreateCancelToken, DDBCancel,
 // DDBFreeCancelToken, DDBSetThreadCancelToken.
 //
 //  - every export listed as "cancellable" in DDBGetCapabilities() returns DDBERR_CANCELED, with

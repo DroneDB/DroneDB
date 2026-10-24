@@ -5,6 +5,7 @@
 #define DDB_H
 
 #include "ddb_export.h"
+#include "ddb_version.h"
 #include <stddef.h>
 #include <stdint.h>
 #ifndef __cplusplus
@@ -28,21 +29,27 @@ extern "C"
 
 #define DDB_FOLDER ".ddb"
 
-/* ABI version of this header (XI-01). The MINOR grows with every additive change (a new export,
- * a new error code, a new field in a JSON output); the MAJOR grows when an export is removed or
- * changes its signature or meaning. The exported DDB* symbols are listed in ddb.symbols, next to
- * this header: CI fails when the library exports a different list, or when the list changes
- * without a version bump (scripts/check-abi.py). A caller checks DDBGetAbiVersion() against the
- * version it was built for: the same MAJOR and a MINOR at least as large. */
-#define DDB_ABI_MAJOR 1
-#define DDB_ABI_MINOR 1
+/* Version (XI-01). The library, its C ABI and the release have ONE version, the "version" of
+ * package.json (semver): ddb_version.h, generated from it, defines DDB_VERSION_MAJOR/MINOR/PATCH
+ * and DDB_VERSION_STRING, and DDB_ABI_MAJOR/DDB_ABI_MINOR, which are the MAJOR and the MINOR of
+ * that version (the PATCH never changes the ABI). ddb_version.h is installed and published next
+ * to this header.
+ *
+ * The MINOR grows with every additive change (a new export, a new error code, a new field in a
+ * JSON output); the MAJOR grows when an export is removed or changes its signature or meaning.
+ * The exported DDB* symbols are listed in ddb.symbols, next to this header. scripts/check-abi.py
+ * (CI) fails when the library exports a different list, a removed export without a MAJOR bump
+ * since the previous release, or a new one without a MINOR (or MAJOR) bump. The list cannot see
+ * a changed signature or meaning: that MAJOR bump is up to the author and the review.
+ * A caller checks DDBGetAbiVersion() against the version it was built for: the same MAJOR and a
+ * MINOR at least as large. (ddb_version.h is included above.) */
 
     /* Error codes. A new code is also listed in DDBGetCapabilities() (kErrorCodes, ddb.cpp).
      * Every code but DDBERR_NONE comes with a message (DDBGetLastError). An export returns the
-     * codes its documentation names, DDBERR_NONE and DDBERR_EXCEPTION. In ABI 1.1 the exports
-     * that existed before it keep the codes they always returned: an invalid argument and a
+     * codes its documentation names, DDBERR_NONE and DDBERR_EXCEPTION. In 2.0 the exports
+     * that existed in 1.x keep the codes they always returned: an invalid argument and a
      * retryable failure are DDBERR_EXCEPTION there; DDBERR_INVALIDARGS and DDBERR_RETRYABLE are
-     * returned by the exports added in ABI 1.1 only. Every export but the exempt ones (see
+     * returned by the exports added in 2.0 only. Every export but the exempt ones (see
      * DDBShutdown) returns DDBERR_SHUTDOWN once DDBShutdown started, and DDBERR_CANCELED when
      * the caller set a cancel token on the thread (DDBSetThreadCancelToken) and canceled it. */
     typedef enum DDBErr
@@ -51,12 +58,12 @@ extern "C"
         DDBERR_EXCEPTION = 1,       // Generic app exception
         DDBERR_BUILDDEPMISSING = 2, // Build skipped: dependency missing
         DDBERR_BUILDINPROGRESS = 3, // Build skipped: another process holds the lock
-        DDBERR_CANCELED = 4,        // Canceled by the progress callback, or by a cancel token (ABI 1.1)
+        DDBERR_CANCELED = 4,        // Canceled by the progress callback, or by a cancel token (new in 2.0)
         DDBERR_BUSY = 5,            // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
         DDBERR_NOTFOUND = 6,        // The requested entry does not exist
-        DDBERR_INVALIDARGS = 7,     // An argument is invalid: fix the call, do not retry (ABI 1.1)
-        DDBERR_RETRYABLE = 8,       // A transient failure (DDBGetLastErrorReason): retry later (ABI 1.1)
-        DDBERR_SHUTDOWN = 9         // The library is shut down (DDBShutdown): no call is accepted (ABI 1.1)
+        DDBERR_INVALIDARGS = 7,     // An argument is invalid: fix the call, do not retry (new in 2.0)
+        DDBERR_RETRYABLE = 8,       // A transient failure (DDBGetLastErrorReason): retry later (new in 2.0)
+        DDBERR_SHUTDOWN = 9         // The library is shut down (DDBShutdown): no call is accepted (new in 2.0)
     } DDBErr;
 
     DDB_STATIC_ASSERT(sizeof(bool) == 1, "bool is 1 byte (marshal it as U1)");
@@ -83,7 +90,7 @@ extern "C"
     DDB_DLL const char *DDBGetLastError(void);
 
     /** The machine-readable reason of the last failed call on this thread, next to its message
-     * (ABI 1.1): never NULL, "" when the failure has no reason or the last call succeeded.
+     * (new in 2.0): never NULL, "" when the failure has no reason or the last call succeeded.
      * Valid like DDBGetLastError(). A reason is a stable camelCase name; names are only ever
      * added (DDBGetCapabilities() lists them as "errorReasons"), so treat an unknown one like "".
      * Defined today, for a transient failure (the disk or a tool, not the input) after which the
@@ -91,17 +98,17 @@ extern "C"
      *   "lowDiskSpace"     free disk space fell below the build budget
      *   "noSpaceOnDevice"  a write failed because the disk is full
      *   "idleTimeout"      an external tool stopped producing output and was stopped
-     * An export added in ABI 1.1 returns DDBERR_RETRYABLE for them; an older export (DDBBuild)
+     * An export added in 2.0 returns DDBERR_RETRYABLE for them; an older export (DDBBuild)
      * returns DDBERR_EXCEPTION with the same reason. */
     DDB_DLL const char *DDBGetLastErrorReason(void);
 
-    /** @deprecated (ABI 1.1): libddb sets and clears the last error itself. Replaces the last
+    /** @deprecated since 2.0: libddb sets and clears the last error itself. Replaces the last
      * error message of this thread with err (NULL clears it) and clears the reason. */
     DDB_DLL void DDBSetLastError(const char *err);
 
     /** This must be called as the very first function of every DDB process/program, before any
      * other call but the exempt accessors. A failed initialization is final: this and every
-     * later call return DDBERR_EXCEPTION with its message (ABI 1.1; returned void before).
+     * later call return DDBERR_EXCEPTION with its message (new in 2.0; returned void before).
      * @param verbose whether the program should output its debug and trace log messages to
      *                stderr (the console of the log; stdout is for the output of the commands)
      * @return DDBERR_NONE on success, DDBERR_EXCEPTION when the initialization failed */
@@ -130,7 +137,7 @@ extern "C"
      * @return the JSON, or NULL only if the process ran out of memory while building it */
     DDB_DLL const char *DDBGetCapabilities(void);
 
-    /* Process configuration (DQ-15, XI-06, ABI 1.1). One set of settings for the whole process,
+    /* Process configuration (DQ-15, XI-06, new in 2.0). One set of settings for the whole process,
      * which a host sets with DDBConfigure and reads back with DDBGetEffectiveConfig. Each setting
      * takes, by precedence: the DDBConfigure value, else its environment variable, else the
      * built-in default. An environment variable that is not a valid value is ignored.
@@ -188,7 +195,7 @@ extern "C"
      *         default cache folder cannot be found (no DDB_HOME, HOME or USERPROFILE) */
     DDB_DLL DDBErr DDBGetEffectiveConfig(char **output);
 
-    /* Shutdown (DQ-15, XI-07, ABI 1.1). A host calls DDBShutdown once, when it stops (after it
+    /* Shutdown (DQ-15, XI-07, new in 2.0). A host calls DDBShutdown once, when it stops (after it
      * stopped sending work), so that the index files are left whole and the log is written out
      * before the process exits. The library has three states:
      *   running        every call works;
@@ -224,7 +231,7 @@ extern "C"
      *         shut down all the same */
     DDB_DLL DDBErr DDBShutdown(int timeoutMs);
 
-    /* Cancellation (DQ-15, XI-07, ABI 1.1). A cancel token stops the work of the calls made for
+    /* Cancellation (DQ-15, XI-07, new in 2.0). A cancel token stops the work of the calls made for
      * it, without a new variant of every export:
      *   1. DDBCreateCancelToken creates a token (one per request or job);
      *   2. DDBSetThreadCancelToken(token) on the thread that makes the call, right before it: the
@@ -266,7 +273,7 @@ extern "C"
      * @return DDBERR_NONE */
     DDB_DLL DDBErr DDBSetThreadCancelToken(DDBCancelToken *token);
 
-    /* Logging (DQ-15, XI-08, ABI 1.1). A host receives libddb's log records and GDAL's messages
+    /* Logging (DQ-15, XI-08, new in 2.0). A host receives libddb's log records and GDAL's messages
      * in one callback, each with the operation id it set on the thread that made the call, and
      * maps them to its own logger. Without a callback the records go to stderr, like GDAL's
      * messages; stdout carries only the output of the CLI commands. While a callback is
@@ -331,7 +338,7 @@ extern "C"
      * NUL-terminated API), "encoding" (not valid UTF-8), "absolute" (leading '/' or '\', a UNC
      * path, a drive "X:"), "traversal" (a ".." segment), "empty" (nothing left, e.g. "./"),
      * "reserved". New codes may be added; treat an unknown code as a rejection.
-     * The existing exports do not apply these rules yet (ABI 1.1).
+     * The existing exports do not apply these rules yet (new in 2.0).
      * @param path the path (UTF-8)
      * @param reservedJson NULL, "" or a JSON array of extra names reserved as the FIRST segment
      *                     only, e.g. [".uploads"]; each name is one segment (no separator, not
@@ -471,7 +478,7 @@ extern "C"
      * @param folder dataset-relative folder, "" for the dataset root; a file selects itself
      * @param recursive the whole subtree of the folder (true) or its children only (false)
      * @param namePattern file name pattern ('*' any characters, '?' one character, letters in any
-     *                    case: Unicode simple case folding since ABI 1.1, ASCII only before; a
+     *                    case: Unicode simple case folding since 2.0, ASCII only before; a
      *                    name or pattern that is not valid UTF-8 folds ASCII only), or "" for
      *                    every name
      * @param types comma-separated entry types (see DDBRescan, "directory" allowed), or "" for all
@@ -597,7 +604,7 @@ extern "C"
     DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, char **conflicts);
 
     /** DDBApplyDelta for a host that checked the hashes of the added files itself, e.g. while
-     * it received them (XI-05, ABI 1.1): libddb does not read those files again.
+     * it received them (XI-05, new in 2.0): libddb does not read those files again.
      * verifiedHashesJson NULL: as DDBApplyDelta (every added file is hashed, unless
      * DDB_VERIFY_PUSH_HASHES=0). Otherwise a JSON object {"<delta path>": "<sha256>"} of the
      * files the caller verified, and DDB_VERIFY_PUSH_HASHES is ignored: a listed file is
@@ -761,7 +768,7 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetBuildStatus(const char *ddbPath, const char **paths, int numPaths, char **output);
 
-    /* ---- Build manifest (XI-04, ABI 1.1) -------------------------------------------------------
+    /* ---- Build manifest (XI-04, new in 2.0) -------------------------------------------------------
      * libddb owns the build layout, the build state and the entry type rules: a host serves the
      * roles, paths and states these exports return, and never composes a build path, names an
      * artifact file or keeps its own list of buildable types.
@@ -824,7 +831,7 @@ extern "C"
      * a build and stays in place (DDBIsBuildActive removes it). A call opens the index once; an
      * entry that is not buildable costs no filesystem access. */
 
-    /** The entry types of libddb and what it does with them (XI-04, ABI 1.1).
+    /** The entry types of libddb and what it does with them (XI-04, new in 2.0).
      * @param output pointer to C-string where to store the JSON array, by id (free with DDBFree).
      *               Each element: {"id": int, "name": string, "buildable": bool,
      *               "thumbnail": "none"|"file"|"build", "sidecarExtensions": [string],
@@ -843,7 +850,7 @@ extern "C"
     DDB_DLL DDBErr DDBGetEntryTypes(char **output);
 
     /** The build state and the existing artifacts of several entries, with one index open
-     * (XI-04, ABI 1.1). For a host it replaces DDBIsBuildable, DDBIsBuildActive,
+     * (XI-04, new in 2.0). For a host it replaces DDBIsBuildable, DDBIsBuildActive,
      * DDBIsBuildComplete, DDBIsBuildPending, DDBGetPendingBuildInfo and DDBGetBuildStatus.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param paths array of dataset-relative entry paths (exact match)
@@ -858,7 +865,7 @@ extern "C"
      *         contention; DDBERR_EXCEPTION otherwise (no database at ddbPath, ...) */
     DDB_DLL DDBErr DDBGetBuildArtifacts(const char *ddbPath, const char **paths, int numPaths, char **output);
 
-    /** The absolute path of a file of a build, checked (XI-04, ABI 1.1): it serves the
+    /** The absolute path of a file of a build, checked (XI-04, new in 2.0): it serves the
      * ".../build/{hash}/{path}" URLs, tiles included.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param hash the hash of the build ("hash" of a build object): 64 hexadecimal characters
@@ -875,7 +882,7 @@ extern "C"
      *         contention */
     DDB_DLL DDBErr DDBResolveBuildFile(const char *ddbPath, const char *hash, const char *path, char **outPath);
 
-    /** Copy the build of an entry to another dataset, with its pending marker (XI-04, ABI 1.1):
+    /** Copy the build of an entry to another dataset, with its pending marker (XI-04, new in 2.0):
      * after copying or moving a file between datasets, its artifacts need no rebuild and a
      * deferred build stays deferred. Copies the artifact folders of the types of the source
      * entries with this hash (legacy ones included), each through a scratch folder renamed onto
@@ -899,15 +906,15 @@ extern "C"
     DDB_DLL DDBErr DDBCopyBuildArtifacts(const char *sourceDdbPath, const char *destinationDdbPath, const char *hash,
                                          char **output);
 
-    /** Options for DDBListEntriesEx (ABI 1.1). Set structSize to sizeof(DDBListEntriesOptions)
-     * and every other field explicitly. A later ABI may append fields: a library that does not
+    /** Options for DDBListEntriesEx (new in 2.0). Set structSize to sizeof(DDBListEntriesOptions)
+     * and every other field explicitly. A later version may append fields: a library that does not
      * know them rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
     typedef struct {
         uint32_t structSize; // sizeof(DDBListEntriesOptions)
         bool recursive;      // the whole subtree of the folder (true) or its children only (false)
         bool withDetails;    // full entries (true) or path, hash, type, mtime, size, depth (false)
         bool withBuild;      // each entry gets its "build" object (see the build manifest above)
-        uint8_t reserved;    // must be 0: a later ABI may give it a meaning (DDBERR_INVALIDARGS otherwise)
+        uint8_t reserved;    // must be 0: a later version may give it a meaning (DDBERR_INVALIDARGS otherwise)
     } DDBListEntriesOptions;
 
     DDB_STATIC_ASSERT(sizeof(DDBListEntriesOptions) == 8, "DDBListEntriesOptions layout");
@@ -917,7 +924,7 @@ extern "C"
     DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, withBuild) == 6, "DDBListEntriesOptions layout");
     DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, reserved) == 7, "DDBListEntriesOptions layout");
 
-    /** DDBListEntries with options (ABI 1.1): with withBuild false the output is DDBListEntries',
+    /** DDBListEntries with options (new in 2.0): with withBuild false the output is DDBListEntries',
      * byte for byte; with withBuild true every entry also has "build", its build object (see
      * the build manifest above), read with the same index connection, so a listing with build
      * states is one call.
@@ -1010,7 +1017,7 @@ extern "C"
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBStacItemCollection(const char *ddbPath, const char *stacCollectionRoot, const char *id, const char *stacCatalogRoot, const char *bbox, const char *datetime, int limit, int offset, char **output);
 
-    /** Data-only STAC (XI-09, ABI 1.1): the document of DDBStac with id NULL, without any member
+    /** Data-only STAC (XI-09, new in 2.0): the document of DDBStac with id NULL, without any member
      *  built from a URL or an ID, which the caller (Registry) owns: no "id", "collection" or
      *  "links", and no asset "href". Everything else is the same: an Item keeps its entry path
      *  as properties.title and as the key of its data asset, a Collection takes its title from
@@ -1022,7 +1029,7 @@ extern "C"
      *          DDBERR_INVALIDARGS when ddbPath or output is NULL, an error otherwise */
     DDB_DLL DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output);
 
-    /** Data-only STAC ItemCollection (XI-09, ABI 1.1): the document of DDBStacItemCollection
+    /** Data-only STAC ItemCollection (XI-09, new in 2.0): the document of DDBStacItemCollection
      *  without "links", and with data-only features (DDBStacData). numberMatched and
      *  numberReturned are kept. bbox, datetime, limit and offset are those of
      *  DDBStacItemCollection.

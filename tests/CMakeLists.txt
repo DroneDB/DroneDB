@@ -107,9 +107,12 @@ if(BUILD_TESTING)
     # no other test TU carries it on its compile line
     set_source_files_properties(unit/dq01_version_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_PACKAGE_JSON="${PROJECT_SOURCE_DIR}/package.json")
-    # The ABI test compares DDBGetCapabilities() with the symbol manifest (src/CMakeLists.txt)
+    # The ABI test compares DDBGetCapabilities() with the symbol manifest (src/CMakeLists.txt),
+    # and the ABI macros (generated from package.json) with package.json
     set_source_files_properties(unit/abi_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_SYMBOLS_MANIFEST="${DDB_SYMBOLS_MANIFEST}")
+    set_property(SOURCE unit/abi_test.cpp APPEND PROPERTY
+        COMPILE_DEFINITIONS DDB_PACKAGE_JSON="${PROJECT_SOURCE_DIR}/package.json")
     # The golden outputs of the geo and raster code (DQ-06): read from the source tree, and
     # rewritten there with DDB_UPDATE_DQ06_GOLDEN=1 (see dq06_golden_support.h)
     set_source_files_properties(dq06_golden_support.cpp PROPERTIES
@@ -175,7 +178,8 @@ if(BUILD_TESTING)
     # flag or define of the C++ targets reaches it.
     add_library(ddb_c11_header OBJECT unit/c11_header.c)
     set_target_properties(ddb_c11_header PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
-    target_include_directories(ddb_c11_header PRIVATE "${PROJECT_SOURCE_DIR}/src/include")
+    target_include_directories(ddb_c11_header PRIVATE "${PROJECT_SOURCE_DIR}/src/include"
+                                                      "${DDB_GENERATED_INCLUDE_DIR}")
     if(MSVC)
         target_compile_options(ddb_c11_header PRIVATE /W4 /WX)
     else()
@@ -224,6 +228,16 @@ if(BUILD_TESTING)
             "-DDDB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/c_abi_coverage.cmake")
     set_tests_properties(c_abi.ExportsHaveTests PROPERTIES LABELS unit TIMEOUT 60)
+
+    # scripts/check-abi.py enforces semver between the exports and package.json: its rules have
+    # a test of their own, on throw-away git repositories (Python and git are the CI's already)
+    find_package(Python3 COMPONENTS Interpreter)
+    find_program(GIT_EXECUTABLE git)
+    if(Python3_Interpreter_FOUND AND GIT_EXECUTABLE)
+        add_test(NAME abi.CheckAbiSemver
+            COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_abi_test.py")
+        set_tests_properties(abi.CheckAbiSemver PROPERTIES LABELS unit TIMEOUT 120)
+    endif()
 
     # CLI exit codes (DQ-02): usage errors and failed commands must exit 1, an explicit
     # help request exits 0. Each test checks the exact code (cli_expect_exit.cmake), so a
