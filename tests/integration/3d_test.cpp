@@ -1115,7 +1115,6 @@ namespace
         writeGltfWithImageUri(ds.root / "sub" / "model.gltf", "https://example.invalid/tex.png");
         ds.add({"sub/model.gltf"});
 
-        EXPECT_TRUE(ddb::getGltfDependencies((ds.root / "sub" / "model.gltf").string()).empty());
         expectGltfBuildFailsWithoutPending(ds, "sub/model.gltf", "model.gltf references files that cannot be resolved");
     }
 

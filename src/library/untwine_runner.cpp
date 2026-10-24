@@ -151,17 +151,6 @@ namespace ddb
             return bin.empty() ? CopcBackend::Pdal : CopcBackend::Untwine;
         }
 
-        bool runUntwine(const std::vector<std::string> &inputFiles,
-                        const fs::path &outputFile,
-                        const fs::path &tempDir,
-                        std::string &errorOut,
-                        const fs::path &binary)
-        {
-            const auto result = runUntwineResult(inputFiles, outputFile, tempDir, binary);
-            errorOut = result.error;
-            return result.succeeded;
-        }
-
         ToolRunResult runUntwineResult(const std::vector<std::string> &inputFiles,
                                       const fs::path &outputFile,
                                       const fs::path &tempDir,

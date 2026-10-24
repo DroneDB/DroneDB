@@ -25,8 +25,6 @@ namespace ddb
     {
         double spacing = 0;                  // point spacing of the root node
         std::vector<uint64_t> pointsPerDepth; // index = depth (0 = root)
-
-        uint64_t totalPoints() const;
     };
 
     /// Octree node of a COPC file (depth and cell position)
@@ -114,11 +112,6 @@ namespace ddb
     /// the bounds text keeps every bit of the doubles
     pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads,
                                     const CopcWindow &window);
-
-    /// The points readers.copc returns for that window, in batches (the reference
-    /// CopcNodeReader matches)
-    void readCopcWindow(const std::string &copcPath, const CopcWindow &window,
-                        const std::function<void(PointBatch &)> &sink);
 
     /// Runs the (streamable) PDAL pipeline that ends at tail without holding its points:
     /// they go to sink in batches of up to chunkSize. Batches carry the Red/Green/Blue

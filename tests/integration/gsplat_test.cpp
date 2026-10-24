@@ -883,22 +883,13 @@ TEST(gsplat, truncatedSpzRejected) {
 // Georeferencing (ODX convention)
 // ---------------------------------------------------------------------------
 
-TEST(gsplat, parseCoordsAndWriteGeoref) {
+TEST(gsplat, writeGeoref) {
     TestArea ta(TEST_NAME);
-    const fs::path coords = ta.getPath("coords.txt");
-    {
-        std::ofstream o(coords.string());
-        o << "WGS84 UTM 17N\n";
-        o << "263892 4156842\n";
-        o << "0 0 1.5\n"; // extra content ignored
-    }
 
     GsplatGeoref g;
-    ASSERT_TRUE(ddb::parseCoordsFile(coords, g));
-    EXPECT_TRUE(g.valid);
-    EXPECT_EQ(g.srs, "WGS84 UTM 17N");
-    EXPECT_DOUBLE_EQ(g.offset[0], 263892.0);
-    EXPECT_DOUBLE_EQ(g.offset[1], 4156842.0);
+    g.srs = "WGS84 UTM 17N";
+    g.offset = {263892.0, 4156842.0, 0.0};
+    g.valid = true;
 
     const fs::path georef = ta.getPath("georef.json");
     ddb::writeGeoref(g, georef);
@@ -911,16 +902,6 @@ TEST(gsplat, parseCoordsAndWriteGeoref) {
     ASSERT_TRUE(j["offset"].is_array());
     EXPECT_DOUBLE_EQ(j["offset"][0].get<double>(), 263892.0);
     EXPECT_DOUBLE_EQ(j["offset"][1].get<double>(), 4156842.0);
-}
-
-TEST(gsplat, parseCoordsRejectsMalformed) {
-    TestArea ta(TEST_NAME);
-    const fs::path coords = ta.getPath("bad.txt");
-    { std::ofstream o(coords.string()); o << "WGS84 UTM 17N\n"; } // missing offset line
-
-    GsplatGeoref g;
-    EXPECT_FALSE(ddb::parseCoordsFile(coords, g));
-    EXPECT_FALSE(g.valid);
 }
 
 TEST(gsplat, buildWithGerefWritesSidecar) {

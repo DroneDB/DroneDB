@@ -45,17 +45,9 @@ namespace ddb
         // Runs the Untwine binary to convert one or more LAS/LAZ inputs into a
         // single COPC LAZ file at outputFile. tempDir is used by Untwine for
         // intermediate files; if empty, Untwine creates one next to the output.
-        // Returns true on success (binary exited with code 0 and the output file
-        // exists). On failure returns false and leaves a message in errorOut.
-        // The Untwine binary path is resolved via findUntwineBinary() unless
-        // a non-empty path is provided.
-        bool runUntwine(const std::vector<std::string> &inputFiles,
-                        const fs::path &outputFile,
-                        const fs::path &tempDir,
-                        std::string &errorOut,
-                        const fs::path &binary = fs::path());
-
-        // Native build callers use structured failures; legacy callers retain bool/errorOut.
+        // The result succeeds when the binary exited with code 0 and the output file
+        // exists; otherwise it carries the error. The Untwine binary path is resolved via
+        // findUntwineBinary() unless a non-empty path is provided.
         ToolRunResult runUntwineResult(const std::vector<std::string> &inputFiles,
                                                  const fs::path &outputFile,
                                                  const fs::path &tempDir,

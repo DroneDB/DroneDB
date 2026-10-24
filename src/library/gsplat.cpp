@@ -280,11 +280,6 @@ namespace ddb
         return io::Path(io::fromUtf8(filename)).checkExtension({"spz"});
     }
 
-    bool hasSplatExtension(const std::string &filename)
-    {
-        return io::Path(io::fromUtf8(filename)).checkExtension({"spz", "splat", "ksplat"});
-    }
-
     bool looksLikeSpz(const fs::path &path)
     {
         std::ifstream in(path, std::ios::binary);
@@ -344,56 +339,6 @@ namespace ddb
                 // .ksplat is recognized as a type but not natively decodable here.
                 return false;
         }
-    }
-
-    bool parseCoordsFile(const fs::path &coordsFile, GsplatGeoref &georef)
-    {
-        georef = GsplatGeoref();
-
-        std::ifstream in(coordsFile);
-        if (!in.good())
-            return false;
-
-        std::string line;
-        // First non-empty line: SRS header.
-        std::string srs;
-        while (std::getline(in, line))
-        {
-            std::string t = line;
-            str::trim(t);
-            if (!t.empty())
-            {
-                srs = t;
-                break;
-            }
-        }
-        if (srs.empty())
-            return false;
-
-        // Next non-empty, non-comment line: "east north [z]".
-        std::string offsetLine;
-        while (std::getline(in, line))
-        {
-            std::string t = line;
-            str::trim(t);
-            if (t.empty() || t[0] == '#')
-                continue;
-            offsetLine = t;
-            break;
-        }
-        if (offsetLine.empty())
-            return false;
-
-        std::array<double, 3> offset = {0.0, 0.0, 0.0};
-        std::istringstream ss(offsetLine);
-        if (!(ss >> offset[0] >> offset[1]))
-            return false;
-        ss >> offset[2]; // optional, leaves 0.0 if absent
-
-        georef.srs = srs;
-        georef.offset = offset;
-        georef.valid = true;
-        return true;
     }
 
     void writeGeoref(const GsplatGeoref &georef, const fs::path &outFile)

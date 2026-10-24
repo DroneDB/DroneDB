@@ -104,14 +104,6 @@ namespace ddb
         };
     }
 
-    uint64_t CopcHierarchy::totalPoints() const
-    {
-        uint64_t total = 0;
-        for (const auto n : pointsPerDepth)
-            total += n;
-        return total;
-    }
-
     CopcHierarchy CopcIndex::hierarchy() const
     {
         CopcHierarchy h;
@@ -312,15 +304,6 @@ namespace ddb
         options.add("bounds", bounds.str());
         options.add("resolution", window.resolution);
         return options;
-    }
-
-    void readCopcWindow(const std::string &copcPath, const CopcWindow &window,
-                        const std::function<void(PointBatch &)> &sink)
-    {
-        const auto threads = copcReadThreads(copcPath);
-        pdal::CopcReader reader;
-        reader.setOptions(copcWindowOptions(copcPath, threads, window));
-        forEachPointBatch(reader, sink);
     }
 
     void forEachPointBatch(pdal::Stage &tail, const std::function<void(PointBatch &)> &sink, size_t chunkSize)

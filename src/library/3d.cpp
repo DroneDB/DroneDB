@@ -45,11 +45,6 @@ bool isDataUri(const std::string& uri) {
     return uri.starts_with("data:");
 }
 
-// Helper to check if a URI is absolute (external resource)
-bool isAbsoluteUri(const std::string& uri) {
-    return uri.starts_with("http://") || uri.starts_with("https://") || uri.starts_with("file://");
-}
-
 // Helper to validate and sanitize a relative path (prevent path traversal attacks)
 bool isSafePath(const std::string& path, const fs::path& parentPath) {
     try {
@@ -68,59 +63,6 @@ bool isSafePath(const std::string& path, const fs::path& parentPath) {
     } catch (...) {
         return false;
     }
-}
-
-// Parse GLTF JSON and extract dependencies (buffers and images)
-std::vector<std::string> parseGltfJson(const json& gltfJson, const fs::path& parentPath) {
-    std::vector<std::string> deps;
-
-    try {
-        // Extract buffer URIs
-        if (gltfJson.contains("buffers") && gltfJson["buffers"].is_array()) {
-            for (const auto& buffer : gltfJson["buffers"]) {
-                if (buffer.contains("uri") && buffer["uri"].is_string()) {
-                    std::string uri = buffer["uri"];
-
-                    // Skip data URIs and absolute URIs
-                    if (isDataUri(uri) || isAbsoluteUri(uri))
-                        continue;
-
-                    // Validate path safety
-                    if (!isSafePath(uri, parentPath)) {
-                        LOGW << "Skipping unsafe buffer path: " << uri;
-                        continue;
-                    }
-
-                    deps.push_back(uri);
-                }
-            }
-        }
-
-        // Extract image URIs
-        if (gltfJson.contains("images") && gltfJson["images"].is_array()) {
-            for (const auto& image : gltfJson["images"]) {
-                if (image.contains("uri") && image["uri"].is_string()) {
-                    std::string uri = image["uri"];
-
-                    // Skip data URIs and absolute URIs
-                    if (isDataUri(uri) || isAbsoluteUri(uri))
-                        continue;
-
-                    // Validate path safety
-                    if (!isSafePath(uri, parentPath)) {
-                        LOGW << "Skipping unsafe image path: " << uri;
-                        continue;
-                    }
-
-                    deps.push_back(uri);
-                }
-            }
-        }
-    } catch (const json::exception& e) {
-        throw AppException("Error parsing GLTF JSON: " + std::string(e.what()));
-    }
-
-    return deps;
 }
 
 // Read and parse GLB file to extract JSON chunk
@@ -1045,17 +987,6 @@ std::vector<std::string> getObjDependencies(const std::string& obj,
     for (const auto& d : collectObjDependencies(obj, io::fromUtf8(datasetRoot)))
         deps.push_back(d.name);
     return deps;
-}
-
-std::vector<std::string> getGltfDependencies(const std::string& gltf) {
-    const json gltfJson = readGltfDocument(gltf);
-    try {
-        return parseGltfJson(gltfJson, io::fromUtf8(gltf).parent_path());
-    } catch (const AppException&) {
-        throw;  // Re-throw our exceptions
-    } catch (const std::exception& e) {
-        throw AppException("Error reading GLTF file: " + std::string(e.what()));
-    }
 }
 
 EntryType identifyGltf(const fs::path& gltfFile) {

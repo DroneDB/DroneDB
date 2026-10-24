@@ -18,8 +18,6 @@ namespace ddb
     // The Gaussian Splat artifact names (GsplatBuildSubfolder, GsplatRadFileName,
     // GsplatBoundsFileName, GsplatGeorefFileName, ...) are in build_layout.h.
 
-    constexpr int GsplatThumbSize = 2048; // pixels, square
-
     // Web LOD delivery profile (see TBD/GaussianSplats/LOD-Support.md): bhatt-lod ("quality")
     // with full spherical harmonics (degree 3) so the streamed .rad preserves the look of the
     // source and can be served as the SOLE delivery artifact (the .spz is dropped after build).
@@ -64,10 +62,6 @@ namespace ddb
     // True when the path ends with the canonical .spz delivery extension.
     bool isSpzPath(const std::string &filename);
 
-    // True when the path has any Gaussian Splat source extension we recognize
-    // (.spz, .splat, .ksplat). Note: a .ply splat is recognized via identifyPly().
-    bool hasSplatExtension(const std::string &filename);
-
     // Content sanity checks used by detection. They never throw and tolerate I/O errors.
     bool looksLikeSpz(const fs::path &path);         // NGSP magic (v4) or gzip magic (legacy)
     bool looksLikeSplatBinary(const fs::path &path); // size > 0 and multiple of 32 bytes
@@ -75,11 +69,6 @@ namespace ddb
     // Reads lightweight metadata (splat count + SH degree) from a splat source
     // (.ply | .splat | .spz). Returns false if the file cannot be interpreted.
     bool getGaussianSplatInfo(const std::string &filename, GaussianSplatInfo &info);
-
-    // Parses an ODX/ODM coordinates file: first line is the SRS header, second
-    // non-empty/non-comment line is the "east north [z]" offset. Returns false when
-    // the file is missing or malformed.
-    bool parseCoordsFile(const fs::path &coordsFile, GsplatGeoref &georef);
 
     // Writes the georef.json sidecar described by `georef`.
     void writeGeoref(const GsplatGeoref &georef, const fs::path &outFile);

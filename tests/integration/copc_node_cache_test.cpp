@@ -12,6 +12,8 @@
 
 #include "copc_node_cache.h"
 #include "copc_utils.h"
+#include "pdal_inc.h"
+#include <pdal/io/CopcReader.hpp>
 #include "pointcloud.h"
 #include "raster_cache.h"
 #include "raster_test_utils.h"
@@ -62,8 +64,11 @@ namespace
     std::vector<Point> readWithPdal(const fs::path &copc, const Window &w, double resolution)
     {
         std::vector<Point> points;
-        readCopcWindow(copc.string(), {w.minX, w.minY, w.maxX, w.maxY, resolution},
-                       [&](PointBatch &b) { append(points, b); });
+        const auto threads = copcReadThreads(copc.string());
+        pdal::CopcReader reader;
+        reader.setOptions(
+            copcWindowOptions(copc.string(), threads, {w.minX, w.minY, w.maxX, w.maxY, resolution}));
+        forEachPointBatch(reader, [&](PointBatch &b) { append(points, b); });
         std::sort(points.begin(), points.end());
         return points;
     }

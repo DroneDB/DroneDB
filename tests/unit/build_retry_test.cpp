@@ -87,7 +87,7 @@ TEST(BuildRetryClassification, ExitZeroWithoutOutputIsPermanent) {
     EXPECT_NO_THROW(result.throwIfRetryable("primary build: "));
 }
 
-TEST(BuildRetryClassification, OrdinaryToolExitIsPermanentAndBoolApiStillReportsError) {
+TEST(BuildRetryClassification, OrdinaryToolExitIsPermanentAndReportsAnError) {
     TestArea area(TEST_NAME, true);
     const fs::path input = area.getPath("input.spz");
     std::ofstream(input) << "test input";
@@ -95,9 +95,7 @@ TEST(BuildRetryClassification, OrdinaryToolExitIsPermanentAndBoolApiStillReports
     EXPECT_FALSE(result.succeeded);
     EXPECT_FALSE(result.timedOut);
     EXPECT_NO_THROW(result.throwIfRetryable("primary build: "));
-    std::string error;
-    EXPECT_FALSE(buildlod::runBuildLod(input, area.getPath("model.rad"), error, true, 1, testChildPath()));
-    EXPECT_FALSE(error.empty());
+    EXPECT_FALSE(result.error.empty());
 }
 
 TEST(BuildRetryClassification, FilesystemWrappersPreserveCodeWithoutGuessingFromMessage) {

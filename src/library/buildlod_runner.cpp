@@ -46,18 +46,6 @@ namespace ddb
             return !findBuildLodBinary().empty();
         }
 
-        bool runBuildLod(const fs::path &input,
-                         const fs::path &outputRad,
-                         std::string &errorOut,
-                         bool quality,
-                         int maxSh,
-                         const fs::path &binary)
-        {
-            const auto result = runBuildLodResult({input, outputRad, quality, maxSh, binary});
-            errorOut = result.error;
-            return result.succeeded;
-        }
-
         ToolRunResult runBuildLodResult(const BuildLodRequest &request,
                                        const process::Options &options,
                                        const process::IProcessRunner &runner)

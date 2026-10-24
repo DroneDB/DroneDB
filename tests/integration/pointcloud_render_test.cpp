@@ -219,6 +219,14 @@ namespace
         }
     }
 
+    uint64_t totalPoints(const CopcHierarchy &h)
+    {
+        uint64_t total = 0;
+        for (const auto n : h.pointsPerDepth)
+            total += n;
+        return total;
+    }
+
     TEST(DDB07_Thumb, hierarchyCountsAllPoints)
     {
         TestArea ta(TEST_NAME, true);
@@ -228,7 +236,7 @@ namespace
         const auto h = readCopcHierarchy(copc.string());
         EXPECT_GT(h.spacing, 0);
         EXPECT_GE(h.pointsPerDepth.size(), 2u);
-        EXPECT_EQ(h.totalPoints(), info.pointCount);
+        EXPECT_EQ(totalPoints(h), info.pointCount);
     }
 
     size_t opaquePixels(const DecodedImage &img)
@@ -258,7 +266,7 @@ namespace
         const auto full = decodeImage(takeBuffer(buf, bufSize));
 
         EXPECT_GE(opaquePixels(budgeted), opaquePixels(full) * 95 / 100)
-            << "read " << planned << " of " << h.totalPoints() << " points";
+            << "read " << planned << " of " << totalPoints(h) << " points";
     }
 
     TEST(DDB07_Thumb, pointBudgetRespected)

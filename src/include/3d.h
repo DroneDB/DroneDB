@@ -213,7 +213,6 @@ namespace ddb
      * @throws AppException if a reference is absolute, or escapes @p datasetRoot.
      */
     std::vector<std::string> getObjDependencies(const std::string &obj, const std::string &datasetRoot = "");
-    std::vector<std::string> getGltfDependencies(const std::string &gltf);
 
     /**
      * @brief Classify a glTF/GLB file from the primitives declared in its JSON.
