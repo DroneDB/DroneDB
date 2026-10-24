@@ -12,10 +12,10 @@ namespace ddb {
 // header does not: everything here is the interface.
 class CprHttpClient final : public IHttpClient {
 public:
-    DDB_DLL HttpResponse get(const HttpRequest &request) override;
-    DDB_DLL HttpResponse post(const HttpRequest &request) override;
-    DDB_DLL HttpResponse multipart(const HttpRequest &request) override;
-    DDB_DLL HttpResponse download(const HttpRequest &request, std::ostream &sink) override;
+    HttpResponse get(const HttpRequest &request) override;
+    HttpResponse post(const HttpRequest &request) override;
+    HttpResponse multipart(const HttpRequest &request) override;
+    HttpResponse download(const HttpRequest &request, std::ostream &sink) override;
 };
 
 } // namespace ddb

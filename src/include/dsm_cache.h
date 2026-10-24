@@ -13,7 +13,6 @@
 #include <string>
 #include <unordered_map>
 
-#include "ddb_export.h"
 #include "dsm_reader.h"
 #include "fs.h"
 
@@ -30,22 +29,22 @@ namespace ddb
     public:
         // The elevation from a loaded raster containing the point (0 when the DSM has no value
         // there), or nothing when no loaded raster contains it
-        DDB_DLL std::optional<float> lookup(double latitude, double longitude);
-        DDB_DLL bool contains(const std::string &filename);
-        DDB_DLL void put(const std::string &filename, DSMCacheEntry entry);
-        DDB_DLL void erase(const std::string &filename);
+        std::optional<float> lookup(double latitude, double longitude);
+        bool contains(const std::string &filename);
+        void put(const std::string &filename, DSMCacheEntry entry);
+        void erase(const std::string &filename);
     };
 
     // Reads the raster and keeps it in memory under its file name (with its pixels only when it
     // covers the point, so a file outside the query is not opened again). True when it covers
     // the point.
-    DDB_DLL bool addRasterToCache(DsmMemoryCache &memory, const fs::path &filePath,
-                                  double latitude, double longitude);
+    bool addRasterToCache(DsmMemoryCache &memory, const fs::path &filePath,
+                          double latitude, double longitude);
 
     // Reads the rasters of the folder that memory does not hold yet until one covers the point
     // (true). A raster that cannot be opened is deleted.
-    DDB_DLL bool loadDsmFolder(const fs::path &folder, DsmMemoryCache &memory,
-                               double latitude, double longitude);
+    bool loadDsmFolder(const fs::path &folder, DsmMemoryCache &memory,
+                       double latitude, double longitude);
 
 } // namespace ddb
 

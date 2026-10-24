@@ -13,7 +13,6 @@
 #include <string>
 
 #include "database.h"
-#include "ddb_export.h"
 #include "delta_apply.h"
 #include "registry_auth.h"
 #include "registry_client.h"
@@ -23,31 +22,31 @@ namespace ddb {
 
 // Pulls the dataset at `path` from the Registry of its tag, applying the changes with
 // `mergeStrategy`. Throws IndexException when the dataset has no tag.
-DDB_DLL void pullDataset(RegistryClient &client, const std::string &path, MergeStrategy mergeStrategy,
-                         std::ostream &out);
+void pullDataset(RegistryClient &client, const std::string &path, MergeStrategy mergeStrategy,
+                 std::ostream &out);
 
 // Pushes the dataset at `path` to the Registry of its tag: init, the metadata, the files the
 // server needs, commit. Throws IndexException when the dataset has no tag and
 // PullRequiredException when the Registry has changes the dataset has not pulled. Nothing in
 // the sequence is tried again; an error ends the push before the commit.
-DDB_DLL void pushDataset(RegistryClient &client, const std::string &path, std::ostream &out);
+void pushDataset(RegistryClient &client, const std::string &path, std::ostream &out);
 
 // Clones the dataset into `folder` (empty or missing): indexes it, tags it and pulls it
-DDB_DLL void cloneDataset(RegistryClient &client, const std::string &organization, const std::string &dataset,
-                          const std::string &folder, std::ostream &out);
+void cloneDataset(RegistryClient &client, const std::string &organization, const std::string &dataset,
+                  const std::string &folder, std::ostream &out);
 
 // The Registry of the dataset at `db`: `registry` when given, else the one in its tag.
 // `verb` ("push", "pull") names the operation in the error of a dataset without a tag.
-DDB_DLL std::string datasetRegistryUrl(Database *db, const std::string &registry, const std::string &verb);
+std::string datasetRegistryUrl(Database *db, const std::string &registry, const std::string &verb);
 
 // The operations of the CLI, from the current folder. `registry` may be empty (the tag says).
 // `deps` are the client's collaborators (RegistryDeps): the defaults are the real ones.
-DDB_DLL void push(const std::string &registry, bool sslVerify, CredentialProvider &credentials,
-                  const RegistryDeps &deps = {});
-DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy, bool sslVerify,
-                  CredentialProvider &credentials, const RegistryDeps &deps = {});
-DDB_DLL void clone(const TagComponents &tag, const std::string &folder, bool sslVerify,
-                   CredentialProvider &credentials, const RegistryDeps &deps = {});
+void push(const std::string &registry, bool sslVerify, CredentialProvider &credentials,
+          const RegistryDeps &deps = {});
+void pull(const std::string &registry, MergeStrategy mergeStrategy, bool sslVerify,
+          CredentialProvider &credentials, const RegistryDeps &deps = {});
+void clone(const TagComponents &tag, const std::string &folder, bool sslVerify,
+           CredentialProvider &credentials, const RegistryDeps &deps = {});
 
 } // namespace ddb
 

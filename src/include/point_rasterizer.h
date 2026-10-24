@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <vector>
 
-#include "ddb_export.h"
 #include "tile_encoder.h"
 
 namespace ddb
@@ -23,8 +22,8 @@ namespace ddb
         std::vector<uint16_t> blue;
 
         size_t size() const { return x.size(); }
-        DDB_DLL void clear();
-        DDB_DLL void reserve(size_t n);
+        void clear();
+        void reserve(size_t n);
     };
 
     /// Maps world coordinates to the pixels of a z-buffer of width x height:
@@ -51,16 +50,16 @@ namespace ddb
     class PointRasterizer
     {
     public:
-        DDB_DLL PointRasterizer(int imageSize, const PixelMapping &mapping, int drawOffset = 0, int radius = 2);
+        PointRasterizer(int imageSize, const PixelMapping &mapping, int drawOffset = 0, int radius = 2);
 
         /// Adds points whose x, y are in the coordinates of the mapping
-        DDB_DLL void add(const PointBatch &points);
+        void add(const PointBatch &points);
 
         /// Points that won their z-buffer pixel and were drawn
         size_t drawn() const { return drawn_; }
 
         /// The image: 3 colour bands and alpha (opaque where a disc was drawn)
-        DDB_DLL RasterImage toImage() const;
+        RasterImage toImage() const;
 
     private:
         int imageSize_;

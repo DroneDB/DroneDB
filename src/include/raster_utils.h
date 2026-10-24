@@ -7,7 +7,6 @@
 #include <vector>
 #include <cmath>
 #include "gdal_inc.h"
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -21,10 +20,10 @@ struct BandNodata {
 
 // Reads the geotransform of a dataset into gt. Throws GDALException("Raster has no geotransform:
 // <the dataset's name>") when the dataset has none (GDAL would hand out its default one).
-DDB_DLL void requireGeoTransform(GDALDatasetH ds, double gt[6]);
+void requireGeoTransform(GDALDatasetH ds, double gt[6]);
 
 // Reads the nodata value of a band. The one place that calls GDALGetRasterNoDataValue.
-DDB_DLL BandNodata readBandNodata(GDALRasterBandH band);
+BandNodata readBandNodata(GDALRasterBandH band);
 
 // The one rule that says whether a sample is the band's nodata value: an exact match in the
 // precision of the sample, GDAL's own rule for its nodata masks. A NaN nodata value matches NaN
@@ -53,18 +52,18 @@ struct RasterBandNodata {
 };
 
 // Detect alpha band and nodata values for each band of a GDAL dataset
-DDB_DLL RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount);
+RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount);
 
 // Pre-mask pixels: sets all bands to NODATA_SENTINEL where alpha==0
 // or any band matches its GDAL nodata value (NaN-safe comparison).
 // A null entry of bandPtrs is a band that was not read: it is neither inspected nor
 // written, so the caller decides which bands decide the mask (the alpha band, if it
 // is null, does not mask).
-DDB_DLL void premaskNodata(const std::vector<float*>& bandPtrs,
-                           size_t pixelCount,
-                           int bandCount,
-                           const RasterBandNodata& info,
-                           float outputNodata = NODATA_SENTINEL);
+void premaskNodata(const std::vector<float*>& bandPtrs,
+                   size_t pixelCount,
+                   int bandCount,
+                   const RasterBandNodata& info,
+                   float outputNodata = NODATA_SENTINEL);
 
 }  // namespace ddb
 

@@ -10,24 +10,23 @@
 
 #include <string>
 
-#include "ddb_export.h"
 #include "http_client.h"
 
 namespace ddb::utils {
 
 // Downloads `url` to `filePath` (replacing it). A failed or empty download leaves no file and, with
 // throwOnError, throws NetException; the response is returned either way.
-DDB_DLL HttpResponse downloadToFile(IHttpClient& client,
-                                    const std::string& url,
-                                    const std::string& filePath,
-                                    bool throwOnError = false,
-                                    bool verifySsl = true);
+HttpResponse downloadToFile(IHttpClient& client,
+                            const std::string& url,
+                            const std::string& filePath,
+                            bool throwOnError = false,
+                            bool verifySsl = true);
 
 // The same with the library's own client (defaultHttpClient)
-DDB_DLL HttpResponse downloadToFile(const std::string& url,
-                                    const std::string& filePath,
-                                    bool throwOnError = false,
-                                    bool verifySsl = true);
+HttpResponse downloadToFile(const std::string& url,
+                            const std::string& filePath,
+                            bool throwOnError = false,
+                            bool verifySsl = true);
 
 }  // namespace ddb::utils
 

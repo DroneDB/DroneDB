@@ -23,7 +23,6 @@
 #include <utility>
 #include <vector>
 
-#include "ddb_export.h"
 #include "fs.h"
 
 namespace ddb {
@@ -107,11 +106,11 @@ public:
 };
 
 // The client libddb uses (cpr). One instance for the process.
-DDB_DLL IHttpClient &defaultHttpClient();
+IHttpClient &defaultHttpClient();
 
 // The Registry's own spelling of a query value (RFC 3986: everything but letters, digits and
 // "-._~" is %XX), the one the STAC links and the downloads use
-DDB_DLL std::string urlEncode(std::string_view text);
+std::string urlEncode(std::string_view text);
 
 } // namespace ddb
 

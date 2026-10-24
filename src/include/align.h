@@ -6,7 +6,6 @@
 
 #include <string>
 #include <vector>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -63,14 +62,14 @@ struct AlignResult {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /** Validate that the two rasters are compatible for alignment. */
-DDB_DLL AlignValidationResult validateAlignRaster(
+AlignValidationResult validateAlignRaster(
     const std::string &sourcePath,
     const std::string &referencePath);
 
 /** Align sourcePath to referencePath and write outputPath (COG).
  *  The output CRS is the one produced by buildCog (Web Mercator).
  *  Falls back to Translation when there are not enough inliers. */
-DDB_DLL AlignResult alignRaster(
+AlignResult alignRaster(
     const std::string &sourcePath,
     const std::string &referencePath,
     const std::string &outputPath,
@@ -78,10 +77,10 @@ DDB_DLL AlignResult alignRaster(
 
 /** Adds zOffset to every sample of band 1 of the DEM at path, in place (nodata stays as it is);
  *  an offset below 1e-6 leaves the file alone. */
-DDB_DLL void applyZOffset(const std::string &path, double zOffset);
+void applyZOffset(const std::string &path, double zOffset);
 
-DDB_DLL std::string alignResultToJson(const AlignResult &r);
-DDB_DLL std::string alignValidationToJson(const AlignValidationResult &r);
+std::string alignResultToJson(const AlignResult &r);
+std::string alignValidationToJson(const AlignValidationResult &r);
 
 }  // namespace ddb
 

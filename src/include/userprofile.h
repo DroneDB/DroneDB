@@ -10,7 +10,6 @@
 #include "fs.h"
 #include "logger.h"
 #include "authmanager.h"
-#include "ddb_export.h"
 
 #define DDB_FOLDER ".ddb"
 
@@ -24,28 +23,28 @@ namespace ddb
     class UserProfile
     {
     public:
-        DDB_DLL static UserProfile *get();
+        static UserProfile *get();
 
         // The profile folder from the environment, without creating it: DDB_HOME/.ddb when
         // DDB_HOME is set (*fromDdbHome = true), else the home folder's .ddb. Throws
         // AppException when no home folder is set.
-        DDB_DLL static fs::path defaultProfileDir(bool *fromDdbHome = nullptr);
+        static fs::path defaultProfileDir(bool *fromDdbHome = nullptr);
 
-        DDB_DLL fs::path getHomeDir();
-        DDB_DLL fs::path getProfileDir();
-        DDB_DLL fs::path getProfilePath(const fs::path &p, bool createIfNeeded);
+        fs::path getHomeDir();
+        fs::path getProfileDir();
+        fs::path getProfilePath(const fs::path &p, bool createIfNeeded);
         // The cache folder (created) and a folder in it (created)
-        DDB_DLL fs::path getCacheDir();
-        DDB_DLL fs::path getCachePath(const fs::path &p);
-        DDB_DLL fs::path getThumbsDir();
-        DDB_DLL fs::path getThumbsDir(int thumbSize);
-        DDB_DLL fs::path getTilesDir();
-        DDB_DLL fs::path getTemplatesDir();
+        fs::path getCacheDir();
+        fs::path getCachePath(const fs::path &p);
+        fs::path getThumbsDir();
+        fs::path getThumbsDir(int thumbSize);
+        fs::path getTilesDir();
+        fs::path getTemplatesDir();
 
-        DDB_DLL fs::path getAuthFile();
+        fs::path getAuthFile();
 
         // Created on first use, with the profile folder and auth.json
-        DDB_DLL AuthManager *getAuthManager();
+        AuthManager *getAuthManager();
 
     private:
         UserProfile() = default;

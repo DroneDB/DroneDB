@@ -9,7 +9,6 @@
 #include <string>
 
 #include "gdal_inc.h"
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -39,32 +38,32 @@ namespace ddb
 
     public:
         // Throws GDALException when GDAL cannot build the transformation
-        DDB_DLL CoordsTransformer(const OGRSpatialReference &from, const OGRSpatialReference &to);
-        DDB_DLL CoordsTransformer(int epsgFrom, int epsgTo);
-        DDB_DLL CoordsTransformer(const std::string &wktFrom, int epsgTo);
-        DDB_DLL CoordsTransformer(int epsgFrom, const std::string &wktTo);
-        DDB_DLL ~CoordsTransformer();
+        CoordsTransformer(const OGRSpatialReference &from, const OGRSpatialReference &to);
+        CoordsTransformer(int epsgFrom, int epsgTo);
+        CoordsTransformer(const std::string &wktFrom, int epsgTo);
+        CoordsTransformer(int epsgFrom, const std::string &wktTo);
+        ~CoordsTransformer();
 
         CoordsTransformer(const CoordsTransformer &) = delete;
         CoordsTransformer &operator=(const CoordsTransformer &) = delete;
-        DDB_DLL CoordsTransformer(CoordsTransformer &&) noexcept;
-        DDB_DLL CoordsTransformer &operator=(CoordsTransformer &&) noexcept;
+        CoordsTransformer(CoordsTransformer &&) noexcept;
+        CoordsTransformer &operator=(CoordsTransformer &&) noexcept;
 
         // Null when GDAL cannot build the transformation (no operation between the two CRSs):
         // for callers that report that failure in their own words or go on without it
-        DDB_DLL static std::unique_ptr<CoordsTransformer> tryCreate(const OGRSpatialReference &from,
-                                                                    const OGRSpatialReference &to);
+        static std::unique_ptr<CoordsTransformer> tryCreate(const OGRSpatialReference &from,
+                                                            const OGRSpatialReference &to);
 
         // These throw GDALException when the point cannot be transformed
-        DDB_DLL void transform(double *x, double *y);
-        DDB_DLL void transform(double *x, double *y, double *z);
+        void transform(double *x, double *y);
+        void transform(double *x, double *y, double *z);
 
         // Transforms n points in place in one PROJ call. Points that cannot be
         // transformed are set to HUGE_VAL instead of failing the call.
-        DDB_DLL void transform(size_t n, double *x, double *y);
+        void transform(size_t n, double *x, double *y);
 
         // Transforms n points in place (z may be null); false when any point failed
-        DDB_DLL bool tryTransform(size_t n, double *x, double *y, double *z = nullptr);
+        bool tryTransform(size_t n, double *x, double *y, double *z = nullptr);
 
         // The transformation, for GDAL APIs that take one (OGR_G_Transform, OGRGeometry::transform)
         OGRCoordinateTransformation *get() const noexcept { return ct.get(); }

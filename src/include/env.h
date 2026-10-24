@@ -16,7 +16,6 @@
 #include <string>
 #include <string_view>
 
-#include "ddb_export.h"
 
 namespace ddb::env {
 
@@ -25,7 +24,7 @@ constexpr uint64_t kDefaultMaxInteger = INT32_MAX;
 
 // A decimal integer in [min, max]: digits only. Nothing for anything else, including a value
 // above max (it never overflows).
-DDB_DLL std::optional<uint64_t> parseDecimal(std::string_view text, uint64_t min, uint64_t max);
+std::optional<uint64_t> parseDecimal(std::string_view text, uint64_t min, uint64_t max);
 
 struct Integer {
     enum class State {
@@ -40,14 +39,14 @@ struct Integer {
 };
 
 // Reads the variable `name` as an integer from min to max. Logs nothing.
-DDB_DLL Integer readInteger(const char *name, uint64_t min, uint64_t max);
+Integer readInteger(const char *name, uint64_t min, uint64_t max);
 
 // readInteger(name, 1, max): a count or a number of seconds, where 0 makes no sense.
-DDB_DLL Integer readPositiveInt(const char *name, uint64_t max = kDefaultMaxInteger);
+Integer readPositiveInt(const char *name, uint64_t max = kDefaultMaxInteger);
 
 // The value of the variable when it is a valid integer from min to max. An invalid value is
 // logged at warning level ("Ignoring invalid NAME=...") and treated as unset: nothing.
-DDB_DLL std::optional<uint64_t> readIntegerOrWarn(const char *name, uint64_t min, uint64_t max);
+std::optional<uint64_t> readIntegerOrWarn(const char *name, uint64_t min, uint64_t max);
 
 // A size, count or number of seconds from 0 (a pool or cache turned off) to UINT32_MAX: the value
 // of the variable, or `fallback` when it is unset or invalid (the warning is logged).

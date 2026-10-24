@@ -347,7 +347,7 @@ namespace ddb
         return "";
     }
 
-    DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info)
+    bool getPlyInfo(const fs::path &plyFile, PlyInfo &info)
     {
         info.isMesh = false;      // Assumed
         info.hasTextures = false; // Assumed

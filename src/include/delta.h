@@ -9,7 +9,6 @@
 
 #include "dbops.h"
 #include "output_format.h"
-#include "ddb_export.h"
 #include "simpleentry.h"
 
 namespace ddb
@@ -73,7 +72,7 @@ namespace ddb
         std::vector<std::string> metaAdds;
         std::vector<std::string> metaRemoves;
 
-        DDB_DLL std::vector<std::string> modifiedPathList() const
+        std::vector<std::string> modifiedPathList() const
         {
             std::vector<std::string> result;
             for (unsigned long i = 0; i < adds.size(); i++)
@@ -83,22 +82,22 @@ namespace ddb
             return result;
         }
 
-        DDB_DLL bool empty() const
+        bool empty() const
         {
             return adds.empty() && removes.empty() &&
                    metaAdds.empty() && metaRemoves.empty();
         }
     };
 
-    DDB_DLL void to_json(json &j, const SimpleEntry &e);
-    DDB_DLL void to_json(json &j, const RemoveAction &e);
-    DDB_DLL void to_json(json &j, const AddAction &e);
-    DDB_DLL void to_json(json &j, const Delta &d);
+    void to_json(json &j, const SimpleEntry &e);
+    void to_json(json &j, const RemoveAction &e);
+    void to_json(json &j, const AddAction &e);
+    void to_json(json &j, const Delta &d);
 
-    DDB_DLL void from_json(const json &j, Delta &d);
+    void from_json(const json &j, Delta &d);
 
-    DDB_DLL Delta getDelta(const json &sourceDbStamp,
-                           const json &destinationDbStamp);
+    Delta getDelta(const json &sourceDbStamp,
+                   const json &destinationDbStamp);
 
     /**
      * Appends the entry changes between two entry lists, both sorted by path (byte order).
@@ -106,19 +105,19 @@ namespace ddb
      * A destination entry is removed when no source entry has the same path and the
      * same kind (file or folder). Runs in O(n + m).
      */
-    DDB_DLL void diffSortedEntries(const std::vector<SimpleEntry> &source,
-                                   const std::vector<SimpleEntry> &destination,
-                                   std::vector<AddAction> &adds,
-                                   std::vector<RemoveAction> &removes);
+    void diffSortedEntries(const std::vector<SimpleEntry> &source,
+                           const std::vector<SimpleEntry> &destination,
+                           std::vector<AddAction> &adds,
+                           std::vector<RemoveAction> &removes);
 
-    DDB_DLL Delta getDelta(Database *sourceDb, Database *targetDb);
+    Delta getDelta(Database *sourceDb, Database *targetDb);
 
     /// Writes the delta as text (one "A"/"D" line per change) or JSON; any other format throws an
     /// InvalidArgsException
-    DDB_DLL void delta(Database *sourceDb, Database *targetDb, std::ostream &output, OutputFormat format);
-    DDB_DLL void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream &output, OutputFormat format);
+    void delta(Database *sourceDb, Database *targetDb, std::ostream &output, OutputFormat format);
+    void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream &output, OutputFormat format);
 
-    DDB_DLL std::vector<SimpleEntry> parseStampEntries(const json &stamp);
+    std::vector<SimpleEntry> parseStampEntries(const json &stamp);
 
 } // namespace ddb
 

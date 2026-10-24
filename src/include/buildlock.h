@@ -6,7 +6,6 @@
 #define BUILDLOCK_H
 
 #include <string>
-#include "ddb_export.h"
 
 #ifdef WIN32
 #include <windows.h>
@@ -73,7 +72,7 @@ namespace ddb {
  * locks, flock() and no-share CreateFile are all per open file). No ThreadLock
  * is needed around a BuildLock.
  */
-class DDB_DLL BuildLock {
+class BuildLock {
 private:
     std::string lockFilePath;  ///< Full path to the lock file
     bool isLocked;             ///< Track lock state for proper cleanup

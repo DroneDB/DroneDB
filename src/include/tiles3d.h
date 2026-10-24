@@ -6,7 +6,6 @@
 
 #include <optional>
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -43,7 +42,7 @@ namespace ddb
      * @param ttzPath Path to the .3tz archive.
      * @return the footprint/georeferencing info, or nothing when no usable bounding volume was found.
      */
-    DDB_DLL std::optional<Tiles3DInfo> getTiles3DInfo(const std::string &ttzPath);
+    std::optional<Tiles3DInfo> getTiles3DInfo(const std::string &ttzPath);
 
 }
 

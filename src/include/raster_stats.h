@@ -10,7 +10,6 @@
 #include <mutex>
 #include <string>
 
-#include "ddb_export.h"
 #include "gdal_inc.h"
 
 namespace ddb
@@ -51,17 +50,17 @@ namespace ddb
             uint64_t computed = 0;
         };
 
-        DDB_DLL static RasterStatsProvider &instance();
+        static RasterStatsProvider &instance();
 
         /// Statistics of band (1-based) of the raster at path; ds is that raster, open
         /// (used only when the statistics are not cached yet).
-        DDB_DLL BandStatistics get(const std::string &path, GDALDatasetH ds, int band);
+        BandStatistics get(const std::string &path, GDALDatasetH ds, int band);
 
         /// How the statistics returned so far were obtained (test and diagnostics seam)
-        DDB_DLL Counters counters() const;
+        Counters counters() const;
 
         /// Forgets every cached file
-        DDB_DLL void clear();
+        void clear();
 
     private:
         struct Entry;
@@ -77,7 +76,7 @@ namespace ddb
     /// Reads the statistics of band (1-based) from the "<raster>.stats.json" sidecar
     /// next to path. False when there is no sidecar, it is older than the raster or it
     /// has no entry for the band.
-    DDB_DLL bool readStatsSidecar(const std::string &path, int band, BandStatistics &out);
+    bool readStatsSidecar(const std::string &path, int band, BandStatistics &out);
 }
 
 #endif // RASTER_STATS_H

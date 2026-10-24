@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "ddb_export.h"
 #include "fs.h"
 
 namespace ddb
@@ -15,19 +14,19 @@ namespace ddb
     /// deleted (modification time in nanoseconds, size and, on POSIX, device and inode).
     /// Empty when the file does not exist. Caches of data derived from a file key their
     /// entries with it, so a rebuilt file is never served from a stale entry.
-    DDB_DLL std::string fileVersion(const fs::path &file);
+    std::string fileVersion(const fs::path &file);
 
     /// Identity of a file that changes when the path points to another file: device and
     /// inode on POSIX; on Windows, where an open file cannot be replaced, a constant.
     /// Empty when the file does not exist.
-    DDB_DLL std::string fileIdentity(const fs::path &file);
+    std::string fileIdentity(const fs::path &file);
 
     /// Absolute, normalized form of path with '/' separators: the key that path-scoped
     /// caches use, so releasing a folder matches every entry under it.
-    DDB_DLL std::string cacheKeyPath(const fs::path &path);
+    std::string cacheKeyPath(const fs::path &path);
 
     /// True when key (a cacheKeyPath) is prefix itself or lies under the folder prefix
-    DDB_DLL bool isCacheKeyUnder(const std::string &key, const std::string &prefix);
+    bool isCacheKeyUnder(const std::string &key, const std::string &prefix);
 }
 
 #endif // FILEVERSION_H

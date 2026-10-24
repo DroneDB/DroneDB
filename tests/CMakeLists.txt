@@ -14,7 +14,11 @@ if(BUILD_TESTING)
     find_package(cxxopts CONFIG REQUIRED)
 
     # Two test binaries (DQ-03), so the fast offline tests run on their own (and under the
-    # sanitizers) and the rest keeps testing libddb as it ships:
+    # sanitizers) and the rest keeps the downloads, the external tools and the 3D builds apart.
+    # Both contain the library (DQ-14): libddb exports nothing but its C API, and the tests use the
+    # C++ code, so they link the library objects (ddb_embed_library, src/CMakeLists.txt) like the
+    # CLI. The shared libddb is tested as it ships by the probes below (a process each, C API
+    # only) and by scripts/check-abi.py exports (the dynamic symbols equal the manifest).
     #
     #   ddb_unit_tests  tests/unit/: self-contained tests. A test file belongs here when none of
     #                   its tests downloads anything (TestFS or downloadTestAsset with a URL),
@@ -23,14 +27,14 @@ if(BUILD_TESTING)
     #                   itself, e.g. ddbtest_child, are fine), reads CAD assets or builds a 3D
     #                   model (Nexus/3D Tiles: libnexus and Obj2Tiles). Whole files are
     #                   classified, so a file with one such test is an integration file.
-    #                   Links the library objects (ddb_core + ddb_capi, src/CMakeLists.txt)
-    #                   and never libddb. main.cpp initializes the process through the core
-    #                   (ddb::registerProcess); ddb_capi is linked for the unit tests of the C
+    #                   main.cpp initializes the process through the core
+    #                   (ddb::registerProcess); ddb_capi is there for the unit tests of the C
     #                   API functions (DDBGet, DDBList, DDBCalculateVolume, ...); the CLI's
-    #                   commands (ddb_cli_commands, apps/CMakeLists.txt) for the unit tests of
-    #                   the command registry and of the handler that maps exceptions to exit codes.
-    #   ddbtest         tests/integration/: every other test; links libddb. The name is kept
-    #                   (CI, packaging docs, the Windows crash-dump key).
+    #                   commands (ddb_cli_commands, apps/CMakeLists.txt) are linked for the unit
+    #                   tests of the command registry and of the handler that maps exceptions to
+    #                   exit codes.
+    #   ddbtest         tests/integration/: every other test. The name is kept (CI, packaging
+    #                   docs, the Windows crash-dump key).
     #
     # tests/*.cpp (main.cpp and the shared helpers) are compiled once, into ddb_test_support,
     # and linked into both.
@@ -80,7 +84,7 @@ if(BUILD_TESTING)
         DDB_CONFIG_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_config_probe>"
         DDB_LOG_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_log_probe>"
         DDB_NEXUS_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_nexus_probe>")
-    target_link_libraries(ddb_test_support PUBLIC ddb_headers GTest::gtest cpr::cpr GDAL::GDAL boolinq
+    target_link_libraries(ddb_test_support PUBLIC ddb_static_api GTest::gtest cpr::cpr GDAL::GDAL boolinq
         PRIVATE ddb_warnings)
     if(WIN32)
         # win_crash_report.cpp walks the faulting thread's stack
@@ -139,14 +143,10 @@ if(BUILD_TESTING)
         # tests/ before the library headers, so that a test helper header (tests/utils.h) is never
         # shadowed by a library header of the same name
         target_include_directories(${name} BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-        # LINK first: ddbtest must resolve symbols that libddb exports (cpr, spz) from libddb,
-        # before a static archive of the same library is searched
+        ddb_embed_library(${name})
         target_link_libraries(${name} PRIVATE ${T_LINK} ddb_test_support ddb_warnings)
         add_dependencies(${name} ddbtest_child ddbtest_signal_probe ddbtest_config_probe ddbtest_log_probe
             ddbtest_nexus_probe)
-        if(WIN32)
-            set_target_properties(${name} PROPERTIES ENABLE_EXPORTS 1)
-        endif()
 
         gtest_discover_tests(${name}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -175,9 +175,11 @@ if(BUILD_TESTING)
     # ddb.h is valid C (DQ-10, XI-03): unit/c11_header.c includes it as C11 with warnings as
     # errors, and is linked into ddb_unit_tests (unit/c_header_test.cpp calls it), so a header
     # that is not valid C fails the build of the unit tests. Only the public include folder: no
-    # flag or define of the C++ targets reaches it.
+    # flag or define of the C++ targets reaches it, but DDB_STATIC_DEFINE: it is linked with the
+    # library objects (ddb_export.h), as the unit tests are.
     add_library(ddb_c11_header OBJECT unit/c11_header.c)
     set_target_properties(ddb_c11_header PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    target_compile_definitions(ddb_c11_header PRIVATE DDB_STATIC_DEFINE)
     target_include_directories(ddb_c11_header PRIVATE "${PROJECT_SOURCE_DIR}/src/include"
                                                       "${DDB_GENERATED_INCLUDE_DIR}")
     if(MSVC)
@@ -191,9 +193,8 @@ if(BUILD_TESTING)
     ddb_add_test_binary(ddb_unit_tests
         LABEL unit
         TIMEOUT 300
-        SOURCES ${DDB_UNIT_TEST_SOURCES} $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>
-            $<TARGET_OBJECTS:ddb_c11_header>
-        LINK ddb_core_usage ddb_cli_commands
+        SOURCES ${DDB_UNIT_TEST_SOURCES} $<TARGET_OBJECTS:ddb_c11_header>
+        LINK ddb_cli_commands
         SERIAL DDB03_Delta.isLinear
     )
     # The C API's private headers (src/library/c_api_util.h), for the unit tests of its mapper;
@@ -203,24 +204,16 @@ if(BUILD_TESTING)
     # on the ddb target
     ddb_stage_runtime_files(ddb_unit_tests)
 
-    # libddb plus the third-party libraries the integration tests call directly, each taken
-    # from the module that already provides it in the process, so no second static copy is
-    # linked in front of it (LINK comes first on the link line):
-    #   * cpr, spz: re-exported by libddb.so;
-    #   * GDAL, SQLite, curl, OpenSSL: Linux libddb resolves them from the shared libpdalcpp
-    #     (vcpkg links them into it, exported), so ddbtest links pdalcpp before the static GDAL
-    #     archive and uses the same GDAL instance as libddb (driver registry, error handler);
-    #   * Exiv2, tinyobjloader: linked into libddb.so with hidden symbols, so the few tests that
-    #     call them directly get their own copy.
-    # On Windows all of them are DLLs (spz is static, not exported by ddb.dll: its own copy).
+    # The same library objects and dependencies as the unit tests (COMMON_LIBS links pdalcpp
+    # before the static GDAL archive: one GDAL instance in the process), plus the data files:
+    # the integration binary does not depend on the ddb target either
     ddb_add_test_binary(ddbtest
         LABEL integration
         TIMEOUT 900
         SOURCES ${DDB_INTEGRATION_TEST_SOURCES}
-        LINK ${PROJECT_NAME} pdalcpp Exiv2::exiv2lib tinyobjloader::tinyobjloader OpenSSL::Crypto spz
         SLOW thumbnail.orthoEdgeBatch EdgeRasterTest.NodataInfinity52Bands
     )
-    ddb_stage_runtime_dlls(ddbtest)
+    ddb_stage_runtime_files(ddbtest)
 
     # Every export of ddb.h is called by a test (DQ-03): a new export without one fails here
     add_test(NAME c_abi.ExportsHaveTests

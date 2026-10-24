@@ -160,12 +160,16 @@ install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}cmd
     ARCHIVE DESTINATION lib
 )
 
-# Install public headers
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/include/
-    DESTINATION include
-)
-# ddb.h includes ddb_version.h (generated from package.json): installed next to it
-install(FILES "${DDB_GENERATED_INCLUDE_DIR}/ddb_version.h"
+# Install the public headers: the C API and nothing else (DQ-14). libddb exports only the DDB*
+# functions of ddb.h, so the C++ headers of src/include could not be used with it. ddb.h includes
+# ddb_export.h (the export macro) and ddb_version.h (generated from package.json); the symbol
+# manifest lists the exports. Each header compiles on its own (tests/CMakeLists.txt,
+# ddb_header_check).
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/include/ddb.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/include/ddb_export.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/include/ddb.symbols"
+    "${DDB_GENERATED_INCLUDE_DIR}/ddb_version.h"
     DESTINATION include
 )
 

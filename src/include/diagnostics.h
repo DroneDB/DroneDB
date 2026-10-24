@@ -9,19 +9,18 @@
 
 #include <string>
 
-#include "ddb_export.h"
 
 namespace ddb::diagnostics {
 
 // Logs the versions of libddb and of its libraries, the data paths and the locale
-DDB_DLL void printVersions();
+void printVersions();
 
 // "Debug build ..." or "Release build ..." (from NDEBUG) and the compiler
-DDB_DLL std::string getBuildInfo();
+std::string getBuildInfo();
 
 // The value of an environment variable, or "<unset>" when it is not set (std::getenv
 // returns null, which must never be streamed)
-DDB_DLL std::string getEnvOrUnset(const char* name);
+std::string getEnvOrUnset(const char* name);
 
 }  // namespace ddb::diagnostics
 

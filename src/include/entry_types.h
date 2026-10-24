@@ -7,7 +7,6 @@
 #include <string>
 #include <map>
 #include <vector>
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -39,9 +38,9 @@ namespace ddb
     // The number of a type, as stored in the index and returned to hosts
     constexpr int entryTypeValue(EntryType t) noexcept { return static_cast<int>(t); }
 
-    DDB_DLL std::string typeToHuman(EntryType t);
-    DDB_DLL EntryType typeFromHuman(const std::string &s);
-    DDB_DLL std::vector<std::string> getEntryTypeNames();
+    std::string typeToHuman(EntryType t);
+    EntryType typeFromHuman(const std::string &s);
+    std::vector<std::string> getEntryTypeNames();
 
 }
 

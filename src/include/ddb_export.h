@@ -4,16 +4,31 @@
 #ifndef DDB_EXPORT_H
 #define DDB_EXPORT_H
 
-#ifdef _WIN32
-    #define DDB_DLL   __declspec(dllexport)
+/* DDB_DLL marks the functions of the C API (ddb.h): the only symbols libddb exports. The library
+ * is built with hidden visibility, so a symbol without DDB_DLL stays inside it.
+ *
+ * Which one it is depends on who includes the header:
+ *   DDB_STATIC_DEFINE     the code is linked with the library objects instead of libddb (the CLI
+ *                         and the test binaries): nothing to mark.
+ *   DDB_BUILDING_LIBRARY  the library itself is being built: export (Windows: dllexport).
+ *   neither               a user of the shared library: Windows dllimport, elsewhere the
+ *                         visibility attribute.
+ *
+ * One file for every platform, because it is published with ddb.h and ddb_version.h (release
+ * assets): a header made by CMake's generate_export_header() holds the macros of the platform
+ * it was generated on, and the Linux one does not compile with MSVC. */
+#if defined(DDB_STATIC_DEFINE)
+#define DDB_DLL
+#elif defined(_WIN32) || defined(__CYGWIN__)
+#if defined(DDB_BUILDING_LIBRARY)
+#define DDB_DLL __declspec(dllexport)
 #else
-    #define DDB_DLL
-#endif // _WIN32
+#define DDB_DLL __declspec(dllimport)
+#endif
+#elif defined(__GNUC__) || defined(__clang__)
+#define DDB_DLL __attribute__((visibility("default")))
+#else
+#define DDB_DLL
+#endif
 
-// Database schema version for migration management
-// Increment this value when making schema changes
-// Version 0 = legacy database without versioning
-// Version 1 = first versioned schema (current)
-#define DDB_SCHEMA_VERSION 1
-
-#endif // DDB_EXPORT_H
+#endif /* DDB_EXPORT_H */

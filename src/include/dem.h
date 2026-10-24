@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "coordstransformer.h"
-#include "ddb_export.h"
 #include "gdal_inc.h"
 #include "gdal_raii.h"
 #include "raster_utils.h"
@@ -43,28 +42,28 @@ namespace ddb
         // WGS84 (longitude, latitude) to the CRS of the raster, and back. Null when the raster
         // has no CRS: its map coordinates are taken as WGS84 then. Throw GDALException when
         // GDAL cannot build the transformation.
-        DDB_DLL std::unique_ptr<CoordsTransformer> wgs84ToDem() const;
-        DDB_DLL std::unique_ptr<CoordsTransformer> demToWgs84() const;
+        std::unique_ptr<CoordsTransformer> wgs84ToDem() const;
+        std::unique_ptr<CoordsTransformer> demToWgs84() const;
 
         // Whether a sample is an elevation: finite, and not the nodata of the band
         bool isValid(float v) const noexcept { return std::isfinite(v) && !isNodata(v, nodata); }
 
         // The window (x, y, w, h) of the band, resampled to bufferW x bufferH, as floats. Throws
         // AppException("Cannot read raster data") when GDAL cannot read it.
-        DDB_DLL std::vector<float> readElevations(int x, int y, int w, int h, int bufferW, int bufferH) const;
+        std::vector<float> readElevations(int x, int y, int w, int h, int bufferW, int bufferH) const;
         std::vector<float> readElevations(int x, int y, int w, int h) const { return readElevations(x, y, w, h, w, h); }
 
         // The size of a pixel in meters. A projected CRS has its geotransform in meters already;
         // a geographic one (or none) has it in degrees, converted with a local WGS84 approximation
         // at `latitude`.
-        DDB_DLL PixelSize pixelSizeMeters(double latitude) const;
+        PixelSize pixelSizeMeters(double latitude) const;
     };
 
     // Opens `path` for reading and checks that it can be used as a DEM: it has a geotransform and
     // the band `bandIndex` (1-based). Throws GDALException ("Cannot open raster: ...", "Raster has
     // no geotransform: ...", "Raster has no bands") and InvalidArgsException ("Invalid band index:
     // ...").
-    DDB_DLL DemContext openDem(const std::string &path, int bandIndex = 1);
+    DemContext openDem(const std::string &path, int bandIndex = 1);
 }
 
 #endif // DEM_H

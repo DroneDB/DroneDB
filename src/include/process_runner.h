@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "ddb_export.h"
 #include "fs.h"
 
 namespace ddb
@@ -147,9 +146,9 @@ namespace ddb
 
         // Runs binary (an explicit path; no PATH search) with args (argv[1..]).
         // argv[0] is io::toUtf8(binary).
-        DDB_DLL Result run(const fs::path &binary,
-                           const std::vector<std::string> &args,
-                           const Options &options = Options());
+        Result run(const fs::path &binary,
+                   const std::vector<std::string> &args,
+                   const Options &options = Options());
 
         // The seam of the tool runners (Obj2Tiles, Untwine, build-lod, dwg2dxf): they start their
         // child through this interface, so a test substitutes a fake that returns the Result it
@@ -166,7 +165,7 @@ namespace ddb
         };
 
         // The real one: process::run().
-        class DDB_DLL SystemProcessRunner final : public IProcessRunner
+        class SystemProcessRunner final : public IProcessRunner
         {
           public:
             Result run(const fs::path &binary,
@@ -175,11 +174,11 @@ namespace ddb
         };
 
         // A shared SystemProcessRunner, the default of the runners.
-        DDB_DLL const IProcessRunner &systemProcessRunner();
+        const IProcessRunner &systemProcessRunner();
 
         // Command line for logging, quoted as the child will see it on Windows.
-        DDB_DLL std::string formatCommandLine(const fs::path &binary,
-                                              const std::vector<std::string> &args);
+        std::string formatCommandLine(const fs::path &binary,
+                                      const std::vector<std::string> &args);
 
     } // namespace process
 

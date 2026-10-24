@@ -4,7 +4,6 @@
 #ifndef PROCESS_INIT_H
 #define PROCESS_INIT_H
 
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -13,12 +12,12 @@ namespace ddb
     // (verbose, or DDB_DEBUG/DDB_LOG set: debug output), GDAL and PROJ, the XMP toolkit.
     // Call it before any other library function. It installs no signal or crash handler:
     // the host process owns them. DDBRegisterProcess (ddb.h) is the C entry point.
-    DDB_DLL void registerProcess(bool verbose = false);
+    void registerProcess(bool verbose = false);
 
     // Closes what the process keeps open between calls: a TRUNCATE checkpoint of every pooled
     // index connection, then closes them, and closes the idle cached rasters. The teardown of
     // DDBShutdown; no call may use them meanwhile.
-    DDB_DLL void closeKeptResources();
+    void closeKeptResources();
 
     // The last library call of an executable: on its main thread at the end of main, once no
     // other thread uses the library or GDAL; nothing may call them afterwards. Closes what the
@@ -34,7 +33,7 @@ namespace ddb
     // finalized, its DllMain has nothing left to do. Not part of DDBShutdown: a library host
     // may use GDAL after it, and stops long after its last libddb call returned (the workers
     // are idle by then, a state the teardown in DllMain survives).
-    DDB_DLL void finalizeProcess();
+    void finalizeProcess();
 }
 
 #endif // PROCESS_INIT_H

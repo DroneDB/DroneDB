@@ -22,7 +22,6 @@
 
 #include "authcredentials.h"
 #include "constants.h"
-#include "ddb_export.h"
 #include "entry.h"
 #include "fs.h"
 #include "http_client.h"
@@ -71,74 +70,74 @@ class RegistryClient {
 public:
     // Throws InvalidArgsException for an URL that is not http or https; "https://" is assumed when the
     // URL has no scheme, and an empty URL is the default Registry
-    DDB_DLL explicit RegistryClient(const std::string &registryUrl = DEFAULT_REGISTRY, bool verifySsl = true,
-                                    const RegistryDeps &dependencies = {});
+    explicit RegistryClient(const std::string &registryUrl = DEFAULT_REGISTRY, bool verifySsl = true,
+                            const RegistryDeps &dependencies = {});
 
     // The base URL (normalized) followed by `path`
-    DDB_DLL std::string getUrl(const std::string &path = "") const;
-    DDB_DLL bool getSslVerify() const { return sslVerify; }
-    DDB_DLL void setSslVerify(bool verify) { sslVerify = verify; }
+    std::string getUrl(const std::string &path = "") const;
+    bool getSslVerify() const { return sslVerify; }
+    void setSslVerify(bool verify) { sslVerify = verify; }
 
     // -- Authentication (registry_client.cpp) ------------------------------------------------
 
     // Logs in with the credentials saved for this Registry; InvalidArgsException when there are none
-    DDB_DLL std::string login();
+    std::string login();
     // Logs in and, on success, saves the credentials for next time. AuthException when it fails
     // (the message names the transport error, the server's message or the status). Safe to retry:
     // a transport error, a 5xx or a 429 is tried again before it fails.
-    DDB_DLL std::string login(const std::string &username, const std::string &password);
+    std::string login(const std::string &username, const std::string &password);
     // Logs in again, with the saved credentials, when the token has expired. No-op without a token.
-    DDB_DLL void ensureTokenValidity();
+    void ensureTokenValidity();
     // The credentials saved for this Registry (empty when there are none)
-    DDB_DLL AuthCredentials savedCredentials() const;
+    AuthCredentials savedCredentials() const;
     // Deletes the saved credentials; false when there were none
-    DDB_DLL bool logout();
-    DDB_DLL std::string getAuthToken() const { return authToken; }
-    DDB_DLL std::time_t getTokenExpiration() const { return tokenExpiration; }
+    bool logout();
+    std::string getAuthToken() const { return authToken; }
+    std::time_t getTokenExpiration() const { return tokenExpiration; }
 
     // -- Authenticated requests --------------------------------------------------------------
     // Each refreshes the token when it expired, sends the token, honours the SSL setting and
     // returns the response untouched: expectOk()/fail() turn an error response into an exception.
 
     // GET. Tried again on a transport error, a 5xx or a 429.
-    DDB_DLL HttpResponse get(const std::string &path, AuthScheme scheme);
+    HttpResponse get(const std::string &path, AuthScheme scheme);
     // POST of a form. Tried again, like a GET, only when `idempotent` says the server cannot do
     // it twice (a read that happens to need a POST).
-    DDB_DLL HttpResponse postForm(const std::string &path, const HttpFields &form, AuthScheme scheme,
-                                  bool idempotent = false);
+    HttpResponse postForm(const std::string &path, const HttpFields &form, AuthScheme scheme,
+                          bool idempotent = false);
     // POST of a multipart body (an upload). Never tried again.
-    DDB_DLL HttpResponse postMultipart(const std::string &path, const std::vector<HttpPart> &parts,
-                                       AuthScheme scheme, const HttpLimits &limits = {},
-                                       const HttpProgressCallback &progress = nullptr);
+    HttpResponse postMultipart(const std::string &path, const std::vector<HttpPart> &parts,
+                               AuthScheme scheme, const HttpLimits &limits = {},
+                               const HttpProgressCallback &progress = nullptr);
     // GET of `path`, or POST of `form` when it has fields, written to `sink`. Never tried again:
     // the sink has the start of the body.
-    DDB_DLL HttpResponse download(const std::string &path, AuthScheme scheme, std::ostream &sink,
-                                  const HttpProgressCallback &progress = nullptr,
-                                  const HttpFields &form = {});
+    HttpResponse download(const std::string &path, AuthScheme scheme, std::ostream &sink,
+                          const HttpProgressCallback &progress = nullptr,
+                          const HttpFields &form = {});
 
     // Nothing when the response is a 200; otherwise fail()
-    DDB_DLL void expectOk(const HttpResponse &res) const;
+    void expectOk(const HttpResponse &res) const;
     // Throws what the response says went wrong: RegistryException for a transport error, an
     // error response (the ProblemDetails/legacy message, or the body) and a 200 the caller found
     // malformed; AuthException for a 401 (a 403 is not one: the credentials were accepted, the
     // user may not do this, and asking for others would not help).
-    [[noreturn]] DDB_DLL void fail(const HttpResponse &res) const;
+    [[noreturn]] void fail(const HttpResponse &res) const;
 
     // -- Dataset endpoints (registry_datasets.cpp) -------------------------------------------
 
-    DDB_DLL Entry getDatasetInfo(const std::string &organization, const std::string &dataset);
+    Entry getDatasetInfo(const std::string &organization, const std::string &dataset);
 
-    DDB_DLL void downloadDdb(const std::string &organization, const std::string &dataset,
-                             const std::string &folder);
+    void downloadDdb(const std::string &organization, const std::string &dataset,
+                     const std::string &folder);
 
-    DDB_DLL json getStamp(const std::string &organization, const std::string &dataset);
+    json getStamp(const std::string &organization, const std::string &dataset);
 
-    DDB_DLL void downloadFiles(const std::string &organization, const std::string &dataset,
-                               const std::vector<std::string> &files, const std::string &folder,
-                               std::ostream &out);
+    void downloadFiles(const std::string &organization, const std::string &dataset,
+                       const std::vector<std::string> &files, const std::string &folder,
+                       std::ostream &out);
 
-    DDB_DLL json getMetaDump(const std::string &organization, const std::string &dataset,
-                             const std::vector<std::string> &ids);
+    json getMetaDump(const std::string &organization, const std::string &dataset,
+                     const std::vector<std::string> &ids);
 };
 
 } // namespace ddb

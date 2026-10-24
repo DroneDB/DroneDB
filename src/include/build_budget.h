@@ -6,7 +6,6 @@
 
 #include <cstdint>
 
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -21,13 +20,13 @@ struct BuildResourceBudget {
     int warpMemoryMb;
     int threads;  // >= 1
 
-    DDB_DLL static BuildResourceBudget fromConfig();
+    static BuildResourceBudget fromConfig();
 };
 
 // Bounds GDAL's process-wide block cache (GDAL default: 5% of RAM) to
 // DDB_GDAL_CACHE_MB (default 1024 MB). Never raises it, and does nothing
 // when GDAL_CACHEMAX is set explicitly. Called once by ddb::registerProcess.
-DDB_DLL void applyDefaultGdalCacheBound();
+void applyDefaultGdalCacheBound();
 
 // Sets GDAL's block cache to `bytes` while the guard is alive. The cache is
 // process-wide, so all guards share one state: while any guard is alive the
@@ -35,7 +34,7 @@ DDB_DLL void applyDefaultGdalCacheBound();
 // was in effect before the first guard is restored when the last one ends.
 // This keeps concurrent builds bounded: one build ending never restores the
 // unbounded default under another build that is still running.
-class DDB_DLL ScopedGdalCacheMax {
+class ScopedGdalCacheMax {
 public:
     explicit ScopedGdalCacheMax(int64_t bytes);
     ~ScopedGdalCacheMax();

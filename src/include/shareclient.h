@@ -7,7 +7,6 @@
 #include <functional>
 #include <string>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "registry_client.h"
 
@@ -27,14 +26,14 @@ namespace ddb
         std::string resultUrl;
 
     public:
-        DDB_DLL ShareClient(RegistryClient *client);
+        ShareClient(RegistryClient *client);
 
-        DDB_DLL void Init(const std::string &tag, const std::string &password, const std::string &datasetName = "", const std::string &datasetDescription = "");
-        DDB_DLL void Upload(const std::string &path, const fs::path &filePath, const UploadCallback &cb = nullptr);
-        DDB_DLL std::string Commit();
+        void Init(const std::string &tag, const std::string &password, const std::string &datasetName = "", const std::string &datasetDescription = "");
+        void Upload(const std::string &path, const fs::path &filePath, const UploadCallback &cb = nullptr);
+        std::string Commit();
 
-        DDB_DLL std::string getToken() const;
-        DDB_DLL std::string getResultUrl() const;
+        std::string getToken() const;
+        std::string getResultUrl() const;
     };
 
 }

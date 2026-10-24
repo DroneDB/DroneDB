@@ -5,7 +5,6 @@
 #define STATUS_H
 
 #include "entry.h"
-#include "ddb_export.h"
 
 #include "dbops.h"
 
@@ -24,12 +23,12 @@ namespace ddb
      * Sets e.mtime, and e.hash when it hashed the file. fileMtime, when given, receives the
      * file's modification time with sub-second precision (to store in the index).
      */
-    DDB_DLL FileStatus checkUpdate(Entry &e, const fs::path &p, double dbMtime, const std::string &dbHash,
-                                   double *fileMtime = nullptr);
+    FileStatus checkUpdate(Entry &e, const fs::path &p, double dbMtime, const std::string &dbHash,
+                           double *fileMtime = nullptr);
 
     typedef std::function<void(const FileStatus status, const std::string &file)> FileStatusCallback;
 
-    DDB_DLL void statusIndex(Database *db, const FileStatusCallback &cb);
+    void statusIndex(Database *db, const FileStatusCallback &cb);
 
 }
 

@@ -9,7 +9,6 @@
 #include <mutex>
 #include <optional>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "json_fwd.h"
 
@@ -36,28 +35,28 @@ namespace ddb
     class ProcessConfig
     {
     public:
-        DDB_DLL static ProcessConfig &get();
+        static ProcessConfig &get();
 
         // Applies the members of `changes` (a JSON object): a value sets the setting, null puts
         // it back to its environment variable or default. Every member is checked first: on an
         // unknown name or an invalid value it throws InvalidArgsException and changes nothing.
-        DDB_DLL void configure(const json &changes);
+        void configure(const json &changes);
 
         // {"settings": {name: value}, "sources": {name: "configure"|"environment"|"default"},
         //  "hardwareThreads": n}: the value of every setting and where it comes from
-        DDB_DLL json effective() const;
+        json effective() const;
 
         // Size of the process-wide CPU token pool (parallel.h): worker threads that may run
         // beside the calling threads, across every libddb call at once
-        DDB_DLL size_t cpuPoolSize() const;
+        size_t cpuPoolSize() const;
         // Threads of one I/O-bound parallel section (hashing files, deleting build folders)
-        DDB_DLL size_t ioThreads() const;
+        size_t ioThreads() const;
         // Free space a build (or a copy of build artifacts) needs on its volume, in MiB; 0 turns
         // the check off
-        DDB_DLL uint64_t minFreeDiskMb() const;
+        uint64_t minFreeDiskMb() const;
         // The folder of libddb's caches (thumbnails, tiles, index templates, DSM tiles); not
         // created here (UserProfile::getCacheDir creates it)
-        DDB_DLL fs::path cacheDir() const;
+        fs::path cacheDir() const;
 
         ProcessConfig(const ProcessConfig &) = delete;
         ProcessConfig &operator=(const ProcessConfig &) = delete;

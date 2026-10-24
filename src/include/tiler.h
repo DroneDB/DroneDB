@@ -9,7 +9,6 @@
 #include <sstream>
 #include <string>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "geo.h"
 #include "tile_encoder.h"
@@ -90,25 +89,25 @@ namespace ddb
                               uint8_t **outBuffer, int *outBufferSize);
 
     public:
-        DDB_DLL Tiler(const std::string &inputPath,
-                      const std::string &outputFolder, int tileSize = 256,
-                      bool tms = false);
-        DDB_DLL virtual ~Tiler();
+        Tiler(const std::string &inputPath,
+              const std::string &outputFolder, int tileSize = 256,
+              bool tms = false);
+        virtual ~Tiler();
 
-        DDB_DLL std::string getTilePath(int z, int x, int y,
-                                        bool createIfNotExists);
+        std::string getTilePath(int z, int x, int y,
+                                bool createIfNotExists);
 
         // PNG tile
-        DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
-        DDB_DLL virtual std::string tile(int tz, int tx, int ty, ImageFormat format,
-                                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) = 0;
-        DDB_DLL std::string tile(const TileInfo &tile);
+        std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
+        virtual std::string tile(int tz, int tx, int ty, ImageFormat format,
+                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) = 0;
+        std::string tile(const TileInfo &tile);
 
-        DDB_DLL std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
-        DDB_DLL BoundingBox<int> getMinMaxZ() const;
+        std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
+        BoundingBox<int> getMinMaxZ() const;
 
         // Min max tile coordinates for specified zoom level
-        DDB_DLL BoundingBox<Projected2Di> getMinMaxCoordsForZ(int tz) const;
+        BoundingBox<Projected2Di> getMinMaxCoordsForZ(int tz) const;
     };
 
 } // namespace ddb

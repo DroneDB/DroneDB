@@ -11,7 +11,7 @@
 namespace ddb
 {
 
-	DDB_DLL int PasswordManager::countPasswords()
+	int PasswordManager::countPasswords()
 	{
 
 		const std::string sql = "SELECT COUNT(*) FROM passwords";
@@ -23,7 +23,7 @@ namespace ddb
 		return cnt;
 	}
 
-	DDB_DLL void PasswordManager::append(const std::string &password)
+	void PasswordManager::append(const std::string &password)
 	{
 
 		if (password.empty())
@@ -56,7 +56,7 @@ namespace ddb
 	//{
 	//}
 
-	DDB_DLL bool PasswordManager::verify(const std::string &password)
+	bool PasswordManager::verify(const std::string &password)
 	{
 		const auto noPasswords = countPasswords() == 0;
 		if (password.empty() && noPasswords)
@@ -85,7 +85,7 @@ namespace ddb
 		return false;
 	}
 
-	DDB_DLL void PasswordManager::clearAll()
+	void PasswordManager::clearAll()
 	{
 		const std::string sql = "DELETE FROM passwords";
 		const auto q = this->db->query(sql);

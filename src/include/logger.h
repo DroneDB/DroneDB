@@ -13,17 +13,16 @@
 #include <plog/Formatters/CsvFormatter.h>
 #include <plog/Formatters/MessageOnlyFormatter.h>
 
-#include "ddb_export.h"
 
 namespace ddb::logging {
 
 // Starts the logger (once per process): the console, or the host's log callback, and with
 // logToFile also the rolling file ddb-log.csv
-DDB_DLL void init(bool logToFile = false);
-DDB_DLL void setVerbose();
-DDB_DLL bool isVerbose();
+void init(bool logToFile = false);
+void setVerbose();
+bool isVerbose();
 // Writes out what the log appenders buffered (stdout, stderr): before the host exits (DDBShutdown)
-DDB_DLL void flush();
+void flush();
 
 }  // namespace ddb::logging
 

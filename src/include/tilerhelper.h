@@ -11,7 +11,6 @@
 #include <sstream>
 #include <string>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "geo.h"
 #include "gdaltiler.h"
@@ -77,24 +76,24 @@ namespace ddb
     public:
         // Writes the tiles of input under output, one path per line (or one JSON string per
         // member of an array) to os
-        DDB_DLL static void runTiler(const fs::path &input, const fs::path &output, std::ostream &os,
-                                     const TilerRun &run = {});
+        static void runTiler(const fs::path &input, const fs::path &output, std::ostream &os,
+                             const TilerRun &run = {});
 
         // Get a single tile from user cache: request.source.outputFolder, format, visParams and
         // the buffer are not used (the cache names its own folder and keeps PNG files)
-        DDB_DLL static fs::path getFromUserCache(const TileRequest &request);
+        static fs::path getFromUserCache(const TileRequest &request);
 
         // Get a single tile: its path, or the encoded bytes in the request's buffer
-        DDB_DLL static fs::path getTile(const TileRequest &request);
+        static fs::path getTile(const TileRequest &request);
 
         // Prepare a tileable file for tiling (if needed)
         // for example, geoimages that can be tiled are first geoprojected
-        DDB_DLL static fs::path toGeoTIFF(const fs::path &tileablePath,
-                                          int tileSize, bool forceRecreate,
-                                          const fs::path &outputGeotiff = "",
-                                          const std::string &tileablePathHash = "");
+        static fs::path toGeoTIFF(const fs::path &tileablePath,
+                                  int tileSize, bool forceRecreate,
+                                  const fs::path &outputGeotiff = "",
+                                  const std::string &tileablePathHash = "");
 
-        DDB_DLL static void cleanupUserCache();
+        static void cleanupUserCache();
     };
 
 } // namespace ddb

@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "ddb_export.h"
 #include "registry_auth.h"
 #include "registry_client.h"
 
@@ -41,12 +40,12 @@ namespace ddb
         RegistryDeps deps;
 
     public:
-        DDB_DLL explicit ShareService(const RegistryDeps &registryDeps = {});
+        explicit ShareService(const RegistryDeps &registryDeps = {});
 
         // Uploads the files (directories are skipped) to a new share of the Registry in `tag`
         // and returns the URL of the result. The login goes through withAuthenticatedRegistry:
         // `credentials` is asked when none are saved or the saved ones are refused.
-        DDB_DLL std::string share(const ShareRequest &request, CredentialProvider &credentials);
+        std::string share(const ShareRequest &request, CredentialProvider &credentials);
     };
 
 } // namespace ddb

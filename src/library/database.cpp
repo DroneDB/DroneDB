@@ -157,7 +157,7 @@ END;
         return *this;
     }
 
-    DDB_DLL void Database::ensureSchemaConsistency()
+    void Database::ensureSchemaConsistency()
     {
         LOGD << "Ensuring schema consistency";
 

@@ -9,7 +9,6 @@
 #include <sstream>
 #include <string>
 
-#include "ddb_export.h"
 #include "raster_stats.h"
 #include "tiler.h"
 #include "thumbs.h"
@@ -77,28 +76,28 @@ namespace ddb
         GDALRasterBandH FindAlphaBand(const GDALDatasetH &dataset);
 
     public:
-        DDB_DLL GDALTiler(const std::string &geotiffPath,
-                          const std::string &outputFolder, int tileSize = 256,
-                          bool tms = false);
-        DDB_DLL ~GDALTiler();
+        GDALTiler(const std::string &geotiffPath,
+                  const std::string &outputFolder, int tileSize = 256,
+                  bool tms = false);
+        ~GDALTiler();
 
         using Tiler::tile;
 
-        DDB_DLL std::string tile(int tz, int tx, int ty, ImageFormat format,
-                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
+        std::string tile(int tz, int tx, int ty, ImageFormat format,
+                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
 
         // Format-aware overload. outputFormat is "png", "jpeg" or "webp" (or a MIME type).
-        DDB_DLL std::string tile(int tz, int tx, int ty,
-                                 const std::string &outputFormat,
-                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
+        std::string tile(int tz, int tx, int ty,
+                         const std::string &outputFormat,
+                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
 
         // Band-aware tile generation with visualization parameters
-        DDB_DLL std::string tile(int tz, int tx, int ty,
-                                 const ThumbVisParams &visParams,
-                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
-        DDB_DLL std::string tile(int tz, int tx, int ty,
-                                 const ThumbVisParams &visParams, ImageFormat format,
-                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
+        std::string tile(int tz, int tx, int ty,
+                         const ThumbVisParams &visParams,
+                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
+        std::string tile(int tz, int tx, int ty,
+                         const ThumbVisParams &visParams, ImageFormat format,
+                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
     };
 
 } // namespace ddb

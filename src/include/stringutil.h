@@ -18,7 +18,6 @@
 #include <string_view>
 #include <vector>
 
-#include "ddb_export.h"
 
 namespace ddb::str {
 
@@ -134,18 +133,18 @@ inline void trim(std::string& s) {
 
 // The pieces of s between the occurrences of delimiter, empty pieces included ("a,,b" gives
 // "a", "", "b"; "" gives one empty piece). An empty delimiter gives s as the only piece.
-DDB_DLL std::vector<std::string> split(std::string_view s, std::string_view delimiter);
-DDB_DLL std::vector<std::string> split(std::string_view s, char delimiter);
+std::vector<std::string> split(std::string_view s, std::string_view delimiter);
+std::vector<std::string> split(std::string_view s, char delimiter);
 
 // The runs of non-whitespace characters (isSpaceChar) of s, in order; none for blank text
-DDB_DLL std::vector<std::string> splitWhitespace(std::string_view s);
+std::vector<std::string> splitWhitespace(std::string_view s);
 
 // The items with separator between them (no trailing separator; "" for no items)
-DDB_DLL std::string join(const std::vector<std::string>& items, std::string_view separator = ",");
+std::string join(const std::vector<std::string>& items, std::string_view separator = ",");
 
 // s with every occurrence of `from` replaced by `to`, left to right, without rescanning the
 // replacement; an empty `from` changes nothing
-DDB_DLL void replaceAll(std::string& s, std::string_view from, std::string_view to);
+void replaceAll(std::string& s, std::string_view from, std::string_view to);
 
 }  // namespace ddb::str
 

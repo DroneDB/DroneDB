@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "ddb_export.h"
 #include "fs.h"
 
 namespace ddb
@@ -37,14 +36,14 @@ namespace ddb
     /// re-saved by an editor often keep an MPF index that points past their end).
     /// Throws FSException when the file cannot be read; returns an empty layout (size 0)
     /// when it is not a JPEG.
-    DDB_DLL JpegLayout readJpegLayout(const fs::path &path);
+    JpegLayout readJpegLayout(const fs::path &path);
 
     /// The smallest preview with the proportions of the main image (1 % tolerance) whose
     /// long side is at least minLongSide; nothing when there is none
-    DDB_DLL std::optional<JpegPreview> pickJpegPreview(const JpegLayout &layout, int minLongSide);
+    std::optional<JpegPreview> pickJpegPreview(const JpegLayout &layout, int minLongSide);
 
     /// GDAL path that opens the preview inside the file (/vsisubfile/)
-    DDB_DLL std::string jpegPreviewGdalPath(const fs::path &path, const JpegPreview &preview);
+    std::string jpegPreviewGdalPath(const fs::path &path, const JpegPreview &preview);
 }
 
 #endif // EMBEDDED_PREVIEW_H

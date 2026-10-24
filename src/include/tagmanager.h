@@ -5,7 +5,6 @@
 #define TAGMANAGER_H
 
 #include "dbops.h"
-#include "ddb_export.h"
 #include "entry.h"
 
 namespace ddb
@@ -22,8 +21,8 @@ namespace ddb
         TagManager(Database *db) : db(db) {}
 
         /// The tag of the dataset, "" when it has none; never creates the tags file
-        DDB_DLL std::string getTag() const;
-        DDB_DLL void setTag(const std::string &tag);
+        std::string getTag() const;
+        void setTag(const std::string &tag);
     };
 
 } // namespace ddb

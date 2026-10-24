@@ -8,7 +8,6 @@
 #include <sqlite3.h>
 #include <string>
 #include "logger.h"
-#include "ddb_export.h"
 
 // Owns one prepared statement (finalized by the destructor). Move-only: a copy would
 // finalize the same sqlite3_stmt twice. A moved-from Statement owns nothing and may only be
@@ -27,35 +26,35 @@ class Statement
   Statement &step();
 
 public:
-  DDB_DLL Statement(sqlite3 *db, const std::string &query);
-  DDB_DLL ~Statement();
+  Statement(sqlite3 *db, const std::string &query);
+  ~Statement();
 
   Statement(const Statement &) = delete;
   Statement &operator=(const Statement &) = delete;
-  DDB_DLL Statement(Statement &&other) noexcept;
-  DDB_DLL Statement &operator=(Statement &&other) noexcept;
+  Statement(Statement &&other) noexcept;
+  Statement &operator=(Statement &&other) noexcept;
 
-  DDB_DLL Statement &bind(int paramNum, const std::string &value);
-  DDB_DLL Statement &bind(int paramNum, int value);
-  DDB_DLL Statement &bind(int paramNum, long long value);
-  DDB_DLL Statement &bind(int paramNum, double value);
+  Statement &bind(int paramNum, const std::string &value);
+  Statement &bind(int paramNum, int value);
+  Statement &bind(int paramNum, long long value);
+  Statement &bind(int paramNum, double value);
 
-  DDB_DLL bool fetch();
+  bool fetch();
 
   // Readers of the current row: they do not change the statement
-  DDB_DLL int getInt(int columnId) const;
-  DDB_DLL long long getInt64(int columnId) const;
-  DDB_DLL std::string getText(int columnId) const;
-  DDB_DLL double getDouble(int columnId) const;
-  DDB_DLL const void *getBlob(int columnId) const;
+  int getInt(int columnId) const;
+  long long getInt64(int columnId) const;
+  std::string getText(int columnId) const;
+  double getDouble(int columnId) const;
+  const void *getBlob(int columnId) const;
 
-  DDB_DLL int getColumnsCount() const;
+  int getColumnsCount() const;
   // TODO: more
 
-  DDB_DLL void reset();
-  DDB_DLL void execute();
+  void reset();
+  void execute();
 
-  DDB_DLL std::string getQuery() const;
+  std::string getQuery() const;
 };
 
 #endif // STATEMENT_H

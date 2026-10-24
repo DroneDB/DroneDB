@@ -6,7 +6,6 @@
 
 #include "entry.h"
 #include "fs.h"
-#include "ddb_export.h"
 
 #include <cstdint>
 #include <functional>
@@ -25,32 +24,32 @@ namespace ddb
         std::string rescale;     // Rescale range "min,max"
     };
 
-    DDB_DLL fs::path getThumbFromUserCache(const fs::path &imagePath, int thumbSize, bool forceRecreate);
+    fs::path getThumbFromUserCache(const fs::path &imagePath, int thumbSize, bool forceRecreate);
     // Writes a thumbnail per file the generators support; onGenerated gets the path of each one
     // as soon as it is written
-    DDB_DLL void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc,
-                                const std::function<void(const fs::path &)> &onGenerated = {});
-    DDB_DLL bool supportsThumbnails(EntryType type);
-    DDB_DLL fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int thumbSize);
-    DDB_DLL fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
-    DDB_DLL void generateImageThumbEx(const fs::path &imagePath, int thumbSize,
+    void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc,
+                        const std::function<void(const fs::path &)> &onGenerated = {});
+    bool supportsThumbnails(EntryType type);
+    fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int thumbSize);
+    fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
+    void generateImageThumbEx(const fs::path &imagePath, int thumbSize,
                                        const fs::path &outImagePath,
                                        uint8_t **outBuffer, int *outBufferSize,
                                        const ThumbVisParams &visParams);
     // Thumbnail of a COPC point cloud. It reads the octree down to the deepest level
     // whose points fit pointBudget (0 = about 2 points per output pixel).
-    DDB_DLL void generatePointCloudThumb(const fs::path &copcPath, int thumbSize,
-                                         const fs::path &outImagePath,
-                                         uint8_t **outBuffer, int *outBufferSize,
-                                         uint64_t pointBudget = 0);
+    void generatePointCloudThumb(const fs::path &copcPath, int thumbSize,
+                                 const fs::path &outImagePath,
+                                 uint8_t **outBuffer, int *outBufferSize,
+                                 uint64_t pointBudget = 0);
     // Thumbnails of a Gaussian Splat, from a .spz file or from the level-of-detail .rad artifact
-    DDB_DLL void generateSplatThumb(const fs::path &spzPath, int thumbSize,
-                                    const fs::path &outImagePath,
-                                    uint8_t **outBuffer, int *outBufferSize);
-    DDB_DLL void generateSplatThumbFromRad(const fs::path &radPath, int thumbSize,
-                                           const fs::path &outImagePath,
-                                           uint8_t **outBuffer, int *outBufferSize);
-    DDB_DLL void cleanupThumbsUserCache();
+    void generateSplatThumb(const fs::path &spzPath, int thumbSize,
+                            const fs::path &outImagePath,
+                            uint8_t **outBuffer, int *outBufferSize);
+    void generateSplatThumbFromRad(const fs::path &radPath, int thumbSize,
+                                   const fs::path &outImagePath,
+                                   uint8_t **outBuffer, int *outBufferSize);
+    void cleanupThumbsUserCache();
 
 }
 

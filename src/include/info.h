@@ -6,7 +6,6 @@
 
 #include "entry.h"
 #include "output_format.h"
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -25,8 +24,8 @@ namespace ddb
     /// Describes files (and, with options.recursive, the folders below them) without indexing
     /// them: text (one block per file), a JSON array of entries, or a GeoJSON feature collection
     /// of those
-    DDB_DLL void info(const std::vector<std::string> &input, std::ostream &output,
-                      const InfoOptions &options = {});
+    void info(const std::vector<std::string> &input, std::ostream &output,
+              const InfoOptions &options = {});
 
 }
 

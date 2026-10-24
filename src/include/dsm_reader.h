@@ -11,7 +11,6 @@
 #include <cstring>
 #include <vector>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "gdal_inc.h"
 #include "geo.h"
@@ -26,13 +25,13 @@ struct DSMCacheEntry
     std::vector<float> data;
     ddb::BoundingBox<ddb::Point2D> bbox;
 
-    DDB_DLL DSMCacheEntry() : width(0), height(0)
+    DSMCacheEntry() : width(0), height(0)
     {
         memset(geoTransform, 0, sizeof(double) * 6);
     }
 
-    DDB_DLL void loadData(GDALDatasetH hDataset);
-    DDB_DLL float getElevation(double latitude, double longitude);
+    void loadData(GDALDatasetH hDataset);
+    float getElevation(double latitude, double longitude);
 };
 
 namespace ddb
@@ -49,7 +48,7 @@ namespace ddb
     // raster covers the point (longitude, latitude), so a file outside the query costs one open.
     // Throws GDALException when the file cannot be opened, has no geotransform or projection,
     // or has more than one band.
-    DDB_DLL DsmRaster readDsmRaster(const fs::path &filePath, double latitude, double longitude);
+    DsmRaster readDsmRaster(const fs::path &filePath, double latitude, double longitude);
 
 } // namespace ddb
 

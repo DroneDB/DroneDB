@@ -8,17 +8,16 @@
 #include <functional>
 #include <string>
 
-#include "ddb_export.h"
 
 namespace ddb::parallel
 {
     // Cores reported by the system, at least 1.
-    DDB_DLL size_t hardwareThreads();
+    size_t hardwareThreads();
 
     // Thread count wanted by the config option `name` (environment variable or
     // CPLSetConfigOption): N > 0 is N, 0 is every core, unset or invalid is
     // min(defaultMax, cores). The CPU pool decides how many of them run.
-    DDB_DLL int threadsOption(const char *name, int defaultMax);
+    int threadsOption(const char *name, int defaultMax);
 
     // ---- The process-wide CPU token pool (DQ-15, XI-06) ----------------------------------
     //
@@ -34,7 +33,7 @@ namespace ddb::parallel
 
     // Tokens held by one parallel section, given back when it ends (RAII). Not thread-safe:
     // one section, one owner.
-    class DDB_DLL CpuTokens
+    class CpuTokens
     {
     public:
         CpuTokens() noexcept = default;
@@ -60,15 +59,15 @@ namespace ddb::parallel
 
     // Tokens for a section that wants `threads` threads in all (the calling thread included,
     // so it asks for threads - 1 tokens): 0 to threads - 1 of them, without waiting
-    DDB_DLL CpuTokens tryAcquireThreads(size_t threads) noexcept;
+    CpuTokens tryAcquireThreads(size_t threads) noexcept;
 
     // "NUM_THREADS=<tokens.threads()>": GDAL's thread option (creation option -co, warp option
     // -wo) for the threads the tokens allow. Keep the tokens alive while GDAL uses the threads
     // (until the dataset that was created with the option is closed).
-    DDB_DLL std::string gdalNumThreads(const CpuTokens &tokens);
+    std::string gdalNumThreads(const CpuTokens &tokens);
 
     // Tokens held in the whole process (diagnostics and tests)
-    DDB_DLL size_t cpuTokensInUse() noexcept;
+    size_t cpuTokensInUse() noexcept;
 
     // ---- Parallel loops ---------------------------------------------------------------------
 
@@ -89,12 +88,12 @@ namespace ddb::parallel
     // and every index checks it before it starts: once the token is canceled
     // or the shutdown started, no new index starts and the loop throws
     // CanceledException (ShutdownException), like a failed index.
-    DDB_DLL void forEachIndex(size_t count, size_t maxThreads, const std::function<void(size_t)> &fn);
+    void forEachIndex(size_t count, size_t maxThreads, const std::function<void(size_t)> &fn);
 
     // forEachIndex for a section bound by the disk rather than by the CPU (reading files to
     // hash them, deleting folders): up to ProcessConfig::ioThreads() threads (DDBConfigure
     // "ioThreads", default 4) per call, without CPU tokens.
-    DDB_DLL void forEachIndexIo(size_t count, const std::function<void(size_t)> &fn);
+    void forEachIndexIo(size_t count, const std::function<void(size_t)> &fn);
 
 } // namespace ddb::parallel
 

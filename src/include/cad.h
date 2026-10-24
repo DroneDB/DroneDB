@@ -7,7 +7,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-#include "ddb_export.h"
 #include "fs.h"
 #include "gdal_inc.h"
 #include "mio.h"
@@ -25,17 +24,17 @@ namespace ddb
     namespace cad
     {
         // .dxf or .dwg (case-insensitive).
-        DDB_DLL bool isCadFile(const fs::path &p);
-        DDB_DLL bool isDwgFile(const fs::path &p);
+        bool isCadFile(const fs::path &p);
+        bool isDwgFile(const fs::path &p);
 
         // Locates dwg2dxf: DDB_DWG2DXF_PATH (authoritative when set), next to the
         // running executable, <exe>/../bin, then PATH. Empty when unavailable. The answer is
         // cached like the other tools' (tools::findTool); forceRefresh searches again.
-        DDB_DLL fs::path findDwg2DxfBinary(bool forceRefresh = false);
+        fs::path findDwg2DxfBinary(bool forceRefresh = false);
 
         // "AC1032 (R2018)" from the DWG header; throws AppException ("... is not a
         // valid DWG file") when the file does not start with a DWG version magic.
-        DDB_DLL std::string dwgVersion(const fs::path &dwg);
+        std::string dwgVersion(const fs::path &dwg);
 
         // Converts a DWG into a DXF. Implementations throw AppException with a
         // message a user can act on; outDxf exists only on success.
@@ -49,7 +48,7 @@ namespace ddb
         // LibreDWG dwg2dxf. The child is bounded by an idle timeout (60 s) and a
         // total run time (DDB_DWG2DXF_MAX_SECONDS, default 120 s). Exit code 0 is
         // not trusted: the output must open in GDAL and contain features.
-        class DDB_DLL LibreDwgConverter : public ICadConverter
+        class LibreDwgConverter : public ICadConverter
         {
           public:
             // Empty binary: findDwg2DxfBinary() at conversion time. The child is started by
@@ -65,7 +64,7 @@ namespace ddb
 
         // A GDAL-openable DXF for a CAD file: the file itself for .dxf, a
         // temporary conversion for .dwg (deleted with this object).
-        class DDB_DLL CadSource
+        class CadSource
         {
           public:
             // converter: nullptr = LibreDwgConverter. workDir: parent of the
@@ -100,22 +99,22 @@ namespace ddb
             double geoNorthX = 0, geoNorthY = 1;
             double geoUnitScale = 1;
         };
-        DDB_DLL DxfInfo readDxfInfo(const fs::path &dxf);
+        DxfInfo readDxfInfo(const fs::path &dxf);
 
         // Unit name for $INSUNITS ("m", "ft", "mm", ...; "" when unknown/unitless).
-        DDB_DLL std::string insUnitsName(int insUnits);
+        std::string insUnitsName(int insUnits);
 
         // SRS (authority code such as "EPSG:2193", or WKT) from a GEODATA object of
         // type 2 (projected grid) or 3 (geographic); type 0 (unset) and 1 (local grid,
         // see the DxfInfo overload) have none.
-        DDB_DLL std::optional<std::string> srsFromGeoData(int type, const std::string &definition);
+        std::optional<std::string> srsFromGeoData(int type, const std::string &definition);
 
         // SRS of a drawing's GEODATA: types 2 and 3 as above; a local grid (type 1) of
         // a projected coordinate system becomes a WKT2 derived projected CRS whose
         // affine conversion takes the drawing's design point to the reference point,
         // turns the drawing's north direction to grid north and scales drawing units
         // to the system's units.
-        DDB_DLL std::optional<std::string> srsFromGeoData(const DxfInfo &info);
+        std::optional<std::string> srsFromGeoData(const DxfInfo &info);
 
         struct CadCrs
         {
@@ -142,24 +141,24 @@ namespace ddb
         //   4. a DXF (never a DWG) without CRS whose extent fits in +-180/+-90:
         //      EPSG:4326, source "lonlat" (DDB-12 D1);
         //   5. otherwise local (not georeferenced: shown without a globe).
-        DDB_DLL CadCrs resolveCadCrs(const fs::path &originalInput, GDALDatasetH ds, const DxfInfo &info);
+        CadCrs resolveCadCrs(const fs::path &originalInput, GDALDatasetH ds, const DxfInfo &info);
 
         // Content of a .prj that gives a drawing the coordinate system `crs`: an
         // authority code ("EPSG:32632"), WKT or a PROJ string, written as ESRI WKT (what
         // other GIS software reads in a .prj), or "local" for LOCAL_CS["Drawing"], which
         // keeps the drawing in its own coordinates. Throws InvalidArgsException when crs
         // is not a coordinate system.
-        DDB_DLL std::string prjContent(const std::string &crs);
+        std::string prjContent(const std::string &crs);
 
         // The same-name .prj of a file, if one exists ("drawing.prj" or "drawing.PRJ")
         // and is not ignored by an IgnoredSidecarScope on this thread.
-        DDB_DLL std::optional<fs::path> findPrjSidecar(const fs::path &file);
+        std::optional<fs::path> findPrjSidecar(const fs::path &file);
 
         // While alive, findPrjSidecar() ignores these files on the current thread.
         // The index re-reads a drawing right after its .prj was removed from the
         // index, and hosts delete the file only afterwards (Registry does), so the
         // removed .prj must not count even though it is still on disk.
-        class DDB_DLL IgnoredSidecarScope
+        class IgnoredSidecarScope
         {
           public:
             explicit IgnoredSidecarScope(std::vector<fs::path> files);

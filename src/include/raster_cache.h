@@ -14,7 +14,6 @@
 #include <string>
 #include <vector>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "gdal_inc.h"
 
@@ -34,8 +33,8 @@ namespace ddb
             Vector
         };
 
-        DDB_DLL explicit OpenedDataset(const std::string &path, Kind kind = Kind::Raster);
-        DDB_DLL ~OpenedDataset();
+        explicit OpenedDataset(const std::string &path, Kind kind = Kind::Raster);
+        ~OpenedDataset();
         OpenedDataset(const OpenedDataset &) = delete;
         OpenedDataset &operator=(const OpenedDataset &) = delete;
 
@@ -143,29 +142,29 @@ namespace ddb
 
         using TilerFactory = std::function<std::unique_ptr<Tiler>()>;
 
-        DDB_DLL static RasterCache &instance();
+        static RasterCache &instance();
 
         /// A tiler for key: an idle one when available, otherwise one made by create
-        DDB_DLL Lease<Tiler> acquireTiler(const TilerKey &key, const TilerFactory &create);
+        Lease<Tiler> acquireTiler(const TilerKey &key, const TilerFactory &create);
 
         /// The raster at path opened read-only: an idle handle when available
-        DDB_DLL Lease<OpenedDataset> acquireDataset(const std::string &path);
+        Lease<OpenedDataset> acquireDataset(const std::string &path);
 
         /// The vector file at path opened read-only: an idle handle when available. The
         /// caller must clear the filters it sets on its layers before giving it back.
-        DDB_DLL Lease<OpenedDataset> acquireVectorDataset(const std::string &path);
+        Lease<OpenedDataset> acquireVectorDataset(const std::string &path);
 
         /// Closes the idle instances of every file under path (a file, a build folder, a
         /// dataset folder). Returns how many were closed.
-        DDB_DLL size_t release(const fs::path &path);
+        size_t release(const fs::path &path);
 
         /// Closes every idle instance
-        DDB_DLL size_t clear();
+        size_t clear();
 
         /// Replaces the options; closes idle instances beyond the new limits
-        DDB_DLL void configure(const Options &options);
-        DDB_DLL Options options() const;
-        DDB_DLL Stats stats() const;
+        void configure(const Options &options);
+        Options options() const;
+        Stats stats() const;
 
     private:
         struct Idle
@@ -181,8 +180,8 @@ namespace ddb
 
         Lease<OpenedDataset> acquireOpened(const std::string &file, OpenedDataset::Kind kind);
         std::shared_ptr<void> take(const std::string &key, const std::string &version);
-        DDB_DLL void giveBack(const std::string &key, const std::string &path, const std::string &version,
-                              std::shared_ptr<void> object);
+        void giveBack(const std::string &key, const std::string &path, const std::string &version,
+                      std::shared_ptr<void> object);
         // Under lock: moves expired and over-limit instances to out
         void collect(std::vector<std::shared_ptr<void>> &out, std::chrono::steady_clock::time_point now);
         bool enabledLocked() const { return options_.perRaster > 0 && options_.total > 0; }
@@ -200,7 +199,7 @@ namespace ddb
     /// Releases what this process keeps of the files under path (a file or a folder):
     /// idle rasters and tilers (RasterCache) and decoded point-cloud nodes (CopcNodeCache).
     /// Call it before replacing or deleting those files. Returns the rasters closed.
-    DDB_DLL size_t releaseCachedFiles(const fs::path &path);
+    size_t releaseCachedFiles(const fs::path &path);
 }
 
 #endif // RASTER_CACHE_H

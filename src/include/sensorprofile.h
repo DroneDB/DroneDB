@@ -11,7 +11,6 @@
 #include <map>
 #include <mutex>
 #include "json_fwd.h"
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -78,7 +77,7 @@ struct SensorDetectionResult {
     std::string defaultPresetId;
 };
 
-class DDB_DLL SensorProfileManager {
+class SensorProfileManager {
 public:
     static SensorProfileManager& instance();
 

@@ -34,7 +34,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "ddb_export.h"
 #include "gdal_inc.h"
 
 namespace ddb
@@ -105,10 +104,10 @@ namespace ddb
 
     // Takes the bytes of the /vsimem/ file at path, which no longer exists after (GDAL's
     // unlink-and-seize). Null (size 0) when there is no such file.
-    DDB_DLL VsiFreePtr<GByte> stealMemFileBuffer(const std::string &path, vsi_l_offset &size);
+    VsiFreePtr<GByte> stealMemFileBuffer(const std::string &path, vsi_l_offset &size);
     // The same for the int sizes of the C API: throws GDALException when the file is larger than
     // an int (the buffer is freed).
-    DDB_DLL VsiFreePtr<GByte> stealMemFileBuffer(const std::string &path, int &size);
+    VsiFreePtr<GByte> stealMemFileBuffer(const std::string &path, int &size);
 
     struct SrsDeleter
     {
@@ -123,15 +122,15 @@ namespace ddb
 
     // A new SRS read from WKT, with the traditional GIS axis order (x = easting or longitude).
     // Null when wkt is null or empty or does not parse.
-    DDB_DLL SrsPtr srsFromWkt(const char *wkt);
+    SrsPtr srsFromWkt(const char *wkt);
     // A new SRS of an EPSG code, with the traditional GIS axis order. Null when unknown.
-    DDB_DLL SrsPtr srsFromEpsg(int epsg);
+    SrsPtr srsFromEpsg(int epsg);
     // A new SRS from a PROJ string, with the traditional GIS axis order. Null when it does not
     // parse.
-    DDB_DLL SrsPtr srsFromProj4(const char *proj4);
+    SrsPtr srsFromProj4(const char *proj4);
     // A new SRS from anything GDAL accepts ("EPSG:3857", a WKT, a PROJ string, a URN), with the
     // traditional GIS axis order. Null when it does not parse.
-    DDB_DLL SrsPtr srsFromUserInput(const char *input);
+    SrsPtr srsFromUserInput(const char *input);
 
     // The C++ object behind an owned SRS handle (for the C++ API; the handle keeps ownership)
     inline const OGRSpatialReference &srsOf(const SrsPtr &srs) noexcept
@@ -212,7 +211,7 @@ namespace ddb
 
     // A file of GDAL's virtual file system, normally /vsimem/, removed (VSIUnlink) when the scope
     // exits unless its buffer was stolen or the path released. Movable, not copyable.
-    class DDB_DLL VsiMemFile
+    class VsiMemFile
     {
         std::string path_;
 
@@ -245,7 +244,7 @@ namespace ddb
     // Sets a GDAL configuration option for the current thread only, and restores the value it had
     // (or unsets it) when the scope exits. Thread-local, so concurrent builds in one process never
     // see each other's setting. A null value unsets the option for the scope.
-    class DDB_DLL ScopedThreadConfigOption
+    class ScopedThreadConfigOption
     {
         std::string key_;
         bool hadPrevious_ = false;

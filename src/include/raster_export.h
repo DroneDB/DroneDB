@@ -7,7 +7,6 @@
 #include <functional>
 #include <string>
 
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -41,7 +40,7 @@ namespace ddb
     // Exports the raster block by block, so the memory used does not depend on its size. A failed or
     // canceled export leaves no output file. Throws CanceledException when the progress callback
     // asked to stop or the call was canceled (cancellation.h).
-    DDB_DLL void exportRaster(const RasterExport &request);
+    void exportRaster(const RasterExport &request);
 
 } // namespace ddb
 

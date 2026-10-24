@@ -13,7 +13,6 @@
 #include <string>
 
 #include "authcredentials.h"
-#include "ddb_export.h"
 #include "registry_client.h"
 
 namespace ddb {
@@ -46,9 +45,9 @@ struct AuthenticationOptions {
  * must be safe to run twice (it is run again from the start, with a fresh token); errors other
  * than AuthException leave at once, so a 403 or a transport error never prompts.
  */
-DDB_DLL void withAuthenticatedRegistry(const std::string &url, bool sslVerify, CredentialProvider &provider,
-                                       const std::function<void(RegistryClient &)> &fn,
-                                       const AuthenticationOptions &options = {}, const RegistryDeps &deps = {});
+void withAuthenticatedRegistry(const std::string &url, bool sslVerify, CredentialProvider &provider,
+                               const std::function<void(RegistryClient &)> &fn,
+                               const AuthenticationOptions &options = {}, const RegistryDeps &deps = {});
 
 } // namespace ddb
 

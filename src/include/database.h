@@ -6,9 +6,14 @@
 
 #define DDB_BUILD_PATH "build"
 
+// Database schema version for migration management.
+// Increment this value when making schema changes.
+// Version 0 = legacy database without versioning
+// Version 1 = first versioned schema (current)
+#define DDB_SCHEMA_VERSION 1
+
 #include "metamanager.h"
 #include "sqlite_database.h"
-#include "ddb_export.h"
 #include "json_fwd.h"
 #include "constants.h"
 
@@ -49,48 +54,48 @@ namespace ddb
     static constexpr int busyTimeoutMs = 200;
 
     Database() = default;
-    DDB_DLL ~Database() override;
+    ~Database() override;
     Database(const Database &) = delete;
     Database &operator=(const Database &) = delete;
     Database(Database &&) = delete;
     Database &operator=(Database &&) = delete;
 
     /// Gives a connection opened by ddb::open() back to the DatabasePool, otherwise closes it
-    DDB_DLL SqliteDatabase &close() override;
-    DDB_DLL void afterOpen() override;
-    DDB_DLL Database &createTables();
-    DDB_DLL void ensureSchemaConsistency();
+    SqliteDatabase &close() override;
+    void afterOpen() override;
+    Database &createTables();
+    void ensureSchemaConsistency();
     /// Removes the entry with an empty path that older versions wrote for the dataset root
     /// (`ddb add .`). Best effort: an index that cannot be written keeps it.
-    DDB_DLL void removeRootEntry();
+    void removeRootEntry();
 
-    DDB_DLL json getProperties() const;
-    DDB_DLL json getStamp() const;
+    json getProperties() const;
+    json getStamp() const;
     /// The stamp of an index with nothing in it: what a Registry reports for a dataset nobody has
     /// pushed to, and the baseline of a dataset that was never synced with one
-    DDB_DLL static json emptyStamp();
+    static json emptyStamp();
     /// getStamp().dump(), without building the json document
-    DDB_DLL std::string getStampJson() const;
+    std::string getStampJson() const;
     /// getStamp()["checksum"], without collecting the entries
-    DDB_DLL std::string getStampChecksum() const;
+    std::string getStampChecksum() const;
 
-    DDB_DLL fs::path rootDirectory() const;
-    DDB_DLL fs::path ddbDirectory() const;
-    DDB_DLL fs::path tmpDirectory() const;
-    DDB_DLL fs::path buildDirectory() const;
+    fs::path rootDirectory() const;
+    fs::path ddbDirectory() const;
+    fs::path tmpDirectory() const;
+    fs::path buildDirectory() const;
 
-    DDB_DLL std::string getReadme() const;
-    DDB_DLL json getExtent() const;
+    std::string getReadme() const;
+    json getExtent() const;
 
     /// Created on first use; owned by this Database, which outlives the returned pointer
-    DDB_DLL MetaManager *getMetaManager();
+    MetaManager *getMetaManager();
   };
 
   /// Frees the SpatiaLite cache of a connection (spatialite_cleanup_ex) once the connection
   /// is closed. Every cache is freed through here: one at a time in the process (database.cpp).
   void freeSpatialiteCache(void *cache);
 
-  DDB_DLL json wktBboxCoordinates(const std::string &wktBbox);
+  json wktBboxCoordinates(const std::string &wktBbox);
 
 }
 

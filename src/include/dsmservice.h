@@ -12,7 +12,6 @@
 #include <functional>
 #include <string>
 
-#include "ddb_export.h"
 #include "dsm_cache.h"
 #include "dsm_downloader.h"
 #include "dsm_reader.h"
@@ -27,19 +26,19 @@ class DSMService
 
 public:
     // The service of the process: the user's cache folder and the library's HTTP client
-    DDB_DLL static DSMService *get();
+    static DSMService *get();
 
     // A service with its own HTTP client (it must outlive the service) and cache folder
-    DDB_DLL DSMService(ddb::IHttpClient &client, std::function<fs::path()> cacheFolder);
+    DSMService(ddb::IHttpClient &client, std::function<fs::path()> cacheFolder);
 
-    DDB_DLL float getAltitude(double latitude, double longitude);
+    float getAltitude(double latitude, double longitude);
 
-    DDB_DLL bool loadDiskCache(double latitude, double longitude);
-    DDB_DLL std::string loadFromNetwork(double latitude, double longitude);
+    bool loadDiskCache(double latitude, double longitude);
+    std::string loadFromNetwork(double latitude, double longitude);
     // Same, from the given service URL template (see buildDsmServiceUrl)
-    DDB_DLL std::string loadFromNetwork(double latitude, double longitude, const std::string &urlTemplate);
-    DDB_DLL bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
-    DDB_DLL fs::path getCacheDir();
+    std::string loadFromNetwork(double latitude, double longitude, const std::string &urlTemplate);
+    bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
+    fs::path getCacheDir();
 };
 
 #endif // DSMSERVICE_H

@@ -6,7 +6,6 @@
 
 #include <string>
 #include <vector>
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -40,15 +39,15 @@ namespace ddb
      *                                  including a GDAL build without the
      *                                  MVT driver.
      */
-    DDB_DLL void buildVector(const std::string &input,
-                             const std::string &baseOutputPath,
-                             bool overwrite = false);
+    void buildVector(const std::string &input,
+                     const std::string &baseOutputPath,
+                     bool overwrite = false);
 
     /**
      * Return the list of required sidecar dependencies for a vector input
      * (e.g. .shp → [".shx"]). Empty for self-contained formats.
      */
-    DDB_DLL std::vector<std::string> getVectorDependencies(const std::string &input);
+    std::vector<std::string> getVectorDependencies(const std::string &input);
 
 } // namespace ddb
 

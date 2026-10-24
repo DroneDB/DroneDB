@@ -6,7 +6,6 @@
 
 #include <optional>
 #include <string>
-#include "ddb_export.h"
 #include "fs.h"
 #include "process_runner.h"
 
@@ -48,7 +47,7 @@ namespace ddb
         //   4. Directories on the system PATH
         // Returns an empty path if no usable binary is found. The result is cached
         // for the lifetime of the process; pass forceRefresh=true to bypass the cache.
-        DDB_DLL fs::path findObj2TilesBinary(bool forceRefresh = false);
+        fs::path findObj2TilesBinary(bool forceRefresh = false);
 
         /**
          * @brief Convert a single OBJ to an OGC 3D Tiles tileset with Obj2Tiles.
@@ -78,12 +77,12 @@ namespace ddb
          * @return true when the child exits successfully and produces tileset.json;
          *         false on invalid destination, missing tool/input or tool failure.
          */
-        DDB_DLL bool runObj2Tiles(const fs::path &inputObj,
-                                  const fs::path &outDir,
-                                  const Obj2TilesOptions &opts,
-                                  std::string &errorOut,
-                                  const fs::path &binary = fs::path(),
-                                  const process::IProcessRunner &runner = process::systemProcessRunner());
+        bool runObj2Tiles(const fs::path &inputObj,
+                          const fs::path &outDir,
+                          const Obj2TilesOptions &opts,
+                          std::string &errorOut,
+                          const fs::path &binary = fs::path(),
+                          const process::IProcessRunner &runner = process::systemProcessRunner());
 
     } // namespace obj2tiles
 

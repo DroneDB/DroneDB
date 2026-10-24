@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-#include "ddb_export.h"
 #include "entry_types.h"
 
 namespace ddb::filters {
@@ -21,24 +20,24 @@ namespace ddb::filters {
 // Returns an empty vector if types is null or empty
 // Throws InvalidArgsException if an unknown type is found, or if Directory is specified and
 // allowDirectory is false (rescans skip directories)
-DDB_DLL std::vector<EntryType> parseEntryTypeList(const char* types, bool allowDirectory = false);
+std::vector<EntryType> parseEntryTypeList(const char* types, bool allowDirectory = false);
 
 // True if name matches pattern, where '*' matches any characters (also none) and '?' one
 // (UTF-8) character. Letters match regardless of case: Unicode simple case folding
 // (utf8::foldCase) when both are valid UTF-8, else a byte comparison with ASCII letters in any
 // case.
-DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& pattern);
+bool matchesNamePattern(const std::string& name, const std::string& pattern);
 
 // Parse a comma-separated list of file extensions ("dwg,.DXF,copc.laz") into
 // lowercase extensions without the leading dot. Empty items are skipped.
 // Returns an empty vector if extensions is null or empty
 // Throws InvalidArgsException if an item is a bare dot or contains a path separator,
 // a wildcard or whitespace
-DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions);
+std::vector<std::string> parseExtensionList(const char* extensions);
 
 // True if path ends with "." + one of extensions (lowercase, without the dot, as
 // returned by parseExtensionList). Comparison ignores case
-DDB_DLL bool hasAnyExtension(const std::string& path, const std::vector<std::string>& extensions);
+bool hasAnyExtension(const std::string& path, const std::vector<std::string>& extensions);
 
 }  // namespace ddb::filters
 

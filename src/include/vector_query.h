@@ -9,7 +9,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -34,16 +33,16 @@ namespace ddb
      * keeps its id in every page and in id lookups. With fids set, a GeoPackage reads
      * them by primary key.
      */
-    DDB_DLL std::string queryVector(const std::string &vectorPath, const VectorQuery &query);
+    std::string queryVector(const std::string &vectorPath, const VectorQuery &query);
 
     /** Number of features matching query's layer, bbox, fids and where (paging is ignored). */
-    DDB_DLL int64_t countVectorFeatures(const std::string &vectorPath, const VectorQuery &query);
+    int64_t countVectorFeatures(const std::string &vectorPath, const VectorQuery &query);
     /**
      * Describe a vector dataset: layers, geometry types, SRS, extent,
      * feature count and fields. Returns JSON.
      */
-    DDB_DLL std::string describeVector(const std::string &vectorPath,
-                                       const std::string &layerName);
+    std::string describeVector(const std::string &vectorPath,
+                               const std::string &layerName);
 
 } // namespace ddb
 

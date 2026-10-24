@@ -7,7 +7,6 @@
 #include <atomic>
 #include <functional>
 
-#include "ddb_export.h"
 #include "gdal_inc.h"
 
 struct sqlite3;
@@ -30,7 +29,7 @@ namespace ddb::cancel
     // for it holds another one while it does, so the host may free its token at any time, also
     // while a call that uses it is running. Canceling is final. A child token (CallToken) is
     // canceled with its parent too.
-    class DDB_DLL Token
+    class Token
     {
     public:
         // A new token, not canceled, with one reference: the caller's
@@ -60,7 +59,7 @@ namespace ddb::cancel
     };
 
     // A counted reference to a token (or none)
-    class DDB_DLL TokenRef
+    class TokenRef
     {
     public:
         TokenRef() noexcept = default;
@@ -85,13 +84,13 @@ namespace ddb::cancel
 
     // Sets the token the calling thread works for (a reference is held), or none (nullptr).
     // The C API resets it when the outermost call of the thread returns.
-    DDB_DLL void setThreadToken(Token *token) noexcept;
-    DDB_DLL TokenRef threadToken() noexcept;
-    DDB_DLL bool hasThreadToken() noexcept;
+    void setThreadToken(Token *token) noexcept;
+    TokenRef threadToken() noexcept;
+    bool hasThreadToken() noexcept;
 
     // Sets the thread's token while in scope, then puts back the previous one: a worker of a
     // parallel section works for the token of the thread that started the section
-    class DDB_DLL ScopedThreadToken
+    class ScopedThreadToken
     {
     public:
         explicit ScopedThreadToken(const TokenRef &token) noexcept;
@@ -106,7 +105,7 @@ namespace ddb::cancel
     // A token for one call, child of the thread's token and made the thread's token while in
     // scope: the work of the call stops when the caller's token is canceled, the shutdown starts
     // or cancel() is called (by a progress callback that asks to stop).
-    class DDB_DLL CallToken
+    class CallToken
     {
     public:
         CallToken();
@@ -120,22 +119,22 @@ namespace ddb::cancel
     // ---- the shutdown (DDBShutdown)
 
     // Stops the work of every thread, from now on
-    DDB_DLL void requestShutdown() noexcept;
-    DDB_DLL bool shutdownRequested() noexcept;
+    void requestShutdown() noexcept;
+    bool shutdownRequested() noexcept;
     // Unit tests only (with capi::resetShutdownForTests)
-    DDB_DLL void resetShutdownForTests() noexcept;
+    void resetShutdownForTests() noexcept;
 
     // ---- checks
 
     // True when the work of the calling thread must stop: the shutdown started or its token is
     // canceled
-    DDB_DLL bool isCanceled() noexcept;
+    bool isCanceled() noexcept;
     // The same for the work of token, from any thread (GDAL calls progress callbacks from its
     // own worker threads)
-    DDB_DLL bool isCanceled(const Token *token) noexcept;
+    bool isCanceled(const Token *token) noexcept;
     // Throws ShutdownException or CanceledException (with the token's message) when the work of
     // the calling thread must stop
-    DDB_DLL void throwIfCanceled();
+    void throwIfCanceled();
 
     // ---- GDAL
 
@@ -144,7 +143,7 @@ namespace ddb::cancel
     // it from its own threads. Keep it alive while GDAL uses it (until the call returns).
     // GDAL then fails the call ("User terminated"): check throwIfCanceled() before reporting the
     // failure as an error.
-    class DDB_DLL GdalProgress
+    class GdalProgress
     {
     public:
         // Called with every progress fraction before the check (it must not throw)
@@ -173,7 +172,7 @@ namespace ddb::cancel
     // of the thread running it must stop. It reads the running thread's state, never an argument,
     // so a pooled connection is safe whichever thread uses it next. Not while an exception
     // unwinds: the rollback of a canceled transaction runs.
-    DDB_DLL void installSqliteProgressHandler(sqlite3 *db) noexcept;
+    void installSqliteProgressHandler(sqlite3 *db) noexcept;
 
 } // namespace ddb::cancel
 

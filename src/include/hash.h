@@ -11,13 +11,12 @@
 #include <string>
 #include <string_view>
 
-#include "ddb_export.h"
 
 namespace ddb {
 
 // SHA-256 over data given in pieces. OpenSSL stays out of this header: the context is owned by
 // an implementation in hash.cpp. Every OpenSSL failure throws (AppException).
-class DDB_DLL Sha256 {
+class Sha256 {
    public:
     Sha256();
     ~Sha256();
@@ -38,12 +37,12 @@ class DDB_DLL Sha256 {
 class Hash {
    public:
     // SHA-256 of the content of a file (UTF-8 path); throws FSException when it cannot be opened
-    DDB_DLL static std::string fileSHA256(const std::string& path);
-    DDB_DLL static std::string strSHA256(const std::string& str);
+    static std::string fileSHA256(const std::string& path);
+    static std::string strSHA256(const std::string& str);
 
     // CRC-64 of the bytes (the table is the Jones polynomial, as used by Redis), as hex without
     // leading zeros: names of thumbnails and cache entries, not an integrity check
-    DDB_DLL static std::string strCRC64(std::string_view bytes);
+    static std::string strCRC64(std::string_view bytes);
 };
 
 }  // namespace ddb

@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <tuple>
 #include "json_fwd.h"
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -62,7 +61,7 @@ struct Colormap {
     bool listed = true;
 };
 
-class DDB_DLL VegetationEngine {
+class VegetationEngine {
 public:
     static VegetationEngine& instance();
 

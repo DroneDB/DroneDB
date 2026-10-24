@@ -9,7 +9,6 @@
 #include <sstream>
 #include <string>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "geo.h"
 #include "tiler.h"
@@ -47,19 +46,19 @@ namespace ddb
                           const std::function<void(PointBatch &)> &sink);
 
     public:
-        DDB_DLL PointCloudTiler(const std::string &copcPath,
-                                const std::string &outputFolder, int tileSize = 256,
-                                bool tms = false);
-        DDB_DLL ~PointCloudTiler();
+        PointCloudTiler(const std::string &copcPath,
+                        const std::string &outputFolder, int tileSize = 256,
+                        bool tms = false);
+        ~PointCloudTiler();
 
         using Tiler::tile;
 
-        DDB_DLL std::string tile(int tz, int tx, int ty, ImageFormat format,
-                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
+        std::string tile(int tz, int tx, int ty, ImageFormat format,
+                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
 
         // Tiles are read from the COPC level this many zoom levels coarser than the tile's
         // pixel size (DDB_PCTILE_RESOLUTION_OFFSET, default 2)
-        DDB_DLL static int resolutionOffset();
+        static int resolutionOffset();
     };
 
 } // namespace ddb

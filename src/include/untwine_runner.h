@@ -6,7 +6,6 @@
 
 #include <string>
 #include <vector>
-#include "ddb_export.h"
 #include "fs.h"
 #include "process_runner.h"
 #include "tool_runner_result.h"
@@ -32,7 +31,7 @@ namespace ddb
         //   4. Directories on the system PATH
         // Returns an empty path if no usable binary is found. The result is cached
         // for the lifetime of the process; pass forceRefresh=true to bypass the cache.
-        DDB_DLL fs::path findUntwineBinary(bool forceRefresh = false);
+        fs::path findUntwineBinary(bool forceRefresh = false);
 
         // Resolves the requested backend against environment variables and binary
         // availability:
@@ -41,7 +40,7 @@ namespace ddb
         //   - Auto -> Untwine if a binary is discoverable, otherwise Pdal
         // Throws UntwineException only when Untwine was explicitly requested and
         // the binary cannot be located.
-        DDB_DLL CopcBackend resolveBackend(CopcBackend requested = CopcBackend::Auto);
+        CopcBackend resolveBackend(CopcBackend requested = CopcBackend::Auto);
 
         // Runs the Untwine binary to convert one or more LAS/LAZ inputs into a
         // single COPC LAZ file at outputFile. tempDir is used by Untwine for
@@ -50,14 +49,14 @@ namespace ddb
         // exists). On failure returns false and leaves a message in errorOut.
         // The Untwine binary path is resolved via findUntwineBinary() unless
         // a non-empty path is provided.
-        DDB_DLL bool runUntwine(const std::vector<std::string> &inputFiles,
-                                const fs::path &outputFile,
-                                const fs::path &tempDir,
-                                std::string &errorOut,
-                                const fs::path &binary = fs::path());
+        bool runUntwine(const std::vector<std::string> &inputFiles,
+                        const fs::path &outputFile,
+                        const fs::path &tempDir,
+                        std::string &errorOut,
+                        const fs::path &binary = fs::path());
 
         // Native build callers use structured failures; legacy callers retain bool/errorOut.
-        DDB_DLL ToolRunResult runUntwineResult(const std::vector<std::string> &inputFiles,
+        ToolRunResult runUntwineResult(const std::vector<std::string> &inputFiles,
                                                  const fs::path &outputFile,
                                                  const fs::path &tempDir,
                                                  const fs::path &binary = fs::path(),

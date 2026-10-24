@@ -8,7 +8,6 @@
 #include <string_view>
 #include <vector>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "json_fwd.h"
 
@@ -65,21 +64,21 @@ struct EntryPathResult {
 void to_json(json& j, const EntryPathResult& result);
 
 /// True for a separator of a dataset-relative path: '/' or '\'
-DDB_DLL bool isEntryPathSeparator(char c) noexcept;
+bool isEntryPathSeparator(char c) noexcept;
 
 /// True when a path segment (one name, no separator) is reserved at any depth: exactly ".ddb"
 /// (DDB_FOLDER), byte for byte. libddb never indexes anything at or below such a segment.
-DDB_DLL bool isReservedSegment(std::string_view segment) noexcept;
+bool isReservedSegment(std::string_view segment) noexcept;
 /// The same rule for one component of a filesystem path (fs::path::filename(), or an element of
 /// the iteration over a path)
-DDB_DLL bool isReservedSegment(const fs::path& segment);
+bool isReservedSegment(const fs::path& segment);
 
 /// True when a '/'-separated path has a "." or ".." segment (a literal path argument, before any
 /// normalization: the caller refuses it)
-DDB_DLL bool hasDotNotation(const std::string& path);
+bool hasDotNotation(const std::string& path);
 
 /// Normalizes a dataset-relative path, or rejects it (rules above)
-DDB_DLL EntryPathResult normalizeEntryPath(std::string_view path, const ReservedRules& rules = {});
+EntryPathResult normalizeEntryPath(std::string_view path, const ReservedRules& rules = {});
 
 }  // namespace ddb
 

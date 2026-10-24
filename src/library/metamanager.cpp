@@ -320,7 +320,7 @@ namespace ddb
         return j;
     }
 
-    DDB_DLL json MetaManager::bulkRemove(const std::vector<std::string> &ids)
+    json MetaManager::bulkRemove(const std::vector<std::string> &ids)
     {
         const auto q = db->query("DELETE FROM entries_meta WHERE id = ?");
 
@@ -341,7 +341,7 @@ namespace ddb
         return j;
     }
 
-    DDB_DLL std::string MetaManager::getString(const std::string &key, const std::string &path, const std::string &cwd, const std::string &defaultValue)
+    std::string MetaManager::getString(const std::string &key, const std::string &path, const std::string &cwd, const std::string &defaultValue)
     {
         try
         {

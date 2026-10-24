@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-#include "ddb_export.h"
 #include "fileversion.h"
 #include "fs.h"
 
@@ -66,40 +65,40 @@ namespace ddb
             uint64_t discarded = 0; // connections closed instead of kept
         };
 
-        DDB_DLL static DatabasePool &instance();
+        static DatabasePool &instance();
 
         /// Replaces the options; closes idle connections beyond the new limits
-        DDB_DLL void configure(const Options &options);
-        DDB_DLL Options options() const;
-        DDB_DLL bool enabled() const;
+        void configure(const Options &options);
+        Options options() const;
+        bool enabled() const;
 
         /// Gives db an idle connection to dbFile. False when none is available.
-        DDB_DLL bool acquire(const fs::path &dbFile, Database &db);
+        bool acquire(const fs::path &dbFile, Database &db);
 
         /// Marks a connection that db has just opened to dbFile (and checked) as one to
         /// give back on close. No effect when the pool is disabled.
-        DDB_DLL void adopt(const fs::path &dbFile, Database &db);
+        void adopt(const fs::path &dbFile, Database &db);
 
         /// Takes the connection of db (opened by ddb::open()): keeps it idle or closes it.
-        DDB_DLL void release(Database &db);
+        void release(Database &db);
 
         /// Closes the idle connections of every index file under path (a dataset folder,
         /// an organization folder or an index file). Returns how many were closed.
-        DDB_DLL size_t releaseConnections(const fs::path &path);
+        size_t releaseConnections(const fs::path &path);
 
         /// Closes all idle connections
-        DDB_DLL size_t clear();
+        size_t clear();
 
         /// Moves the WAL of every idle connection into its database file (TRUNCATE
         /// checkpoint). Runs at process exit; skipped while another thread holds the pool.
-        DDB_DLL void checkpointIdle();
+        void checkpointIdle();
 
         /// DDBShutdown (XI-07): a TRUNCATE checkpoint of every idle connection, then closes
         /// them all. Unlike checkpointIdle it waits for the pool, and leaves nothing for the
         /// exit-time checkpoint. Returns how many were closed.
-        DDB_DLL size_t shutdown();
+        size_t shutdown();
 
-        DDB_DLL Stats stats() const;
+        Stats stats() const;
 
     private:
         struct Idle

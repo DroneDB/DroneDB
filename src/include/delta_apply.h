@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "database.h"
-#include "ddb_export.h"
 #include "fs.h"
 #include "json.h"
 
@@ -75,10 +74,10 @@ struct DeltaApplication {
  * Applies a delta to `destination`, as `application` says. What it does to the files is
  * written to `out` (one "A", "U" or "D" line per file). Returns the conflicts.
  */
-DDB_DLL std::vector<Conflict> applyDelta(const Delta &d, Database *destination,
-                                         const DeltaApplication &application, std::ostream &out);
-DDB_DLL void ensureParentFolderExists(const fs::path &folder);
-DDB_DLL std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *destination,
+std::vector<Conflict> applyDelta(const Delta &d, Database *destination,
+                                 const DeltaApplication &application, std::ostream &out);
+void ensureParentFolderExists(const fs::path &folder);
+std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *destination,
                                                                 const std::string &hlDestFolder);
 
 } // namespace ddb

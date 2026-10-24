@@ -8,9 +8,15 @@ message(STATUS "SRC_LIST: ${SRC_LIST}")
 #             process initialization, ddb::registerProcess in process_init.cpp)
 #   ddb_capi  the C API: ddb.cpp, the only TU that implements the extern "C" functions of ddb.h,
 #             and c_api_util.cpp, its error mapper and argument helpers (c_api_util.h, private)
-# libddb (SHARED) = ddb_core + ddb_capi. ddb_unit_tests (tests/CMakeLists.txt) links the same
-# objects statically and never libddb: no binary may contain both, otherwise the plog instance
-# (PLOG_GLOBAL) and the library's singletons would exist twice in one process.
+# libddb (SHARED) = ddb_core + ddb_capi. ddbcmd, ddbtest and ddb_unit_tests contain the same
+# objects (ddb_embedded below) and never load libddb: no binary may contain both, otherwise the
+# plog instance and the library's singletons would exist twice in one process.
+#
+# libddb exports the C API and nothing else (DQ-14). Every object is compiled with hidden
+# visibility; only the DDB* functions of ddb.h are marked DDB_DLL (ddb_export.h), and
+# on Linux a version script made from the symbol manifest hides every other symbol, the C++
+# symbols of the static libraries linked into libddb included. The C++ code is reached by
+# linking the objects (ddb_embedded), not through libddb.
 set(DDB_CAPI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/library/ddb.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/library/c_api_util.cpp")
 set(DDB_CORE_SOURCES ${SRC_LIST})
 list(REMOVE_ITEM DDB_CORE_SOURCES ${DDB_CAPI_SOURCES})
@@ -70,33 +76,46 @@ set(COMMON_LIBS
 add_library(boolinq INTERFACE)
 target_include_directories(boolinq SYSTEM INTERFACE ${BOOLINQ_INCLUDE_DIRS})
 
-# Usage requirements, defined once (DQ-03):
-#   ddb_headers     what code including the public headers needs: the include directories,
-#                   cctz (timezone.h exposes cctz::time_zone) and the plog mode, which must be
-#                   the same in libddb and in every module that logs through it. PUBLIC on ddb,
-#                   so ddbcmd and ddbtest get it by linking ddb.
+# Usage requirements, defined once (DQ-03, DQ-14):
+#   ddb_c_api       what code that uses libddb as a shared library needs: the folder of ddb.h and
+#                   ddb_export.h, and of the generated ddb_version.h. PUBLIC on ddb. On Windows
+#                   ddb_export.h makes the DDB* declarations dllimport.
+#   ddb_headers     ddb_c_api plus what the C++ headers of the library need: the include
+#                   directories, cctz (timezone.h exposes cctz::time_zone) and the plog mode,
+#                   the same in every module that logs. What the library objects compile with.
+#   ddb_static_api  ddb_headers for code that is linked with the library objects, not with
+#                   libddb: DDB_STATIC_DEFINE makes ddb_export.h declare the DDB* functions
+#                   without dllimport (the CLI commands, the test support and the C TU).
 #   ddb_core_usage  ddb_headers plus every library dependency (COMMON_LIBS): what the library
-#                   objects compile with and what ddb_unit_tests, which contains them, links.
+#                   objects compile with and what a binary that contains them links.
 #                   ddb links COMMON_LIBS itself (see the note on link order below).
-add_library(ddb_headers INTERFACE)
-# vendor/libnexus is public because 3d.h includes <nxs.h> (installed to include/ by libnexus)
-target_include_directories(ddb_headers INTERFACE
+#   ddb_embed_library()  (below) makes a binary contain the library: ddbcmd, ddbtest and
+#                   ddb_unit_tests.
+add_library(ddb_c_api INTERFACE)
+target_include_directories(ddb_c_api INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${DDB_GENERATED_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:include>
 )
+add_library(ddb_headers INTERFACE)
+target_link_libraries(ddb_headers INTERFACE ddb_c_api)
+add_library(ddb_static_api INTERFACE)
+target_link_libraries(ddb_static_api INTERFACE ddb_headers)
+target_compile_definitions(ddb_static_api INTERFACE DDB_STATIC_DEFINE)
+# vendor/libnexus is public because 3d.h includes <nxs.h> (installed to include/ by libnexus)
 target_include_directories(ddb_headers SYSTEM INTERFACE
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/libnexus>
 )
 target_link_libraries(ddb_headers INTERFACE cctz::cctz)
 # plog's char is UTF-8 everywhere (mio.h, "Path encoding"). Without it MSVC builds read every
 # narrow log string in the ANSI code page. One value for every target: plog's types depend on
-# it, and the library and the CLI share one logger.
+# it.
 target_compile_definitions(ddb_headers INTERFACE PLOG_CHAR_IS_UTF8=1)
-if(WIN32)
-    target_compile_definitions(ddb_headers INTERFACE PLOG_EXPORT)
-else()
-    target_compile_definitions(ddb_headers INTERFACE PLOG_GLOBAL)
+# The logger instance is private to each binary (libddb, ddbcmd, ddbtest, ddb_unit_tests): no two
+# modules of a process share it, and libddb exports nothing but its C API (DQ-14). plog exported
+# its instance through PLOG_GLOBAL (default visibility) and, on Windows, PLOG_EXPORT.
+if(NOT WIN32)
+    target_compile_definitions(ddb_headers INTERFACE PLOG_LOCAL)
 endif()
 
 # nxs is link-only here: Qt5::Gui, reached through nxs, adds its static-plugin import sources
@@ -113,13 +132,18 @@ find_path(PDAL_HEADERS_DIR "filters/StatsFilter.hpp" PATH_SUFFIXES pdal REQUIRED
 
 # ddb_add_library_objects(<name> <sources>...): an object library of libddb sources with the
 # compile settings that apply to library code only: the warnings (counted by the ratchet,
-# scripts/check-warnings.py), the export macro, the MSVC Release debug info and the private
-# third-party include directories (SYSTEM: their warnings are not ours, cmake/Warnings.cmake).
+# scripts/check-warnings.py), hidden visibility and the export macro (only ddb.h's DDB_DLL
+# functions are visible, DQ-14), the MSVC Release debug info and the private third-party
+# include directories (SYSTEM: their warnings are not ours, cmake/Warnings.cmake).
 function(ddb_add_library_objects name)
     add_library(${name} OBJECT ${ARGN})
     ddb_msvc_release_debug_info(${name})
     target_link_libraries(${name} PUBLIC ddb_core_usage PRIVATE ddb_warnings)
-    target_compile_definitions(${name} PRIVATE MODERN_CPP_LIB_EXPORTS)
+    # DDB_BUILDING_LIBRARY: ddb_export.h makes DDB_DLL an export (it is defined for these objects,
+    # not for the ddb target, which has no source of its own)
+    target_compile_definitions(${name} PRIVATE DDB_BUILDING_LIBRARY)
+    set_target_properties(${name} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
     target_include_directories(${name} SYSTEM PRIVATE
         ${GEOTIFF_INCLUDE_DIR}
         ${Stb_INCLUDE_DIR}
@@ -143,11 +167,13 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DDB_SYMBOLS_MA
 # Every line that is not empty or a comment (a comment may hold ';', a list separator)
 file(STRINGS "${DDB_SYMBOLS_MANIFEST}" _ddb_symbols REGEX "^[^#]")
 set(_ddb_symbols_inc "")
+set(_ddb_exported_names "")
 foreach(_symbol IN LISTS _ddb_symbols)
     if(NOT _symbol MATCHES "^DDB[A-Za-z0-9_]+$")
         message(FATAL_ERROR "${DDB_SYMBOLS_MANIFEST}: '${_symbol}' is not a DDB* symbol name")
     endif()
     string(APPEND _ddb_symbols_inc "\"${_symbol}\",\n")
+    string(APPEND _ddb_exported_names "        ${_symbol};\n")
 endforeach()
 if(_ddb_symbols_inc STREQUAL "")
     message(FATAL_ERROR "${DDB_SYMBOLS_MANIFEST} lists no symbol")
@@ -158,16 +184,36 @@ target_include_directories(ddb_capi PRIVATE "${CMAKE_BINARY_DIR}/generated")
 add_library(${PROJECT_NAME} SHARED $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>)
 ddb_msvc_release_debug_info(${PROJECT_NAME})
 
-# On Windows, export every symbol of libddb automatically. The .def file is generated from all
-# the objects linked into ddb.dll, including the TARGET_OBJECTS of ddb_core and ddb_capi.
-if(WIN32)
-    set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+# DDB_DLL (ddb_export.h), the one export macro, is on the DDB* functions of ddb.h only; the library
+# is built with hidden visibility, so nothing else is exported, and on Windows there is no
+# WINDOWS_EXPORT_ALL_SYMBOLS: ddb.dll exports what ddb.h declares.
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+
+# Linux: a version script made from the manifest exports exactly the manifest, whatever the
+# static libraries linked into libddb (cpr, spz, draco, Assimp, ...) export on their own, and
+# also drops the linker's own symbols (_init, _fini, _edata, ...). scripts/check-abi.py exports
+# checks the result (nm -D). The visibility of the objects keeps the C++ symbols of the library
+# itself out; the script is the guarantee for the rest.
+if(UNIX AND NOT APPLE)
+    set(DDB_VERSION_SCRIPT "${CMAKE_BINARY_DIR}/generated/ddb.version")
+    file(CONFIGURE OUTPUT "${DDB_VERSION_SCRIPT}" @ONLY CONTENT
+"{\n    global:\n${_ddb_exported_names}    local:\n        *;\n};\n")
+    target_link_options(${PROJECT_NAME} PRIVATE "LINKER:--version-script=${DDB_VERSION_SCRIPT}")
+    set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS "${DDB_VERSION_SCRIPT}")
 endif()
 
 # COMMON_LIBS directly, in this order, rather than through ddb_core_usage: the order decides which
-# static archive members end up in libddb.so (and so its exported symbols), and an INTERFACE
-# target in between reorders the link line
-target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq PUBLIC ddb_headers)
+# static archive members end up in libddb.so, and an INTERFACE target in between reorders the
+# link line
+target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq ddb_headers PUBLIC ddb_c_api)
+
+# ddb_embed_library(<target>): <target> contains the library instead of loading libddb: the
+# objects of ddb_core and ddb_capi, the libraries they need and DDB_STATIC_DEFINE (ddb_static_api).
+# This is how the CLI and the test binaries reach the C++ code, which libddb does not export.
+function(ddb_embed_library target)
+    target_sources(${target} PRIVATE $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>)
+    target_link_libraries(${target} PRIVATE ddb_core_usage ddb_static_api)
+endfunction()
 
 find_package(Python3 REQUIRED)
 

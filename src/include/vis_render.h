@@ -11,7 +11,6 @@
 #include <utility>
 #include <vector>
 
-#include "ddb_export.h"
 #include "gdal_inc.h"
 #include "raster_stats.h"
 #include "raster_utils.h"
@@ -34,16 +33,16 @@ namespace ddb
     };
 
     /// Parses a "min,max" rescale range. Throws InvalidArgsException when malformed.
-    DDB_DLL std::pair<float, float> parseRescaleRange(const std::string &rescale);
+    std::pair<float, float> parseRescaleRange(const std::string &rescale);
 
     /// Bands to show as R, G, B for visParams: the explicit "bands" list (each checked
     /// against 1..maxBand), the preset's mapping, or the default mapping of the detected
     /// sensor. Empty when nothing selects bands (show the first bands).
-    DDB_DLL std::vector<int> resolveVisBands(const std::string &rasterPath, const ThumbVisParams &visParams,
-                                             int maxBand);
+    std::vector<int> resolveVisBands(const std::string &rasterPath, const ThumbVisParams &visParams,
+                                     int maxBand);
 
     /// Display range of a band: mean ± 2.33 σ (≈ p2-p98) clipped to [min, max]
-    DDB_DLL std::pair<double, double> stretchRange(const BandStatistics &s);
+    std::pair<double, double> stretchRange(const BandStatistics &s);
 
     /// What the render of a formula over one raster decides once: the formula, the band filter
     /// that maps R, G, B, N, Re and T to bands, the colormap and the nodata of every band. The
@@ -60,12 +59,12 @@ namespace ddb
     /// Resolves formulaId, the band filter (bandFilter, "" = detected from the sensor profile of
     /// rasterPath) and, with withColormap, the colormap (colormapId, "" = "rdylgn"). Throws
     /// InvalidArgsException for an unknown formula or colormap.
-    DDB_DLL FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
-                                    const std::string &bandFilter, const std::string &colormapId, bool withColormap);
+    FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
+                            const std::string &bandFilter, const std::string &colormapId, bool withColormap);
 
     /// The same with the band filter already resolved
-    DDB_DLL FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
-                                    const std::string &colormapId, bool withColormap);
+    FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
+                            const std::string &colormapId, bool withColormap);
 
     /// Which bands decide that a pixel has no value, when a formula is computed
     enum class NodataMask
@@ -94,33 +93,33 @@ namespace ddb
     /// the formula: buffers.result holds window.outPixels() values, NODATA_SENTINEL where a pixel
     /// has none, the pixels that mask being those of `mask`. With BandsRead the bands that are not
     /// read have a null entry in buffers.ptrs. The read stops with the call that is canceled (DQ-15).
-    DDB_DLL void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
-                                      FormulaBuffers &buffers, NodataMask mask = NodataMask::AnyBand);
+    void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
+                              FormulaBuffers &buffers, NodataMask mask = NodataMask::AnyBand);
 
     /// A computed value that is a number to render: neither the nodata sentinel nor NaN
     inline bool isFormulaValue(float v) { return v != NODATA_SENTINEL && !std::isnan(v); }
 
     /// The display range that needs no pixels: the explicit "min,max" rescale (InvalidArgsException
     /// when malformed), else the range of the formula itself; none when neither is given
-    DDB_DLL std::optional<std::pair<float, float>> fixedDisplayRange(const std::string &rescale,
-                                                                     const VegetationFormula &formula);
+    std::optional<std::pair<float, float>> fixedDisplayRange(const std::string &rescale,
+                                                             const VegetationFormula &formula);
 
     /// The display range of values that have no fixed range: their p2 and p98 (values are sorted),
     /// (0, 1) when there are none
-    DDB_DLL std::pair<float, float> percentileDisplayRange(std::vector<float> &values);
+    std::pair<float, float> percentileDisplayRange(std::vector<float> &values);
 
     /// Renders the planned formula (the plan has a colormap) over window of ds: RGBA interleaved,
     /// outPixels() * 4 bytes, nodata transparent. The display range is the explicit "min,max"
     /// rescale, else the range of the formula, else the p2-p98 of the computed values. `mask` is
     /// the nodata rule of computeFormulaValues.
-    DDB_DLL std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
-                                                          const RasterWindow &window, const std::string &rescale,
-                                                          NodataMask mask = NodataMask::AnyBand);
+    std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+                                                  const RasterWindow &window, const std::string &rescale,
+                                                  NodataMask mask = NodataMask::AnyBand);
 
     /// Renders visParams.formula (a vegetation index) over window of ds with its
     /// colormap: RGBA interleaved, outPixels() * 4 bytes, nodata transparent.
-    DDB_DLL std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
-                                                   const RasterWindow &window, const ThumbVisParams &visParams);
+    std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
+                                           const RasterWindow &window, const ThumbVisParams &visParams);
 }
 
 #endif // VIS_RENDER_H

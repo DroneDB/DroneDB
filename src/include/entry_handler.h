@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "ddb_export.h"
 #include "entry_types.h"
 #include "exceptions.h"
 #include "fs.h"
@@ -121,10 +120,10 @@ struct BuildContext {
 // ---- Completeness helpers ------------------------------------------------------------------
 
 // The file exists, is a regular file and is not empty.
-DDB_DLL bool fileExistsAndNonEmpty(const fs::path& p);
+bool fileExistsAndNonEmpty(const fs::path& p);
 // The directory exists and holds at least one non-empty regular file (recursively): an empty
 // folder left by an aborted build is not an output.
-DDB_DLL bool directoryHasNonEmptyContent(const fs::path& dir);
+bool directoryHasNonEmptyContent(const fs::path& dir);
 
 // ---- The handler ---------------------------------------------------------------------------
 
@@ -236,28 +235,28 @@ class EntryHandler {
 // lookups return references that stay valid until their handler is replaced.
 
 // The handler of a type. A value without a handler gets a handler without capabilities, named "?".
-DDB_DLL const EntryHandler& entryHandler(EntryType type);
+const EntryHandler& entryHandler(EntryType type);
 // The handler of a type, or nullptr
-DDB_DLL const EntryHandler* findEntryHandler(EntryType type);
+const EntryHandler* findEntryHandler(EntryType type);
 // Every registered handler, by type value
-DDB_DLL std::vector<const EntryHandler*> entryHandlers();
+std::vector<const EntryHandler*> entryHandlers();
 // The handler that claims the extension of path (case-insensitive), or nullptr
-DDB_DLL const EntryHandler* findEntryHandlerByExtension(const fs::path& path);
+const EntryHandler* findEntryHandlerByExtension(const fs::path& path);
 // The types whose handler builds them, by type value
-DDB_DLL std::vector<EntryType> buildableEntryTypes();
+std::vector<EntryType> buildableEntryTypes();
 // The first ThumbnailGenerator (by type value) that accepts input, or nullptr
-DDB_DLL const ThumbnailGenerator* findThumbnailGenerator(const fs::path& input);
+const ThumbnailGenerator* findThumbnailGenerator(const fs::path& input);
 // The first TilerFactory (by type value) that accepts tileablePath, or nullptr
-DDB_DLL const TilerFactory* findTilerFactory(const fs::path& tileablePath);
+const TilerFactory* findTilerFactory(const fs::path& tileablePath);
 // The main-file extensions (lowercase, without the dot, in lookup order) a file at path is a
 // sidecar of; empty when no SidecarRule lists its extension
-DDB_DLL std::vector<std::string> sidecarMainExtensions(const std::string& path);
+std::vector<std::string> sidecarMainExtensions(const std::string& path);
 
 // Registers handler for handler->type() and returns the handler it replaces (nullptr if none).
 // Throws InvalidArgsException when one of its extensions belongs to another type.
-DDB_DLL std::unique_ptr<EntryHandler> registerEntryHandler(std::unique_ptr<EntryHandler> handler);
+std::unique_ptr<EntryHandler> registerEntryHandler(std::unique_ptr<EntryHandler> handler);
 // Removes the handler of type and returns it (nullptr if none)
-DDB_DLL std::unique_ptr<EntryHandler> unregisterEntryHandler(EntryType type);
+std::unique_ptr<EntryHandler> unregisterEntryHandler(EntryType type);
 
 // Registers a handler for its lifetime and then puts back the one it replaced (tests).
 class ScopedEntryHandler {

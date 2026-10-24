@@ -9,7 +9,6 @@
 #include <optional>
 #include <string>
 
-#include "ddb_export.h"
 #include "json_fwd.h"
 
 namespace ddb
@@ -25,19 +24,19 @@ namespace ddb
     };
 
     /// "text", "json" or "geojson"
-    DDB_DLL const char *outputFormatName(OutputFormat format) noexcept;
+    const char *outputFormatName(OutputFormat format) noexcept;
 
     /// The format called `name` (exactly, in lowercase); nothing for any other text
-    DDB_DLL std::optional<OutputFormat> findOutputFormat(const std::string &name);
+    std::optional<OutputFormat> findOutputFormat(const std::string &name);
 
     /// The format called `name` when it is one of `allowed`; otherwise throws an
     /// InvalidArgsException "Invalid format <name>"
-    DDB_DLL OutputFormat parseOutputFormat(const std::string &name,
-                                           std::initializer_list<OutputFormat> allowed = {
+    OutputFormat parseOutputFormat(const std::string &name,
+                                   std::initializer_list<OutputFormat> allowed = {
                                                OutputFormat::Text, OutputFormat::Json, OutputFormat::GeoJson});
 
     /// Throws the same InvalidArgsException when `format` is not one of `allowed`
-    DDB_DLL void requireOutputFormat(OutputFormat format, std::initializer_list<OutputFormat> allowed);
+    void requireOutputFormat(OutputFormat format, std::initializer_list<OutputFormat> allowed);
 
     /**
      * Writes a JSON array one member at a time, so a listing is never held as one document: the
@@ -45,7 +44,7 @@ namespace ddb
      * from finish(). The default text is a plain array; a GeoJSON feature collection passes its
      * own opening and closing.
      */
-    class DDB_DLL JsonArrayWriter
+    class JsonArrayWriter
     {
         std::ostream &out_;
         std::string close_;

@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include "ddb_export.h"
 #include "entry_types.h"
 #include "fs.h"
 #ifndef NO_NEXUS
@@ -70,8 +69,8 @@ namespace ddb
      *         staged for the converted model), if the converted model still
      *         references a file that cannot be resolved, or on any other failure.
      */
-    DDB_DLL std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite = false,
-                                   const std::string &datasetRoot = "");
+    std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite = false,
+                           const std::string &datasetRoot = "");
 
     /**
      * @brief Detect a model's WGS84 georeferencing origin from sidecar files.
@@ -86,7 +85,7 @@ namespace ddb
      * @return The georeferencing origin, or std::nullopt if none is found or the
      *         coordinates are out of range (then the model is treated as local).
      */
-    DDB_DLL std::optional<ModelGeoref> detectModelGeoref(const std::string &inputObj);
+    std::optional<ModelGeoref> detectModelGeoref(const std::string &inputObj);
 
     /**
      * @brief Generate an OGC 3D Tiles tileset from an OBJ/GLTF/GLB/PLY model using Obj2Tiles.
@@ -132,14 +131,14 @@ namespace ddb
      * @throws AppException if a dependency reference is unsatisfiable (same cases as
      *         @ref buildNexus).
      */
-    DDB_DLL std::string buildModel3DTiles(const std::string &inputObj, const std::string &outputDir,
-                                          const Tiles3DOptions &options = {});
+    std::string buildModel3DTiles(const std::string &inputObj, const std::string &outputDir,
+                                  const Tiles3DOptions &options = {});
 
     /** Read-only sentinel check used by tiles recovery and build cleanup. */
-    DDB_DLL bool isModel3DTilesComplete(const fs::path &outputDir);
+    bool isModel3DTilesComplete(const fs::path &outputDir);
 
     /** A usable swap backup exists while the final tiles sentinel is missing/empty. */
-    DDB_DLL bool hasRecoverableModel3DTilesSwap(const fs::path &outputDir);
+    bool hasRecoverableModel3DTilesSwap(const fs::path &outputDir);
 
     /**
      * Repair an interrupted tiles swap under the output's tiles BuildLock.
@@ -149,7 +148,7 @@ namespace ddb
      * Throws BuildInProgressException without changing directories when busy;
      * filesystem failures preserve the usable backup and are propagated.
      */
-    DDB_DLL void recoverModel3DTilesSwap(const std::string &outputDir);
+    void recoverModel3DTilesSwap(const std::string &outputDir);
 
     /**
      * @brief Local-space axis-aligned bounding box of a 3D model.
@@ -180,7 +179,7 @@ namespace ddb
      * @param info Output bounding box (only written when the function returns true).
      * @return true when a non-empty bounding box was computed, false otherwise.
      */
-    DDB_DLL bool getModelInfo(const std::string &inputModel, ModelInfo &info);
+    bool getModelInfo(const std::string &inputModel, ModelInfo &info);
 
     /**
      * @brief Compute Obj2Tiles parameters based on model face count.
@@ -195,7 +194,7 @@ namespace ddb
      *             PLY converter (PlyToObjResult::info).
      * @return Obj2TilesOptions with heuristic-based divisions/lods/octree.
      */
-    DDB_DLL obj2tiles::Obj2TilesOptions computeObj2TilesOpts(const ModelInfo &info);
+    obj2tiles::Obj2TilesOptions computeObj2TilesOpts(const ModelInfo &info);
 
     /**
      * @brief List the file dependencies of an OBJ (its MTL files and their textures).
@@ -213,8 +212,8 @@ namespace ddb
      * @throws FSException if @p obj does not exist.
      * @throws AppException if a reference is absolute, or escapes @p datasetRoot.
      */
-    DDB_DLL std::vector<std::string> getObjDependencies(const std::string &obj, const std::string &datasetRoot = "");
-    DDB_DLL std::vector<std::string> getGltfDependencies(const std::string &gltf);
+    std::vector<std::string> getObjDependencies(const std::string &obj, const std::string &datasetRoot = "");
+    std::vector<std::string> getGltfDependencies(const std::string &gltf);
 
     /**
      * @brief Classify a glTF/GLB file from the primitives declared in its JSON.
@@ -234,7 +233,7 @@ namespace ddb
      * @param gltfFile Path to the .gltf or .glb file.
      * @return EntryType::Model when triangle geometry is present, EntryType::Generic otherwise.
      */
-    DDB_DLL EntryType identifyGltf(const fs::path &gltfFile);
+    EntryType identifyGltf(const fs::path &gltfFile);
 
     /**
      * @brief Convert glTF/GLB to OBJ or PLY format
@@ -248,12 +247,12 @@ namespace ddb
      *                        output keeps vertex colours as `v x y z r g b` either way)
      * @throws AppException if conversion fails
      */
-    DDB_DLL void convertGltfTo3dModel(const std::string &inputGltf,
-                                      const std::string &outputBasePath,
-                                      std::string &outGeomPath,
-                                      std::string &outMtlPath,
-                                      bool forcePLY = false,
-                                      bool preferPLYIfNoUV = true);
+    void convertGltfTo3dModel(const std::string &inputGltf,
+                              const std::string &outputBasePath,
+                              std::string &outGeomPath,
+                              std::string &outMtlPath,
+                              bool forcePLY = false,
+                              bool preferPLYIfNoUV = true);
 
 }
 #endif // _3D_H

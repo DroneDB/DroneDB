@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -47,16 +46,16 @@ struct MergeValidationResult {
     } alignment;
 };
 
-DDB_DLL std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string> &inputPaths);
+std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string> &inputPaths);
 
-DDB_DLL MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths);
+MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths);
 
-DDB_DLL void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
+void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
                                         const std::vector<int> &previewBands,
                                         int thumbSize,
                                         uint8_t **outBuffer, int *outBufferSize);
 
-DDB_DLL void mergeMultispectral(const std::vector<std::string> &inputPaths,
+void mergeMultispectral(const std::vector<std::string> &inputPaths,
                                  const std::string &outputPath);
 
 } // namespace ddb

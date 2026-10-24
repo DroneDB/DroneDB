@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "ddb_export.h"
 #include "parallel.h"
 #include "point_rasterizer.h"
 
@@ -58,51 +57,51 @@ namespace ddb
         std::vector<CopcNode> nodes;            // every node with points
 
         /// Point counts by depth
-        DDB_DLL CopcHierarchy hierarchy() const;
+        CopcHierarchy hierarchy() const;
 
         /// Whether the point records carry Red/Green/Blue (formats 7 and 8)
         bool hasColor() const { return pointFormat == 7 || pointFormat == 8; }
 
         /// Cell of key in the cloud's coordinates (PDAL's copc::Key::bounds)
-        DDB_DLL void nodeBounds(const CopcNodeKey &key, double &minX, double &minY, double &maxX,
-                                double &maxY) const;
+        void nodeBounds(const CopcNodeKey &key, double &minX, double &minY, double &maxX,
+                        double &maxY) const;
     };
 
     /// Reads the LAS header, COPC info VLR and every hierarchy page of a .copc.laz (local
     /// path or URL). Throws AppException when the file is not a valid COPC.
-    DDB_DLL CopcIndex readCopcIndex(const std::string &copcPath);
+    CopcIndex readCopcIndex(const std::string &copcPath);
 
     /// readCopcIndex(copcPath).hierarchy()
-    DDB_DLL CopcHierarchy readCopcHierarchy(const std::string &copcPath);
+    CopcHierarchy readCopcHierarchy(const std::string &copcPath);
 
     /// Decompresses the points of one node: coordinates in the cloud CRS and colours
     /// (zeros when the format has none). Throws AppException when the chunk cannot be read.
-    DDB_DLL void decodeCopcNode(const std::string &copcPath, const CopcIndex &index, const CopcNode &node,
-                                PointBatch &points);
+    void decodeCopcNode(const std::string &copcPath, const CopcIndex &index, const CopcNode &node,
+                        PointBatch &points);
 
     /// readers.copc's depth limit for its "resolution" option: nodes of depth below it
     /// are read
-    DDB_DLL int copcDepthEnd(double spacing, double resolution);
+    int copcDepthEnd(double spacing, double resolution);
 
     /// Deepest octree depth whose points, with those of every shallower depth, fit in
     /// budget (0 when even the root exceeds it)
-    DDB_DLL int planCopcDepth(const std::vector<uint64_t> &pointsPerDepth, uint64_t budget);
+    int planCopcDepth(const std::vector<uint64_t> &pointsPerDepth, uint64_t budget);
 
     /// readers.copc "resolution" option that reads depths 0..depth of a cloud whose
     /// root spacing is spacing. PDAL reads the depths below ceil(log2(spacing / r)) + 1,
     /// so the value is taken between two levels, never on one.
-    DDB_DLL double copcResolutionForDepth(double spacing, int depth);
+    double copcResolutionForDepth(double spacing, int depth);
 
     /// CPU tokens for the decompression threads of a local COPC file: up to 4 threads, the
     /// calling one included (parallel::tryAcquireThreads). None for a remote file, which keeps
     /// PDAL's own thread count (network-bound). Keep them until the reader has run.
-    DDB_DLL parallel::CpuTokens copcReadThreads(const std::string &copcPath);
+    parallel::CpuTokens copcReadThreads(const std::string &copcPath);
 
     /// readers.copc options shared by tiles and thumbnails: the file (relative paths
     /// made explicit for PDAL), no SRS processing (callers work with the WKT of
     /// getCopcInfo and pass bounds in the cloud CRS) and, for a local file, the
     /// decompression threads that `threads` (copcReadThreads) allows
-    DDB_DLL pdal::Options copcReaderOptions(const std::string &copcPath, const parallel::CpuTokens &threads);
+    pdal::Options copcReaderOptions(const std::string &copcPath, const parallel::CpuTokens &threads);
 
     /// A 2D window of a COPC file (cloud CRS, bounds included) and the resolution to read it at
     struct CopcWindow
@@ -113,19 +112,19 @@ namespace ddb
 
     /// readers.copc options for the points of a window, down to the depth for its resolution;
     /// the bounds text keeps every bit of the doubles
-    DDB_DLL pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads,
-                                            const CopcWindow &window);
+    pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads,
+                                    const CopcWindow &window);
 
     /// The points readers.copc returns for that window, in batches (the reference
     /// CopcNodeReader matches)
-    DDB_DLL void readCopcWindow(const std::string &copcPath, const CopcWindow &window,
-                                const std::function<void(PointBatch &)> &sink);
+    void readCopcWindow(const std::string &copcPath, const CopcWindow &window,
+                        const std::function<void(PointBatch &)> &sink);
 
     /// Runs the (streamable) PDAL pipeline that ends at tail without holding its points:
     /// they go to sink in batches of up to chunkSize. Batches carry the Red/Green/Blue
     /// dimensions when the pipeline has them, zeros otherwise.
-    DDB_DLL void forEachPointBatch(pdal::Stage &tail, const std::function<void(PointBatch &)> &sink,
-                                   size_t chunkSize = 16384);
+    void forEachPointBatch(pdal::Stage &tail, const std::function<void(PointBatch &)> &sink,
+                           size_t chunkSize = 16384);
 }
 
 #endif // COPC_UTILS_H

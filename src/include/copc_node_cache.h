@@ -16,7 +16,6 @@
 #include <unordered_map>
 
 #include "copc_utils.h"
-#include "ddb_export.h"
 #include "fs.h"
 #include "point_rasterizer.h"
 
@@ -41,19 +40,19 @@ namespace ddb
     public:
         using Node = std::shared_ptr<const PointBatch>;
 
-        DDB_DLL static CopcNodeCache &instance();
+        static CopcNodeCache &instance();
 
         /// The decoded node stored under key, loading it with load on a miss. file is the
         /// cloud the node belongs to (for release()). Exceptions of load propagate and
         /// nothing is cached.
-        DDB_DLL Node get(const std::string &file, const std::string &key, const std::function<Node()> &load);
+        Node get(const std::string &file, const std::string &key, const std::function<Node()> &load);
 
         /// Drops the nodes of path, or of every file under path when it is a folder
-        DDB_DLL size_t release(const fs::path &path);
+        size_t release(const fs::path &path);
 
-        DDB_DLL void clear();
-        DDB_DLL void setCapacity(size_t bytes);
-        DDB_DLL size_t bytes() const;
+        void clear();
+        void setCapacity(size_t bytes);
+        size_t bytes() const;
 
         /// Nodes loaded since start (misses), for tests and diagnostics
         uint64_t loads() const { return loads_.load(); }
@@ -80,7 +79,7 @@ namespace ddb
     };
 
     /// Bytes a decoded node takes in memory
-    DDB_DLL size_t pointBatchBytes(const PointBatch &points);
+    size_t pointBatchBytes(const PointBatch &points);
 
     /**
      * Reads the points of a local COPC file for a 2D window and resolution, as
@@ -95,7 +94,7 @@ namespace ddb
         CopcIndex index_;
 
     public:
-        DDB_DLL explicit CopcNodeReader(const std::string &copcPath);
+        explicit CopcNodeReader(const std::string &copcPath);
 
         bool hasColor() const { return index_.hasColor(); }
         const CopcIndex &index() const { return index_; }
@@ -103,8 +102,8 @@ namespace ddb
         /// Gives sink the points inside [minX, maxX] x [minY, maxY] (cloud CRS, bounds
         /// included) of the nodes that overlap it, down to the depth readers.copc reads for
         /// resolution. Batches are reused between calls of sink.
-        DDB_DLL void read(double minX, double minY, double maxX, double maxY, double resolution,
-                          const std::function<void(PointBatch &)> &sink) const;
+        void read(double minX, double minY, double maxX, double maxY, double resolution,
+                  const std::function<void(PointBatch &)> &sink) const;
     };
 }
 

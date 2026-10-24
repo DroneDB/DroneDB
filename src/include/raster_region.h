@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -50,10 +49,10 @@ namespace ddb
      *                    caller frees with `VSIFree` (== `DDBVSIFree`).
      * @param outSize     Buffer size in bytes.
      */
-    DDB_DLL void renderRasterRegion(const RegionRequest &request,
-                                    const RegionOptions &options,
-                                    uint8_t **outBytes,
-                                    int *outSize);
+    void renderRasterRegion(const RegionRequest &request,
+                            const RegionOptions &options,
+                            uint8_t **outBytes,
+                            int *outSize);
 
     /**
      * Query a raster at a geographic point. Returns JSON.
@@ -64,9 +63,9 @@ namespace ddb
      * @param srs        Authority code; empty = "EPSG:4326".
      * @return JSON string with bands, lon, lat, pixel.
      */
-    DDB_DLL std::string queryRasterPoint(const std::string &inputPath,
-                                         double x, double y,
-                                         const std::string &srs);
+    std::string queryRasterPoint(const std::string &inputPath,
+                                 double x, double y,
+                                 const std::string &srs);
 
     /**
      * Render a spectral index (NDVI/NDRE/NDWI/EVI/SAVI) over a raster region
@@ -88,10 +87,10 @@ namespace ddb
      * @param outBytes    Caller frees with DDBVSIFree.
      * @param outSize     Buffer size.
      */
-    DDB_DLL void renderRasterIndex(const RegionRequest &request,
-                                   const std::string &indexName,
-                                   uint8_t **outBytes,
-                                   int *outSize);
+    void renderRasterIndex(const RegionRequest &request,
+                           const std::string &indexName,
+                           uint8_t **outBytes,
+                           int *outSize);
 
 } // namespace ddb
 

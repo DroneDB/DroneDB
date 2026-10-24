@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "ddb_export.h"
 #include "json_fwd.h"
 #include "registry_client.h"
 
@@ -33,20 +32,20 @@ namespace ddb
         std::string endpoint(const std::string &name) const;
 
     public:
-        DDB_DLL PushManager(RegistryClient *client,
-                            const std::string &org,
-                            const std::string &ds)
+        PushManager(RegistryClient *client,
+                    const std::string &org,
+                    const std::string &ds)
             : registry(client), organization(org), dataset(ds)
         {
         }
 
-        DDB_DLL PushInitResponse init(const std::string &registryStampChecksum, const json &dbStamp);
-        DDB_DLL void upload(const std::string &fullPath, const std::string &file, const std::string &token);
-        DDB_DLL void meta(const json &metaDump, const std::string &token);
-        DDB_DLL void commit(const std::string &token);
+        PushInitResponse init(const std::string &registryStampChecksum, const json &dbStamp);
+        void upload(const std::string &fullPath, const std::string &file, const std::string &token);
+        void meta(const json &metaDump, const std::string &token);
+        void commit(const std::string &token);
 
-        DDB_DLL std::string getOrganization() { return this->organization; }
-        DDB_DLL std::string getDataset() { return this->dataset; }
+        std::string getOrganization() { return this->organization; }
+        std::string getDataset() { return this->dataset; }
     };
 
 } // namespace ddb

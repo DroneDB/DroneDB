@@ -6,7 +6,6 @@
 
 #include <vector>
 #include "fs.h"
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -16,15 +15,15 @@ namespace ddb
     std::vector<fs::path> files;
 
   public:
-    DDB_DLL ExifEditor(const std::string &file);
-    DDB_DLL ExifEditor(std::vector<std::string> &files);
+    ExifEditor(const std::string &file);
+    ExifEditor(std::vector<std::string> &files);
 
-    DDB_DLL bool canEdit();
+    bool canEdit();
 
-    DDB_DLL void SetGPSAltitude(double altitude);
-    DDB_DLL void SetGPSLatitude(double latitude);
-    DDB_DLL void SetGPSLongitude(double longitude);
-    DDB_DLL void SetGPS(double latitude, double longitude, double altitude);
+    void SetGPSAltitude(double altitude);
+    void SetGPSLatitude(double latitude);
+    void SetGPSLongitude(double longitude);
+    void SetGPS(double latitude, double longitude, double altitude);
 
   protected:
     template <typename Func>

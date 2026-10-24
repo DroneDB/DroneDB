@@ -19,17 +19,17 @@ namespace ddb
 
         Database *db;
 
-        DDB_DLL int countPasswords();
+        int countPasswords();
 
     public:
         PasswordManager(ddb::Database *db) : db(db) {}
 
-        DDB_DLL void append(const std::string &password);
+        void append(const std::string &password);
 
         // Nice to have
         // void remove(const std::string& password);
-        DDB_DLL bool verify(const std::string &password);
-        DDB_DLL void clearAll();
+        bool verify(const std::string &password);
+        void clearAll();
     };
 
 }

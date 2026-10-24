@@ -9,7 +9,6 @@
 #include <string>
 #include "fs.h"
 #include "entry_types.h"
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -48,9 +47,9 @@ namespace ddb
 
     // Maps a PLY type name (including the sized aliases) to its scalar type;
     // PlyScalarType::Unknown when not recognised.
-    DDB_DLL PlyScalarType plyScalarTypeFromName(const std::string &name);
+    PlyScalarType plyScalarTypeFromName(const std::string &name);
     // Size in bytes of a binary scalar (0 for Unknown).
-    DDB_DLL size_t plyScalarSize(PlyScalarType t);
+    size_t plyScalarSize(PlyScalarType t);
 
     struct PlyProperty
     {
@@ -120,17 +119,17 @@ namespace ddb
     // that the name-only consumers (getPlyInfo) keep working. Consumers that read
     // the body (plyconv) validate them.
     // @throws FSException if the file cannot be opened.
-    DDB_DLL bool parsePlyHeader(const fs::path &plyFile, PlyHeader &header, std::string *error = nullptr);
+    bool parsePlyHeader(const fs::path &plyFile, PlyHeader &header, std::string *error = nullptr);
 
     // Same as parsePlyHeader but throws AppException with the reason on failure.
-    DDB_DLL PlyHeader readPlyHeader(const fs::path &plyFile);
+    PlyHeader readPlyHeader(const fs::path &plyFile);
 
     // Multi-texture meshes are not supported (only one texture is converted, so a
     // face of texture #2 would silently be mapped onto texture #1). Returns a
     // human-readable reason when the header declares more than one
     // `comment TextureFile` or the `face` element has a `texnumber` property;
     // empty when the texture layout is supported.
-    DDB_DLL std::string plyUnsupportedTextureReason(const PlyHeader &header);
+    std::string plyUnsupportedTextureReason(const PlyHeader &header);
 
     struct PlyInfo
     {
@@ -157,8 +156,8 @@ namespace ddb
         std::string unsupportedTextureReason;
     };
 
-    DDB_DLL EntryType identifyPly(const fs::path &plyFile);
-    DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info);
+    EntryType identifyPly(const fs::path &plyFile);
+    bool getPlyInfo(const fs::path &plyFile, PlyInfo &info);
 
 }
 #endif // PLY_H

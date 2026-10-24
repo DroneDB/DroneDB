@@ -5,7 +5,6 @@
 #define TOOL_LOCATOR_H
 
 #include <string>
-#include "ddb_export.h"
 #include "fs.h"
 
 namespace ddb
@@ -13,7 +12,7 @@ namespace ddb
     namespace tools
     {
         // True when p is a regular file that can be executed (any exec bit on POSIX).
-        DDB_DLL bool isExecutableFile(const fs::path &p);
+        bool isExecutableFile(const fs::path &p);
 
         // Locates an external tool shipped next to DroneDB, in this order:
         //   1. envVar, when set and non-empty: authoritative (a non-executable value
@@ -28,7 +27,7 @@ namespace ddb
         // envVar (so pointing the variable somewhere else is looked up again);
         // forceRefresh=true searches again and replaces the cached answer (a tool installed
         // after the first lookup, a test that changed the PATH).
-        DDB_DLL fs::path findTool(const std::string &baseName, const char *envVar, bool forceRefresh = false);
+        fs::path findTool(const std::string &baseName, const char *envVar, bool forceRefresh = false);
     }
 }
 

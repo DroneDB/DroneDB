@@ -5,7 +5,6 @@
 #define RASTER_ANALYSIS_H
 
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -25,7 +24,7 @@ namespace ddb {
  *   "calibration": {...}     // only when isThermal && calibration valid
  * }
  */
-DDB_DLL std::string getRasterValueInfoJson(const std::string &filePath);
+std::string getRasterValueInfoJson(const std::string &filePath);
 
 /**
  * Get raster value at pixel (x, y).
@@ -39,7 +38,7 @@ DDB_DLL std::string getRasterValueInfoJson(const std::string &filePath);
  *   "isThermal": bool
  * }
  */
-DDB_DLL std::string getRasterPointJson(const std::string &filePath, int x, int y);
+std::string getRasterPointJson(const std::string &filePath, int x, int y);
 
 /**
  * Get statistics over pixel rectangle [x0,y0]-[x1,y1] (inclusive).
@@ -53,12 +52,12 @@ DDB_DLL std::string getRasterPointJson(const std::string &filePath, int x, int y
  *   "isThermal": bool
  * }
  */
-DDB_DLL std::string getRasterAreaStatsJson(const std::string &filePath,
-                                           int x0, int y0, int x1, int y1);
+std::string getRasterAreaStatsJson(const std::string &filePath,
+                                   int x0, int y0, int x1, int y1);
 
 /** Read GDAL UNITTYPE of the first band of a raster.
  *  Returns empty string if unset or file cannot be opened. */
-DDB_DLL std::string readGdalUnitType(const std::string &filePath);
+std::string readGdalUnitType(const std::string &filePath);
 
 } // namespace ddb
 

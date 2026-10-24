@@ -11,7 +11,6 @@
 #include <thread>
 #include <utility>
 
-#include "ddb_export.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "randomutil.h"
@@ -49,7 +48,7 @@ struct ThreadRetrySleeper {
 //    transport error, a 5xx or a 429).
 // Full jitter (rand(0, backoff), not a fixed or "equal jitter" schedule) is what de-synchronises a
 // herd of writers contending for the same lock, or of clients retrying the same server.
-struct DDB_DLL RetryPolicy {
+struct RetryPolicy {
     unsigned baseDelayMs = 25;
     unsigned maxDelayMs = 2000;
     unsigned deadlineMs = 60000;

@@ -10,7 +10,6 @@
 #include <string_view>
 #include <vector>
 
-#include "ddb_export.h"
 #include "dbops.h"
 #include "entry_handler.h"
 #include "fs.h"
@@ -36,7 +35,7 @@ namespace ddb {
 enum class BuildState { None, Pending, Building, Complete };
 
 // "none", "pending", "building", "complete"
-DDB_DLL std::string_view buildStateName(BuildState state);
+std::string_view buildStateName(BuildState state);
 
 // The build of one entry: the "build" object of DDBGetBuildArtifacts and DDBListEntriesEx
 struct EntryBuild {
@@ -62,23 +61,23 @@ struct EntryBuild {
 };
 
 // {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?}
-DDB_DLL void to_json(json& j, const BuildArtifact& artifact);
+void to_json(json& j, const BuildArtifact& artifact);
 // {"buildable", "source", "hash", "root", "state", "missingDependencies", "lastAttempt",
 // "retryAfter", "artifacts"}; source, hash, root, lastAttempt and retryAfter are null when they
 // do not apply
-DDB_DLL void to_json(json& j, const EntryBuild& build);
+void to_json(json& j, const EntryBuild& build);
 
 // DDBGetEntryTypes: one object per registered entry type, by id
-DDB_DLL json entryTypesJson();
+json entryTypesJson();
 
 // DDBGetBuildArtifacts: one object per path, in input order, from one index connection:
 // {"path", "exists": false} or {"path", "exists": true, "hash", "type", "build"}
-DDB_DLL json getBuildArtifactsJson(Database* db, const std::vector<std::string>& paths);
+json getBuildArtifactsJson(Database* db, const std::vector<std::string>& paths);
 
 // DDBListEntries and DDBListEntriesEx: listEntries(db, query) as a JSON array of
 // to_json(Entry) (the "json" format of writeEntries), each entry with its "build" object when
 // withBuild. Serialized entry by entry: the listing is never held as one JSON document.
-DDB_DLL std::string listEntriesJson(Database* db, const EntryQuery& query, bool withBuild);
+std::string listEntriesJson(Database* db, const EntryQuery& query, bool withBuild);
 
 // DDBResolveBuildFile: the absolute path of the file at relativePath ('/'-separated) in the
 // build root of hash, when relativePath lies inside one of the artifacts of an entry with
@@ -87,7 +86,7 @@ DDB_DLL std::string listEntriesJson(Database* db, const EntryQuery& query, bool 
 // dataset path rules (normalizeEntryPath: absolute, "..", empty, invalid UTF-8, ...);
 // EntryNotFoundException when no entry has that hash, the path is not inside one of its
 // artifacts, the file does not exist, or it resolves (through a link) outside the build root.
-DDB_DLL fs::path resolveBuildFile(Database* db, const std::string& hash, const std::string& relativePath);
+fs::path resolveBuildFile(Database* db, const std::string& hash, const std::string& relativePath);
 
 // DDBCopyBuildArtifacts: copies the artifact folders of hash (those of the types of the
 // entries of source with that hash, legacy folders included) and its pending marker from the
@@ -98,7 +97,7 @@ DDB_DLL fs::path resolveBuildFile(Database* db, const std::string& hash, const s
 // EntryNotFoundException when no entry of source has that hash, BuildInProgressException
 // when a build of hash runs in either dataset (nothing is copied), RetryableBuildException
 // when the destination's disk is (nearly) full.
-DDB_DLL json copyBuildArtifacts(Database* source, Database* destination, const std::string& hash);
+json copyBuildArtifacts(Database* source, Database* destination, const std::string& hash);
 
 }  // namespace ddb
 
