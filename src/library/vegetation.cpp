@@ -14,6 +14,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <utility>
 #include <tuple>
 #include <cstdio>
 
@@ -256,6 +257,134 @@ bool hasNoValue(float v, float nodata) {
     return v == nodata || !std::isfinite(v);
 }
 
+// The source bands of one pixel by symbol (0 for a band the filter does not name)
+struct PixelBands {
+    float R = 0, G = 0, B = 0, N = 0, Re = 0;
+};
+
+// The formulas this file evaluates; the id of a VegetationFormula is looked up once per call, not
+// compared with every id for every pixel
+enum class FormulaKind { Unknown, NDVI, VARI, EXG, GLI, vNDVI, NDWI, GNDVI, SAVI, EVI, NDRE, NDYI, MPRI, OSAVI, GRVI, ENDVI, ARVI, CELSIUS, KELVIN };
+
+FormulaKind formulaKind(const std::string &id) {
+    static const std::pair<const char *, FormulaKind> kinds[] = {
+        {"NDVI", FormulaKind::NDVI},   {"VARI", FormulaKind::VARI},     {"EXG", FormulaKind::EXG},
+        {"GLI", FormulaKind::GLI},     {"vNDVI", FormulaKind::vNDVI},   {"NDWI", FormulaKind::NDWI},
+        {"GNDVI", FormulaKind::GNDVI}, {"SAVI", FormulaKind::SAVI},     {"EVI", FormulaKind::EVI},
+        {"NDRE", FormulaKind::NDRE},   {"NDYI", FormulaKind::NDYI},     {"MPRI", FormulaKind::MPRI},
+        {"OSAVI", FormulaKind::OSAVI}, {"GRVI", FormulaKind::GRVI},     {"ENDVI", FormulaKind::ENDVI},
+        {"ARVI", FormulaKind::ARVI},   {"CELSIUS", FormulaKind::CELSIUS}, {"KELVIN", FormulaKind::KELVIN}};
+    for (const auto &[name, kind] : kinds)
+        if (id == name) return kind;
+    return FormulaKind::Unknown;
+}
+
+// The value of the formula over pixel i (nodata where it is undefined there): p are its bands, and
+// `thermal` is the first band of the raster (or null), which the thermal formulas read as it is
+template <FormulaKind kind>
+inline float evaluateFormula(const PixelBands &p, const float *thermal, size_t i, float nodata) {
+    const float EPS = 1e-10f;
+    const float R = p.R, G = p.G, B = p.B, N = p.N, Re = p.Re;
+    // A ratio is undefined where its denominator is (nearly) zero
+    const auto over = [nodata, EPS](float numerator, float denominator) {
+        return (std::abs(denominator) < EPS) ? nodata : numerator / denominator;
+    };
+
+    switch (kind) {
+    case FormulaKind::NDVI: return over(N - R, N + R);
+    case FormulaKind::VARI: return over(G - R, G + R - B);
+    case FormulaKind::EXG: return (2.0f * G) - (R + B);
+    case FormulaKind::GLI: return over((G * 2.0f) - R - B, (G * 2.0f) + R + B);
+    case FormulaKind::vNDVI:
+        if (R > EPS && G > EPS && B > EPS)
+            return 0.5268f * std::pow(R, -0.1294f) * std::pow(G, 0.3389f) * std::pow(B, -0.3118f);
+        return nodata;
+    case FormulaKind::NDWI: return over(G - N, G + N);
+    case FormulaKind::GNDVI: return over(N - G, N + G);
+    case FormulaKind::SAVI: return over(1.5f * (N - R), N + R + 0.5f);
+    case FormulaKind::EVI: return over(2.5f * (N - R), N + 6.0f * R - 7.5f * B + 1.0f);
+    case FormulaKind::NDRE: return over(N - Re, N + Re);
+    case FormulaKind::NDYI: return over(G - B, G + B);
+    case FormulaKind::MPRI: return over(G - R, G + R);
+    case FormulaKind::OSAVI: return over(N - R, N + R + 0.16f);
+    case FormulaKind::GRVI: return over(N, G);
+    case FormulaKind::ENDVI: return over((N + G) - (2.0f * B), (N + G) + (2.0f * B));
+    case FormulaKind::ARVI: return over(N - (2.0f * R) + B, N + (2.0f * R) + B);
+    // Thermal passthrough: the pixel value is already the temperature in °C. For single-band
+    // thermal rasters, band index 0 is used directly.
+    case FormulaKind::CELSIUS:
+        return thermal != nullptr && !hasNoValue(thermal[i], nodata) ? thermal[i] : nodata;
+    // Celsius to Kelvin
+    case FormulaKind::KELVIN:
+        return thermal != nullptr && !hasNoValue(thermal[i], nodata) ? thermal[i] + 273.15f : nodata;
+    case FormulaKind::Unknown: break;
+    }
+    return nodata;
+}
+
+// What a formula runs over: a pointer per source band (null for a band the filter does not name),
+// the first band of the raster for the thermal formulas, and the output
+struct FormulaInput {
+    const float *R, *G, *B, *N, *Re, *thermal;
+    float *out;
+    size_t count;
+    float nodata;
+};
+
+// The formula over every pixel. One instance per formula: the choice of the formula is made once, not
+// per pixel.
+template <FormulaKind kind>
+void formulaLoop(const FormulaInput &in) {
+    const float nodata = in.nodata;
+    for (size_t i = 0; i < in.count; i++) {
+        float R = in.R ? in.R[i] : 0;
+        float G = in.G ? in.G[i] : 0;
+        float B = in.B ? in.B[i] : 0;
+        float N = in.N ? in.N[i] : 0;
+        float Re = in.Re ? in.Re[i] : 0;
+
+        // A pixel has no value when a source band used has none: nodata, or not a number (NaN,
+        // infinite), which no formula turns into a value
+        bool isNodata = false;
+        if (in.R && hasNoValue(R, nodata)) isNodata = true;
+        if (in.G && hasNoValue(G, nodata)) isNodata = true;
+        if (in.B && hasNoValue(B, nodata)) isNodata = true;
+        if (in.N && hasNoValue(N, nodata)) isNodata = true;
+        if (in.Re && hasNoValue(Re, nodata)) isNodata = true;
+
+        if (isNodata) {
+            in.out[i] = nodata;
+            continue;
+        }
+
+        in.out[i] = evaluateFormula<kind>(PixelBands{R, G, B, N, Re}, in.thermal, i, nodata);
+    }
+}
+
+void runFormula(FormulaKind kind, const FormulaInput &in) {
+    switch (kind) {
+    case FormulaKind::NDVI: return formulaLoop<FormulaKind::NDVI>(in);
+    case FormulaKind::VARI: return formulaLoop<FormulaKind::VARI>(in);
+    case FormulaKind::EXG: return formulaLoop<FormulaKind::EXG>(in);
+    case FormulaKind::GLI: return formulaLoop<FormulaKind::GLI>(in);
+    case FormulaKind::vNDVI: return formulaLoop<FormulaKind::vNDVI>(in);
+    case FormulaKind::NDWI: return formulaLoop<FormulaKind::NDWI>(in);
+    case FormulaKind::GNDVI: return formulaLoop<FormulaKind::GNDVI>(in);
+    case FormulaKind::SAVI: return formulaLoop<FormulaKind::SAVI>(in);
+    case FormulaKind::EVI: return formulaLoop<FormulaKind::EVI>(in);
+    case FormulaKind::NDRE: return formulaLoop<FormulaKind::NDRE>(in);
+    case FormulaKind::NDYI: return formulaLoop<FormulaKind::NDYI>(in);
+    case FormulaKind::MPRI: return formulaLoop<FormulaKind::MPRI>(in);
+    case FormulaKind::OSAVI: return formulaLoop<FormulaKind::OSAVI>(in);
+    case FormulaKind::GRVI: return formulaLoop<FormulaKind::GRVI>(in);
+    case FormulaKind::ENDVI: return formulaLoop<FormulaKind::ENDVI>(in);
+    case FormulaKind::ARVI: return formulaLoop<FormulaKind::ARVI>(in);
+    case FormulaKind::CELSIUS: return formulaLoop<FormulaKind::CELSIUS>(in);
+    case FormulaKind::KELVIN: return formulaLoop<FormulaKind::KELVIN>(in);
+    case FormulaKind::Unknown: return formulaLoop<FormulaKind::Unknown>(in);
+    }
+}
+
 } // anonymous namespace
 
 void VegetationEngine::applyFormula(const VegetationFormula &formula,
@@ -264,9 +393,6 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
                                      float *outData,
                                      size_t pixelCount,
                                      float nodata) const {
-    const float EPS = 1e-10f;
-    const std::string &id = formula.id;
-
     // Get band data pointers by symbol
     // bandData indices match the raster band order (0-based)
     auto getBand = [&](char sym) -> const float* {
@@ -275,101 +401,10 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
         return bandData[idx];
     };
 
-    const float *pR = getBand('R');
-    const float *pG = getBand('G');
-    const float *pB = getBand('B');
-    const float *pN = getBand('N');
-    const float *pRe = getBand('e');
-
-    for (size_t i = 0; i < pixelCount; i++) {
-        float R = pR ? pR[i] : 0;
-        float G = pG ? pG[i] : 0;
-        float B = pB ? pB[i] : 0;
-        float N = pN ? pN[i] : 0;
-        float Re = pRe ? pRe[i] : 0;
-
-        // A pixel has no value when a source band used has none: nodata, or not a number (NaN,
-        // infinite), which no formula turns into a value
-        bool isNodata = false;
-        if (pR && hasNoValue(R, nodata)) isNodata = true;
-        if (pG && hasNoValue(G, nodata)) isNodata = true;
-        if (pB && hasNoValue(B, nodata)) isNodata = true;
-        if (pN && hasNoValue(N, nodata)) isNodata = true;
-        if (pRe && hasNoValue(Re, nodata)) isNodata = true;
-
-        if (isNodata) {
-            outData[i] = nodata;
-            continue;
-        }
-
-        float result = nodata;
-
-        if (id == "NDVI") {
-            float denom = N + R;
-            result = (std::abs(denom) < EPS) ? nodata : (N - R) / denom;
-        } else if (id == "VARI") {
-            float denom = G + R - B;
-            result = (std::abs(denom) < EPS) ? nodata : (G - R) / denom;
-        } else if (id == "EXG") {
-            result = (2.0f * G) - (R + B);
-        } else if (id == "GLI") {
-            float denom = (G * 2.0f) + R + B;
-            result = (std::abs(denom) < EPS) ? nodata : ((G * 2.0f) - R - B) / denom;
-        } else if (id == "vNDVI") {
-            if (R > EPS && G > EPS && B > EPS) {
-                result = 0.5268f * std::pow(R, -0.1294f) * std::pow(G, 0.3389f) * std::pow(B, -0.3118f);
-            } else {
-                result = nodata;
-            }
-        } else if (id == "NDWI") {
-            float denom = G + N;
-            result = (std::abs(denom) < EPS) ? nodata : (G - N) / denom;
-        } else if (id == "GNDVI") {
-            float denom = N + G;
-            result = (std::abs(denom) < EPS) ? nodata : (N - G) / denom;
-        } else if (id == "SAVI") {
-            float denom = N + R + 0.5f;
-            result = (std::abs(denom) < EPS) ? nodata : (1.5f * (N - R)) / denom;
-        } else if (id == "EVI") {
-            float denom = N + 6.0f * R - 7.5f * B + 1.0f;
-            result = (std::abs(denom) < EPS) ? nodata : 2.5f * (N - R) / denom;
-        } else if (id == "NDRE") {
-            float denom = N + Re;
-            result = (std::abs(denom) < EPS) ? nodata : (N - Re) / denom;
-        } else if (id == "NDYI") {
-            float denom = G + B;
-            result = (std::abs(denom) < EPS) ? nodata : (G - B) / denom;
-        } else if (id == "MPRI") {
-            float denom = G + R;
-            result = (std::abs(denom) < EPS) ? nodata : (G - R) / denom;
-        } else if (id == "OSAVI") {
-            float denom = N + R + 0.16f;
-            result = (std::abs(denom) < EPS) ? nodata : (N - R) / denom;
-        } else if (id == "GRVI") {
-            result = (std::abs(G) < EPS) ? nodata : N / G;
-        } else if (id == "ENDVI") {
-            float denom = (N + G) + (2.0f * B);
-            result = (std::abs(denom) < EPS) ? nodata : ((N + G) - (2.0f * B)) / denom;
-        } else if (id == "ARVI") {
-            float denom = N + (2.0f * R) + B;
-            result = (std::abs(denom) < EPS) ? nodata : (N - (2.0f * R) + B) / denom;
-        } else if (id == "CELSIUS") {
-            // Thermal passthrough: pixel value is already temperature in °C
-            // For single-band thermal rasters, use band index 0 directly
-            if (bandData.size() > 0 && bandData[0] != nullptr) {
-                float val = bandData[0][i];
-                result = hasNoValue(val, nodata) ? nodata : val;
-            }
-        } else if (id == "KELVIN") {
-            // Convert Celsius to Kelvin
-            if (bandData.size() > 0 && bandData[0] != nullptr) {
-                float val = bandData[0][i];
-                result = hasNoValue(val, nodata) ? nodata : val + 273.15f;
-            }
-        }
-
-        outData[i] = result;
-    }
+    const FormulaInput input{getBand('R'), getBand('G'), getBand('B'), getBand('N'), getBand('e'),
+                             (!bandData.empty() && bandData[0] != nullptr) ? bandData[0] : nullptr,
+                             outData, pixelCount, nodata};
+    runFormula(formulaKind(formula.id), input);
 }
 
 void VegetationEngine::applyColormap(const float *values,
