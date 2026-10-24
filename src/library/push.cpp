@@ -73,14 +73,15 @@ void pushDataset(RegistryClient& client, const std::string& path, std::ostream& 
     out << "Push completed" << std::endl;
 }
 
-void push(const std::string& registry, bool sslVerify, CredentialProvider& credentials, const RegistryDeps& deps) {
+void push(const std::string& registry, bool sslVerify, CredentialProvider& credentials, std::ostream& out,
+          const RegistryDeps& deps) {
     const auto currentPath = io::toUtf8(fs::current_path());
 
     const auto db = open(currentPath, true);
     const auto registryUrl = datasetRegistryUrl(db.get(), registry, "push");
 
     withAuthenticatedRegistry(registryUrl, sslVerify, credentials, [&](RegistryClient& client) {
-        pushDataset(client, currentPath, std::cout);
+        pushDataset(client, currentPath, out);
     }, {}, deps);
 }
 

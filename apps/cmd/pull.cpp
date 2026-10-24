@@ -59,7 +59,7 @@ namespace cmd
         else if (keepOurs)
             mergeStrategy = ddb::MergeStrategy::KeepOurs;
 
-        ddb::pull(remote, mergeStrategy, sslVerify, credentials(), registryDeps());
+        ddb::pull(remote, mergeStrategy, sslVerify, credentials(), std::cout, registryDeps());
         return EXIT_SUCCESS;
     }
 

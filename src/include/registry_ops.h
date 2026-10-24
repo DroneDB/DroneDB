@@ -9,7 +9,7 @@
 // pull and clone are what the CLI runs from the dataset folder: they find the Registry, log in
 // through withAuthenticatedRegistry (registry_auth.h) and ask `credentials` when they must.
 
-#include <iostream>
+#include <ostream>
 #include <string>
 
 #include "database.h"
@@ -40,13 +40,14 @@ void cloneDataset(RegistryClient &client, const std::string &organization, const
 std::string datasetRegistryUrl(Database *db, const std::string &registry, const std::string &verb);
 
 // The operations of the CLI, from the current folder. `registry` may be empty (the tag says).
-// `deps` are the client's collaborators (RegistryDeps): the defaults are the real ones.
-void push(const std::string &registry, bool sslVerify, CredentialProvider &credentials,
+// Their progress goes to `out`. `deps` are the client's collaborators (RegistryDeps): the defaults
+// are the real ones.
+void push(const std::string &registry, bool sslVerify, CredentialProvider &credentials, std::ostream &out,
           const RegistryDeps &deps = {});
 void pull(const std::string &registry, MergeStrategy mergeStrategy, bool sslVerify,
-          CredentialProvider &credentials, const RegistryDeps &deps = {});
+          CredentialProvider &credentials, std::ostream &out, const RegistryDeps &deps = {});
 void clone(const TagComponents &tag, const std::string &folder, bool sslVerify,
-           CredentialProvider &credentials, const RegistryDeps &deps = {});
+           CredentialProvider &credentials, std::ostream &out, const RegistryDeps &deps = {});
 
 } // namespace ddb
 

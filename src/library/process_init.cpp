@@ -185,6 +185,8 @@ void setupLogging(bool verbose) {
         }
 
     } catch (const std::exception& e) {
+        // The one console write left in the library: the logger itself failed to start, so there is
+        // no log (and no host callback) to report it to
         std::cerr << "Failed to initialize logging: " << e.what() << std::endl;
     }
 }

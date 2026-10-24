@@ -50,7 +50,7 @@ namespace cmd
         auto input = opts["input"].as<std::vector<std::string>>();
         ddb::ExifEditor exifEditor(input);
 
-        if (!exifEditor.canEdit())
+        if (!exifEditor.canEdit(std::cerr))
         {
             return EXIT_FAILURE;
         }

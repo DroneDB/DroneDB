@@ -6,6 +6,7 @@
 
 #include <exiv2/exiv2.hpp>
 #include <memory>
+#include <ostream>
 #include <stdio.h>
 #include <cmath>
 #include "fs.h"
@@ -182,7 +183,7 @@ namespace ddb
         bool extractGpsDirection(GpsDirection &direction);
         bool extractPanoramaInfo(PanoramaInfo &info);
 
-        void printAllTags();
+        void printAllTags(std::ostream &out);
 
         bool hasExif();
         bool hasXmp();

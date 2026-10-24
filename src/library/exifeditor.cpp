@@ -6,7 +6,6 @@
 #include "exceptions.h"
 #include "mio.h"
 #include "exif.h"
-#include <iostream>
 #include <exiv2/exiv2.hpp>
 #include <cmath>
 
@@ -24,7 +23,7 @@ namespace ddb
     }
 
     // Verify that all files can be edited
-    bool ExifEditor::canEdit()
+    bool ExifEditor::canEdit(std::ostream &rejected)
     {
         int rejectCount = 0;
 
@@ -43,12 +42,12 @@ namespace ddb
             }
             catch (const FSException &e)
             {
-                std::cerr << io::toUtf8(file) << ": " << e.what() << std::endl;
+                rejected << io::toUtf8(file) << ": " << e.what() << std::endl;
                 rejectCount++;
             }
             catch (const Exiv2::Error &e)
             {
-                std::cerr << io::toUtf8(file) << ": " << e.what() << std::endl;
+                rejected << io::toUtf8(file) << ": " << e.what() << std::endl;
                 rejectCount++;
             }
 
@@ -166,9 +165,9 @@ namespace ddb
             {
                 writeExivMetadata(*image, file);
             }
-            catch (const Exiv2::Error &)
+            catch (const Exiv2::Error &e)
             {
-                std::cerr << "Cannot write metadata to " + io::toUtf8(file);
+                LOGE << "Cannot write metadata to " << io::toUtf8(file) << ": " << e.what();
             }
         }
     }

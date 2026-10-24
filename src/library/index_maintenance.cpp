@@ -19,7 +19,6 @@
 #include "transaction.h"
 
 #include <ctime>
-#include <iostream>
 #include <map>
 
 namespace ddb
@@ -224,7 +223,7 @@ namespace ddb
         refreshPrjMains(db, directory, removedPrj, true);
     }
 
-    void syncIndex(Database *db)
+    void syncIndex(Database *db, SyncCallback callback)
     {
         const fs::path directory = db->rootDirectory();
 
@@ -258,14 +257,16 @@ namespace ddb
                 deleteQ->execute();
                 checkDeleteBuild(db, hash);
                 checkDeleteMeta(db, relPath.generic());
-                std::cout << "D\t" << relPath.generic() << std::endl;
+                if (callback)
+                    callback(true, relPath.generic());
                 break;
 
             case Modified:
 
                 parseEntry(p, directory, e, true);
                 doUpdate(updateQ.get(), e, fileMtime);
-                std::cout << "U\t" << e.path << std::endl;
+                if (callback)
+                    callback(false, e.path);
                 break;
 
             default:; // Do nothing

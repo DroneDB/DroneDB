@@ -20,6 +20,9 @@ namespace ddb
 
     typedef std::function<bool(const Entry &e, bool updated)> AddCallback;
     typedef std::function<void(const std::string &path)> RemoveCallback;
+    /// Told of every change syncIndex applies: `deleted` (the file is gone, its row was removed) or
+    /// updated (its row was re-parsed), with the path
+    typedef std::function<void(bool deleted, const std::string &path)> SyncCallback;
     typedef std::function<bool(const Entry &e, bool success, const std::string &error)> RescanCallback;
 
     // Options for addToIndexEx / DDBAddWithOptions.
@@ -194,7 +197,9 @@ namespace ddb
                       const AddOptions &options, AddResult &result, AddCallback callback = nullptr);
 
     void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback = nullptr);
-    void syncIndex(Database *db);
+    /// Brings the index in line with the files on disk: removes the rows of deleted files and
+    /// re-parses the modified ones, in one transaction; `callback` is told of each change
+    void syncIndex(Database *db, SyncCallback callback = nullptr);
 
     /**
      * Rescans entries in the index, updating their metadata and status.

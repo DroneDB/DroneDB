@@ -32,7 +32,8 @@ namespace cmd
         fs::current_path(ddb::io::fromUtf8(workingDir));
 
         const auto db = ddb::open(workingDir, true);
-        syncIndex(db.get());
+        syncIndex(db.get(), [](bool deleted, const std::string &path)
+                  { std::cout << (deleted ? "D\t" : "U\t") << path << std::endl; });
         return EXIT_SUCCESS;
     }
 

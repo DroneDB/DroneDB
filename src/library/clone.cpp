@@ -28,13 +28,13 @@ void cloneDataset(RegistryClient& client, const std::string& organization, const
 }
 
 void clone(const TagComponents& tag, const std::string& folder, bool sslVerify, CredentialProvider& credentials,
-           const RegistryDeps& deps) {
+           std::ostream& out, const RegistryDeps& deps) {
     if (fs::exists(io::fromUtf8(folder)) && !fs::is_empty(io::fromUtf8(folder))) {
-        std::cout << "Cannot clone in folder '" + folder + "' because it already exists" << std::endl;
+        out << "Cannot clone in folder '" + folder + "' because it already exists" << std::endl;
         return;
     }
 
-    std::cout << "Cloning dataset '" << tag.organization << "/" << tag.dataset << "' from registry '"
+    out << "Cloning dataset '" << tag.organization << "/" << tag.dataset << "' from registry '"
               << tag.registryUrl << "' to folder '" << folder << "'" << std::endl;
 
     // A public dataset needs no login: the credentials are asked for when the server says 401
@@ -45,7 +45,7 @@ void clone(const TagComponents& tag, const std::string& folder, bool sslVerify, 
         tag.registryUrl, sslVerify, credentials,
         [&](RegistryClient& client) {
             try {
-                cloneDataset(client, tag.organization, tag.dataset, folder, std::cout);
+                cloneDataset(client, tag.organization, tag.dataset, folder, out);
             } catch (const AuthException&) {
                 // What the refused attempt started is removed: the next one needs an empty folder
                 io::assureIsRemoved(io::fromUtf8(folder));

@@ -8,6 +8,7 @@
 #include "stringutil.h"
 #include "dbops.h"
 #include "geoproject.h"
+#include "logger.h"
 #include "mio.h"
 #include <format>
 #include "gdal_raii.h"
@@ -210,7 +211,7 @@ namespace ddb
                 if (stopOnError)
                     throw FSException("Cannot geoproject " + io::toUtf8(p) + ", not a GeoImage");
                 else
-                    std::cerr << "Cannot geoproject " << io::toUtf8(p) << ", not a GeoImage, skipping..." << std::endl;
+                    LOGW << "Cannot geoproject " << io::toUtf8(p) << ", not a GeoImage, skipping...";
                 continue;
             }
             if (e.polygon_geom.size() < 4 || e.properties.find("width") == e.properties.end() || e.properties.find("height") == e.properties.end())
@@ -218,7 +219,7 @@ namespace ddb
                 if (stopOnError)
                     throw FSException("Cannot geoproject " + io::toUtf8(p) + ", the image does not have sufficient information");
                 else
-                    std::cerr << "Cannot geoproject " << io::toUtf8(p) << ", the image does not have sufficient information: skipping" << std::endl;
+                    LOGW << "Cannot geoproject " << io::toUtf8(p) << ", the image does not have sufficient information: skipping";
                 continue;
             }
 
@@ -242,7 +243,7 @@ namespace ddb
                 if (stopOnError)
                     throw FSException("Cannot project " + io::toUtf8(p) + ", cannot open raster");
                 else
-                    std::cout << "Cannot project " << io::toUtf8(p) << ", cannot open raster: skipping" << std::endl;
+                    LOGW << "Cannot project " << io::toUtf8(p) << ", cannot open raster: skipping";
                 continue;
             }
 

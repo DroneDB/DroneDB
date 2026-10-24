@@ -4,6 +4,8 @@
 #ifndef EXIFEDITOR_H
 #define EXIFEDITOR_H
 
+#include <ostream>
+#include <string>
 #include <vector>
 #include "fs.h"
 
@@ -18,7 +20,9 @@ namespace ddb
     ExifEditor(const std::string &file);
     ExifEditor(std::vector<std::string> &files);
 
-    bool canEdit();
+    /// True when every file can be edited; writes one line to `rejected` for each file that cannot
+    /// ("<file>: <reason>")
+    bool canEdit(std::ostream &rejected);
 
     void SetGPSAltitude(double altitude);
     void SetGPSLatitude(double latitude);

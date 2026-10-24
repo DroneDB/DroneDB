@@ -880,13 +880,13 @@ namespace ddb
         return true;
     }
 
-    void ExifParser::printAllTags()
+    void ExifParser::printAllTags(std::ostream &out)
     {
         Exiv2::ExifData::const_iterator end = exifData.end();
         for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i)
         {
             const char *tn = i->typeName();
-            std::cout << i->key() << " "
+            out << i->key() << " "
                       << i->value()
                       << " | " << tn
                       << std::endl;
@@ -895,7 +895,7 @@ namespace ddb
         for (Exiv2::XmpData::const_iterator i = xmpData.begin(); i != xend; ++i)
         {
             const char *tn = i->typeName();
-            std::cout << i->key() << " "
+            out << i->key() << " "
                       << i->value()
                       << " | " << tn
                       << std::endl;
