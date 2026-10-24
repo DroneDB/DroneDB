@@ -93,7 +93,10 @@ namespace ddb
             fs::file_time_type fromUnixTime(std::chrono::seconds seconds, std::chrono::nanoseconds nanoseconds)
             {
                 const std::chrono::sys_time<std::chrono::nanoseconds> sys(seconds + nanoseconds);
-                return std::chrono::clock_cast<fs::file_time_type::clock>(sys);
+                // file_time_type's duration is the clock's own tick (100 ns on Windows), not
+                // nanoseconds: round down to it
+                return std::chrono::floor<fs::file_time_type::duration>(
+                    std::chrono::clock_cast<fs::file_time_type::clock>(sys));
             }
 
             // What a failed file system call says: "<what> <path> (<reason>)"
