@@ -41,7 +41,9 @@ namespace
         CPLFree(wkt);
         std::vector<float> row(64, 1.0f);
         for (int y = 0; y < 64; y++)
-            GDALRasterIO(GDALGetRasterBand(datasetHandle(ds), 1), GF_Write, 0, y, 64, 1, row.data(), 64, 1, GDT_Float32, 0, 0);
+            EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(datasetHandle(ds), 1), GF_Write, 0, y, 64, 1, row.data(), 64, 1,
+                                   GDT_Float32, 0, 0),
+                      CE_None);
         return path;
     }
 
@@ -78,7 +80,7 @@ namespace
                 v = noise(rng);
             if (y == 5)
                 row[3] = nodata;
-            GDALRasterIO(band, GF_Write, 0, y, Size, 1, row.data(), Size, 1, GDT_Float32, 0, 0);
+            EXPECT_EQ(GDALRasterIO(band, GF_Write, 0, y, Size, 1, row.data(), Size, 1, GDT_Float32, 0, 0), CE_None);
         }
         return path;
     }
@@ -87,8 +89,9 @@ namespace
     {
         auto ds = adoptDataset(GDALOpen(io::toUtf8(path).c_str(), GA_ReadOnly));
         std::vector<float> data(static_cast<size_t>(Size) * Size);
-        GDALRasterIO(GDALGetRasterBand(datasetHandle(ds), 1), GF_Read, 0, 0, Size, Size, data.data(), Size, Size,
-                     GDT_Float32, 0, 0);
+        EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(datasetHandle(ds), 1), GF_Read, 0, 0, Size, Size, data.data(), Size,
+                               Size, GDT_Float32, 0, 0),
+                  CE_None);
         return data;
     }
 

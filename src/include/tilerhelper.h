@@ -24,21 +24,21 @@ namespace ddb
     // Where the tiles of a file come from, and where they are kept
     struct TileSource
     {
-        fs::path path;             // a georaster, a geoimage, a COPC point cloud or a URL
+        fs::path path{};           // a georaster, a geoimage, a COPC point cloud or a URL
         int tileSize = 256;
         bool tms = false;          // tile rows count from the bottom (TMS) instead of the top (XYZ)
         bool forceRecreate = false;
-        fs::path outputFolder;     // tile files go here (empty: only a requested buffer is filled)
-        std::string pathHash;      // known hash of a remote file: names its local copy ("" when unknown)
+        fs::path outputFolder{};   // tile files go here (empty: only a requested buffer is filled)
+        std::string pathHash{};    // known hash of a remote file: names its local copy ("" when unknown)
     };
 
     // One tile of a source
     struct TileRequest
     {
-        TileSource source;
+        TileSource source{};
         int tz = 0, tx = 0, ty = 0;
         std::string format = "png";                // "png", "jpeg" or "webp"
-        std::optional<ThumbVisParams> visParams;   // visualization of rasters (point clouds render as usual)
+        std::optional<ThumbVisParams> visParams{}; // visualization of rasters (point clouds render as usual)
         uint8_t **outBuffer = nullptr;             // the encoded tile goes here instead of a file
         int *outBufferSize = nullptr;
     };

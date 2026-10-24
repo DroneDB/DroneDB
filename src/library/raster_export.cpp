@@ -44,8 +44,11 @@ void buildInternalOverviews(GDALDatasetH hDs, int width, int height)
     // Thread-local config so concurrent exports do not clobber global GDAL state.
     const ScopedThreadConfigOption compress("COMPRESS_OVERVIEW", "DEFLATE");
     const ScopedThreadConfigOption predictor("PREDICTOR_OVERVIEW", "2");
-    GDALBuildOverviews(hDs, "AVERAGE", static_cast<int>(levels.size()),
-                       levels.data(), 0, nullptr, nullptr, nullptr);
+    if (GDALBuildOverviews(hDs, "AVERAGE", static_cast<int>(levels.size()),
+                           levels.data(), 0, nullptr, nullptr, nullptr) != CE_None)
+    {
+        LOGD << "Cannot build the internal overviews of the export (the full-resolution data is intact)";
+    }
 }
 
 // Auto-compute a windowed tile size for the formula export branch.
@@ -141,9 +144,9 @@ struct WindowGrid
     int tw = 0, th = 0;     // window size
     int ntx = 0, nty = 0;   // windows across and down
 
-    WindowGrid(int width, int height, int tileSize)
-        : width(width), height(height), tw(tileSize), th(tileSize),
-          ntx((width + tw - 1) / tw), nty((height + th - 1) / th) {}
+    WindowGrid(int rasterWidth, int rasterHeight, int tileSize)
+        : width(rasterWidth), height(rasterHeight), tw(tileSize), th(tileSize),
+          ntx((rasterWidth + tw - 1) / tw), nty((rasterHeight + th - 1) / th) {}
 
     size_t total() const { return static_cast<size_t>(ntx) * nty; }
 
@@ -198,7 +201,7 @@ std::pair<float, float> displayRange(GDALDatasetH hSrcDs, const FormulaPlan &pla
                 {
                     // Reservoir sampling: draw j from [0, seen) where seen
                     // already includes this element → probability k/seen.
-                    const size_t j = static_cast<size_t>(reservoirUni(reservoirRng) * seen);
+                    const size_t j = static_cast<size_t>(reservoirUni(reservoirRng) * static_cast<double>(seen));
                     if (j < kMaxSamples) valid[j] = v;
                 }
             }
@@ -259,7 +262,7 @@ void renderWindows(GDALDatasetH hSrcDs, const FormulaPlan &plan, const WindowGri
     {
         for (int tx = 0; tx < grid.ntx; tx++)
         {
-            session.checkpoint(static_cast<double>(doneTiles) / totalTiles, "rendering");
+            session.checkpoint(static_cast<double>(doneTiles) / static_cast<double>(totalTiles), "rendering");
 
             const RasterWindow window = grid.at(tx, ty);
             const int x0 = window.x, y0 = window.y;

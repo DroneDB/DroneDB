@@ -20,8 +20,8 @@ DSMService *DSMService::get()
     return &instance;
 }
 
-DSMService::DSMService(IHttpClient &client, std::function<fs::path()> cacheDirectory)
-    : downloader(client), cacheDirectory(std::move(cacheDirectory))
+DSMService::DSMService(IHttpClient &client, std::function<fs::path()> cacheFolder)
+    : downloader(client), cacheDirectory(std::move(cacheFolder))
 {
 }
 

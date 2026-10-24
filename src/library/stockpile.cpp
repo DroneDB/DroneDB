@@ -696,13 +696,13 @@ class DetectionBuilder {
     }
 
 public:
-    DetectionBuilder(const DemContext &dem, const ScaledRaster &raster, const std::vector<float> &trend,
-                     const std::vector<int32_t> &labels, float sensitivity, double meanPos)
-        : dem(dem), raster(raster), trend(trend), labels(labels), meanPos(meanPos),
+    DetectionBuilder(const DemContext &demContext, const ScaledRaster &scaled, const std::vector<float> &trendMap,
+                     const std::vector<int32_t> &componentLabels, float sensitivity, double meanPositive)
+        : dem(demContext), raster(scaled), trend(trendMap), labels(componentLabels), meanPos(meanPositive),
           epsMeters(((1.0 - sensitivity) * 4.0 + 0.5) * 0.5 *
-                    (raster.pixel.x * raster.scale + raster.pixel.y * raster.scale)),
+                    (scaled.pixel.x * scaled.scale + scaled.pixel.y * scaled.scale)),
           // Coord transformer raster->WGS84 (reused for all components)
-          rasterToWgs(dem.demToWgs84()) {}
+          rasterToWgs(demContext.demToWgs84()) {}
 
     // The entry of a component, or nothing when its outline cannot be traced
     std::optional<Detection> build(int32_t lab, const ComponentStat &s, double areaM2) const {

@@ -28,11 +28,11 @@ namespace ddb
     // What to share
     struct ShareRequest
     {
-        std::vector<std::string> input;  // the files (directories are skipped), already expanded
-        std::string tag;                 // the Registry, organization and dataset: <host>/<org>/<ds>
-        std::string password;            // of the share ("" = none)
-        std::string cwd;                 // the folder the paths of input are relative to
-        ShareCallback callback;          // progress, optional
+        std::vector<std::string> input{};  // the files (directories are skipped), already expanded
+        std::string tag{};                 // the Registry, organization and dataset: <host>/<org>/<ds>
+        std::string password{};            // of the share ("" = none)
+        std::string cwd{};                 // the folder the paths of input are relative to
+        ShareCallback callback{};          // progress, optional
         bool sslVerify = true;
     };
 

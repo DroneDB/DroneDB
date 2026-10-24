@@ -41,12 +41,12 @@ namespace ddb
         /// tileset is complete); when false, a non-empty one causes an exception.
         bool overwrite = false;
         /// Explicit georeferencing origin (overrides auto-detection).
-        std::optional<ModelGeoref> georef;
+        std::optional<ModelGeoref> georef{};
         /// When true and @c georef is empty, attempt sidecar detection.
         bool autoDetectGeoref = true;
         /// Root folder of the dataset that contains the model, or empty when unknown (same
         /// meaning as in @ref buildNexus).
-        std::string datasetRoot;
+        std::string datasetRoot{};
     };
 
     /**

@@ -21,9 +21,9 @@ namespace ddb
     // The filters and the page of a STAC ItemCollection
     struct StacItemQuery
     {
-        std::vector<double> bbox;     // [minX, minY, maxX, maxY] in EPSG:4326; anything else = no filter
-        std::string datetimeStart;    // RFC 3339; empty = open
-        std::string datetimeEnd;
+        std::vector<double> bbox{};   // [minX, minY, maxX, maxY] in EPSG:4326; anything else = no filter
+        std::string datetimeStart{};  // RFC 3339; empty = open
+        std::string datetimeEnd{};
         int limit = 10;               // a value of 0 or less is 10
         int offset = 0;
     };

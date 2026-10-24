@@ -30,7 +30,7 @@ public:
     DDB_DLL static DSMService *get();
 
     // A service with its own HTTP client (it must outlive the service) and cache folder
-    DDB_DLL DSMService(ddb::IHttpClient &client, std::function<fs::path()> cacheDirectory);
+    DDB_DLL DSMService(ddb::IHttpClient &client, std::function<fs::path()> cacheFolder);
 
     DDB_DLL float getAltitude(double latitude, double longitude);
 

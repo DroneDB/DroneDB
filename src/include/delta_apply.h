@@ -58,7 +58,7 @@ using VerifiedHashes = std::unordered_map<std::string, std::string>;
 struct DeltaApplication {
     /// Where the added files are (a temporary folder on the volume of the dataset): they are
     /// moved, not copied
-    fs::path sourcePath;
+    fs::path sourcePath{};
     MergeStrategy mergeStrategy = DontMerge;
     /// The metadata of the source dataset, from which the metadata the delta adds is restored
     json sourceMetaDump = json::array();
@@ -68,7 +68,7 @@ struct DeltaApplication {
     /// A file here is not read again: its entry must name a file the delta adds, with the delta's
     /// hash, or applyDelta throws InvalidArgsException before anything changes (also without
     /// verifyHashes)
-    VerifiedHashes verifiedHashes;
+    VerifiedHashes verifiedHashes{};
 };
 
 /**

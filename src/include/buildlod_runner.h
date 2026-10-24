@@ -56,11 +56,11 @@ namespace ddb
         // What to convert and how (the arguments of runBuildLod without its error text)
         struct BuildLodRequest
         {
-            fs::path input;
-            fs::path outputRad;
+            fs::path input{};
+            fs::path outputRad{};
             bool quality = true;
             int maxSh = 1;
-            fs::path binary; // empty: findBuildLodBinary()
+            fs::path binary{}; // empty: findBuildLodBinary()
         };
 
         // Native build callers use structured failures; legacy callers retain bool/errorOut.

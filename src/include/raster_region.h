@@ -17,17 +17,17 @@ namespace ddb
     struct RegionRequest
     {
         /// Path to the raster (any GDAL-readable format).
-        std::string inputPath;
+        std::string inputPath{};
         /// [minX, minY, maxX, maxY] in @c bboxSrs.
         std::array<double, 4> bbox{};
         /// Authority code, e.g. "EPSG:3857". Empty = "EPSG:4326".
-        std::string bboxSrs;
+        std::string bboxSrs{};
         /// Output size in pixels (1..4096 each).
         int width = 0;
         int height = 0;
         /// MIME type: "image/png" | "image/jpeg" | "image/webp" | "image/tiff" | "image/geotiff".
         /// Empty = "image/png".
-        std::string format;
+        std::string format{};
     };
 
     /** What renderRasterRegion can do besides the region. */
@@ -35,10 +35,10 @@ namespace ddb
     {
         /// Target CRS authority code; empty means "same as bboxSrs". Pass the source CRS to avoid
         /// cross-projection resampling artefacts (useful for scientific multi-band data via OGC WCS).
-        std::string outputCrs;
+        std::string outputCrs{};
         /// 1-based band selection (e.g. {4, 1, 2} for a false-colour NIR/R/G composite). Empty =
         /// all bands in source order.
-        std::vector<int> bands;
+        std::vector<int> bands{};
     };
 
     /**

@@ -146,7 +146,7 @@ class ProfileSampler {
 
 public:
     // Throws when the geotransform of the raster cannot be inverted
-    explicit ProfileSampler(const DemContext &dem) : dem(dem) {
+    explicit ProfileSampler(const DemContext &raster) : dem(raster) {
         if (!GDALInvGeoTransform(dem.gt, invGt))
             throw AppException("Cannot invert geotransform");
     }

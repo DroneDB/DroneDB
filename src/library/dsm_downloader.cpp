@@ -83,7 +83,7 @@ std::string DsmDownloader::download(const DsmDownload &request) const
 
     try
     {
-        utils::downloadToFile(client, *url, filePath, true);
+        utils::downloadToFile(client_, *url, filePath, true);
     }
     catch (const NetException &e)
     {

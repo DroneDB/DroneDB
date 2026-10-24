@@ -33,17 +33,17 @@ namespace ddb
     {
         double latitude = 0;
         double longitude = 0;
-        std::string urlTemplate; // see buildDsmServiceUrl
-        std::string apiKey;
-        fs::path folder;         // the file is created here
+        std::string urlTemplate{}; // see buildDsmServiceUrl
+        std::string apiKey{};
+        fs::path folder{};         // the file is created here
     };
 
     class DsmDownloader
     {
-        IHttpClient &client;
+        IHttpClient &client_;
 
     public:
-        explicit DsmDownloader(IHttpClient &client) : client(client) {}
+        explicit DsmDownloader(IHttpClient &client) : client_(client) {}
 
         // Downloads the DSM into a new file of request.folder and returns its path. Throws
         // NetException when there is no key (nothing is requested), the transfer fails, or the

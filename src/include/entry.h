@@ -47,16 +47,16 @@ namespace ddb
         // The columns of an index row as the database stores them (the JSON ones as text)
         struct Row
         {
-            std::string path;
-            std::string hash;
+            std::string path{};
+            std::string hash{};
             int type = 0;
-            std::string propertiesJson;
+            std::string propertiesJson{};
             long long mtime = 0;
             std::uintmax_t size = 0;
             int depth = 0;
-            std::string pointCoordinatesJson; // "" when the row has none
-            std::string polyCoordinatesJson;
-            std::string metaJson;
+            std::string pointCoordinatesJson{}; // "" when the row has none
+            std::string polyCoordinatesJson{};
+            std::string metaJson{};
         };
 
         void parseFields(const Row &row)
