@@ -388,20 +388,23 @@ namespace ddb
     //
     // The arithmetic, the nodata handling and the colormap lookup are those of the shared
     // formula engine (VegetationEngine, vis_render.h): the thumbnails, the tiles and this layer
-    // render a vegetation index through one implementation. What is the layer's own is the
-    // choice of the formulas, the fixed band mapping, the colormap and the nodata rule: a pixel
-    // is left out when a band its index reads has no value (NodataMask::BandsRead), as the layer
+    // render a vegetation index through one implementation, and the bands are those the tiles
+    // use: the sensor profile of the raster (VegetationEngine::autoDetectFilter) says which band
+    // is red, NIR... What is the layer's own is the choice of the formulas, the order of the
+    // bands of a raster the profiles do not name, the colormap and the nodata rule: a pixel is
+    // left out when a band its index reads has no value (NodataMask::BandsRead), as the layer
     // has always done.
     // ---------------------------------------------------------------------
     namespace
     {
-        // The formulas of the engine the layer renders (case-insensitive names)
-        constexpr std::array<const char *, 5> kIndexFormulas = {"NDVI", "NDRE", "NDWI", "EVI", "SAVI"};
+        // The formulas of the engine the layer renders (case-insensitive names), in the order the
+        // layer lists them
+        constexpr std::array<const char *, 5> kIndexFormulas = {"NDVI", "NDRE", "NDWI", "SAVI", "EVI"};
 
-        // The bands of a typical 5-band aerial multispectral raster: R=1, G=2, B=3, RedEdge=4,
-        // NIR=5. Every index above reads the NIR band, so a raster needs all five.
-        constexpr const char *kIndexBandMapping = "RGBReN";
-        constexpr int kIndexBands = 5;
+        // The bands of a raster the sensor profiles do not name, if it has five or more: the order
+        // the layer had before it read the profiles, R=1, G=2, B=3, RedEdge=4, NIR=5
+        constexpr const char *kLegacyBandMapping = "RGBReN";
+        constexpr int kLegacyBands = 5;
 
         // The ramp the layer has always used (red, yellow, green over [-1, 1]), in the engine's
         // table. It is not a colormap clients pick: the engine does not list it.
@@ -415,7 +418,74 @@ namespace ddb
                 if (u == formula) return formula;
             throw InvalidArgsException("Unknown spectral index: " + n);
         }
+
+        // What the layer does for one index over one raster: the bands it reads it from, or why it
+        // cannot
+        struct IndexChoice
+        {
+            const VegetationFormula *formula = nullptr;
+            BandFilter filter;
+            std::string refusal; // empty when the raster can render the index
+        };
+
+        // The one rule of which of its indices the layer can render from a raster, and with which
+        // bands. The render and the raster info both ask it.
+        //   - an index that needs reflectance (SAVI, EVI) needs a floating-point raster;
+        //   - the bands are those the sensor profile (band names, descriptions, colour
+        //     interpretation) maps, when it maps every band the index reads;
+        //   - otherwise, a raster with five data bands or more is read in the fixed order R, G, B,
+        //     Red edge, NIR (kLegacyBandMapping);
+        //   - otherwise the index is refused.
+        class IndexLayerPlanner
+        {
+            BandFilter detected_;
+            RasterDataKind data_;
+
+        public:
+            IndexLayerPlanner(const std::string &rasterPath, GDALDatasetH ds)
+                : detected_(VegetationEngine::instance().autoDetectFilter(rasterPath)), data_(rasterDataKind(ds)) {}
+
+            IndexChoice choose(const char *formulaId) const
+            {
+                IndexChoice choice;
+                choice.formula = VegetationEngine::instance().getFormula(formulaId);
+                choice.refusal = VegetationEngine::dataRefusal(*choice.formula, data_);
+                if (!choice.refusal.empty())
+                    return choice;
+
+                choice.filter = detected_;
+                const auto missing = VegetationEngine::missingSymbols(*choice.formula, detected_);
+                if (missing.empty())
+                    return choice;
+                if (data_.bandCount >= kLegacyBands)
+                {
+                    choice.filter = VegetationEngine::parseFilter(kLegacyBandMapping, kLegacyBands);
+                    return choice;
+                }
+
+                std::string names;
+                for (const char symbol : missing)
+                    names += std::string(names.empty() ? "" : ", ") + VegetationEngine::symbolName(symbol);
+                choice.refusal = std::string(formulaId) + " needs the " + names + " band" + (missing.size() > 1 ? "s" : "") +
+                                 ", which the raster does not name, and it has " + std::to_string(data_.bandCount) +
+                                 " data bands, fewer than the " + std::to_string(kLegacyBands) +
+                                 " (Red, Green, Blue, Red edge, NIR) the layer reads by position";
+                return choice;
+            }
+        };
+
     } // anon
+
+    std::vector<std::string> rasterIndexLayerIndices(const std::string &rasterPath)
+    {
+        const auto source = RasterCache::instance().acquireDataset(rasterPath);
+        const IndexLayerPlanner planner(rasterPath, source->handle());
+        std::vector<std::string> indices;
+        for (const char *formula : kIndexFormulas)
+            if (planner.choose(formula).refusal.empty())
+                indices.emplace_back(formula);
+        return indices;
+    }
 
     void renderRasterIndex(const RegionRequest &request,
                            const std::string &indexName,
@@ -434,13 +504,15 @@ namespace ddb
         const FormatInfo fi = resolveFormat(request.format);
         const std::string srs = request.bboxSrs.empty() ? std::string("EPSG:4326") : request.bboxSrs;
 
-        // Step 1: warp to /vsimem GTiff at target window & resolution (keep all bands).
+        // Step 1: which bands the index reads, over the source (the warp makes every band Float32,
+        // so the type of the data is the source's), then warp to /vsimem GTiff at target window &
+        // resolution (keep all bands).
         const auto source = RasterCache::instance().acquireDataset(inputPath);
         GDALDatasetH hSrc = source->handle();
 
-        if (GDALGetRasterCount(hSrc) < kIndexBands) {
-            throw InvalidArgsException("Raster has insufficient bands for " + indexName);
-        }
+        const IndexChoice choice = IndexLayerPlanner(inputPath, hSrc).choose(formulaId);
+        if (!choice.refusal.empty())
+            throw InvalidArgsException(choice.refusal);
 
         VsiMemFile vsiTif = VsiMemFile::unique("ddb-idx-", ".tif");
 
@@ -477,14 +549,13 @@ namespace ddb
             throw GDALException("Warp failed for index render: " + inputPath);
         }
         GDALDatasetH hWarp = datasetHandle(warp);
+        const size_t npx = static_cast<size_t>(width) * height;
 
         // Step 2: the shared engine reads the bands of the warped window as Float32, leaves the
         // nodata and transparent pixels out of the formula (they are rendered with alpha = 0
         // instead of being colorized as if they were valid samples) and colorizes the values
         // over the range of the formula.
-        const size_t npx = static_cast<size_t>(width) * height;
-        FormulaPlan plan = planFormula(hWarp, formulaId,
-                                       VegetationEngine::parseFilter(kIndexBandMapping, kIndexBands), "", false);
+        FormulaPlan plan = planFormula(hWarp, formulaId, choice.filter, "", false);
         plan.colormap = VegetationEngine::instance().getColormap(kIndexColormap, true);
         const RasterWindow window{0, 0, width, height, width, height};
         std::vector<uint8_t> rgba = renderPlannedFormulaRgba(hWarp, plan, window, "", NodataMask::BandsRead);

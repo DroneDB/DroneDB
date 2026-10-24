@@ -1485,8 +1485,10 @@ DDBErr DDBGetRasterInfo(const char* path, char** output) {
         requireOutput(output);
 
         auto& spm = ddb::SensorProfileManager::instance();
-        std::string jsonStr = spm.getRasterInfoJson(std::string(path));
-        return jsonStr;
+        json info = json::parse(spm.getRasterInfoJson(std::string(path)));
+        // The indices the WMS vegetation-index layer renders from this raster
+        info["indexLayer"] = ddb::rasterIndexLayerIndices(std::string(path));
+        return info;
     });
 }
 

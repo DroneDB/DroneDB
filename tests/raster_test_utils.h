@@ -27,7 +27,9 @@ namespace testutils
         double originX = 1000.0; // upper-left corner
         double originY = 1000.0;
         double pixelSize = 1.0;
-        bool alphaBand = false;  // the last band is alpha (255)
+        bool alphaBand = false;  // the last band is alpha (255, or alphaValue)
+        std::function<double(int x, int y)> alphaValue = [](int, int) { return 255.0; };
+        std::vector<std::string> bandNames; // GDAL descriptions of the first bands, as ODM and the sensors write them
         std::function<double(int band, int x, int y)> value = [](int, int, int) { return 0.0; };
     };
 

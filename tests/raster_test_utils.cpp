@@ -52,10 +52,12 @@ namespace testutils
             const bool alpha = spec.alphaBand && b == spec.bands;
             if (alpha)
                 GDALSetRasterColorInterpretation(band, GCI_AlphaBand);
+            if (b <= static_cast<int>(spec.bandNames.size()))
+                GDALSetDescription(band, spec.bandNames[b - 1].c_str());
             for (int y = 0; y < spec.height; y++)
             {
                 for (int x = 0; x < spec.width; x++)
-                    row[x] = alpha ? 255.0 : spec.value(b, x, y);
+                    row[x] = alpha ? spec.alphaValue(x, y) : spec.value(b, x, y);
                 if (GDALRasterIO(band, GF_Write, 0, y, spec.width, 1, row.data(), spec.width, 1, GDT_Float64, 0, 0) !=
                     CE_None)
                     throw std::runtime_error("Cannot write " + ddb::io::toUtf8(path));

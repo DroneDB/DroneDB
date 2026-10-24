@@ -68,22 +68,32 @@ namespace ddb
                                  const std::string &srs);
 
     /**
-     * Render a spectral index (NDVI/NDRE/NDWI/EVI/SAVI) over a raster region
+     * Render a spectral index (NDVI/NDRE/NDWI/SAVI/EVI) over a raster region
      * and produce a colorized RGB(A) image.
      *
      * The index is computed and colorized by the formula engine the thumbnails and
      * the tiles use (VegetationEngine, vis_render.h), over the range [-1, 1] with
-     * its ramp (red, yellow, green; not a colormap clients can pick). A pixel is
-     * transparent in the output when a band the index reads has no value (nodata,
-     * NaN), or when the alpha band, if the raster has one, is 0: alpha says "no
-     * data here" for every band. A gap in a band the index does not read (the blue
+     * its ramp (red, yellow, green; not a colormap clients can pick).
+     *
+     * The bands are those the tiles use: the sensor profile of the raster says which
+     * is red, green, blue, red edge and NIR (band names, descriptions, colour
+     * interpretation). A raster that names none of them, and has five data bands or
+     * more, is read as R, G, B, red edge, NIR (bands 1 to 5). A raster that has not the
+     * bands of an index is refused (InvalidArgsException naming them): a 4-band
+     * Green, Red, Red edge, NIR raster renders NDVI, NDRE, NDWI and SAVI, not EVI
+     * (which needs blue). SAVI and EVI add constants to the band values, so they are
+     * for reflectance: a raster whose data is not floating point is refused. See
+     * rasterIndexLayerIndices.
+     *
+     * A pixel is transparent in the output when a band the index reads has no value
+     * (nodata, NaN), or when the alpha band, if the raster has one, is 0: alpha says
+     * "no data here" for every band. A gap in a band the index does not read (the blue
      * band for NDVI) does not hide the pixel.
      *
-     * @param request     The region: request.inputPath is the multi-band raster (it must
-     *                    include the bands referenced by the index; typical mapping: R=band 1,
-     *                    G=band 2, B=band 3, RedEdge=band 4, NIR=band 5), and the format is one
-     *                    of image/png | image/jpeg | image/webp | image/tiff | image/geotiff.
-     * @param indexName   One of: NDVI, NDRE, NDWI, EVI, SAVI (case-insensitive).
+     * @param request     The region: request.inputPath is the multi-band raster, and the
+     *                    format is one of image/png | image/jpeg | image/webp |
+     *                    image/tiff | image/geotiff.
+     * @param indexName   One of: NDVI, NDRE, NDWI, SAVI, EVI (case-insensitive).
      * @param outBytes    Caller frees with DDBVSIFree.
      * @param outSize     Buffer size.
      */
@@ -91,6 +101,15 @@ namespace ddb
                            const std::string &indexName,
                            uint8_t **outBytes,
                            int *outSize);
+
+    /**
+     * The indices renderRasterIndex can render from a raster, in its order (NDVI, NDRE,
+     * NDWI, SAVI, EVI): the subset whose bands the raster has (named by its sensor profile,
+     * or the fixed order of a raster of five bands or more) and whose data it can take (SAVI and
+     * EVI need floating point). The one rule: the render refuses the others. Empty when the
+     * raster has none. This is what DDBGetRasterInfo reports as "indexLayer".
+     */
+    std::vector<std::string> rasterIndexLayerIndices(const std::string &rasterPath);
 
 } // namespace ddb
 

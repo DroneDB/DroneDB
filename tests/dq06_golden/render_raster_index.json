@@ -110,7 +110,7 @@
   "width": 80
  },
  "fewBands": {
-  "error": "Raster has insufficient bands for NDRE"
+  "error": "NDRE needs the NIR, Red edge bands, which the raster does not name, and it has 3 data bands, fewer than the 5 (Red, Green, Blue, Red edge, NIR) the layer reads by position"
  },
  "ndvi_image/jpeg": {
   "alpha": false,

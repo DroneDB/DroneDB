@@ -1042,7 +1042,13 @@ extern "C"
                                              int limit,
                                              int offset,
                                              char** output);
-    /** Get raster info including bands, detected sensor, presets
+    /** Get raster info including bands, detected sensor, presets, and "indexLayer": the spectral
+     *  indices the WMS vegetation-index layer (DDBRenderRasterIndex) can render from the raster,
+     *  as an array of names in the layer's order, a subset of ["NDVI", "NDRE", "NDWI", "SAVI",
+     *  "EVI"], [] when the raster has none. A raster has an index when its bands are named by its
+     *  sensor profile (or it has five or more unnamed data bands, read as R, G, B, Red edge, NIR)
+     *  and, for SAVI and EVI, which need reflectance, when its data is floating point:
+     *  DDBRenderRasterIndex refuses the others.
      * @param path Path to raster file
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
@@ -1361,11 +1367,15 @@ extern "C"
 
     /** Render a spectral index over a raster region (WMS GetMap STYLES support).
      *
-     * Computes NDVI / NDRE / NDWI / EVI / SAVI using the standard 5-band mapping
-     * (R=1, G=2, B=3, RedEdge=4, NIR=5) and applies a red-yellow-green color ramp.
+     * Computes NDVI / NDRE / NDWI / SAVI / EVI and applies a red-yellow-green color ramp. The
+     * bands are those the tiles use (the raster's sensor profile: band names, descriptions,
+     * colour interpretation); a raster that names none of them and has five data bands or more is
+     * read as R=1, G=2, B=3, RedEdge=4, NIR=5. SAVI and EVI add constants to the band values, so
+     * they need a floating-point (reflectance) raster. An index the raster cannot render is
+     * refused with the reason: DDBGetRasterInfo lists the renderable ones ("indexLayer").
      *
      * @param inputPath Source raster path.
-     * @param indexName One of: "NDVI", "NDRE", "NDWI", "EVI", "SAVI" (case-insensitive).
+     * @param indexName One of: "NDVI", "NDRE", "NDWI", "SAVI", "EVI" (case-insensitive).
      * @param bbox 4 doubles [minX,minY,maxX,maxY] in @p bboxSrs.
      * @param bboxSrs CRS authority code; NULL = "EPSG:4326".
      * @param width Output width in pixels (1..4096).

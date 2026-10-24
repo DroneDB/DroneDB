@@ -12,7 +12,8 @@
     "bands",
     "availablePresets",
     "defaultPreset",
-    "detectedSensor"
+    "detectedSensor",
+    "indexLayer"
   ],
   "additionalProperties": false,
   "properties": {
@@ -104,6 +105,19 @@
         "string",
         "null"
       ]
+    },
+    "indexLayer": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "NDVI",
+          "NDRE",
+          "NDWI",
+          "SAVI",
+          "EVI"
+        ]
+      },
+      "description": "The spectral indices the WMS vegetation-index layer renders from the raster, in the layer's order"
     }
   }
 }
