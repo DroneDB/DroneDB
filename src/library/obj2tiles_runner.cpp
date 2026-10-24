@@ -141,6 +141,83 @@ namespace ddb
                 return cap;
             }
 
+
+            // Public calls require a fresh destination. Otherwise a successful no-output tool could
+            // make an old tileset look like new output. "" when outDir is absent or an empty
+            // directory, else why not.
+            std::string checkFreshOutput(const fs::path &outDir)
+            {
+                std::error_code ec;
+                const bool outputExists = fs::exists(outDir, ec);
+                if (ec)
+                    return "could not inspect output directory '" + io::toUtf8(outDir) + "': " + ec.message();
+                if (outputExists)
+                {
+                    const bool directory = fs::is_directory(outDir, ec);
+                    const bool empty = directory && !ec && fs::is_empty(outDir, ec);
+                    if (ec || !empty)
+                        return "Obj2Tiles output directory must be absent or empty: '" + io::toUtf8(outDir) +
+                               "'. Use a fresh staging directory" + (ec ? ": " + ec.message() : ".");
+                }
+                return {};
+            }
+
+            // The cores the child may use
+            struct CoreCap
+            {
+                std::optional<unsigned int> maxCores; // DOTNET_PROCESSOR_COUNT to set
+                bool capped = false;                  // the child runs under a core count (set or inherited)
+            };
+
+            // The cap of the child: DDB_OBJ2TILES_MAX_CORES (else every core) bounded by what the
+            // pool has free (`cores`). A cap is set when the variable is or when the pool gives
+            // fewer cores than the host has (`hw`); without the variable, an inherited
+            // DOTNET_PROCESSOR_COUNT at or below the pool's keeps its value.
+            CoreCap decideCoreCap(const std::optional<unsigned int> &requestedCap, unsigned int hw, unsigned int cores)
+            {
+                const char *inheritedCount = std::getenv("DOTNET_PROCESSOR_COUNT");
+                CoreCap cap;
+                if (requestedCap || cores < hw)
+                    cap.maxCores = cores;
+                if (cap.maxCores && !requestedCap && inheritedCount)
+                {
+                    const auto inherited = parseCoreCount(inheritedCount);
+                    if (inherited && *inherited <= cores)
+                        cap.maxCores.reset();
+                }
+                cap.capped = cap.maxCores || (inheritedCount && inheritedCount[0] != '\0');
+                return cap;
+            }
+
+            // After a run that exited 0: logs the finish and checks that a tileset.json was written, so
+            // a tool that succeeded without output is not taken for one that produced a tileset
+            bool checkTileset(const fs::path &outDir, const process::Result &res, std::string &errorOut)
+            {
+                {
+                    std::ostringstream oss;
+                    oss.imbue(std::locale::classic());
+                    oss << "Obj2Tiles finished: exit code 0 in " << std::fixed << std::setprecision(1)
+                        << (static_cast<double>(res.duration.count()) / 1000.0) << " s, " << res.totalBytes
+                        << " bytes of output";
+                    LOGI << oss.str();
+                }
+
+                std::error_code ec;
+                const fs::path tilesetPath = outDir / TilesetFileName;
+                if (!fs::is_regular_file(tilesetPath, ec) || ec || fs::file_size(tilesetPath, ec) == 0 || ec)
+                {
+                    std::ostringstream oss;
+                    oss << "Obj2Tiles reported success but tileset.json is missing or empty: " << io::toUtf8(tilesetPath);
+                    if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
+                    errorOut = oss.str();
+
+                    LOGI << "Obj2Tiles exited with code 0 without writing " << io::toUtf8(tilesetPath)
+                         << (res.outputTail.empty() ? std::string(", no output")
+                                                    : ", output tail:\n" + res.tail(process::kDefaultOutputCapacity));
+                    return false;
+                }
+                return true;
+            }
         } // namespace
 
         fs::path findObj2TilesBinary(bool forceRefresh)
@@ -157,26 +234,10 @@ namespace ddb
         {
             errorOut.clear();
 
-            // Public calls require a fresh destination. Otherwise a successful
-            // no-output tool could make an old tileset look like new output.
             std::error_code ec;
-            const bool outputExists = fs::exists(outDir, ec);
-            if (ec)
-            {
-                errorOut = "could not inspect output directory '" + io::toUtf8(outDir) + "': " + ec.message();
+            errorOut = checkFreshOutput(outDir);
+            if (!errorOut.empty())
                 return false;
-            }
-            if (outputExists)
-            {
-                const bool directory = fs::is_directory(outDir, ec);
-                const bool empty = directory && !ec && fs::is_empty(outDir, ec);
-                if (ec || !empty)
-                {
-                    errorOut = "Obj2Tiles output directory must be absent or empty: '" + io::toUtf8(outDir) +
-                               "'. Use a fresh staging directory" + (ec ? ": " + ec.message() : ".");
-                    return false;
-                }
-            }
 
             const fs::path bin = binary.empty() ? findObj2TilesBinary() : binary;
             if (!tools::isExecutableFile(bin))
@@ -202,26 +263,13 @@ namespace ddb
             }
 
             // Per-child core cap (C1): only the child's environment is changed. The child's
-            // cores are CPU tokens (DQ-15), held while it runs: DDB_OBJ2TILES_MAX_CORES (else
-            // every core) bounded by what the pool has free. A cap is set when the variable is
-            // or when the pool gives fewer cores than the host has.
+            // cores are CPU tokens (DQ-15), held while it runs.
             const auto requestedCap = readMaxCores();
             const auto hw = static_cast<unsigned int>(parallel::hardwareThreads());
             const auto cpu = parallel::tryAcquireThreads(requestedCap ? *requestedCap : hw);
-            const auto cores = static_cast<unsigned int>(cpu.threads());
-            const char *inheritedCount = std::getenv("DOTNET_PROCESSOR_COUNT");
-            std::optional<unsigned int> maxCores;
-            if (requestedCap || cores < hw)
-                maxCores = cores;
-            // Without DDB_OBJ2TILES_MAX_CORES, an inherited count at or below the pool's keeps
-            // its value
-            if (maxCores && !requestedCap && inheritedCount)
-            {
-                const auto inherited = parseCoreCount(inheritedCount);
-                if (inherited && *inherited <= cores)
-                    maxCores.reset();
-            }
-            const bool coreCapped = maxCores || (inheritedCount && inheritedCount[0] != '\0');
+            const CoreCap cap = decideCoreCap(requestedCap, hw, static_cast<unsigned int>(cpu.threads()));
+            const auto &maxCores = cap.maxCores;
+            const bool coreCapped = cap.capped;
 
             // libktx encoder threads are native: DOTNET_PROCESSOR_COUNT does not
             // bound them, so they would multiply past any core cap.
@@ -264,30 +312,7 @@ namespace ddb
                 return false;
             }
 
-            {
-                std::ostringstream oss;
-                oss.imbue(std::locale::classic());
-                oss << "Obj2Tiles finished: exit code 0 in " << std::fixed << std::setprecision(1)
-                    << (static_cast<double>(res.duration.count()) / 1000.0) << " s, " << res.totalBytes
-                    << " bytes of output";
-                LOGI << oss.str();
-            }
-
-            const fs::path tilesetPath = outDir / TilesetFileName;
-            if (!fs::is_regular_file(tilesetPath, ec) || ec || fs::file_size(tilesetPath, ec) == 0 || ec)
-            {
-                std::ostringstream oss;
-                oss << "Obj2Tiles reported success but tileset.json is missing or empty: " << io::toUtf8(tilesetPath);
-                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
-                errorOut = oss.str();
-
-                LOGI << "Obj2Tiles exited with code 0 without writing " << io::toUtf8(tilesetPath)
-                     << (res.outputTail.empty() ? std::string(", no output")
-                                                : ", output tail:\n" + res.tail(process::kDefaultOutputCapacity));
-                return false;
-            }
-
-            return true;
+            return checkTileset(outDir, res, errorOut);
         }
 
     } // namespace obj2tiles
