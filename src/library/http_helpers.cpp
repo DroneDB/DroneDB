@@ -43,11 +43,4 @@ HttpResponse downloadToFile(IHttpClient& client,
     return response;
 }
 
-HttpResponse downloadToFile(const std::string& url,
-                            const std::string& filePath,
-                            bool throwOnError,
-                            bool verifySsl) {
-    return downloadToFile(defaultHttpClient(), url, filePath, throwOnError, verifySsl);
-}
-
 }  // namespace ddb::utils

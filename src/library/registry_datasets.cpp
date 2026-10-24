@@ -88,15 +88,6 @@ Entry RegistryClient::getDatasetInfo(const std::string &organization, const std:
     return j[0].get<Entry>();
 }
 
-void RegistryClient::downloadDdb(const std::string &organization, const std::string &dataset,
-                                 const std::string &folder) {
-    const auto res = get(datasetPath(organization, dataset) + "/ddb", AuthScheme::Cookie);
-    expectOk(res);
-
-    // The body is the zip: a binary buffer, read with its size
-    zip::extractAllFromBuffer(res.body.c_str(), res.body.size(), folder);
-}
-
 json RegistryClient::getStamp(const std::string &organization, const std::string &dataset) {
     const auto res = get(datasetPath(organization, dataset) + "/stamp", AuthScheme::Cookie);
     expectOk(res);

@@ -22,12 +22,6 @@ HttpResponse downloadToFile(IHttpClient& client,
                             bool throwOnError = false,
                             bool verifySsl = true);
 
-// The same with the library's own client (defaultHttpClient)
-HttpResponse downloadToFile(const std::string& url,
-                            const std::string& filePath,
-                            bool throwOnError = false,
-                            bool verifySsl = true);
-
 }  // namespace ddb::utils
 
 #endif  // HTTP_HELPERS_H

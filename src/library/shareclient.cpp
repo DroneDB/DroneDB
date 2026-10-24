@@ -81,15 +81,7 @@ namespace ddb
         if (!j.contains("url"))
             registry->fail(res);
 
-        this->resultUrl = registry->getUrl(j["url"]);
-
-        return std::string(this->resultUrl);
-    }
-
-    std::string ShareClient::getToken() const { return std::string(this->token); }
-    std::string ShareClient::getResultUrl() const
-    {
-        return std::string(this->resultUrl);
+        return registry->getUrl(j["url"]);
     }
 
 } // namespace ddb

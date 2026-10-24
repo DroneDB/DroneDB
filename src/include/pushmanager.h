@@ -43,9 +43,6 @@ namespace ddb
         void upload(const std::string &fullPath, const std::string &file, const std::string &token);
         void meta(const json &metaDump, const std::string &token);
         void commit(const std::string &token);
-
-        std::string getOrganization() { return this->organization; }
-        std::string getDataset() { return this->dataset; }
     };
 
 } // namespace ddb

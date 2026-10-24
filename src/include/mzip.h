@@ -5,19 +5,13 @@
 #define MZIP_H
 
 #include <string>
-#include <iostream>
-#include <vector>
-#include <zip.h>
-
 
 namespace ddb::zip
 {
 
-    void extractAllFromBuffer(const void *zipBuffer, size_t length, const std::string &outdir, std::ostream *progressOut = nullptr);
-    void extractAll(const std::string &zipFile, const std::string &outdir, std::ostream *progressOut = nullptr);
-    void zipFolder(const std::string &folder, const std::string &zipFile, const std::vector<std::string> &excludes);
-
-    void _extractAll(zip_t *pZip, const std::string &outdir, std::ostream *progressOut = nullptr);
+    // Extracts every entry of zipFile into outdir (created). An entry name that is absolute or
+    // would leave outdir (Zip-Slip) throws a ZipException before anything is written for it.
+    void extractAll(const std::string &zipFile, const std::string &outdir);
 
 }
 

@@ -75,8 +75,6 @@ public:
 
     // The base URL (normalized) followed by `path`
     std::string getUrl(const std::string &path = "") const;
-    bool getSslVerify() const { return sslVerify; }
-    void setSslVerify(bool verify) { sslVerify = verify; }
 
     // -- Authentication (registry_client.cpp) ------------------------------------------------
 
@@ -126,9 +124,6 @@ public:
     // -- Dataset endpoints (registry_datasets.cpp) -------------------------------------------
 
     Entry getDatasetInfo(const std::string &organization, const std::string &dataset);
-
-    void downloadDdb(const std::string &organization, const std::string &dataset,
-                     const std::string &folder);
 
     json getStamp(const std::string &organization, const std::string &dataset);
 

@@ -23,7 +23,6 @@ namespace ddb
 
         std::string token;
         RegistryClient *registry;
-        std::string resultUrl;
 
     public:
         ShareClient(RegistryClient *client);
@@ -31,9 +30,6 @@ namespace ddb
         void Init(const std::string &tag, const std::string &password, const std::string &datasetName = "", const std::string &datasetDescription = "");
         void Upload(const std::string &path, const fs::path &filePath, const UploadCallback &cb = nullptr);
         std::string Commit();
-
-        std::string getToken() const;
-        std::string getResultUrl() const;
     };
 
 }

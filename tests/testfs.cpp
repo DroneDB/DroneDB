@@ -55,11 +55,11 @@ TestFS::TestFS(const std::string &testArchivePath, const std::string &baseTestFo
         {
             std::cout << "Using cached archive...\n";
         }
-        ddb::zip::extractAll(tempPath.string(), testFolder, nullptr);
+        ddb::zip::extractAll(tempPath.string(), testFolder);
     }
     else
     {
-        ddb::zip::extractAll(testArchivePath, testFolder, nullptr);
+        ddb::zip::extractAll(testArchivePath, testFolder);
     }
 
     std::cout << "Created test FS '" << testArchivePath << "' in '" << testFolder << "'\n";

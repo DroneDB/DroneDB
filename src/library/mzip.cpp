@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "mzip.h"
+#include <zip.h>
 #include "mio.h"
 #include "logger.h"
 #include "exceptions.h"
@@ -62,42 +63,7 @@ namespace ddb::zip
         }
     }
 
-    void extractAllFromBuffer(const void *zipBuffer, size_t length, const std::string &outdir, std::ostream *progressOut)
-    {
-        zip_error_t error;
-        zip_source_t *buf = zip_source_buffer_create(zipBuffer, length, 0, &error);
-        if (buf == nullptr)
-        {
-            zip_error_init_with_code(&error, errno);
-            throw ZipException("Cannot initialize zip file from buffer: " + std::string(zip_error_strerror(&error)));
-        }
-
-        zip_t *pZip = zip_open_from_source(buf, ZIP_RDONLY, &error);
-        if (pZip == nullptr)
-        {
-            zip_error_init_with_code(&error, errno);
-            throw ZipException("Cannot open zip file from buffer: " + std::string(zip_error_strerror(&error)));
-        }
-
-        _extractAll(pZip, outdir, progressOut);
-    }
-
-    void extractAll(const std::string &zipFile, const std::string &outdir, std::ostream *progressOut)
-    {
-        int error;
-        char errstr[ERR_SIZE];
-
-        zip_t *pZip = zip_open(zipFile.c_str(), ZIP_RDONLY, &error);
-        if (pZip == nullptr)
-        {
-            zip_error_to_str(errstr, ERR_SIZE, error, errno);
-            throw ZipException("Cannot open zip file " + zipFile + " (" + std::string(errstr) + ")");
-        }
-
-        _extractAll(pZip, outdir, progressOut);
-    }
-
-    void _extractAll(zip_t *pZip, const std::string &outdir, std::ostream *progressOut)
+    static void extractArchive(zip_t *pZip, const std::string &outdir)
     {
         struct zip_file *pFile = nullptr;
         int bytesRead;
@@ -170,12 +136,6 @@ namespace ddb::zip
                 zip_fclose(pFile);
                 pFile = nullptr;
                 of.close();
-
-                if (progressOut != nullptr)
-                {
-                    (*progressOut) << "Extracted (" << (eId + 1) << "/" << nEntries << ")\t\t\r";
-                    progressOut->flush();
-                }
             }
 
             if (zip_close(pZip))
@@ -184,7 +144,7 @@ namespace ddb::zip
             }
             pZip = nullptr;
         }
-        catch (const ZipException &e)
+        catch (const ZipException &)
         {
             // Close files
             if (pFile != nullptr)
@@ -193,101 +153,21 @@ namespace ddb::zip
                 zip_close(pZip);
             throw;
         }
-
-        if (progressOut != nullptr)
-            (*progressOut) << std::endl;
     }
 
-    void zipFolder(const std::string &folder, const std::string &zipFile, const std::vector<std::string> &excludes)
+    void extractAll(const std::string &zipFile, const std::string &outdir)
     {
         int error;
         char errstr[ERR_SIZE];
 
-        zip_t *pZip = zip_open(zipFile.c_str(), ZIP_CREATE | ZIP_EXCL | ZIP_TRUNCATE, &error);
+        zip_t *pZip = zip_open(zipFile.c_str(), ZIP_RDONLY, &error);
         if (pZip == nullptr)
         {
             zip_error_to_str(errstr, ERR_SIZE, error, errno);
             throw ZipException("Cannot open zip file " + zipFile + " (" + std::string(errstr) + ")");
         }
 
-        zip_source_t *source = nullptr;
-
-        try
-        {
-            for (auto i = fs::recursive_directory_iterator(io::fromUtf8(folder));
-                 i != fs::recursive_directory_iterator(); ++i)
-            {
-
-                const auto relPath = io::Path(i->path()).relativeTo(io::fromUtf8(folder));
-
-                bool exclude = false;
-
-                for (const auto &excl : excludes)
-                {
-                    exclude = false;
-
-                    // If it's a folder we exclude this path and all the descendants
-                    if (excl[excl.length() - 1] == '/')
-                    {
-                        const auto folderName = excl.substr(0, excl.length() - 1);
-                        if (relPath.generic().starts_with(folderName))
-                        {
-                            exclude = true;
-                            i.disable_recursion_pending();
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        if (relPath.generic() == excl)
-                        {
-                            exclude = true;
-                            break;
-                        }
-                    }
-                }
-                if (!exclude)
-                {
-                    LOGD << "Adding: '" << relPath.generic() << "'";
-                    if (fs::is_directory(i->path()))
-                    {
-                        if (zip_dir_add(pZip, relPath.generic().c_str(), ZIP_FL_ENC_UTF_8) < 0)
-                        {
-                            throw ZipException("Cannot add directory to zip: " + std::string(zip_strerror(pZip)));
-                        }
-                    }
-                    else
-                    {
-                        source = zip_source_file(pZip, io::toUtf8(i->path()).c_str(), 0, 0);
-                        if (source == nullptr)
-                        {
-                            throw ZipException("Failed to add file to zip: " + std::string(zip_strerror(pZip)));
-                        }
-
-                        if (zip_file_add(pZip, relPath.generic().c_str(), source, ZIP_FL_ENC_UTF_8) < 0)
-                        {
-                            throw ZipException("Failed to add file to zip: " + std::string(zip_strerror(pZip)));
-                        }
-
-                        source = nullptr;
-                    }
-                }
-            }
-
-            if (zip_close(pZip))
-            {
-                throw ZipException("Error closing archive: " + std::string(zip_strerror(pZip)));
-            }
-            pZip = nullptr;
-        }
-        catch (const ZipException &e)
-        {
-            if (pZip != nullptr)
-                zip_close(pZip);
-            if (source != nullptr)
-                zip_source_free(source);
-            throw;
-        }
+        extractArchive(pZip, outdir);
     }
 
 }

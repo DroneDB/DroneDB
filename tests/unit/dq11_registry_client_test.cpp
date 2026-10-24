@@ -13,10 +13,10 @@
 #include "fake_http_client.h"
 #include "gtest/gtest.h"
 #include "mio.h"
-#include "mzip.h"
 #include "registry_client.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
@@ -140,8 +140,8 @@ namespace
     {
         ClientFixture f(TEST_NAME);
         f.net.acceptLogin();
-        f.client.setSslVerify(false);
-        f.client.login("alice", "x");
+        RegistryClient insecure(Url, false, f.net.deps());
+        insecure.login("alice", "x");
         EXPECT_FALSE(f.net.http.calls.at(0).request.verifySsl);
     }
 
@@ -610,7 +610,7 @@ namespace
         const auto src = f.ta.getFolder("src");
         { std::ofstream(src / "a.txt") << "alpha"; std::ofstream(src / "b.txt") << "beta"; }
         const auto zipFile = f.ta.getPath("src.zip");
-        ddb::zip::zipFolder(io::toUtf8(src), io::toUtf8(zipFile), {});
+        zipFolder(io::toUtf8(src), io::toUtf8(zipFile));
         std::ifstream zin(zipFile, std::ios::binary);
         std::stringstream zbytes;
         zbytes << zin.rdbuf();

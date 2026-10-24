@@ -14,6 +14,7 @@
 #include "mzip.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 #include "tiles3d.h"
 
 namespace
@@ -38,7 +39,7 @@ namespace
         }
         const fs::path ttz = ta.getFolder(".") / (name + ".3tz");
         fs::remove(ttz);
-        ddb::zip::zipFolder(dir.string(), ttz.string(), {});
+        zipFolder(dir.string(), ttz.string());
         return ttz;
     }
 

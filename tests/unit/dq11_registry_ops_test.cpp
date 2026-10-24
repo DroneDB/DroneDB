@@ -17,7 +17,6 @@
 #include "fake_http_client.h"
 #include "gtest/gtest.h"
 #include "mio.h"
-#include "mzip.h"
 #include "pushmanager.h"
 #include "registry_auth.h"
 #include "registry_ops.h"
@@ -556,8 +555,6 @@ namespace
         EXPECT_EQ(call.header("Authorization"), "Bearer tok-1");
         EXPECT_EQ(call.field("token"), "push-token");
         EXPECT_EQ(json::parse(call.field("meta")).size(), 1u);
-        EXPECT_EQ(pm.getOrganization(), "o");
-        EXPECT_EQ(pm.getDataset(), "d");
     }
 
     // =============================================================== pull / clone
@@ -695,7 +692,7 @@ namespace
         const auto staging = f.remote.ta.getFolder("staging");
         writeFile(staging / "r1.txt", "one");
         writeFile(staging / "r2.txt", "two two");
-        ddb::zip::zipFolder(io::toUtf8(staging), io::toUtf8(zipFile), {});
+        zipFolder(io::toUtf8(staging), io::toUtf8(zipFile));
         f.net.http.on("DOWNLOAD-POST", "/orgs/org/ds/ds/download", reply(200, slurp(zipFile)));
         auto client = f.loggedIn();
         std::ostringstream out;
@@ -827,7 +824,6 @@ namespace
         ShareClient share(&client);
 
         share.Init("org/ds", "secret");
-        EXPECT_EQ(share.getToken(), "share-token");
         const auto init = f.net.http.callsTo("POST", "/share/init").at(0);
         EXPECT_EQ(init.header("Authorization"), "Bearer tok-1");
         EXPECT_EQ(init.field("tag"), "org/ds");
@@ -853,7 +849,6 @@ namespace
         EXPECT_EQ(progress[0], std::make_pair(size_t(40), size_t(100)));
 
         EXPECT_EQ(share.Commit(), "https://registry.test/r/share-token");
-        EXPECT_EQ(share.getResultUrl(), "https://registry.test/r/share-token");
         EXPECT_TRUE(f.net.http.callsTo("POST", "/share/commit/share-token").at(0).request.form.empty());
     }
 
