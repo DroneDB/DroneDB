@@ -14,11 +14,25 @@
 #include <string>
 #include <vector>
 
+#include "coordstransformer.h"
 #include "database.h"
 #include "entry.h"
 #include "delta.h"
 #include "entry_types.h"
 #include "testarea.h"
+#include "vegetation.h"
+
+// A CoordsTransformer between two EPSG codes (the library builds its transformers from a WKT or from
+// spatial reference objects)
+class EpsgTransformer : public ddb::CoordsTransformer
+{
+public:
+    EpsgTransformer(int epsgFrom, int epsgTo);
+};
+
+// The formulas of the vegetation engine that a raster with the bands of `filter` and values of
+// kind `data` can compute (the availability rule of VegetationEngine::unavailableReason)
+std::vector<ddb::VegetationFormula> availableFormulas(const ddb::BandFilter &filter, const ddb::RasterDataKind &data);
 
 // ------------------------------------------------------------------------------- files
 
@@ -36,6 +50,10 @@ bool compareTree(std::filesystem::path &sourceFolder,
 void printTree(std::filesystem::path &folder);
 std::vector<ddb::SimpleEntry> getEntries(const std::filesystem::path &path);
 std::string calculateHash(const std::filesystem::path &file);
+
+// Zips `folder` (UTF-8 path) into the new archive `zipFile` (UTF-8 path), with the entries named
+// relative to it. Throws std::runtime_error when the archive cannot be written.
+void zipFolder(const std::string &folder, const std::string &zipFile);
 
 void createFile(const std::filesystem::path &filePath);
 bool createTestTree(const std::filesystem::path &root);

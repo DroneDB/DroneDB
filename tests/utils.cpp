@@ -12,11 +12,39 @@
 #include <boolinq/boolinq.h>
 
 #include "dbops.h"
+#include "exceptions.h"
 #include "ddb.h"
 #include "gdal_inc.h"
 #include "gtest/gtest.h"
 #include "hash.h"
 #include "json.h"
+#include "mio.h"
+
+#include <zip.h>
+
+static OGRSpatialReference srsOfEpsg(int epsg)
+{
+    OGRSpatialReference srs;
+    if (srs.importFromEPSG(epsg) != OGRERR_NONE)
+        throw ddb::GDALException("Cannot import spatial reference system " + std::to_string(epsg));
+    return srs;
+}
+
+EpsgTransformer::EpsgTransformer(int epsgFrom, int epsgTo)
+    : ddb::CoordsTransformer(srsOfEpsg(epsgFrom), srsOfEpsg(epsgTo))
+{
+}
+
+std::vector<ddb::VegetationFormula> availableFormulas(const ddb::BandFilter &filter, const ddb::RasterDataKind &data)
+{
+    std::vector<ddb::VegetationFormula> result;
+    for (const auto &formula : ddb::VegetationEngine::instance().getAllFormulas())
+    {
+        if (ddb::VegetationEngine::unavailableReason(formula, filter, data).empty())
+            result.push_back(formula);
+    }
+    return result;
+}
 
 std::filesystem::path writeFile(const std::filesystem::path &path, const std::string &content)
 {
@@ -30,6 +58,46 @@ std::filesystem::path writeFile(const std::filesystem::path &path, const std::st
 std::filesystem::path writeFile(const std::filesystem::path &path, const std::vector<uint8_t> &content)
 {
     return writeFile(path, std::string(content.begin(), content.end()));
+}
+
+void zipFolder(const std::string &folder, const std::string &zipFile)
+{
+    int error = 0;
+    zip_t *archive = zip_open(zipFile.c_str(), ZIP_CREATE | ZIP_EXCL | ZIP_TRUNCATE, &error);
+    if (archive == nullptr)
+        throw std::runtime_error("Cannot create zip file " + zipFile + " (libzip error " + std::to_string(error) + ")");
+
+    try
+    {
+        const auto root = ddb::io::fromUtf8(folder);
+        for (const auto &item : fs::recursive_directory_iterator(root))
+        {
+            const auto name = ddb::io::Path(item.path()).relativeTo(root).generic();
+            if (fs::is_directory(item.path()))
+            {
+                if (zip_dir_add(archive, name.c_str(), ZIP_FL_ENC_UTF_8) < 0)
+                    throw std::runtime_error(std::string("Cannot add directory to zip: ") + zip_strerror(archive));
+                continue;
+            }
+
+            zip_source_t *source = zip_source_file(archive, ddb::io::toUtf8(item.path()).c_str(), 0, 0);
+            if (source == nullptr)
+                throw std::runtime_error(std::string("Cannot add file to zip: ") + zip_strerror(archive));
+            if (zip_file_add(archive, name.c_str(), source, ZIP_FL_ENC_UTF_8) < 0)
+            {
+                zip_source_free(source);
+                throw std::runtime_error(std::string("Cannot add file to zip: ") + zip_strerror(archive));
+            }
+        }
+
+        if (zip_close(archive) != 0)
+            throw std::runtime_error(std::string("Cannot close zip file: ") + zip_strerror(archive));
+    }
+    catch (...)
+    {
+        zip_discard(archive);
+        throw;
+    }
 }
 
 void fileWriteAllText(const fs::path &path, const std::string &content)
