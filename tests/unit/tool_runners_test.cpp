@@ -129,7 +129,7 @@ TEST(EnvSettings, parseDecimalAcceptsOnlyDigitsInRange) {
 }
 
 TEST(EnvSettings, readIntegerTellsUnsetFromInvalid) {
-    const char *name = "DDB_DQ07_TEST_INT";
+    const char *name = "DDB_TEST_INT";
     EnvVarGuard guard(name);
 
     unsetEnv(name);
@@ -157,7 +157,7 @@ TEST(EnvSettings, readIntegerTellsUnsetFromInvalid) {
 }
 
 TEST(EnvSettings, readSizeIsTheSettingOfThePoolsAndCaches) {
-    const char *name = "DDB_DQ07_TEST_SIZE";
+    const char *name = "DDB_TEST_SIZE";
     EnvVarGuard guard(name);
 
     unsetEnv(name);
@@ -181,7 +181,7 @@ TEST(EnvSettings, readSizeIsTheSettingOfThePoolsAndCaches) {
 TEST(ToolLocator, overrideIsAuthoritativeAndPartOfTheCacheKey) {
     TestArea ta("runner_locator_override", true);
     const fs::path tool = fakeTool(ta, "bin/ddbtest-fake-tool");
-    const char *var = "DDB_DQ07_FAKE_TOOL_PATH";
+    const char *var = "DDB_TEST_FAKE_TOOL_PATH";
     EnvVarGuard guard(var);
 
     setEnv(var, io::toUtf8(tool));
@@ -198,7 +198,7 @@ TEST(ToolLocator, overrideIsAuthoritativeAndPartOfTheCacheKey) {
 TEST(ToolLocator, theAnswerIsCachedUntilARefreshIsAsked) {
     TestArea ta("runner_locator_cache", true);
     const fs::path tool = fakeTool(ta, "bin/ddbtest-cached-tool");
-    const char *var = "DDB_DQ07_CACHED_TOOL_PATH";
+    const char *var = "DDB_TEST_CACHED_TOOL_PATH";
     EnvVarGuard guard(var, io::toUtf8(tool));
 
     EXPECT_EQ(tools::findTool("ddbtest-cached-tool", var), tool);

@@ -67,7 +67,7 @@ namespace
     // Decode an in-memory PNG and return the max value of band 1.
     int pngMaxBand1(const uint8_t *buf, int size)
     {
-        const std::string vsi = "/vsimem/ddb11_" + std::to_string(reinterpret_cast<uintptr_t>(buf)) + ".png";
+        const std::string vsi = "/vsimem/ddb_latent_" + std::to_string(reinterpret_cast<uintptr_t>(buf)) + ".png";
         VSIFCloseL(VSIFileFromMemBuffer(vsi.c_str(), const_cast<uint8_t *>(buf), size, FALSE));
         GDALDatasetH ds = GDALOpen(vsi.c_str(), GA_ReadOnly);
         EXPECT_NE(ds, nullptr);
