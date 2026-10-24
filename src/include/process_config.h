@@ -54,6 +54,10 @@ namespace ddb
         // Free space a build (or a copy of build artifacts) needs on its volume, in MiB; 0 turns
         // the check off
         uint64_t minFreeDiskMb() const;
+        // The size of GDAL's block cache in MiB, shared by the whole process, and where it comes
+        // from (build_budget.h applies it)
+        uint64_t gdalCacheMb() const;
+        ConfigSource gdalCacheSource() const;
         // The folder of libddb's caches (thumbnails, tiles, index templates, DSM tiles); not
         // created here (UserProfile::getCacheDir creates it)
         fs::path cacheDir() const;
@@ -65,7 +69,7 @@ namespace ddb
         ProcessConfig() = default;
 
         // One entry per integer setting (kIntegerSettings in process_config.cpp)
-        static constexpr size_t IntegerSettings = 3;
+        static constexpr size_t IntegerSettings = 4;
 
         struct Integer
         {

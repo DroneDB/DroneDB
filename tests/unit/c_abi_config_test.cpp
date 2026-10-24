@@ -112,6 +112,7 @@ namespace
         TestArea ta(TEST_NAME, true);
         const json settings = {{"cacheDir", io::toUtf8(ta.getPath("cache"))},
                                {"cpuPoolSize", 3},
+                               {"gdalCacheMb", 64},
                                {"ioThreads", 2},
                                {"minFreeDiskMb", 1}};
         const ScopedProcessConfig configured(settings.dump());

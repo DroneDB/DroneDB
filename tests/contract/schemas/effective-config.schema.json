@@ -15,6 +15,7 @@
       "required": [
         "cacheDir",
         "cpuPoolSize",
+        "gdalCacheMb",
         "ioThreads",
         "minFreeDiskMb"
       ],
@@ -42,6 +43,12 @@
           "minimum": 0,
           "maximum": 10000000000000,
           "description": "Free MiB a build needs on its volume; 0 turns the check off"
+        },
+        "gdalCacheMb": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1048576,
+          "description": "Size of GDAL's block cache in MiB, shared by the whole process: the size DDBConfigure set, else the bound from DDB_GDAL_CACHE_MB or the default 1024 (libddb lowers GDAL's own default to it, never raises it, and a GDAL_CACHEMAX set explicitly wins)"
         }
       }
     },
@@ -50,6 +57,7 @@
       "required": [
         "cacheDir",
         "cpuPoolSize",
+        "gdalCacheMb",
         "ioThreads",
         "minFreeDiskMb"
       ],
@@ -65,6 +73,9 @@
           "$ref": "#/$defs/source"
         },
         "minFreeDiskMb": {
+          "$ref": "#/$defs/source"
+        },
+        "gdalCacheMb": {
           "$ref": "#/$defs/source"
         }
       }

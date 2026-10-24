@@ -114,11 +114,11 @@ namespace
         CPLSetConfigOption("DDB_GDAL_CACHE_MB", nullptr);
 
         GDALSetCacheMax64(6144 * MiB);   // GDAL default on a 123 GB host
-        applyDefaultGdalCacheBound();
+        applyGdalCacheSetting();
         EXPECT_EQ(GDALGetCacheMax64(), 1024 * MiB);
 
         GDALSetCacheMax64(400 * MiB);    // small host: never raised
-        applyDefaultGdalCacheBound();
+        applyGdalCacheSetting();
         EXPECT_EQ(GDALGetCacheMax64(), 400 * MiB);
     }
 
@@ -127,7 +127,7 @@ namespace
         ConfigSnapshot snap({"GDAL_CACHEMAX"});
         CPLSetConfigOption("GDAL_CACHEMAX", "8192");
         GDALSetCacheMax64(8192 * MiB);
-        applyDefaultGdalCacheBound();
+        applyGdalCacheSetting();
         EXPECT_EQ(GDALGetCacheMax64(), 8192 * MiB);
     }
 

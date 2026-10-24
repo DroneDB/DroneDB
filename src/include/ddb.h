@@ -158,6 +158,16 @@ extern "C"
      *                    The free space in MiB a build or a copy of build artifacts needs on the
      *                    volume it writes to; below it the call fails with the reason
      *                    "lowDiskSpace". 0 turns the check off.
+     *   "gdalCacheMb"    integer 16..1048576, env DDB_GDAL_CACHE_MB, default 1024.
+     *                    The size in MiB of GDAL's block cache, which the whole process shares
+     *                    (tiles, renders, thumbnails, statistics, builds). Set with DDBConfigure
+     *                    it is the size of the cache, at once, raising or lowering GDAL's own
+     *                    default (5% of the RAM; a GDAL_CACHEMAX set explicitly does not matter);
+     *                    a build in flight keeps the cache it asked for (DDB_COG_CACHE_MB) until
+     *                    it ends. From the environment variable or the default it is an upper
+     *                    bound only: DDBRegisterProcess lowers GDAL's cache to it, never raises
+     *                    it, and leaves a GDAL_CACHEMAX set explicitly alone. Put back to null,
+     *                    the cache GDAL had before DDBConfigure is restored and bounded again.
      *   "cacheDir"       absolute folder path (UTF-8), default the profile folder: DDB_HOME/.ddb
      *                    when DDB_HOME is set (source "environment"), else the home folder's .ddb.
      *                    Where libddb caches thumbnails, tiles, index templates and DSM tiles

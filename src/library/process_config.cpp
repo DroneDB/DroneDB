@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include "build_budget.h"
 #include "env.h"
 #include "exceptions.h"
 #include "logger.h"
@@ -36,8 +37,13 @@ namespace ddb
         constexpr size_t CpuPoolSize = 0;
         constexpr size_t IoThreads = 1;
         constexpr size_t MinFreeDiskMb = 2;
+        constexpr size_t GdalCacheMb = 3;
 
-        const std::array<IntegerSetting, 3> kIntegerSettings = {{
+        // GDAL's block cache: 16 MiB to 1 TiB (1 TiB in bytes fits in 64 bits)
+        constexpr uint64_t MinGdalCacheMb = 16;
+        constexpr uint64_t MaxGdalCacheMb = 1024 * 1024;
+
+        const std::array<IntegerSetting, 4> kIntegerSettings = {{
             // Every core: the calling thread plus cores - 1 workers, as the parallel sections
             // used before the pool existed (ALL_CPUS)
             {"cpuPoolSize", "DDB_CPU_POOL_SIZE", 0, 4096,
@@ -47,6 +53,9 @@ namespace ddb
             // Low enough never to trip on a healthy host, high enough to stop a build from
             // starting on an essentially full disk
             {"minFreeDiskMb", "DDB_MIN_FREE_DISK_MB", 0, MaxFreeDiskMb, [] { return uint64_t{512}; }},
+            // GDAL's own default is 5% of the RAM (6 GB on a 128 GB host), shared by tile serving
+            // and builds: this is the bound libddb puts on it unless the host sets a size
+            {"gdalCacheMb", "DDB_GDAL_CACHE_MB", MinGdalCacheMb, MaxGdalCacheMb, [] { return uint64_t{1024}; }},
         }};
 
         constexpr std::string_view CacheDirName = "cacheDir";
@@ -133,13 +142,19 @@ namespace ddb
                                               : std::optional<uint64_t>(integerValue(kIntegerSettings[index], value));
         }
 
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (size_t i = 0; i < IntegerSettings; i++)
-            if (integers[i])
-                integers_[i] = *integers[i];
-        if (cacheDir)
-            cacheDir_ = *cacheDir;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (size_t i = 0; i < IntegerSettings; i++)
+                if (integers[i])
+                    integers_[i] = *integers[i];
+            if (cacheDir)
+                cacheDir_ = *cacheDir;
+        }
         LOGD << "Process configuration changed: " << changes.dump();
+
+        // GDAL's cache is process state, not a value read when needed: a change is applied now
+        if (integers[GdalCacheMb])
+            applyGdalCacheSetting();
     }
 
     ProcessConfig::Integer ProcessConfig::integer(size_t index) const
@@ -206,6 +221,16 @@ namespace ddb
     uint64_t ProcessConfig::minFreeDiskMb() const
     {
         return integer(MinFreeDiskMb).value;
+    }
+
+    uint64_t ProcessConfig::gdalCacheMb() const
+    {
+        return integer(GdalCacheMb).value;
+    }
+
+    ConfigSource ProcessConfig::gdalCacheSource() const
+    {
+        return integer(GdalCacheMb).source;
     }
 
     fs::path ProcessConfig::cacheDir() const

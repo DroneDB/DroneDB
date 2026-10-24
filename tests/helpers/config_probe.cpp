@@ -47,7 +47,7 @@ namespace
         ok = expectIn(config, "\"ioThreads\":3,", when) && ok;
         ok = expectIn(config, "\"cacheDir\":" + cacheJson + ",", when) && ok;
         ok = expectIn(config, "\"sources\":{\"cacheDir\":\"configure\",\"cpuPoolSize\":\"configure\","
-                              "\"ioThreads\":\"configure\"",
+                              "\"gdalCacheMb\":\"default\",\"ioThreads\":\"configure\"",
                       when) && ok;
         return ok;
     }

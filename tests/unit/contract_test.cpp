@@ -386,6 +386,7 @@ namespace
         const fs::path cache = ta.getFolder("cache");
         const json settings = {{"cacheDir", ddb::io::toUtf8(cache)},
                                {"cpuPoolSize", 3},
+                               {"gdalCacheMb", 256},
                                {"ioThreads", 2},
                                {"minFreeDiskMb", 256}};
         const ScopedProcessConfig configured(settings.dump());
@@ -393,8 +394,8 @@ namespace
         ASSERT_DDB_OK(DDBGetEffectiveConfig(&out));
         contract::expectMatchesFixture(
             {"effective-config", "Every setting set with DDBConfigure, cacheDir an absolute folder <cache>",
-             "DDBConfigure({\"cacheDir\": \"<cache>\", \"cpuPoolSize\": 3, \"ioThreads\": 2, \"minFreeDiskMb\": "
-             "256}), then DDBGetEffectiveConfig()",
+             "DDBConfigure({\"cacheDir\": \"<cache>\", \"cpuPoolSize\": 3, \"gdalCacheMb\": 256, \"ioThreads\": 2, "
+             "\"minFreeDiskMb\": 256}), then DDBGetEffectiveConfig()",
              "effective-config.schema.json", contract::pathPlaceholders(cache, "<cache>"), {"hardwareThreads"}, {}},
             contract::takeJson(out));
     }

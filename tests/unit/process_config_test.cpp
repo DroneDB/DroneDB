@@ -117,6 +117,10 @@ namespace
             R"({"ioThreads": true})",
             R"({"cpuPoolSize": 4097})",
             R"({"minFreeDiskMb": 10000000000001})",
+            R"({"gdalCacheMb": 15})",
+            R"({"gdalCacheMb": 1048577})",
+            R"({"gdalCacheMb": 64.5})",
+            R"({"gdalCacheMb": "64"})",
             R"({"cacheDir": ""})",
             R"({"cacheDir": "relative/folder"})",
             R"({"cacheDir": 5})",
@@ -131,11 +135,14 @@ namespace
     TEST(ProcessConfig, LimitsAreAccepted)
     {
         const ScopedProcessConfig configured(
-            R"({"cpuPoolSize": 0, "ioThreads": 256, "minFreeDiskMb": 10000000000000})");
+            R"({"cpuPoolSize": 0, "ioThreads": 256, "minFreeDiskMb": 10000000000000, "gdalCacheMb": 1048576})");
         auto &config = ProcessConfig::get();
         EXPECT_EQ(config.cpuPoolSize(), 0u);
         EXPECT_EQ(config.ioThreads(), 256u);
         EXPECT_EQ(config.minFreeDiskMb(), 10000000000000u);
+        EXPECT_EQ(config.gdalCacheMb(), 1048576u);
+        ProcessConfig::get().configure(json::parse(R"({"gdalCacheMb": 16})"));
+        EXPECT_EQ(config.gdalCacheMb(), 16u);
     }
 
     // cacheDir moves the caches, not the profile (credentials)

@@ -23,10 +23,14 @@ struct BuildResourceBudget {
     static BuildResourceBudget fromConfig();
 };
 
-// Bounds GDAL's process-wide block cache (GDAL default: 5% of RAM) to
-// DDB_GDAL_CACHE_MB (default 1024 MB). Never raises it, and does nothing
-// when GDAL_CACHEMAX is set explicitly. Called once by ddb::registerProcess.
-void applyDefaultGdalCacheBound();
+// Applies the gdalCacheMb setting (process_config.h) to GDAL's process-wide block cache (GDAL
+// default: 5% of RAM). Set with DDBConfigure, it is the size of the cache: exactly that, at once
+// (a ScopedGdalCacheMax guard alive keeps its size, and the cache takes the new one when the
+// last guard ends). From DDB_GDAL_CACHE_MB or the default (1024 MB) it is a bound: it lowers the
+// cache, never raises it, and does nothing when GDAL_CACHEMAX is set explicitly. The setting put
+// back to null undoes what DDBConfigure did, then bounds the cache as above.
+// Called by ddb::registerProcess, and by ProcessConfig::configure when the setting changes.
+void applyGdalCacheSetting();
 
 // Sets GDAL's block cache to `bytes` while the guard is alive. The cache is
 // process-wide, so all guards share one state: while any guard is alive the

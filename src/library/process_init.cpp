@@ -241,8 +241,9 @@ void initializeGDALandPROJ() {
     CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.vrt,.ovr,.msk");
 
     // GDAL's default block cache is 5% of RAM (6 GB on a 128 GB host) and is
-    // shared by tile serving and builds; bound it unless GDAL_CACHEMAX is set.
-    applyDefaultGdalCacheBound();
+    // shared by tile serving and builds; bound it unless GDAL_CACHEMAX is set, or the host
+    // sized it with DDBConfigure (gdalCacheMb).
+    applyGdalCacheSetting();
 
     LOGD << "GDAL and PROJ initialization completed";
 

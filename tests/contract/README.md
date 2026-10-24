@@ -319,3 +319,9 @@ Registry has to adopt first.
   used to be accepted). Not covered, because they are filesystem paths: `DDBAdd*`, `DDBRemove`,
   `DDBList`, `DDBInfo`, dataset folders, output files, `DDBBuild`'s `dest`. The tests are
   `tests/unit/c_abi_entry_path_test.cpp` (every vector through every export).
+
+* 2026-10-24: `effective-config` gains the setting `gdalCacheMb` and its source (DQ-15, XI-06):
+  an integer from 16 to 1048576 (MiB), the size of GDAL's block cache for the whole process. The
+  fixture sets it to 256 through `DDBConfigure`; without it the value is the bound from
+  `DDB_GDAL_CACHE_MB` or 1024, source `environment` or `default`. Additive: the other
+  settings did not change.
