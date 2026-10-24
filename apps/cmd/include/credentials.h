@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "command.h"
 #include "registry_auth.h"
 
 namespace cmd
@@ -28,6 +29,28 @@ namespace cmd
     public:
         explicit RefusedCredentials(std::string reason) : message(std::move(reason)) {}
         AuthCredentials credentialsFor(const std::string &registryUrl) override;
+    };
+
+    // What a command that talks to a Registry gets from outside: who answers when libddb needs
+    // credentials, and the collaborators of its client. The defaults are the real ones (the
+    // terminal, the network); a test hands in fakes.
+    struct RegistryServices
+    {
+        ddb::CredentialProvider *credentials = nullptr; // default: InteractiveCredentials
+        ddb::RegistryDeps deps;
+    };
+
+    // The base of push, pull, clone and share
+    class RegistryCommand : public Command
+    {
+        RegistryServices services;
+        InteractiveCredentials terminal;
+
+    protected:
+        explicit RegistryCommand(RegistryServices registryServices = {}) : services(std::move(registryServices)) {}
+
+        ddb::CredentialProvider &credentials() { return services.credentials ? *services.credentials : terminal; }
+        const ddb::RegistryDeps &registryDeps() const { return services.deps; }
     };
 
 } // namespace cmd

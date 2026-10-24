@@ -156,7 +156,7 @@ namespace
     {
         ClientFixture f(TEST_NAME);
         f.net.http.on("POST", "/users/authenticate", transportFailure(HttpTransportError::CouldNotConnect, "Connection refused"));
-        expectThrows<AuthException>([&] { f.client.login("alice", "x"); },
+        expectThrows<RegistryException>([&] { f.client.login("alice", "x"); },
                                     "Login failed: could not connect to https://registry.test: Connection refused");
         EXPECT_EQ(f.net.http.calls.size(), 3u);   // the network policy: three attempts
         EXPECT_EQ(f.net.sleeps.size(), 2u);       // two waits, recorded and not made
@@ -166,7 +166,7 @@ namespace
     {
         ClientFixture f(TEST_NAME);
         f.net.http.on("POST", "/users/authenticate", transportFailure(HttpTransportError::Other, "Operation timed out"));
-        expectThrows<AuthException>([&] { f.client.login("alice", "x"); },
+        expectThrows<RegistryException>([&] { f.client.login("alice", "x"); },
                                     "Login failed: request to https://registry.test failed: Operation timed out");
     }
 

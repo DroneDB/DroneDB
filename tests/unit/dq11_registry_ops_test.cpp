@@ -204,6 +204,35 @@ namespace
         EXPECT_EQ(f.runs, 3); // each ran once
     }
 
+    // A refused connection is not a refused password: the user is not asked for another one
+    TEST(Dq11WithAuthenticatedRegistry, AnUnreachableRegistryIsNotARefusalAndNeverAsksAgain)
+    {
+        AuthFixture f(TEST_NAME);
+        f.net.http.on("POST", "/users/authenticate", transportFailure());
+        f.net.credentials.saveCredentials(Url, AuthCredentials("alice", "pw"));
+        ScriptedCredentials provider({AuthCredentials("alice", "pw")});
+
+        try
+        {
+            f.run(provider, [](RegistryClient &) {});
+            FAIL() << "the operation ran against an unreachable registry";
+        }
+        catch (const RegistryException &e)
+        {
+            EXPECT_STREQ(e.what(), "Login failed: could not connect to https://registry.test: Connection refused");
+        }
+        EXPECT_EQ(provider.asked, 0);
+        EXPECT_EQ(f.runs, 0);
+        EXPECT_EQ(f.net.http.callsTo("POST", "/users/authenticate").size(), 3u); // one login, tried three times
+
+        // Nothing saved: the one login needs the credentials once, and a second question is not asked
+        AuthFixture g(TEST_NAME + std::string("-unsaved"));
+        g.net.http.on("POST", "/users/authenticate", transportFailure(HttpTransportError::Other, "Operation timed out"));
+        ScriptedCredentials typed({AuthCredentials("alice", "pw")});
+        EXPECT_THROW(g.run(typed, [](RegistryClient &) {}), RegistryException);
+        EXPECT_EQ(typed.asked, 1);
+    }
+
     TEST(Dq11WithAuthenticatedRegistry, AProviderThatCannotAskStopsTheOperationBeforeAnyRequest)
     {
         AuthFixture f(TEST_NAME);

@@ -105,7 +105,7 @@ namespace
             registry.login("user", "password");
             FAIL() << "the login of an unreachable server succeeded";
         }
-        catch (const AuthException &e)
+        catch (const RegistryException &e)
         {
             const std::string message = e.what();
             EXPECT_NE(message.find("Login failed: could not connect to http://127.0.0.1:1: "), std::string::npos)

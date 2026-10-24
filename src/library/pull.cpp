@@ -115,7 +115,7 @@ void pullDataset(RegistryClient& client, const std::string& path, const MergeStr
 }
 
 void pull(const std::string& registry, MergeStrategy mergeStrategy, bool sslVerify,
-          CredentialProvider& credentials) {
+          CredentialProvider& credentials, const RegistryDeps& deps) {
     const auto currentPath = io::toUtf8(fs::current_path());
 
     const auto db = open(currentPath, true);
@@ -123,7 +123,7 @@ void pull(const std::string& registry, MergeStrategy mergeStrategy, bool sslVeri
 
     withAuthenticatedRegistry(registryUrl, sslVerify, credentials, [&](RegistryClient& client) {
         pullDataset(client, currentPath, mergeStrategy, std::cout);
-    });
+    }, {}, deps);
 }
 
 }  // namespace ddb

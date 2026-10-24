@@ -18,10 +18,16 @@
 
 #include "cmd/include/cli.h"
 #include "cmd/include/cmdlist.h"
+#include "cmd/include/credentials.h"
+#include "cmd/include/pull.h"
+#include "cmd/include/push.h"
 #include "exceptions.h"
+#include "fake_http_client.h"
 #include "gtest/gtest.h"
+#include "tagmanager.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace {
 
@@ -403,6 +409,63 @@ TEST(Dq12Commands, contourReachesItsWorkInsteadOfFailingToParseItsDefaults) {
     EXPECT_EQ(outcome.code, EXIT_FAILURE);
     EXPECT_EQ(outcome.err.find("failed to parse"), std::string::npos) << outcome.err;
     EXPECT_EQ(outcome.err.find("Usage:"), std::string::npos) << "not a usage error: " << outcome.err;
+}
+
+// ------------------------------------------------------------------------ offline
+
+// Answers every question with alice/pw and counts them
+class CountingCredentials : public ddb::CredentialProvider {
+public:
+    int asked = 0;
+    AuthCredentials credentialsFor(const std::string &) override {
+        asked++;
+        return AuthCredentials("alice", "pw");
+    }
+};
+
+// A dataset tagged for a Registry nobody can reach, as the current folder of the command
+struct OfflineDataset {
+    static constexpr const char *Url = "https://registry.test";
+
+    IndexFixture dataset;
+    fake::Network net;
+    CountingCredentials credentials;
+    std::filesystem::path previous = std::filesystem::current_path();
+
+    explicit OfflineDataset(const std::string &name)
+        : dataset(name), net(dataset.ta.getPath("auth.json")) {
+        ddb::TagManager(dataset.db.get()).setTag(std::string(Url) + "/org/ds");
+        dataset.db->close();
+        net.http.on("POST", "/users/authenticate", fake::transportFailure());
+        std::filesystem::current_path(dataset.root);
+    }
+    ~OfflineDataset() { std::filesystem::current_path(previous); }
+
+    cmd::RegistryServices services() { return {&credentials, net.deps()}; }
+};
+
+// A refused connection or an unresolvable host during the login was an AuthException, so the
+// operation asked for a password it could not use: ddb push offline prompted, then failed
+TEST(Dq12Commands, pushAndPullOfflineFailWithTheTransportErrorAndDoNotPrompt) {
+    for (const bool saved : {true, false}) {
+        OfflineDataset f(saved ? "dq12_offline_saved" : "dq12_offline_unsaved");
+        if (saved)
+            f.net.credentials.saveCredentials(OfflineDataset::Url, AuthCredentials("alice", "pw"));
+
+        cmd::Push push(f.services());
+        cmd::Pull pull(f.services());
+        for (cmd::Command *command : {static_cast<cmd::Command *>(&push), static_cast<cmd::Command *>(&pull)}) {
+            f.credentials.asked = 0;
+            const auto outcome = execute(*command, {});
+
+            EXPECT_EQ(outcome.code, EXIT_FAILURE);
+            EXPECT_TRUE(outcome.out.empty()) << outcome.out;
+            EXPECT_NE(outcome.err.find("could not connect to https://registry.test: Connection refused"), std::string::npos)
+                << outcome.err;
+            // Nothing saved: the one login needs the credentials once. Saved: nobody is asked.
+            EXPECT_EQ(f.credentials.asked, saved ? 0 : 1);
+        }
+    }
 }
 
 }  // namespace

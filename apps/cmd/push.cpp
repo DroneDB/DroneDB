@@ -43,8 +43,7 @@ namespace cmd
         const auto remote = opts["remote"].as<std::string>();
         auto sslVerify = opts["insecure"].count() == 0;
 
-        InteractiveCredentials credentials;
-        ddb::push(remote, sslVerify, credentials);
+        ddb::push(remote, sslVerify, credentials(), registryDeps());
         return EXIT_SUCCESS;
     }
 

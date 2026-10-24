@@ -59,8 +59,7 @@ namespace cmd
         else if (keepOurs)
             mergeStrategy = ddb::MergeStrategy::KeepOurs;
 
-        InteractiveCredentials credentials;
-        ddb::pull(remote, mergeStrategy, sslVerify, credentials);
+        ddb::pull(remote, mergeStrategy, sslVerify, credentials(), registryDeps());
         return EXIT_SUCCESS;
     }
 

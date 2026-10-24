@@ -4,15 +4,15 @@
 #ifndef SHARE_CMD_H
 #define SHARE_CMD_H
 
-#include "command.h"
+#include "credentials.h"
 
 namespace cmd
 {
 
-  class Share : public Command
+  class Share : public RegistryCommand
   {
   public:
-    Share() {}
+    explicit Share(RegistryServices registryServices = {}) : RegistryCommand(std::move(registryServices)) {}
 
     virtual int run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;

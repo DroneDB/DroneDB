@@ -62,8 +62,7 @@ namespace cmd
 
         LOGD << "Normalized folder = " << ddb::io::toGenericUtf8(folder);
 
-        InteractiveCredentials credentials;
-        ddb::clone(tag, ddb::io::toGenericUtf8(folder), sslVerify, credentials);
+        ddb::clone(tag, ddb::io::toGenericUtf8(folder), sslVerify, credentials(), registryDeps());
 
         return EXIT_SUCCESS;
     }

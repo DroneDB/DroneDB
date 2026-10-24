@@ -154,8 +154,9 @@ std::string RegistryClient::login(const std::string &username, const std::string
 
         return token;
     }
+    // Not an AuthException: nobody refused the credentials, so asking for others cannot help
     if (const auto transport = RegistryUtils::transportError(res, this->url); !transport.empty())
-        throw AuthException("Login failed: " + transport);
+        throw RegistryException("Login failed: " + transport);
     if (const auto message = RegistryUtils::errorMessage(res.body); !message.empty())
         throw AuthException("Login failed: " + message);
 

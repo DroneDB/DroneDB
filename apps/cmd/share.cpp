@@ -98,11 +98,10 @@ namespace cmd
 
         // With --non-interactive nobody is asked: the credentials come from the saved ones and the
         // environment only
-        InteractiveCredentials interactive;
         RefusedCredentials refused("Authentication failed. Set DDB_USERNAME and "
                                    "DDB_PASSWORD env vars or run `ddb login` first.");
-        ddb::CredentialProvider &credentials = nonInteractive ? static_cast<ddb::CredentialProvider &>(refused)
-                                                              : static_cast<ddb::CredentialProvider &>(interactive);
+        ddb::CredentialProvider &provider = nonInteractive ? static_cast<ddb::CredentialProvider &>(refused)
+                                                           : credentials();
 
         // Try env-var credentials before the share attempt so that the very
         // first request has them available (a login saves the credentials, which is
@@ -113,7 +112,7 @@ namespace cmd
         {
             try
             {
-                ddb::RegistryClient reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
+                ddb::RegistryClient reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify, registryDeps());
                 reg.login(envUser, envPass);
             }
             catch (const ddb::AppException &e)
@@ -124,9 +123,9 @@ namespace cmd
 
         try
         {
-            ddb::ShareService ss;
+            ddb::ShareService ss(registryDeps());
             const std::string url =
-                ss.share(input, tag, password, credentials, cwd, showProgress, sslVerify);
+                ss.share(input, tag, password, provider, cwd, showProgress, sslVerify);
             if (!quiet)
                 pb.done();
             std::cout << url << std::endl;

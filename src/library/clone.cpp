@@ -27,7 +27,8 @@ void cloneDataset(RegistryClient& client, const std::string& organization, const
     pullDataset(client, folder, MergeStrategy::KeepTheirs, out);
 }
 
-void clone(const TagComponents& tag, const std::string& folder, bool sslVerify, CredentialProvider& credentials) {
+void clone(const TagComponents& tag, const std::string& folder, bool sslVerify, CredentialProvider& credentials,
+           const RegistryDeps& deps) {
     if (fs::exists(io::fromUtf8(folder)) && !fs::is_empty(io::fromUtf8(folder))) {
         std::cout << "Cannot clone in folder '" + folder + "' because it already exists" << std::endl;
         return;
@@ -51,7 +52,7 @@ void clone(const TagComponents& tag, const std::string& folder, bool sslVerify, 
                 throw;
             }
         },
-        options);
+        options, deps);
 }
 
 }  // namespace ddb

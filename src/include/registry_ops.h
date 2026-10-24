@@ -41,11 +41,13 @@ DDB_DLL void cloneDataset(RegistryClient &client, const std::string &organizatio
 DDB_DLL std::string datasetRegistryUrl(Database *db, const std::string &registry, const std::string &verb);
 
 // The operations of the CLI, from the current folder. `registry` may be empty (the tag says).
-DDB_DLL void push(const std::string &registry, bool sslVerify, CredentialProvider &credentials);
+// `deps` are the client's collaborators (RegistryDeps): the defaults are the real ones.
+DDB_DLL void push(const std::string &registry, bool sslVerify, CredentialProvider &credentials,
+                  const RegistryDeps &deps = {});
 DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy, bool sslVerify,
-                  CredentialProvider &credentials);
+                  CredentialProvider &credentials, const RegistryDeps &deps = {});
 DDB_DLL void clone(const TagComponents &tag, const std::string &folder, bool sslVerify,
-                   CredentialProvider &credentials);
+                   CredentialProvider &credentials, const RegistryDeps &deps = {});
 
 } // namespace ddb
 

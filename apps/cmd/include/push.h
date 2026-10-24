@@ -5,16 +5,16 @@
 #ifndef PUSH_CMD_H
 #define PUSH_CMD_H
 
-#include "command.h"
+#include "credentials.h"
 
 namespace cmd
 {
 
-  class Push : public Command
+  class Push : public RegistryCommand
   {
 
   public:
-    Push() {}
+    explicit Push(RegistryServices registryServices = {}) : RegistryCommand(std::move(registryServices)) {}
 
     virtual int run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;

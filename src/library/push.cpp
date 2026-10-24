@@ -76,7 +76,7 @@ void pushDataset(RegistryClient& client, const std::string& path, std::ostream& 
     out << "Push completed" << std::endl;
 }
 
-void push(const std::string& registry, bool sslVerify, CredentialProvider& credentials) {
+void push(const std::string& registry, bool sslVerify, CredentialProvider& credentials, const RegistryDeps& deps) {
     const auto currentPath = io::toUtf8(fs::current_path());
 
     const auto db = open(currentPath, true);
@@ -84,7 +84,7 @@ void push(const std::string& registry, bool sslVerify, CredentialProvider& crede
 
     withAuthenticatedRegistry(registryUrl, sslVerify, credentials, [&](RegistryClient& client) {
         pushDataset(client, currentPath, std::cout);
-    });
+    }, {}, deps);
 }
 
 }  // namespace ddb

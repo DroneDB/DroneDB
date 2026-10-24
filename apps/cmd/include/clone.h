@@ -5,16 +5,16 @@
 #ifndef CLONE_CMD_H
 #define CLONE_CMD_H
 
-#include "command.h"
+#include "credentials.h"
 
 namespace cmd
 {
 
-  class Clone : public Command
+  class Clone : public RegistryCommand
   {
 
   public:
-    Clone() {}
+    explicit Clone(RegistryServices registryServices = {}) : RegistryCommand(std::move(registryServices)) {}
 
     virtual int run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;
