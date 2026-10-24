@@ -1,16 +1,5 @@
 {
  "dem": {
-  "approx": {
-   "pixels": [
-    {
-     "max": 0.6278517246246338,
-     "mean": 0.12624170571722618,
-     "min": -0.36957570910453796,
-     "valid": 79685,
-     "weightedMean": 0.06304169124937575
-    }
-   ]
-  },
   "bands": [
    {
     "blockX": 512,
@@ -26,6 +15,7 @@
   "driver": "GTiff",
   "height": 512,
   "mode": "translation",
+  "pixelsFile": "align_dem",
   "shiftZ": -5.369999885559082,
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {

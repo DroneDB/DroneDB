@@ -9,14 +9,16 @@
 // and every run compares with them.
 //
 // Numbers are compared with a relative tolerance of 1e-9: the goldens must also hold on
-// platforms whose libm differs in the last bit. Below a key "approx" the tolerance is 1e-5, for
-// the statistics of float rasters (a float32 pixel of a warp can differ in its last bit). Two environment variables serve the exact
+// platforms whose libm differs in the last bit. The pixels of a float raster (a float32 pixel of
+// a warp can differ in its last bit) are in a file of their own, compared pixel by pixel with a
+// tolerance (expectPixelsNear). Two environment variables serve the exact
 // comparison between two builds:
 //   DDB_DQ06_DUMP_DIR=<dir>      writes every actual output, unrounded, to <dir>/<name>.json
 //   DDB_UPDATE_DQ06_GOLDEN=1     rewrites the goldens from the actual outputs
 
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "fs.h"
 #include "json.h"
@@ -39,9 +41,15 @@ namespace dq06
     // else: the exact hashes of outputs whose bytes are not portable
     void dumpOnly(const std::string &name, const json &value);
 
-    // Numbers equal to the relative tolerance 1e-9 (1e-5 below a key "approx"; absolute near
-    // zero), everything else exactly. On a difference `where` names the JSON pointer.
+    // Numbers equal to the relative tolerance 1e-9 (absolute near zero), everything else exactly. On a difference `where` names the JSON pointer.
     bool jsonNear(const json &a, const json &b, std::string &where, const std::string &at = "");
+
+    // The pixels of a float raster, `bands` planes of width * height values, against the golden
+    // file pixels/<name>.bin (float32, byte-shuffled and deflated). EVERY pixel is compared: a
+    // pixel differs when |actual - golden| > max(1e-5 * |golden|, 1e-6), a NaN only equals a NaN.
+    // That passes the last-bit noise of another libm or instruction set and fails any real change
+    // of a pixel. DDB_UPDATE_DQ06_GOLDEN=1 rewrites the file.
+    void expectPixelsNear(const std::string &name, int width, int height, const std::vector<std::vector<double>> &bands);
 
     // 64-bit FNV-1a of a byte range, as 16 hex digits
     std::string fnv1a(const void *data, size_t size);

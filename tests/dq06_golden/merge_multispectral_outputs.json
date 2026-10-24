@@ -184,38 +184,6 @@
   "width": 64
  },
  "float4_plain": {
-  "approx": {
-   "pixels": [
-    {
-     "max": 199.0,
-     "mean": 100.046875,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 49.99806139277765
-    },
-    {
-     "max": 199.0,
-     "mean": 100.046875,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 49.99806139277765
-    },
-    {
-     "max": 199.0,
-     "mean": 100.046875,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 49.99806139277765
-    },
-    {
-     "max": 199.0,
-     "mean": 100.046875,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 49.99806139277765
-    }
-   ]
-  },
   "bands": [
    {
     "blockX": 256,
@@ -253,6 +221,7 @@
   "bigTiff": false,
   "driver": "GTiff",
   "height": 64,
+  "pixelsFile": "merge_float4_plain",
   "srs": "",
   "structure": {
    "COMPRESSION": "LZW",
@@ -263,45 +232,6 @@
   "width": 64
  },
  "float5": {
-  "approx": {
-   "pixels": [
-    {
-     "max": 1.0,
-     "mean": 0.4941894530470563,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 0.24745790809568266
-    },
-    {
-     "max": 1.0,
-     "mean": 0.4941894530470563,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 0.24745790809568266
-    },
-    {
-     "max": 1.0,
-     "mean": 0.4941894530470563,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 0.24745790809568266
-    },
-    {
-     "max": 1.0,
-     "mean": 0.4941894530470563,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 0.24745790809568266
-    },
-    {
-     "max": 1.0,
-     "mean": 0.4941894530470563,
-     "min": 0.0,
-     "valid": 4096,
-     "weightedMean": 0.24745790809568266
-    }
-   ]
-  },
   "bands": [
    {
     "blockX": 256,
@@ -347,6 +277,7 @@
   "bigTiff": false,
   "driver": "GTiff",
   "height": 64,
+  "pixelsFile": "merge_float5",
   "srs": "WGS 84 / UTM zone 32N",
   "structure": {
    "COMPRESSION": "LZW",
