@@ -5,6 +5,7 @@
 #include "index_sql.h"
 #include "json.h"
 #include "stringutil.h"
+#include "timeutil.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "mio.h"
@@ -24,33 +25,10 @@
 namespace ddb
 {
 
-    // Convert epoch milliseconds (double) to ISO 8601 UTC string
+    // Epoch milliseconds (double) as an ISO 8601 UTC string
     static std::string epochMsToIso8601(double epochMs)
     {
-        time_t secs = static_cast<time_t>(epochMs / 1000.0);
-        struct tm utcTime;
-#ifdef _WIN32
-        gmtime_s(&utcTime, &secs);
-#else
-        gmtime_r(&secs, &utcTime);
-#endif
-        char buf[32];
-        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
-        return std::string(buf);
-    }
-
-    // Convert epoch seconds (time_t) to ISO 8601 UTC string
-    static std::string epochSecsToIso8601(time_t epochSecs)
-    {
-        struct tm utcTime;
-#ifdef _WIN32
-        gmtime_s(&utcTime, &epochSecs);
-#else
-        gmtime_r(&epochSecs, &utcTime);
-#endif
-        char buf[32];
-        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
-        return std::string(buf);
+        return utcIso8601(static_cast<time_t>(epochMs / 1000.0));
     }
 
     // Slugify a string to conform to STAC best practices: lowercase [a-z0-9_-]
@@ -402,7 +380,7 @@ namespace ddb
         else if (mtime > 0)
         {
             // Fallback to mtime (filesystem modification time)
-            properties["datetime"] = epochSecsToIso8601(static_cast<time_t>(mtime));
+            properties["datetime"] = utcIso8601(static_cast<time_t>(mtime));
         }
         else
         {
