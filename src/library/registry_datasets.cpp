@@ -119,7 +119,8 @@ void RegistryClient::downloadFiles(const std::string &organization, const std::s
     auto downloadPath = datasetPath(organization, dataset) + "/download";
 
     if (files.size() == 1) {
-        downloadPath += "?path=" + files[0];
+        // A query value: a name with &, #, %, + or a space would end, cut or change the value
+        downloadPath += "?path=" + urlEncode(files[0]);
 
         const auto destPath = io::fromUtf8(folder) / io::fromUtf8(files[0]);
 

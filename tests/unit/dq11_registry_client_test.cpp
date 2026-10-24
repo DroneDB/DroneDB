@@ -524,7 +524,7 @@ namespace
     TEST(Dq11RegistryClientDatasets, OneFileIsDownloadedWithAGetToItsPlace)
     {
         ClientFixture f(TEST_NAME);
-        f.net.http.on("DOWNLOAD", "/orgs/o/ds/d/download?path=sub/a.txt", reply(200, "alpha"));
+        f.net.http.on("DOWNLOAD", "/orgs/o/ds/d/download?path=sub%2Fa.txt", reply(200, "alpha"));
         std::ostringstream out;
         f.client.downloadFiles("o", "d", {"sub/a.txt"}, io::toUtf8(f.ta.getFolder("dl")), out);
 
@@ -533,6 +533,34 @@ namespace
         ss << in.rdbuf();
         EXPECT_EQ(ss.str(), "alpha");
         EXPECT_EQ(f.net.http.calls.size(), 1u);
+    }
+
+    // The Registry reads ?path= with the rules of ASP.NET: an unescaped '&' ended the value, '#'
+    // started the fragment, '%' began an escape and a space is not allowed in a URL
+    TEST(Dq11RegistryClientDatasets, TheNameOfOneFileIsEncodedInTheQuery)
+    {
+        struct Case { std::string name, encoded; };
+        const std::vector<Case> cases = {
+            {"a&b.txt", "a%26b.txt"},
+            {"a#b.txt", "a%23b.txt"},
+            {"a b.txt", "a%20b.txt"},
+            {"100%.txt", "100%25.txt"},
+            {"a+b.txt", "a%2Bb.txt"},
+            {"a=b;c.txt", "a%3Db%3Bc.txt"},
+            {"sub dir/\xC3\xA8.txt", "sub%20dir%2F%C3%A8.txt"}, // UTF-8 bytes
+        };
+        for (const auto &c : cases)
+        {
+            ClientFixture f(std::string(TEST_NAME) + "-" + std::to_string(&c - cases.data()));
+            f.net.http.on("DOWNLOAD", "/orgs/o/ds/d/download?path=" + c.encoded, reply(200, "x"));
+            std::ostringstream out;
+            f.client.downloadFiles("o", "d", {c.name}, io::toUtf8(f.ta.getFolder("dl")), out);
+
+            ASSERT_EQ(f.net.http.calls.size(), 1u) << c.name;
+            EXPECT_EQ(f.net.http.calls.at(0).path, std::string(f.client.getUrl("/orgs/o/ds/d/download?path=")) + c.encoded);
+            EXPECT_TRUE(f.net.http.unexpected.empty()) << c.name;
+            EXPECT_TRUE(fs::exists(io::fromUtf8(io::toUtf8(f.ta.getFolder("dl")) + "/" + c.name))) << c.name;
+        }
     }
 
     TEST(Dq11RegistryClientDatasets, SeveralFilesAreAZipOfAPostAndNoTempFileStays)
