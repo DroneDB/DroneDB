@@ -7,7 +7,8 @@ message(STATUS "SRC_LIST: ${SRC_LIST}")
 #   ddb_core  every library source except the C API, plus the generated version TU (and the
 #             process initialization, ddb::registerProcess in process_init.cpp)
 #   ddb_capi  the C API: ddb.cpp, the only TU that implements the extern "C" functions of ddb.h,
-#             and c_api_util.cpp, its error mapper and argument helpers (c_api_util.h, private)
+#             and c_api_util.cpp, its error mapper and argument helpers (c_api_util.h, private),
+#             and c_api_capabilities.cpp, the JSON of DDBGetCapabilities
 # libddb (SHARED) = ddb_core + ddb_capi. ddbcmd, ddbtest and ddb_unit_tests contain the same
 # objects (ddb_embedded below) and never load libddb: no binary may contain both, otherwise the
 # plog instance and the library's singletons would exist twice in one process.
@@ -17,7 +18,8 @@ message(STATUS "SRC_LIST: ${SRC_LIST}")
 # on Linux a version script made from the symbol manifest hides every other symbol, the C++
 # symbols of the static libraries linked into libddb included. The C++ code is reached by
 # linking the objects (ddb_embedded), not through libddb.
-set(DDB_CAPI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/library/ddb.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/library/c_api_util.cpp")
+set(DDB_CAPI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/library/ddb.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/library/c_api_util.cpp"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/library/c_api_capabilities.cpp")
 set(DDB_CORE_SOURCES ${SRC_LIST})
 list(REMOVE_ITEM DDB_CORE_SOURCES ${DDB_CAPI_SOURCES})
 

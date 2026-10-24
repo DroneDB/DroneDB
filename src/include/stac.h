@@ -27,6 +27,12 @@ namespace ddb
         int offset = 0;
     };
 
+    // The query of a STAC API request, from its parameters as the request has them (text): bbox
+    // "minX,minY,maxX,maxY" (EPSG:4326), datetime a single instant or an interval "start/end"
+    // (".." or an empty bound is open), both may be empty (no filter). Throws
+    // InvalidArgsException for a bbox that is not four numbers.
+    StacItemQuery parseStacItemQuery(const std::string &bbox, const std::string &datetime, int limit, int offset);
+
     // Generate a STAC API ItemCollection (GeoJSON FeatureCollection of STAC Items)
     // for all geometry-bearing entries of a dataset, with optional bbox / datetime
     // filtering and limit/offset paging.

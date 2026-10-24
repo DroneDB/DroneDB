@@ -26,6 +26,7 @@
 #include "build.h"
 #include "build_budget.h"
 #include "build_manifest.h"
+#include "c_api_capabilities.h"
 #include "c_api_util.h"
 #include "cancellation.h"
 #include "log_forwarding.h"
@@ -141,106 +142,12 @@ void DDBSetLastError(const char* err) {
         capi::setLastError(err);
 }
 
-namespace {
-
-// Every exported DDB* function, one string literal per line of src/include/ddb.symbols:
-// src/CMakeLists.txt generates the list from the manifest, which stays the only copy (XI-01)
-constexpr std::string_view kExportedSymbols[] = {
-#include "ddb_symbols.inc"
-};
-
-// Every DDBErr code under its enumerator name without the DDBERR_ prefix (the same token, so a
-// name cannot drift from its code), in value order
-#define DDB_ERROR_CODE(name) std::pair<std::string_view, DDBErr>{#name, DDBERR_##name}
-constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
-                                    DDB_ERROR_CODE(EXCEPTION),
-                                    DDB_ERROR_CODE(BUILDDEPMISSING),
-                                    DDB_ERROR_CODE(BUILDINPROGRESS),
-                                    DDB_ERROR_CODE(CANCELED),
-                                    DDB_ERROR_CODE(BUSY),
-                                    DDB_ERROR_CODE(NOTFOUND),
-                                    DDB_ERROR_CODE(INVALIDARGS),
-                                    DDB_ERROR_CODE(RETRYABLE),
-                                    DDB_ERROR_CODE(SHUTDOWN)};
-#undef DDB_ERROR_CODE
-
-// The exports whose work checks the caller's cancel token while it runs (DQ-15, XI-07): their
-// steps check cancel::throwIfCanceled() or run through a checkpoint (GDAL progress, raster
-// reads, forEachIndex items, SQLite statements, external tools). Sorted, so the capabilities
-// list is stable. Rollout: the render paths, then DDBBuild; raster analysis and DDBApplyDelta(Ex)
-// come later. DDBExportRaster2 also stops when its progress callback asks to.
-constexpr std::string_view kCancellable[] = {
-    "DDBBuild",
-    "DDBExportRaster",
-    "DDBExportRaster2",
-    "DDBGenerateMemoryThumbnail",
-    "DDBGenerateMemoryThumbnailEx",
-    "DDBGenerateThumbnail",
-    "DDBMemoryTile",
-    "DDBMemoryTileEx",
-    "DDBMemoryTileFmt",
-    "DDBRenderRasterIndex",
-    "DDBRenderRasterRegion",
-    "DDBRenderRasterRegionEx",
-    "DDBTile",
-};
-
-static_assert(
-    [] {
-        for (size_t i = 0; i < kErrorCodes.size(); i++)
-            if (static_cast<size_t>(kErrorCodes[i].second) != i)
-                return false;
-        return true;
-    }(),
-    "kErrorCodes must list the DDBErr codes in value order, without gaps");
-static_assert(std::ranges::all_of(kCancellable,
-                                  [](std::string_view name) {
-                                      return std::ranges::find(kExportedSymbols, name) !=
-                                             std::end(kExportedSymbols);
-                                  }),
-              "a cancellable function must be an export listed in ddb.symbols");
-static_assert(std::ranges::adjacent_find(kCancellable, std::ranges::greater_equal{}) == std::end(kCancellable),
-              "kCancellable must be sorted, without duplicates");
-
-json stringArray(std::span<const std::string_view> items) {
-    json out = json::array();
-    for (const auto item : items)
-        out.push_back(item);
-    return out;
-}
-
-std::string buildCapabilities() {
-    json errorCodes = json::object();
-    for (const auto& [name, code] : kErrorCodes)
-        errorCodes[std::string(name)] = static_cast<int>(code);
-    json errorReasons = json::array();
-    for (const auto& reason : capi::kRetryableReasons)
-        errorReasons.push_back(reason.second);
-    return json{{"abi", {{"major", DDB_ABI_MAJOR}, {"minor", DDB_ABI_MINOR}}},
-                {"version", ddb::version()},
-                {"errorCodes", std::move(errorCodes)},
-                {"errorReasons", std::move(errorReasons)},
-                {"cancellable", stringArray(kCancellable)},
-                {"symbols", stringArray(kExportedSymbols)}}
-        .dump();
-}
-
-}  // namespace
-
 uint32_t DDBGetAbiVersion() {
     return (static_cast<uint32_t>(DDB_ABI_MAJOR) << 16) | static_cast<uint32_t>(DDB_ABI_MINOR);
 }
 
 const char* DDBGetCapabilities() {
-    try {
-        // Built on the first call; C++ guarantees one thread builds it while the others wait
-        static const std::string capabilities = buildCapabilities();
-        return capabilities.c_str();
-    } catch (...) {
-        // Out of memory while building: no exception may cross the C boundary, and the
-        // next call builds it again
-        return nullptr;
-    }
+    return capi::capabilities();
 }
 
 // ------------------------------------------------------------------ process configuration
@@ -874,20 +781,6 @@ DDBErr DDBDelta(const char* ddbSourceStamp,
     });
 }
 
-// The files a DDBApplyDeltaEx caller verified: a JSON object, delta path -> SHA-256 text
-static VerifiedHashes parseVerifiedHashes(const char* verifiedHashesJson) {
-    const json j = parseJsonArg(verifiedHashesJson);
-    if (!j.is_object())
-        throw InvalidArgsException("verifiedHashes must be a JSON object (path: SHA-256)");
-    VerifiedHashes hashes;
-    for (const auto& [path, hash] : j.items()) {
-        if (!hash.is_string())
-            throw InvalidArgsException("The verified hash of " + path + " must be a string");
-        hashes.emplace(path, hash.get<std::string>());
-    }
-    return hashes;
-}
-
 // DDBApplyDelta and DDBApplyDeltaEx: the conflicts (JSON array of paths). verifiedHashesJson
 // NULL: every added file is hashed unless DDB_VERIFY_PUSH_HASHES=0; otherwise the files it
 // lists are trusted (once applyDelta checked them against the delta) and the others are
@@ -909,32 +802,22 @@ static json applyDeltaConflicts(const char* delta,
         throw InvalidArgsException("Invalid merge strategy");
 
     const Delta d = parseJsonArg(delta);
-    const json metaDump = parseJsonArg(sourceMetaDump);
 
+    DeltaApplication application;
+    application.sourcePath = pathArg(sourcePath);
+    application.mergeStrategy = static_cast<MergeStrategy>(mergeStrategy);
+    application.sourceMetaDump = parseJsonArg(sourceMetaDump);
     // The added files must match the hashes of the delta. A host that checked the uploaded
     // bytes itself says which (verifiedHashes); without it DDB_VERIFY_PUSH_HASHES=0 skips the
     // check of every file
     const bool explicitHashes = verifiedHashesJson != nullptr;
-    const VerifiedHashes verified = explicitHashes ? parseVerifiedHashes(verifiedHashesJson) : VerifiedHashes{};
-    const bool verifyHashes = explicitHashes || [] {
-        const char* env = std::getenv("DDB_VERIFY_PUSH_HASHES");
-        return env == nullptr || (env[0] != '0' && env[0] != '\0');
-    }();
+    if (explicitHashes)
+        application.verifiedHashes = parseVerifiedHashes(parseJsonArg(verifiedHashesJson));
+    application.verifyHashes = explicitHashes || verifyPushHashesByDefault();
 
     const auto ddb = ddb::open(std::string(ddbPath), false);
     std::stringstream ss;
-    DeltaApplication application;
-    application.sourcePath = pathArg(sourcePath);
-    application.mergeStrategy = static_cast<MergeStrategy>(mergeStrategy);
-    application.sourceMetaDump = metaDump;
-    application.verifyHashes = verifyHashes;
-    application.verifiedHashes = verified;
-    const auto adc = applyDelta(d, ddb.get(), application, ss);
-
-    json j = json::array();
-    for (auto& c : adc)
-        j.push_back(c.path);
-    return j;
+    return json(applyDelta(d, ddb.get(), application, ss));
 }
 
 DDBErr DDBApplyDelta(const char* delta,
@@ -977,11 +860,7 @@ DDBErr DDBComputeDeltaLocals(const char* delta,
         const Delta d = parseJsonArg(delta);
         const auto ddb = ddb::open(std::string(ddbPath), false);
 
-        auto cdl = computeDeltaLocals(d, ddb.get(), std::string(hlDestFolder));
-        json j = json::object();
-        for (auto& el : cdl)
-            j[el.first] = el.second;
-        return j;
+        return json(computeDeltaLocals(d, ddb.get(), std::string(hlDestFolder)));
     });
 }
 
@@ -1102,12 +981,7 @@ DDBErr DDBCleanup(const char* ddbPath, char** output) {
         requireOutput(output);
 
         const auto ddb = ddb::open(std::string(ddbPath), true);
-        const auto result = cleanupBuild(ddb.get(), "");
-
-        json j;
-        j["entries"] = result.removedEntries;
-        j["builds"] = result.removedBuilds;
-        return j;
+        return json(cleanupBuild(ddb.get(), ""));
     });
 }
 
@@ -1142,19 +1016,7 @@ DDBErr DDBGetPendingBuildInfo(const char* ddbPath, char** output) {
         requireOutput(output);
 
         const auto db = ddb::open(std::string(ddbPath), true);
-        const auto pending = ddb::getPendingBuildInfo(db.get());
-
-        auto outJson = json::array();
-        for (const auto& p : pending) {
-            json j;
-            j["hash"] = p.hash;
-            j["path"] = p.path;
-            j["missingDependencies"] = p.missingDependencies;
-            j["lastAttempt"] = p.lastAttempt;
-            j["retryAfter"] = p.retryAfter;
-            outJson.push_back(j);
-        }
-        return outJson;
+        return json(ddb::getPendingBuildInfo(db.get()));
     });
 }
 
@@ -1187,12 +1049,7 @@ DDBErr DDBGetBuildStatus(const char* ddbPath, const char** paths, int numPaths, 
         requireOutput(output);
 
         const auto ddb = ddb::open(std::string(ddbPath), true);
-        const auto statuses = ddb::getBuildStatus(ddb.get(), pathList);
-
-        json j = json::array();
-        for (const auto& s : statuses)
-            j.push_back({{"path", s.path}, {"exists", s.exists}, {"buildable", s.buildable}, {"complete", s.complete}});
-        return j;
+        return json(ddb::getBuildStatus(ddb.get(), pathList));
     });
 }
 
@@ -1358,56 +1215,6 @@ DDBErr DDBMetaRestore(const char* ddbPath, const char* dump, char** output) {
 
 // ------------------------------------------------------------------ STAC
 
-namespace {
-
-// A STAC API bbox "minX,minY,maxX,maxY" (EPSG:4326): empty when absent; throws on an invalid one
-std::vector<double> parseStacBbox(const char* bbox) {
-    std::vector<double> bboxVec;
-    if (bbox != nullptr && !isNullOrEmptyOrWhitespace(bbox)) {
-        std::stringstream ss(bbox);
-        std::string token;
-        while (std::getline(ss, token, ',')) {
-            try {
-                bboxVec.push_back(std::stod(token));
-            } catch (...) {
-                throw InvalidArgsException("Invalid bbox value: " + token);
-            }
-        }
-        if (bboxVec.size() != 4)
-            throw InvalidArgsException("bbox must contain exactly 4 comma-separated values");
-    }
-    return bboxVec;
-}
-
-// A STAC API datetime: a single instant or an interval "start/end" ("../end" or "start/.." for
-// open ends); an empty bound is open
-struct StacDatetimeRange {
-    std::string start;
-    std::string end;
-};
-
-StacDatetimeRange parseStacDatetime(const char* datetime) {
-    StacDatetimeRange range;
-    if (datetime != nullptr && !isNullOrEmptyOrWhitespace(datetime)) {
-        const std::string dt(datetime);
-        const auto slash = dt.find('/');
-        if (slash == std::string::npos) {
-            range.start = dt;
-            range.end = dt;
-        } else {
-            const std::string lo = dt.substr(0, slash);
-            const std::string hi = dt.substr(slash + 1);
-            if (lo != "..")
-                range.start = lo;
-            if (hi != "..")
-                range.end = hi;
-        }
-    }
-    return range;
-}
-
-}  // namespace
-
 DDBErr DDBStac(const char* ddbPath,
                const char* entry,
                const char* stacCollectionRoot,
@@ -1443,15 +1250,7 @@ DDBErr DDBStacItemCollection(const char* ddbPath,
         requireDdbPath(ddbPath);
         requireOutput(output);
 
-        const auto bboxVec = parseStacBbox(bbox);
-        const auto datetimeRange = parseStacDatetime(datetime);
-
-        ddb::StacItemQuery query;
-        query.bbox = bboxVec;
-        query.datetimeStart = datetimeRange.start;
-        query.datetimeEnd = datetimeRange.end;
-        query.limit = limit;
-        query.offset = offset;
+        const auto query = ddb::parseStacItemQuery(optStr(bbox), optStr(datetime), limit, offset);
         return ddb::generateStacItemCollection(std::string(ddbPath),
                                                optStr(stacCollectionRoot),
                                                optStr(id),
@@ -1479,14 +1278,7 @@ DDBErr DDBStacItemCollectionData(const char* ddbPath,
         requireDdbPath(ddbPath);
         requireOutput(output);
 
-        const auto bboxVec = parseStacBbox(bbox);
-        const auto datetimeRange = parseStacDatetime(datetime);
-        ddb::StacItemQuery query;
-        query.bbox = bboxVec;
-        query.datetimeStart = datetimeRange.start;
-        query.datetimeEnd = datetimeRange.end;
-        query.limit = limit;
-        query.offset = offset;
+        const auto query = ddb::parseStacItemQuery(optStr(bbox), optStr(datetime), limit, offset);
         return ddb::generateStacItemCollectionData(std::string(ddbPath), query);
     });
 }
@@ -1498,11 +1290,7 @@ DDBErr DDBGetRasterInfo(const char* path, char** output) {
         requireText(path, "No path provided");
         requireOutput(output);
 
-        auto& spm = ddb::SensorProfileManager::instance();
-        json info = json::parse(spm.getRasterInfoJson(std::string(path)));
-        // The indices the WMS vegetation-index layer renders from this raster
-        info["indexLayer"] = ddb::rasterIndexLayerIndices(std::string(path));
-        return info;
+        return ddb::getRasterInfoJson(std::string(path));
     });
 }
 
@@ -1512,143 +1300,7 @@ DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
         requireText(path, "No path provided");
         requireOutput(output);
 
-        const std::string formulaStr = optStr(formula);
-        const std::string filterStr = optStr(bandFilter);
-
-        // Owned: the formula, statistics and sensor steps below can throw while it is open
-        auto dataset = adoptDataset(GDALOpen(path, GA_ReadOnly));
-        if (!dataset)
-            throw GDALException("Cannot open " + std::string(path));
-        GDALDatasetH hDs = datasetHandle(dataset);
-
-        auto& ve = ddb::VegetationEngine::instance();
-        json result;
-
-        int nBands = GDALGetRasterCount(hDs);
-
-        // Determine effective band filter
-        ddb::BandFilter effectiveFilter;
-        if (!filterStr.empty()) {
-            effectiveFilter = ddb::VegetationEngine::parseFilter(filterStr, nBands);
-        } else {
-            effectiveFilter = ve.autoDetectFilter(std::string(path));
-        }
-
-        // Statistics
-        json statsJson;
-
-        if (!formulaStr.empty()) {
-            // Formula statistics: compute on-demand
-            const int width = GDALGetRasterXSize(hDs);
-            const int height = GDALGetRasterYSize(hDs);
-
-            // Sample at reduced resolution for performance
-            const int sampleW = std::min(width, 512);
-            const int sampleH = std::min(height, 512);
-            const size_t pixCount = static_cast<size_t>(sampleW) * sampleH;
-
-            const ddb::FormulaPlan plan = ddb::planFormula(hDs, formulaStr, effectiveFilter, "", false);
-            ddb::FormulaBuffers buffers;
-            ddb::computeFormulaValues(hDs, plan, ddb::RasterWindow{0, 0, width, height, sampleW, sampleH}, buffers);
-            const std::vector<float>& formulaResult = buffers.result;
-            const float nodata = NODATA_SENTINEL;
-
-            // Compute statistics
-            std::vector<double> valid;
-            valid.reserve(pixCount);
-            double sum = 0, sumSq = 0;
-            double fMin = std::numeric_limits<double>::max();
-            double fMax = std::numeric_limits<double>::lowest();
-            for (size_t i = 0; i < pixCount; i++) {
-                if (formulaResult[i] != nodata) {
-                    double v = static_cast<double>(formulaResult[i]);
-                    valid.push_back(v);
-                    sum += v;
-                    sumSq += v * v;
-                    fMin = std::min(fMin, v);
-                    fMax = std::max(fMax, v);
-                }
-            }
-
-            if (!valid.empty()) {
-                double mean = sum / valid.size();
-                double variance = (sumSq / valid.size()) - (mean * mean);
-                double stddev = std::sqrt(std::max(0.0, variance));
-
-                std::sort(valid.begin(), valid.end());
-                double p2 = valid[static_cast<size_t>(valid.size() * 0.02)];
-                double p98 = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
-
-                // Histogram
-                int bins = 255;
-                std::vector<int> counts(bins, 0);
-                std::vector<double> edges(bins + 1);
-                double range = fMax - fMin;
-                if (range <= 0) range = 1.0;
-                for (int i = 0; i <= bins; i++) {
-                    edges[i] = fMin + (range * i / bins);
-                }
-                for (double v : valid) {
-                    int idx = static_cast<int>((v - fMin) / range * (bins - 1));
-                    idx = std::max(0, std::min(bins - 1, idx));
-                    counts[idx]++;
-                }
-
-                statsJson["1"] = {
-                    {"min", fMin}, {"max", fMax}, {"mean", mean}, {"std", stddev},
-                    {"percentiles", {{"p2", p2}, {"p98", p98}}},
-                    {"histogram", {{"counts", counts}, {"edges", edges}, {"bins", bins}}}
-                };
-            }
-        } else {
-            // Per-band statistics
-            for (int i = 1; i <= nBands; i++) {
-                GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
-                double bMin, bMax, bMean, bStdDev;
-                if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
-                    statsJson[std::to_string(i)] = {
-                        {"min", bMin}, {"max", bMax}, {"mean", bMean}, {"std", bStdDev},
-                        {"percentiles", {{"p2", bMean - 2.33 * bStdDev}, {"p98", bMean + 2.33 * bStdDev}}}
-                    };
-                }
-            }
-        }
-
-        result["statistics"] = statsJson;
-
-        // Available algorithms for this band filter and this data
-        // Include all formulas, mark the ones the raster cannot compute as disabled
-        const ddb::RasterDataKind dataKind = ddb::rasterDataKind(hDs);
-        json algJson = json::array();
-        for (const auto& f : ve.getAllFormulas()) {
-            json fj = {
-                {"id", f.id}, {"name", f.name}, {"expr", f.expr},
-                {"help", f.help}
-            };
-            if (f.hasRange) {
-                fj["range"] = {f.rangeMin, f.rangeMax};
-            }
-            const std::string reason = ddb::VegetationEngine::unavailableReason(f, effectiveFilter, dataKind);
-            if (!reason.empty()) {
-                fj["disabled"] = true;
-                fj["disabledReason"] = reason;
-            }
-            algJson.push_back(fj);
-        }
-        result["algorithms"] = algJson;
-
-        // Colormaps
-        result["colormaps"] = ve.getColormapsJson();
-
-        result["autoBands"] = {{"filter", effectiveFilter.id}, {"match", !effectiveFilter.id.empty()}};
-
-        auto& spm = ddb::SensorProfileManager::instance();
-        auto detection = spm.detectSensor(std::string(path));
-        result["detectedSensor"] = detection.sensorId;
-
-        dataset.reset();
-
-        return result;
+        return ddb::getRasterMetadataJson(std::string(path), optStr(formula), optStr(bandFilter));
     });
 }
 
@@ -1676,8 +1328,26 @@ std::vector<std::string> nonNullPaths(const char** paths, int numPaths) {
     return inputPaths;
 }
 
-}  // namespace
+// The bands of a merge preview, "1,2,3": fewer than three (or none) is the first three bands
+std::vector<int> previewBandList(const char* previewBands) {
+    std::vector<int> bands;
+    if (previewBands != nullptr) {
+        std::istringstream ss(previewBands);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            try {
+                bands.push_back(std::stoi(token));
+            } catch (const std::exception&) {
+                throw InvalidArgsException("Invalid preview band value: '" + token + "'");
+            }
+        }
+    }
+    if (bands.size() < 3)
+        bands = {1, 2, 3};
+    return bands;
+}
 
+}  // namespace
 
 DDBErr DDBGenerateMemoryThumbnailEx(const char* filePath, int size,
                                     const char* preset, const char* bands,
@@ -1733,45 +1403,7 @@ DDBErr DDBValidateMergeMultispectral(const char** paths, int numPaths, char** ou
             throw InvalidArgsException("No input paths provided");
         requireOutput(output);
 
-        auto validationResult = ddb::validateMergeMultispectral(nonNullPaths(paths, numPaths));
-
-        json j;
-        j["ok"] = validationResult.ok;
-        j["errors"] = validationResult.errors;
-        j["warnings"] = validationResult.warnings;
-        j["summary"] = {
-            {"totalBands", validationResult.summary.totalBands},
-            {"dataType", validationResult.summary.dataType},
-            {"width", validationResult.summary.width},
-            {"height", validationResult.summary.height},
-            {"crs", validationResult.summary.crs},
-            {"pixelSizeX", validationResult.summary.pixelSizeX},
-            {"pixelSizeY", validationResult.summary.pixelSizeY},
-            {"estimatedSize", validationResult.summary.estimatedSize}
-        };
-
-        // Alignment info
-        json alignmentJson;
-        alignmentJson["detected"] = validationResult.alignment.detected;
-        alignmentJson["maxShiftPixels"] = validationResult.alignment.maxShiftPixels;
-        alignmentJson["correctionApplied"] = validationResult.alignment.correctionApplied;
-        alignmentJson["shiftSource"] = validationResult.alignment.shiftSource;
-
-        json bandsJson = json::array();
-        for (size_t i = 0; i < validationResult.alignment.bands.size(); i++) {
-            const auto &b = validationResult.alignment.bands[i];
-            bandsJson.push_back({
-                {"index", i},
-                {"name", b.bandName},
-                {"wavelength", b.centralWavelength},
-                {"shiftX", b.shiftX},
-                {"shiftY", b.shiftY}
-            });
-        }
-        alignmentJson["bands"] = bandsJson;
-        j["alignment"] = alignmentJson;
-
-        return j;
+        return ddb::mergeValidationToJson(ddb::validateMergeMultispectral(nonNullPaths(paths, numPaths)));
     });
 }
 
@@ -1785,23 +1417,8 @@ DDBErr DDBPreviewMergeMultispectral(const char** paths, int numPaths,
 
         const auto inputPaths = nonNullPaths(paths, numPaths);
 
-        std::vector<int> bandsVec;
-        if (previewBands) {
-            std::istringstream ss(previewBands);
-            std::string token;
-            while (std::getline(ss, token, ',')) {
-                try {
-                    bandsVec.push_back(std::stoi(token));
-                } catch (const std::exception&) {
-                    throw InvalidArgsException("Invalid preview band value: '" + token + "'");
-                }
-            }
-        }
-        if (bandsVec.size() < 3) {
-            bandsVec = {1, 2, 3};
-        }
-
-        ddb::previewMergeMultispectral(inputPaths, bandsVec, thumbSize > 0 ? thumbSize : 512, buffer, bufferSize);
+        ddb::previewMergeMultispectral(inputPaths, previewBandList(previewBands), thumbSize > 0 ? thumbSize : 512,
+                                       buffer, bufferSize);
     });
 }
 

@@ -50,6 +50,12 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
 
 MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths);
 
+/// The validation as JSON (DDBValidateMergeMultispectral): ok, errors, warnings, summary
+/// {totalBands, dataType, width, height, crs, pixelSizeX, pixelSizeY, estimatedSize} and
+/// alignment {detected, maxShiftPixels, correctionApplied, shiftSource, bands: [{index, name,
+/// wavelength, shiftX, shiftY}]}
+std::string mergeValidationToJson(const MergeValidationResult &r);
+
 void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
                                         const std::vector<int> &previewBands,
                                         int thumbSize,

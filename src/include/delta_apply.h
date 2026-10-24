@@ -49,9 +49,20 @@ struct Conflict {
     }
 };
 
+/// A conflict is its path in JSON: the output of DDBApplyDelta is the array of them
+void to_json(json &j, const Conflict &conflict);
+
 // The files of a delta whose content the caller already checked (XI-05): delta path ->
 // the SHA-256 the caller computed (e.g. while it received the file)
 using VerifiedHashes = std::unordered_map<std::string, std::string>;
+
+/// The verified hashes of a JSON object {"<delta path>": "<sha256>"}; throws InvalidArgsException
+/// for anything else (not an object, a hash that is not a string)
+VerifiedHashes parseVerifiedHashes(const json &verifiedHashes);
+
+/// Whether applyDelta hashes every added file when the caller does not say which ones it
+/// verified: yes, unless the environment variable DDB_VERIFY_PUSH_HASHES starts with '0'
+bool verifyPushHashesByDefault();
 
 /// How a delta is applied to a dataset
 struct DeltaApplication {

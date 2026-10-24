@@ -89,6 +89,10 @@ namespace ddb
      */
     std::vector<PendingBuildInfo> getPendingBuildInfo(Database *db);
 
+    /// {"hash", "path", "missingDependencies", "lastAttempt", "retryAfter"}: an element of the
+    /// output of DDBGetPendingBuildInfo (tests/contract/schemas/pending-build-info.schema.json)
+    void to_json(json &j, const PendingBuildInfo &info);
+
     bool isBuildActive(Database *db, const std::string &path);
 
     /**
@@ -131,6 +135,9 @@ namespace ddb
      */
     std::vector<BuildStatus> getBuildStatus(Database *db, const std::vector<std::string> &paths);
 
+    /// {"path", "exists", "buildable", "complete"}: an element of the output of DDBGetBuildStatus
+    void to_json(json &j, const BuildStatus &status);
+
     /**
      * @brief Result of a cleanup operation.
      */
@@ -158,6 +165,9 @@ namespace ddb
      * @return CleanupResult with the lists of removed items
      */
     CleanupResult cleanupBuild(Database *db, const std::string &outputPath = "");
+
+    /// {"entries": removedEntries, "builds": removedBuilds}: the output of DDBCleanup
+    void to_json(json &j, const CleanupResult &result);
 
 }
 

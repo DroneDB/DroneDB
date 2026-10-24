@@ -27,6 +27,27 @@ void ensureParentFolderExists(const fs::path& folder) {
     }
 }
 
+void to_json(json& j, const Conflict& conflict) {
+    j = conflict.path;
+}
+
+VerifiedHashes parseVerifiedHashes(const json& verifiedHashes) {
+    if (!verifiedHashes.is_object())
+        throw InvalidArgsException("verifiedHashes must be a JSON object (path: SHA-256)");
+    VerifiedHashes hashes;
+    for (const auto& [path, hash] : verifiedHashes.items()) {
+        if (!hash.is_string())
+            throw InvalidArgsException("The verified hash of " + path + " must be a string");
+        hashes.emplace(path, hash.get<std::string>());
+    }
+    return hashes;
+}
+
+bool verifyPushHashesByDefault() {
+    const char* env = std::getenv("DDB_VERIFY_PUSH_HASHES");
+    return env == nullptr || (env[0] != '0' && env[0] != '\0');
+}
+
 namespace {
 
 // The file adds of `d` whose hash applyDelta checks: all but those in `verified` (XI-05). An
@@ -142,114 +163,95 @@ class ApplyPolicy {
 
 }  // namespace
 
-std::vector<Conflict> applyDelta(const Delta& rawDelta,
-                                 Database* destination,
-                                 const DeltaApplication& application,
-                                 std::ostream& out) {
-    const fs::path& sourcePath = application.sourcePath;
-    const json& sourceMetaDump = application.sourceMetaDump;
-    std::vector<Conflict> conflicts;
-    ApplyPolicy policy(destination, application.mergeStrategy, conflicts);
-    // Before anything changes: a path outside the dataset refuses the whole delta
-    const Delta d = withNormalizedPaths(rawDelta);
-    const auto unverifiedFiles = filesToVerify(d, withNormalizedPaths(application.verifiedHashes));
+namespace {
 
-    // File operations
-    if (d.adds.size() > 0 || d.removes.size() > 0) {
-        const fs::path destPath = destination->rootDirectory();
+// The removes of the delta that apply: the files are removed from the index and the disk, children
+// before their folder. We don't check whether the file has been modified on the FS, perhaps we should?
+void applyRemoves(const Delta& d, Database* destination, ApplyPolicy& policy, std::ostream& out) {
+    const fs::path destPath = destination->rootDirectory();
+    std::vector<std::string> indexedRemovals;
+    std::vector<const RemoveAction*> fileRemovals;
+    for (const auto& rem : d.removes) {
+        // The dataset root (older versions indexed it as "") is never removed
+        if (rem.path.empty())
+            continue;
 
-        if (application.verifyHashes)
-            verifyDeltaHashes(unverifiedFiles, sourcePath);
+        // rem.hash is the hash in the destination stamp
+        const auto verdict = policy.check(rem.path, rem.hash, rem.hash, ConflictType::RemoteDeleteLocalModified);
+        if (!verdict.apply)
+            continue;
 
-        // Removes. We don't check whether the file has been modified on the FS, perhaps we should?
-        std::vector<std::string> indexedRemovals;
-        std::vector<const RemoveAction*> fileRemovals;
-        for (const auto& rem : d.removes) {
-            // The dataset root (older versions indexed it as "") is never removed
-            if (rem.path.empty())
-                continue;
-
-            // rem.hash is the hash in the destination stamp
-            const auto verdict = policy.check(rem.path, rem.hash, rem.hash, ConflictType::RemoteDeleteLocalModified);
-            if (!verdict.apply)
-                continue;
-
-            const auto dest = destPath / io::fromUtf8(rem.path);
-            if (fs::exists(dest)) {
-                if (verdict.indexed)
-                    indexedRemovals.push_back(io::toUtf8(dest));
-                fileRemovals.push_back(&rem);
-            }
-        }
-
-        // Children before their folder even when the delta is not sorted: removing a folder
-        // removes its content from the index
-        std::sort(indexedRemovals.rbegin(), indexedRemovals.rend());
-        std::sort(fileRemovals.begin(), fileRemovals.end(),
-                  [](const RemoveAction* l, const RemoveAction* r) { return l->path > r->path; });
-
-        removeFromIndex(destination, indexedRemovals);
-        for (const auto* rem : fileRemovals) {
-            // A raster kept open by recent tile requests would block this on Windows
-            releaseCachedFiles(destPath / io::fromUtf8(rem->path));
-            io::assureIsRemoved(destPath / io::fromUtf8(rem->path));
-            out << "D\t" << rem->path << std::endl;
-        }
-
-        const auto indexAdded = [&](const std::vector<KnownFile>& files) {
-            addToIndexWithHashes(destination, files, [&out](const Entry& e, bool updated) {
-                out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
-                return true;
-            });
-        };
-
-        // Adds (sorted by path: folders before their content). Files are moved, not
-        // copied: the source folder is a temporary folder on the same volume.
-        std::vector<KnownFile> addedFiles;
-        try {
-            for (const auto& add : d.adds) {
-                if (add.path.empty())
-                    continue;
-
-                if (!policy.check(add.path, add.hash, add.baseHash, ConflictType::BothModified).apply)
-                    continue;
-
-                const auto dest = destPath / io::fromUtf8(add.path);
-                if (add.isDirectory()) {
-                    io::createDirectories(dest);
-                } else {
-                    releaseCachedFiles(dest);
-                    io::moveOrCopy(sourcePath / io::fromUtf8(add.path), dest);
-                }
-
-                addedFiles.push_back({io::toUtf8(dest), add.hash});
-            }
-        } catch (const std::exception& e) {
-            // The files already moved are gone from the source folder: index them, so the
-            // index matches the dataset and a new delta does not ask for them again
-            LOGW << "Delta apply failed after " << addedFiles.size() << " adds: " << e.what();
-            try {
-                indexAdded(addedFiles);
-            } catch (const std::exception& ie) {
-                LOGW << "Cannot index the adds applied before the failure: " << ie.what();
-            }
-            throw;
-        }
-
-        indexAdded(addedFiles);
-
-        if (conflicts.size() == 0) {
-            auto mPathList = d.modifiedPathList();
-            if (mPathList.size() > 0)
-                syncLocalMTimes(destination, mPathList);
+        const auto dest = destPath / io::fromUtf8(rem.path);
+        if (fs::exists(dest)) {
+            if (verdict.indexed)
+                indexedRemovals.push_back(io::toUtf8(dest));
+            fileRemovals.push_back(&rem);
         }
     }
 
-    // Early exit in case of conflicts
-    if (conflicts.size() > 0)
-        return conflicts;
+    // Children before their folder even when the delta is not sorted: removing a folder
+    // removes its content from the index
+    std::sort(indexedRemovals.rbegin(), indexedRemovals.rend());
+    std::sort(fileRemovals.begin(), fileRemovals.end(),
+              [](const RemoveAction* l, const RemoveAction* r) { return l->path > r->path; });
 
-    // Meta operations
+    removeFromIndex(destination, indexedRemovals);
+    for (const auto* rem : fileRemovals) {
+        // A raster kept open by recent tile requests would block this on Windows
+        releaseCachedFiles(destPath / io::fromUtf8(rem->path));
+        io::assureIsRemoved(destPath / io::fromUtf8(rem->path));
+        out << "D\t" << rem->path << std::endl;
+    }
+}
+
+void indexAddedFiles(Database* destination, const std::vector<KnownFile>& files, std::ostream& out) {
+    addToIndexWithHashes(destination, files, [&out](const Entry& e, bool updated) {
+        out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
+        return true;
+    });
+}
+
+// The adds of the delta that apply (sorted by path: folders before their content). Files are moved,
+// not copied: the source folder is a temporary folder on the same volume.
+void applyAdds(const Delta& d, Database* destination, const fs::path& sourcePath, ApplyPolicy& policy,
+               std::ostream& out) {
+    const fs::path destPath = destination->rootDirectory();
+    std::vector<KnownFile> addedFiles;
+    try {
+        for (const auto& add : d.adds) {
+            if (add.path.empty())
+                continue;
+
+            if (!policy.check(add.path, add.hash, add.baseHash, ConflictType::BothModified).apply)
+                continue;
+
+            const auto dest = destPath / io::fromUtf8(add.path);
+            if (add.isDirectory()) {
+                io::createDirectories(dest);
+            } else {
+                releaseCachedFiles(dest);
+                io::moveOrCopy(sourcePath / io::fromUtf8(add.path), dest);
+            }
+
+            addedFiles.push_back({io::toUtf8(dest), add.hash});
+        }
+    } catch (const std::exception& e) {
+        // The files already moved are gone from the source folder: index them, so the
+        // index matches the dataset and a new delta does not ask for them again
+        LOGW << "Delta apply failed after " << addedFiles.size() << " adds: " << e.what();
+        try {
+            indexAddedFiles(destination, addedFiles, out);
+        } catch (const std::exception& ie) {
+            LOGW << "Cannot index the adds applied before the failure: " << ie.what();
+        }
+        throw;
+    }
+
+    indexAddedFiles(destination, addedFiles, out);
+}
+
+// The metadata the delta adds is restored from the dump of the source; the metadata it removes is removed
+void applyMeta(const Delta& d, Database* destination, const json& sourceMetaDump) {
     if (d.metaAdds.size() > 0) {
         json metaRestore = json::array();
 
@@ -270,7 +272,40 @@ std::vector<Conflict> applyDelta(const Delta& rawDelta,
     if (d.metaRemoves.size() > 0) {
         destination->getMetaManager()->bulkRemove(d.metaRemoves);
     }
+}
 
+}  // namespace
+
+std::vector<Conflict> applyDelta(const Delta& rawDelta,
+                                 Database* destination,
+                                 const DeltaApplication& application,
+                                 std::ostream& out) {
+    std::vector<Conflict> conflicts;
+    ApplyPolicy policy(destination, application.mergeStrategy, conflicts);
+    // Before anything changes: a path outside the dataset refuses the whole delta
+    const Delta d = withNormalizedPaths(rawDelta);
+    const auto unverifiedFiles = filesToVerify(d, withNormalizedPaths(application.verifiedHashes));
+
+    // File operations
+    if (d.adds.size() > 0 || d.removes.size() > 0) {
+        if (application.verifyHashes)
+            verifyDeltaHashes(unverifiedFiles, application.sourcePath);
+
+        applyRemoves(d, destination, policy, out);
+        applyAdds(d, destination, application.sourcePath, policy, out);
+
+        if (conflicts.size() == 0) {
+            auto mPathList = d.modifiedPathList();
+            if (mPathList.size() > 0)
+                syncLocalMTimes(destination, mPathList);
+        }
+    }
+
+    // Early exit in case of conflicts
+    if (conflicts.size() > 0)
+        return conflicts;
+
+    applyMeta(d, destination, application.sourceMetaDump);
     return conflicts;
 }
 

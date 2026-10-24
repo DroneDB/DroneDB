@@ -55,6 +55,30 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y);
 std::string getRasterAreaStatsJson(const std::string &filePath,
                                    int x0, int y0, int x1, int y1);
 
+/**
+ * The metadata of a raster for a viewer (DDBGetRasterMetadata): statistics, the formulas it
+ * can compute, the colormaps and the detected sensor.
+ *
+ * Output JSON schema (tests/contract/schemas/raster-metadata.schema.json):
+ * {
+ *   "statistics": {"<band>": {"min", "max", "mean", "std", "percentiles": {"p2", "p98"},
+ *                              "histogram": {"counts", "edges", "bins"}  // formula only
+ *                            }} | null,
+ *   "algorithms": [{"id", "name", "expr", "help", "range"?, "disabled"?, "disabledReason"?}],
+ *   "colormaps": ..., "autoBands": {"filter", "match"}, "detectedSensor": string
+ * }
+ * @param formula "" for the statistics of each band, else the id of a formula: its statistics
+ *                and histogram over the raster sampled at 512 x 512 at most, as band "1"
+ * @param bandFilter "" to detect the bands from the sensor profile of the raster
+ */
+std::string getRasterMetadataJson(const std::string &path, const std::string &formula, const std::string &bandFilter);
+
+/**
+ * The sensor profile info of a raster (SensorProfileManager::getRasterInfoJson) with "indexLayer"
+ * added: the indices the WMS vegetation-index layer can render from it (DDBGetRasterInfo).
+ */
+std::string getRasterInfoJson(const std::string &path);
+
 /** Read GDAL UNITTYPE of the first band of a raster.
  *  Returns empty string if unset or file cannot be opened. */
 std::string readGdalUnitType(const std::string &filePath);
