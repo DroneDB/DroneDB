@@ -442,268 +442,132 @@ void VegetationEngine::interpolateColormap(ColormapEntry *entries,
     }
 }
 
+namespace {
+
+using GradientStops = std::vector<std::tuple<float, uint8_t, uint8_t, uint8_t>>;
+
+// How a colormap is made: from gradient stops, or by a function for the ones that are not a gradient
+struct ColormapDef {
+    const char *id;
+    const char *name;
+    bool listed;                          // false: not in the list clients choose from
+    GradientStops stops;
+    void (*fill)(ColormapEntry *entries); // when set, makes the entries instead of the stops
+};
+
+// 5 steps of colors (Contrast NDVI)
+void fillDiscreteNdvi(ColormapEntry *entries) {
+    for (int i = 0; i < 256; i++) {
+        float t = static_cast<float>(i) / 255.0f;
+        if (t < 0.2f) { entries[i] = {139, 0, 0, 255}; }
+        else if (t < 0.4f) { entries[i] = {255, 69, 0, 255}; }
+        else if (t < 0.6f) { entries[i] = {255, 215, 0, 255}; }
+        else if (t < 0.8f) { entries[i] = {50, 205, 50, 255}; }
+        else { entries[i] = {0, 100, 0, 255}; }
+    }
+}
+
+void fillGrayscale(ColormapEntry *entries) {
+    for (int i = 0; i < 256; i++) {
+        entries[i] = {static_cast<uint8_t>(i), static_cast<uint8_t>(i), static_cast<uint8_t>(i), 255};
+    }
+}
+
+// Light to dark, matches the frontend preview swatches
+void fillGreys(ColormapEntry *entries) {
+    for (int i = 0; i < 256; i++) {
+        uint8_t v = static_cast<uint8_t>(255 - i);
+        entries[i] = {v, v, v, 255};
+    }
+}
+
+// The colormaps, in the order they are listed
+const std::vector<ColormapDef> &colormapDefs() {
+    static const std::vector<ColormapDef> defs = {
+        // RdYlGn (Red-Yellow-Green) - standard NDVI colormap
+        {"rdylgn", "Red-Yellow-Green", true, {
+            {0.0f, 215, 48, 39}, {0.25f, 253, 174, 97}, {0.5f, 254, 224, 139}, {0.75f, 166, 217, 106}, {1.0f, 26, 152, 80}
+        }, nullptr},
+        // Discrete NDVI (5 colors)
+        {"discrete_ndvi", "Contrast NDVI", true, {}, fillDiscreteNdvi},
+        // Spectral
+        {"spectral", "Spectral", true, {
+            {0.0f, 158, 1, 66}, {0.25f, 253, 174, 97}, {0.5f, 255, 255, 191}, {0.75f, 102, 194, 165}, {1.0f, 94, 79, 162}
+        }, nullptr},
+        // Viridis
+        {"viridis", "Viridis", true, {
+            {0.0f, 68, 1, 84}, {0.25f, 59, 82, 139}, {0.5f, 33, 144, 140}, {0.75f, 93, 201, 99}, {1.0f, 253, 231, 37}
+        }, nullptr},
+        // Plasma
+        {"plasma", "Plasma", true, {
+            {0.0f, 13, 8, 135}, {0.25f, 126, 3, 168}, {0.5f, 204, 71, 120}, {0.75f, 248, 149, 64}, {1.0f, 240, 249, 33}
+        }, nullptr},
+        // Inferno
+        {"inferno", "Inferno", true, {
+            {0.0f, 0, 0, 4}, {0.25f, 87, 16, 110}, {0.5f, 188, 55, 84}, {0.75f, 249, 142, 9}, {1.0f, 252, 255, 164}
+        }, nullptr},
+        // Magma
+        {"magma", "Magma", true, {
+            {0.0f, 0, 0, 4}, {0.25f, 81, 18, 124}, {0.5f, 183, 55, 121}, {0.75f, 252, 137, 97}, {1.0f, 252, 253, 191}
+        }, nullptr},
+        // Grayscale
+        {"grayscale", "Grayscale", true, {}, fillGrayscale},
+        // Ironbow (thermal)
+        {"ironbow", "Ironbow", true, {
+            {0.0f, 0, 0, 0}, {0.2f, 87, 15, 106}, {0.4f, 189, 55, 84}, {0.6f, 249, 120, 8}, {0.8f, 255, 227, 68}, {1.0f, 255, 255, 255}
+        }, nullptr},
+        // Rainbow
+        {"rainbow", "Rainbow", true, {
+            {0.0f, 150, 0, 90}, {0.17f, 0, 0, 200}, {0.33f, 0, 150, 255}, {0.5f, 0, 255, 0}, {0.67f, 255, 255, 0}, {0.83f, 255, 100, 0}, {1.0f, 200, 0, 0}
+        }, nullptr},
+        // BuGn (Blue-Green)
+        {"bugn", "Blue-Green", true, {
+            {0.0f, 247, 252, 253}, {0.25f, 178, 226, 226}, {0.5f, 102, 194, 164}, {0.75f, 35, 139, 69}, {1.0f, 0, 68, 27}
+        }, nullptr},
+        // Whitehot (thermal)
+        {"whitehot", "White Hot", true, {
+            {0.0f, 0, 0, 0}, {1.0f, 255, 255, 255}
+        }, nullptr},
+        // Blackhot (thermal, inverted)
+        {"blackhot", "Black Hot", true, {
+            {0.0f, 255, 255, 255}, {1.0f, 0, 0, 0}
+        }, nullptr},
+        // Arctic
+        {"arctic", "Arctic", true, {
+            {0.0f, 0, 0, 64}, {0.25f, 0, 100, 200}, {0.5f, 100, 200, 255}, {0.75f, 200, 240, 255}, {1.0f, 255, 255, 255}
+        }, nullptr},
+        // Lava
+        {"lava", "Lava", true, {
+            {0.0f, 0, 0, 0}, {0.25f, 128, 0, 0}, {0.5f, 255, 80, 0}, {0.75f, 255, 200, 0}, {1.0f, 255, 255, 200}
+        }, nullptr},
+        // Terrain (elevation: water -> low land -> hills -> mountains -> snow)
+        {"terrain", "Terrain", true, {
+            {0.0f, 51, 51, 153}, {0.2f, 0, 180, 180}, {0.4f, 160, 217, 121}, {0.6f, 236, 216, 122}, {0.8f, 169, 116, 67}, {1.0f, 255, 255, 255}
+        }, nullptr},
+        // Greys (alias of grayscale; maps frontend "greys" id to the standard ramp)
+        {"greys", "Greys", true, {}, fillGreys},
+        // Pure red-yellow-green: the ramp of the vegetation-index map layer (renderRasterIndex),
+        // kept as it looked before that layer moved onto this engine. Not a colormap clients pick:
+        // it is not listed (getColormapsJson) and a request cannot name it
+        {"ryg", "Red-Yellow-Green (pure)", false, {
+            {0.0f, 255, 0, 0}, {0.5f, 255, 255, 0}, {1.0f, 0, 255, 0}
+        }, nullptr},
+    };
+    return defs;
+}
+
+} // anonymous namespace
+
 void VegetationEngine::initColormaps() {
-    // RdYlGn (Red-Yellow-Green) - standard NDVI colormap
-    {
+    for (const auto &def : colormapDefs()) {
         Colormap c;
-        c.id = "rdylgn";
-        c.name = "Red-Yellow-Green";
-        interpolateColormap(c.entries, {
-            {0.0f, 215, 48, 39},
-            {0.25f, 253, 174, 97},
-            {0.5f, 254, 224, 139},
-            {0.75f, 166, 217, 106},
-            {1.0f, 26, 152, 80}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Discrete NDVI (5 colors)
-    {
-        Colormap c;
-        c.id = "discrete_ndvi";
-        c.name = "Contrast NDVI";
-        for (int i = 0; i < 256; i++) {
-            float t = static_cast<float>(i) / 255.0f;
-            if (t < 0.2f) { c.entries[i] = {139, 0, 0, 255}; }
-            else if (t < 0.4f) { c.entries[i] = {255, 69, 0, 255}; }
-            else if (t < 0.6f) { c.entries[i] = {255, 215, 0, 255}; }
-            else if (t < 0.8f) { c.entries[i] = {50, 205, 50, 255}; }
-            else { c.entries[i] = {0, 100, 0, 255}; }
-        }
-        colormaps_.push_back(c);
-    }
-
-    // Spectral
-    {
-        Colormap c;
-        c.id = "spectral";
-        c.name = "Spectral";
-        interpolateColormap(c.entries, {
-            {0.0f, 158, 1, 66},
-            {0.25f, 253, 174, 97},
-            {0.5f, 255, 255, 191},
-            {0.75f, 102, 194, 165},
-            {1.0f, 94, 79, 162}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Viridis
-    {
-        Colormap c;
-        c.id = "viridis";
-        c.name = "Viridis";
-        interpolateColormap(c.entries, {
-            {0.0f, 68, 1, 84},
-            {0.25f, 59, 82, 139},
-            {0.5f, 33, 144, 140},
-            {0.75f, 93, 201, 99},
-            {1.0f, 253, 231, 37}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Plasma
-    {
-        Colormap c;
-        c.id = "plasma";
-        c.name = "Plasma";
-        interpolateColormap(c.entries, {
-            {0.0f, 13, 8, 135},
-            {0.25f, 126, 3, 168},
-            {0.5f, 204, 71, 120},
-            {0.75f, 248, 149, 64},
-            {1.0f, 240, 249, 33}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Inferno
-    {
-        Colormap c;
-        c.id = "inferno";
-        c.name = "Inferno";
-        interpolateColormap(c.entries, {
-            {0.0f, 0, 0, 4},
-            {0.25f, 87, 16, 110},
-            {0.5f, 188, 55, 84},
-            {0.75f, 249, 142, 9},
-            {1.0f, 252, 255, 164}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Magma
-    {
-        Colormap c;
-        c.id = "magma";
-        c.name = "Magma";
-        interpolateColormap(c.entries, {
-            {0.0f, 0, 0, 4},
-            {0.25f, 81, 18, 124},
-            {0.5f, 183, 55, 121},
-            {0.75f, 252, 137, 97},
-            {1.0f, 252, 253, 191}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Grayscale
-    {
-        Colormap c;
-        c.id = "grayscale";
-        c.name = "Grayscale";
-        for (int i = 0; i < 256; i++) {
-            c.entries[i] = {static_cast<uint8_t>(i), static_cast<uint8_t>(i), static_cast<uint8_t>(i), 255};
-        }
-        colormaps_.push_back(c);
-    }
-
-    // Ironbow (thermal)
-    {
-        Colormap c;
-        c.id = "ironbow";
-        c.name = "Ironbow";
-        interpolateColormap(c.entries, {
-            {0.0f, 0, 0, 0},
-            {0.2f, 87, 15, 106},
-            {0.4f, 189, 55, 84},
-            {0.6f, 249, 120, 8},
-            {0.8f, 255, 227, 68},
-            {1.0f, 255, 255, 255}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Rainbow
-    {
-        Colormap c;
-        c.id = "rainbow";
-        c.name = "Rainbow";
-        interpolateColormap(c.entries, {
-            {0.0f, 150, 0, 90},
-            {0.17f, 0, 0, 200},
-            {0.33f, 0, 150, 255},
-            {0.5f, 0, 255, 0},
-            {0.67f, 255, 255, 0},
-            {0.83f, 255, 100, 0},
-            {1.0f, 200, 0, 0}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // BuGn (Blue-Green)
-    {
-        Colormap c;
-        c.id = "bugn";
-        c.name = "Blue-Green";
-        interpolateColormap(c.entries, {
-            {0.0f, 247, 252, 253},
-            {0.25f, 178, 226, 226},
-            {0.5f, 102, 194, 164},
-            {0.75f, 35, 139, 69},
-            {1.0f, 0, 68, 27}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Whitehot (thermal)
-    {
-        Colormap c;
-        c.id = "whitehot";
-        c.name = "White Hot";
-        interpolateColormap(c.entries, {
-            {0.0f, 0, 0, 0},
-            {1.0f, 255, 255, 255}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Blackhot (thermal, inverted)
-    {
-        Colormap c;
-        c.id = "blackhot";
-        c.name = "Black Hot";
-        interpolateColormap(c.entries, {
-            {0.0f, 255, 255, 255},
-            {1.0f, 0, 0, 0}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Arctic
-    {
-        Colormap c;
-        c.id = "arctic";
-        c.name = "Arctic";
-        interpolateColormap(c.entries, {
-            {0.0f, 0, 0, 64},
-            {0.25f, 0, 100, 200},
-            {0.5f, 100, 200, 255},
-            {0.75f, 200, 240, 255},
-            {1.0f, 255, 255, 255}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Lava
-    {
-        Colormap c;
-        c.id = "lava";
-        c.name = "Lava";
-        interpolateColormap(c.entries, {
-            {0.0f, 0, 0, 0},
-            {0.25f, 128, 0, 0},
-            {0.5f, 255, 80, 0},
-            {0.75f, 255, 200, 0},
-            {1.0f, 255, 255, 200}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Terrain (elevation: water -> low land -> hills -> mountains -> snow)
-    {
-        Colormap c;
-        c.id = "terrain";
-        c.name = "Terrain";
-        interpolateColormap(c.entries, {
-            {0.0f, 51, 51, 153},
-            {0.2f, 0, 180, 180},
-            {0.4f, 160, 217, 121},
-            {0.6f, 236, 216, 122},
-            {0.8f, 169, 116, 67},
-            {1.0f, 255, 255, 255}
-        });
-        colormaps_.push_back(c);
-    }
-
-    // Greys (alias of grayscale; maps frontend "greys" id to the standard ramp)
-    {
-        Colormap c;
-        c.id = "greys";
-        c.name = "Greys";
-        for (int i = 0; i < 256; i++) {
-            // Light to dark, matches the frontend preview swatches.
-            uint8_t v = static_cast<uint8_t>(255 - i);
-            c.entries[i] = {v, v, v, 255};
-        }
-        colormaps_.push_back(c);
-    }
-
-    // Pure red-yellow-green: the ramp of the vegetation-index map layer (renderRasterIndex),
-    // kept as it looked before that layer moved onto this engine. Not a colormap clients pick:
-    // it is not listed (getColormapsJson) and a request cannot name it
-    {
-        Colormap c;
-        c.id = "ryg";
-        c.name = "Red-Yellow-Green (pure)";
-        c.listed = false;
-        interpolateColormap(c.entries, {
-            {0.0f, 255, 0, 0},
-            {0.5f, 255, 255, 0},
-            {1.0f, 0, 255, 0}
-        });
+        c.id = def.id;
+        c.name = def.name;
+        c.listed = def.listed;
+        if (def.fill)
+            def.fill(c.entries);
+        else
+            interpolateColormap(c.entries, def.stops);
         colormaps_.push_back(c);
     }
 }
