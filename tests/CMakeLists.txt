@@ -274,7 +274,7 @@ if(BUILD_TESTING)
     add_custom_target(ddb_header_check DEPENDS ddb_installed_headers_cxx ddb_installed_headers_c ddb_internal_headers)
     set_target_properties(ddb_header_check PROPERTIES EXCLUDE_FROM_ALL ON)
     add_test(NAME headers.CompileOnTheirOwn
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ddb_header_check --parallel 8)
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target ddb_header_check --parallel 8)
     set_tests_properties(headers.CompileOnTheirOwn PROPERTIES LABELS headers TIMEOUT 1800)
 
     # libddb as it ships: the dataset flow of a host through the C API, in the probe's own process

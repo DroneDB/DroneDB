@@ -774,6 +774,12 @@ jobs:
             -Command { ctest -C Release -L unit -j $env:NUMBER_OF_PROCESSORS --output-on-failure --schedule-random }
           exit $LASTEXITCODE
         shell: pwsh
+      - name: Check that every header compiles on its own
+        # DQ-14: one translation unit per header; the installed ones also as C11 (ctest -L headers)
+        run: |
+          cd build
+          ctest -C Release -L headers --output-on-failure
+        shell: pwsh
       - name: Run integration tests
         # One process for every test (about 9 minutes): still running after 30 minutes, it is
         # dumped with its thread stacks in this log, then stopped (scripts/ci-hang-watchdog.ps1)
