@@ -11,6 +11,7 @@
 #include <sstream>
 #include <cctype>
 
+#include "pdal_inc.h"
 #include <pdal/PipelineManager.hpp>
 #include <pdal/PointRef.hpp>
 #include <pdal/PointTable.hpp>

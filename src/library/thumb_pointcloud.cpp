@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include "pdal_inc.h"
 #include <pdal/io/CopcReader.hpp>
 #include <sstream>
 

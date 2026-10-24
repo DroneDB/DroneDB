@@ -9,6 +9,7 @@
 #include <cstring>
 #include <algorithm>
 
+#include "pdal_inc.h"
 #include <pdal/Options.hpp>
 #include <pdal/PointTable.hpp>
 #include <pdal/PointRef.hpp>

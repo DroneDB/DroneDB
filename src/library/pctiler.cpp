@@ -10,6 +10,7 @@
 #include <optional>
 #include <vector>
 
+#include "pdal_inc.h"
 #include <pdal/Options.hpp>
 #include <pdal/io/CopcReader.hpp>
 #include <pdal/filters/ColorinterpFilter.hpp>

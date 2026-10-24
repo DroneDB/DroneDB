@@ -253,6 +253,15 @@ class CheckExports(unittest.TestCase):
         self.assertIn("2 symbols that are not DDB* functions", out)
         self.assertIn("cpr_helper", out)
 
+    def test_many_other_exports_are_all_listed(self):
+        others = tuple(f"_ZN4pdal5Utils{i}Ev" for i in range(15))
+        code, out = self.run_exports(self.elf(BASE + others))
+        self.assertEqual(code, 1, out)
+        self.assertIn("15 symbols that are not DDB* functions", out)
+        self.assertIn("(and 5 more)", out)
+        for name in others:
+            self.assertIn(f"\n  {name}\n", out + "\n")
+
     def test_elf_with_an_exported_ddb_variable_fails(self):
         code, out = self.run_exports(self.elf(BASE, variables=("DDBState",)))
         self.assertEqual(code, 1, out)

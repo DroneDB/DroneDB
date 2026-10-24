@@ -258,6 +258,11 @@ def check_exports(repo, library):
                       f"for the rest, the version script from the manifest on Linux): {shown}{more}")
     for error in errors:
         report(error)
+    if len(foreign) > EXAMPLES:
+        # The annotation names a few; the log lists them all, so one run shows every offender
+        print(f"all {len(foreign)} symbols of {library} that are not DDB* functions:")
+        for name in foreign:
+            print(f"  {name}")
     if not errors:
         print(f"{library}: exports the {len(symbols)} DDB* functions of {MANIFEST}, "
               f"ABI {version[0]}.{version[1]} (version {format_version(version)})")

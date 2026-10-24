@@ -11,6 +11,7 @@
 
 #include <clocale>
 #include <cstdlib>
+#include "pdal_inc.h"
 #include <pdal/pdal_features.hpp>
 #include <sstream>
 
