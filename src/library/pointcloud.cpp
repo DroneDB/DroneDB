@@ -220,6 +220,46 @@ static std::vector<std::string> defaultColumnsForCount(size_t columnCount) {
     return cols;
 }
 
+// The column names of the LAST comment line preceding data (CloudCompare "columns title" export
+// places column names in the comment immediately above the data rows; any earlier comments are
+// typically generator/date banners). Empty when that line does not look like a header.
+static std::vector<std::string> commentLineColumns(const std::vector<std::string>& lines) {
+    std::vector<std::string> commentColumns;
+    size_t lastCommentIdx = std::string::npos;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (isBlankLine(lines[i]))
+            continue;
+        if (!isCommentLine(lines[i]))
+            break;
+        lastCommentIdx = i;
+    }
+    if (lastCommentIdx != std::string::npos) {
+        const std::string& line = lines[lastCommentIdx];
+        size_t start = line.find_first_not_of(" \t");
+        std::string content = line.substr(start + 2);  // after "//"
+        if (looksLikeHeaderLine(content)) {
+            const char commentSeparator = detectSeparator(content);
+            commentColumns = splitBySeparator(content, commentSeparator);
+            for (auto& c : commentColumns)
+                c = mapColumnName(c);
+        }
+    }
+    return commentColumns;
+}
+
+// The best available column list, in priority order: inline in-file header > comment-line header
+// (validated by the data column count) > inferred from the data column count
+static std::vector<std::string> chooseColumns(const std::vector<std::string>& inlineColumns,
+                                       const std::vector<std::string>& commentColumns, size_t dataColCount) {
+    if (inlineColumns.size() >= 3)
+        return inlineColumns;
+    if (commentColumns.size() >= 3 && (dataColCount == 0 || commentColumns.size() == dataColCount))
+        return commentColumns;
+    if (dataColCount > 0)
+        return defaultColumnsForCount(dataColCount);
+    return {"X", "Y", "Z"};
+}
+
 // Detect the format of an XYZ text file and return the PDAL configuration needed to read it.
 // Reliability-first heuristic:
 //   1. If the first line is a "//"-prefixed comment containing alphabetic tokens, treat the
@@ -244,29 +284,8 @@ TextReaderConfig detectTextFormat(const std::string& filename) {
         return config;
     }
 
-    // Step 1: attempt to extract column names from the LAST comment line preceding data
-    // (CloudCompare "columns title" export places column names in the comment immediately
-    // above the data rows; any earlier comments are typically generator/date banners).
-    std::vector<std::string> commentColumns;
-    size_t lastCommentIdx = std::string::npos;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (isBlankLine(lines[i]))
-            continue;
-        if (!isCommentLine(lines[i]))
-            break;
-        lastCommentIdx = i;
-    }
-    if (lastCommentIdx != std::string::npos) {
-        const std::string& line = lines[lastCommentIdx];
-        size_t start = line.find_first_not_of(" \t");
-        std::string content = line.substr(start + 2);  // after "//"
-        if (looksLikeHeaderLine(content)) {
-            const char commentSeparator = detectSeparator(content);
-            commentColumns = splitBySeparator(content, commentSeparator);
-            for (auto& c : commentColumns)
-                c = mapColumnName(c);
-        }
-    }
+    // Step 1: column names from the LAST comment line preceding data
+    const std::vector<std::string> commentColumns = commentLineColumns(lines);
 
     // Step 2: skip leading comment/blank lines
     size_t idx = 0;
@@ -314,17 +333,7 @@ TextReaderConfig detectTextFormat(const std::string& filename) {
     const size_t dataColCount =
         (idx < lines.size()) ? splitBySeparator(lines[idx], sep).size() : 0;
 
-    std::vector<std::string> columns;
-    if (inlineColumns.size() >= 3) {
-        columns = inlineColumns;
-    } else if (commentColumns.size() >= 3 &&
-               (dataColCount == 0 || commentColumns.size() == dataColCount)) {
-        columns = commentColumns;
-    } else if (dataColCount > 0) {
-        columns = defaultColumnsForCount(dataColCount);
-    } else {
-        columns = {"X", "Y", "Z"};
-    }
+    const std::vector<std::string> columns = chooseColumns(inlineColumns, commentColumns, dataColCount);
 
     config.hasHeader = true;
     config.detectedColumns = columns;
@@ -675,24 +684,20 @@ static void buildCopcPdal(const std::vector<std::string>& inputFiles,
         throw PDALException("COPC build did not produce output file: " + io::toUtf8(outPath));
 }
 
-void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir) {
-    fs::path dest = io::fromUtf8(outdir);
-    io::assureFolderExists(dest);
+// The number of points of the sources of a COPC build and the XY extent they cover
+struct SourceBounds {
+    size_t pointCount = 0;
+    double minX = std::numeric_limits<double>::max();
+    double minY = std::numeric_limits<double>::max();
+    double maxX = std::numeric_limits<double>::lowest();
+    double maxY = std::numeric_limits<double>::lowest();
 
-    fs::path tmpDir = dest / "tmp";
-    io::assureFolderExists(tmpDir);
+    void add(const PointCloudInfo& info) { updateGlobalBounds(info, minX, minY, maxX, maxY); }
+};
 
-    // Minimum epsilon for extent validation (in the point cloud's native units)
-    // This prevents degenerate output for zero-extent or near-zero-extent inputs.
-    constexpr double MIN_EXTENT_EPSILON = 1e-10;
-    constexpr size_t MIN_POINT_COUNT = 2;
-
-    size_t totalPointCount = 0;
-    double globalMinX = std::numeric_limits<double>::max();
-    double globalMinY = std::numeric_limits<double>::max();
-    double globalMaxX = std::numeric_limits<double>::lowest();
-    double globalMaxY = std::numeric_limits<double>::lowest();
-
+// Checks that every source is a point cloud that exists and measures them
+static SourceBounds measureSources(const std::vector<std::string>& filenames) {
+    SourceBounds bounds;
     for (const std::string& f : filenames) {
         if (!fs::exists(io::fromUtf8(f)))
             throw FSException(f + " does not exist");
@@ -704,20 +709,18 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
         // Get point cloud info for validation
         PointCloudInfo pcInfo;
         if (getPointCloudInfo(f, pcInfo)) {
-            totalPointCount += pcInfo.pointCount;
-            updateGlobalBounds(pcInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
+            bounds.pointCount += pcInfo.pointCount;
+            bounds.add(pcInfo);
         }
     }
+    return bounds;
+}
 
-    if (totalPointCount < MIN_POINT_COUNT) {
-        throw InvalidArgsException("Point cloud has insufficient points (" +
-                                   std::to_string(totalPointCount) +
-                                   "). At least " + std::to_string(MIN_POINT_COUNT) +
-                                   " points are required for COPC generation.");
-    }
-
-    // Convert non-LAS sources to a temporary LAS first; both backends accept only
-    // formats supported by PDAL's LAS reader (LAS/LAZ natively).
+// The sources as the files both COPC backends accept (they accept only formats supported by PDAL's
+// LAS reader, LAS/LAZ natively): the non-LAS sources are converted to a temporary LAS in tmpDir,
+// and their bounds are read back from it into `bounds`
+static std::vector<std::string> lasInputs(const std::vector<std::string>& filenames, const fs::path& tmpDir,
+                                          SourceBounds& bounds) {
     std::vector<std::string> inputFiles;
     for (const auto& f : filenames) {
         auto p = io::Path(io::fromUtf8(f));
@@ -731,15 +734,40 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
             // back from the converted LAS so the extent validation has something to chew on.
             PointCloudInfo lasInfo;
             if (getPointCloudInfo(lasF, lasInfo)) {
-                updateGlobalBounds(lasInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
+                bounds.add(lasInfo);
             }
         } else {
             inputFiles.push_back(f);
         }
     }
+    return inputFiles;
+}
 
-    double extentX = globalMaxX - globalMinX;
-    double extentY = globalMaxY - globalMinY;
+void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir) {
+    fs::path dest = io::fromUtf8(outdir);
+    io::assureFolderExists(dest);
+
+    fs::path tmpDir = dest / "tmp";
+    io::assureFolderExists(tmpDir);
+
+    // Minimum epsilon for extent validation (in the point cloud's native units)
+    // This prevents degenerate output for zero-extent or near-zero-extent inputs.
+    constexpr double MIN_EXTENT_EPSILON = 1e-10;
+    constexpr size_t MIN_POINT_COUNT = 2;
+
+    SourceBounds bounds = measureSources(filenames);
+
+    if (bounds.pointCount < MIN_POINT_COUNT) {
+        throw InvalidArgsException("Point cloud has insufficient points (" +
+                                   std::to_string(bounds.pointCount) +
+                                   "). At least " + std::to_string(MIN_POINT_COUNT) +
+                                   " points are required for COPC generation.");
+    }
+
+    const std::vector<std::string> inputFiles = lasInputs(filenames, tmpDir, bounds);
+
+    double extentX = bounds.maxX - bounds.minX;
+    double extentY = bounds.maxY - bounds.minY;
     if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
         throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
                                    std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
