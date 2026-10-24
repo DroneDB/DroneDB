@@ -48,6 +48,12 @@ namespace dq06
             }
         }
 
+        // The relative tolerance of numbers, and of those below a key "approx": values a platform
+        // computes in floating point with its own libm and instructions (a warped DEM), where the
+        // last bit of a float32 pixel is the platform's
+        constexpr double kExact = 1e-9;
+        constexpr double kApproximate = 1e-5;
+
         void writeText(const fs::path &path, const std::string &text)
         {
             fs::create_directories(path.parent_path());
@@ -63,7 +69,8 @@ namespace dq06
             const double x = a.get<double>(), y = b.get<double>();
             if (std::isnan(x) && std::isnan(y))
                 return true;
-            const double tolerance = 1e-9 * std::max({1.0, std::fabs(x), std::fabs(y)});
+            const double tolerance = (at.find("/approx/") != std::string::npos ? kApproximate : kExact) *
+                                     std::max({1.0, std::fabs(x), std::fabs(y)});
             if (std::fabs(x - y) <= tolerance)
                 return true;
             where = at + ": " + a.dump() + " != " + b.dump();

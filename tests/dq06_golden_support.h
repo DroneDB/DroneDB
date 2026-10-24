@@ -9,7 +9,8 @@
 // and every run compares with them.
 //
 // Numbers are compared with a relative tolerance of 1e-9: the goldens must also hold on
-// platforms whose libm differs in the last bit. Two environment variables serve the exact
+// platforms whose libm differs in the last bit. Below a key "approx" the tolerance is 1e-5, for
+// the statistics of float rasters (a float32 pixel of a warp can differ in its last bit). Two environment variables serve the exact
 // comparison between two builds:
 //   DDB_DQ06_DUMP_DIR=<dir>      writes every actual output, unrounded, to <dir>/<name>.json
 //   DDB_UPDATE_DQ06_GOLDEN=1     rewrites the goldens from the actual outputs
@@ -38,8 +39,8 @@ namespace dq06
     // else: the exact hashes of outputs whose bytes are not portable
     void dumpOnly(const std::string &name, const json &value);
 
-    // Numbers equal to the relative tolerance 1e-9 (absolute 1e-9 near zero), everything else
-    // exactly. On a difference `where` names the JSON pointer.
+    // Numbers equal to the relative tolerance 1e-9 (1e-5 below a key "approx"; absolute near
+    // zero), everything else exactly. On a difference `where` names the JSON pointer.
     bool jsonNear(const json &a, const json &b, std::string &where, const std::string &at = "");
 
     // 64-bit FNV-1a of a byte range, as 16 hex digits

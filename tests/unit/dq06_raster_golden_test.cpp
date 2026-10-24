@@ -98,6 +98,56 @@ namespace
         return dq06::fnv1a(all.data(), all.size());
     }
 
+    // What a floating-point raster holds, as numbers the golden compares with a tolerance
+    // (jsonNear, under "approx"): a warp or an overview computes its floats with the libm and
+    // the instructions of the platform, so a pixel can differ in its last bit from one platform
+    // to another, which an exact hash of the pixels cannot tell from a real change. Per band:
+    // the pixels that have a value, their range and mean, and a mean weighted by the position
+    // of the pixel (a moved or mixed-up pixel changes it).
+    json pixelStatistics(GDALDataset &ds)
+    {
+        const size_t width = ds.GetRasterXSize(), height = ds.GetRasterYSize();
+        std::vector<double> plane(width * height);
+        std::vector<GByte> valid(width * height);
+        json bands = json::array();
+        for (int b = 1; b <= ds.GetRasterCount(); b++)
+        {
+            GDALRasterBand *band = ds.GetRasterBand(b);
+            dq06::checkIo(band->RasterIO(GF_Read, 0, 0, width, height, plane.data(), width, height, GDT_Float64, 0, 0));
+            dq06::checkIo(band->GetMaskBand()->RasterIO(GF_Read, 0, 0, width, height, valid.data(), width, height, GDT_Byte, 0,
+                                                        0));
+            size_t count = 0;
+            double sum = 0.0, weighted = 0.0, lowest = 0.0, highest = 0.0;
+            for (size_t i = 0; i < plane.size(); i++)
+            {
+                if (valid[i] == 0 || std::isnan(plane[i]))
+                    continue;
+                const double weight = static_cast<double>((i * 2654435761ULL) % 1009ULL) / 1009.0;
+                if (count == 0)
+                    lowest = highest = plane[i];
+                lowest = std::min(lowest, plane[i]);
+                highest = std::max(highest, plane[i]);
+                sum += plane[i];
+                weighted += plane[i] * weight;
+                count++;
+            }
+            bands.push_back({{"valid", count},
+                             {"min", lowest},
+                             {"max", highest},
+                             {"mean", count > 0 ? sum / count : 0.0},
+                             {"weightedMean", count > 0 ? weighted / count : 0.0}});
+        }
+        return bands;
+    }
+
+    bool hasFloatBand(GDALDataset &ds)
+    {
+        for (int b = 1; b <= ds.GetRasterCount(); b++)
+            if (GDALDataTypeIsFloating(ds.GetRasterBand(b)->GetRasterDataType()))
+                return true;
+        return false;
+    }
+
     // The structure of a GeoTIFF the code wrote: type, bands, tiling and every creation option
     // GDAL reports back. `name` also receives the exact file hash in DDB_DQ06_DUMP_DIR.
     json describeRaster(const std::string &name, const fs::path &path)
@@ -145,8 +195,14 @@ namespace
 
         const std::string hash = pixelHash(*ds);
         if (!isLossy(structure))
-            out["pixels"] = hash;
-        dq06::dumpOnly(name + "_exact", {{"file", fileHash(path)}, {"pixels", hash}});
+        {
+            // Integer pixels are exact on every platform, floats are not (pixelStatistics)
+            if (hasFloatBand(*ds))
+                out["approx"] = {{"pixels", pixelStatistics(*ds)}};
+            else
+                out["pixels"] = hash;
+        }
+        dq06::dumpOnly(name + "_exact", {{"file", fileHash(path)}, {"pixels", hash}, {"statistics", pixelStatistics(*ds)}});
         return out;
     }
 

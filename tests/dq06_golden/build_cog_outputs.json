@@ -1,5 +1,16 @@
 {
  "dem32": {
+  "approx": {
+   "pixels": [
+    {
+     "max": 0.9958407878875732,
+     "mean": 0.4939134880620322,
+     "min": 0.00029177332180552185,
+     "valid": 11236,
+     "weightedMean": 0.24684673369249932
+    }
+   ]
+  },
   "bands": [
    {
     "blockX": 512,
@@ -15,7 +26,6 @@
   "driver": "GTiff",
   "height": 256,
   "optimized": false,
-  "pixels": "fec0587668833849",
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {
    "COMPRESSION": "LZW",
@@ -26,6 +36,17 @@
   "width": 512
  },
  "dem64": {
+  "approx": {
+   "pixels": [
+    {
+     "max": 0.9958407958532164,
+     "mean": 0.042340179057448885,
+     "min": 0.0,
+     "valid": 131072,
+     "weightedMean": 0.0211606590133985
+    }
+   ]
+  },
   "bands": [
    {
     "blockX": 512,
@@ -40,7 +61,6 @@
   "driver": "GTiff",
   "height": 256,
   "optimized": false,
-  "pixels": "1bc64ef0df41ec0c",
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {
    "COMPRESSION": "LZW",
