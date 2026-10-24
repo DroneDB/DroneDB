@@ -260,6 +260,9 @@ jobs:
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run CLI Exit Code Tests
         run: cd build && ctest -R '^cli\.' --output-on-failure
+      - name: Run the shared library smoke test
+        # DQ-14: the tests and the CLI contain the library objects; this runs libddb.so as a host loads it
+        run: cd build && ctest -L shared --output-on-failure
       - name: Run Program Smoke Test
         run: cd build && ./ddbcmd --version --debug
       - name: Build Debian Package
@@ -805,6 +808,12 @@ jobs:
         run: |
           cd build
           ctest -C Release -R '^cli\.' --output-on-failure
+        shell: pwsh
+      - name: Run the shared library smoke test
+        # DQ-14: the tests and the CLI contain the library objects; this runs ddb.dll as a host loads it
+        run: |
+          cd build
+          ctest -C Release -L shared --output-on-failure
         shell: pwsh
       - name: Run Program Smoke Test
         run: cd build && .\ddbcmd.exe --version --debug
