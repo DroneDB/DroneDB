@@ -96,7 +96,7 @@ private:
      * @brief Clean up platform-specific resources
      *
      * Closes file handles/descriptors and removes the lock file.
-     * Called by the destructor but also usable for early release.
+     * Called by the destructor.
      */
     void cleanup();
 
@@ -180,14 +180,6 @@ public:
     ~BuildLock();
 
     /**
-     * @brief Check if this instance currently holds the lock
-     *
-     * @return true if the lock is currently held by this instance
-     * @return false if the lock has been released or was never acquired
-     */
-    bool isHolding() const { return isLocked; }
-
-    /**
      * @brief Get the path of the lock file
      *
      * @return const std::string& The full path to the lock file
@@ -236,24 +228,12 @@ public:
      */
     static bool removeIfStale(const std::string& outputPath);
 
-    /**
-     * @brief Manually release the lock before destructor
-     *
-     * Explicitly releases the lock and cleans up resources. This can be called
-     * multiple times safely. After calling this method, isHolding() will return false.
-     *
-     * @note
-     * This is primarily useful when you want to release the lock early,
-     * before the BuildLock object goes out of scope.
-     */
-    void release();
-
     // Disable copy constructor and assignment operator
     // BuildLock should not be copied as it manages an exclusive resource
     BuildLock(const BuildLock&) = delete;
     BuildLock& operator=(const BuildLock&) = delete;
 
-    // Allow move constructor and assignment for efficiency
+    // Allow move constructor and assignment (a build holds several locks in a vector)
     BuildLock(BuildLock&& other) noexcept;
     BuildLock& operator=(BuildLock&& other) noexcept;
 };

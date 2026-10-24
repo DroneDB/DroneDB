@@ -60,7 +60,6 @@ TEST_F(BuildLockTest, BasicLockAcquisition) {
     // Test successful lock acquisition
     {
         BuildLock lock(outputPath.string());
-        EXPECT_TRUE(lock.isHolding());
         EXPECT_FALSE(lock.getLockFilePath().empty());
         EXPECT_TRUE(lock.getLockFilePath().find(".building") != std::string::npos);
     }
@@ -79,47 +78,11 @@ TEST_F(BuildLockTest, ConcurrentLockRejection) {
 
     // First lock should succeed
     BuildLock firstLock(outputPath.string());
-    EXPECT_TRUE(firstLock.isHolding());
 
     // Second lock on same path should fail
     EXPECT_THROW({
         BuildLock secondLock(outputPath.string());
     }, AppException);
-}
-
-/**
- * @brief Test manual lock release
- */
-TEST_F(BuildLockTest, ManualRelease) {
-    auto outputPath = testArea->getPath("manual_release");
-
-    BuildLock lock(outputPath.string());
-    EXPECT_TRUE(lock.isHolding());
-
-    // Manual release
-    lock.release();
-    EXPECT_FALSE(lock.isHolding());
-
-    // Should be able to acquire new lock on same path
-    BuildLock newLock(outputPath.string());
-    EXPECT_TRUE(newLock.isHolding());
-}
-
-/**
- * @brief Test multiple releases (should be safe)
- */
-TEST_F(BuildLockTest, MultipleReleases) {
-    auto outputPath = testArea->getPath("multiple_release");
-
-    BuildLock lock(outputPath.string());
-    EXPECT_TRUE(lock.isHolding());
-
-    // Multiple releases should be safe
-    lock.release();
-    EXPECT_FALSE(lock.isHolding());
-
-    lock.release(); // Should not crash
-    EXPECT_FALSE(lock.isHolding());
 }
 
 /**
@@ -131,12 +94,9 @@ TEST_F(BuildLockTest, MoveSemantics) {
     // Test move constructor
     {
         BuildLock originalLock(outputPath.string());
-        EXPECT_TRUE(originalLock.isHolding());
 
         BuildLock movedLock = std::move(originalLock);
-        EXPECT_TRUE(movedLock.isHolding());
-        EXPECT_FALSE(originalLock.isHolding()); // Original should be invalidated
-
+        
         // Should not be able to acquire lock on same path
         EXPECT_THROW({
             BuildLock conflictLock(outputPath.string());
@@ -146,21 +106,16 @@ TEST_F(BuildLockTest, MoveSemantics) {
     // Test move assignment
     {
         BuildLock lock1(outputPath.string());
-        EXPECT_TRUE(lock1.isHolding());
 
         auto outputPath2 = testArea->getPath("move_test2");
         BuildLock lock2(outputPath2.string());
-        EXPECT_TRUE(lock2.isHolding());
 
         // Move assign lock1 to lock2
         lock2 = std::move(lock1);
-        EXPECT_TRUE(lock2.isHolding());
-        EXPECT_FALSE(lock1.isHolding());
 
         // lock2 should now hold the lock for outputPath, not outputPath2
         // This means we should be able to acquire lock for outputPath2
         BuildLock newLock(outputPath2.string());
-        EXPECT_TRUE(newLock.isHolding());
     }
 }
 
@@ -175,8 +130,6 @@ TEST_F(BuildLockTest, DifferentPaths) {
     BuildLock lock1(outputPath1.string());
     BuildLock lock2(outputPath2.string());
 
-    EXPECT_TRUE(lock1.isHolding());
-    EXPECT_TRUE(lock2.isHolding());
     EXPECT_NE(lock1.getLockFilePath(), lock2.getLockFilePath());
 }
 
@@ -203,7 +156,7 @@ TEST_F(BuildLockTest, ThreadSafety) {
                 // Expected - lock acquisition failed
             }
             attempted.count_down();
-            if (lock && lock->isHolding()) {
+            if (lock) {
                 attempted.wait();
                 successCount++;
                 return true;
@@ -317,7 +270,6 @@ TEST_F(BuildLockTest, LongPathName) {
 
     // If path is not too long, lock should work normally
     BuildLock lock(longPath.string());
-    EXPECT_TRUE(lock.isHolding());
 }
 
 /**
@@ -329,7 +281,6 @@ TEST_F(BuildLockTest, LockPersistence) {
     // Create lock in inner scope
     {
         BuildLock lock(outputPath.string());
-        EXPECT_TRUE(lock.isHolding());
 
         // Lock should prevent other acquisitions
         EXPECT_THROW({
@@ -343,7 +294,6 @@ TEST_F(BuildLockTest, LockPersistence) {
 
     // Should be able to acquire lock again
     BuildLock newLock(outputPath.string());
-    EXPECT_TRUE(newLock.isHolding());
 }
 
 /**
@@ -354,7 +304,6 @@ TEST_F(BuildLockTest, ExceptionSafety) {
 
     auto testExceptionSafety = [&outputPath]() {
         BuildLock lock(outputPath.string());
-        EXPECT_TRUE(lock.isHolding());
 
         // Simulate exception
         throw std::runtime_error("Test exception");
@@ -368,7 +317,6 @@ TEST_F(BuildLockTest, ExceptionSafety) {
 
     // Should be able to acquire lock after exception
     BuildLock newLock(outputPath.string());
-    EXPECT_TRUE(newLock.isHolding());
 }
 
 /**
@@ -380,7 +328,6 @@ TEST_F(BuildLockTest, StressTest) {
 
     for (int i = 0; i < iterations; ++i) {
         BuildLock lock(outputPath.string());
-        EXPECT_TRUE(lock.isHolding());
 
         // Very brief hold
         std::this_thread::sleep_for(std::chrono::microseconds(100));
@@ -388,7 +335,6 @@ TEST_F(BuildLockTest, StressTest) {
 
     // Final verification
     BuildLock finalLock(outputPath.string());
-    EXPECT_TRUE(finalLock.isHolding());
 }
 
 /**
@@ -398,7 +344,6 @@ TEST_F(BuildLockTest, LockFileContent) {
     auto outputPath = testArea->getPath("content_test");
 
     BuildLock lock(outputPath.string());
-    EXPECT_TRUE(lock.isHolding());
 
     auto lockFilePath = lock.getLockFilePath();
 
@@ -422,8 +367,6 @@ TEST_F(BuildLockTest, IsBuildActiveDetection) {
     // Initially, no lock should be active
     try {
         BuildLock testLock(outputPath.string(), false); // Try to acquire without waiting
-        EXPECT_TRUE(testLock.isHolding());
-        testLock.release(); // Release immediately
     } catch (const AppException&) {
         FAIL() << "Should be able to acquire lock when no other process is using it";
     }
@@ -431,7 +374,6 @@ TEST_F(BuildLockTest, IsBuildActiveDetection) {
     // Now test with an active lock
     {
         BuildLock activeLock(outputPath.string()); // Acquire and hold lock
-        EXPECT_TRUE(activeLock.isHolding());
 
         // Try to acquire another lock - should fail immediately with wait=false
         EXPECT_THROW({
@@ -442,7 +384,6 @@ TEST_F(BuildLockTest, IsBuildActiveDetection) {
     // After lock is released, should be able to acquire again
     try {
         BuildLock testLock(outputPath.string(), false);
-        EXPECT_TRUE(testLock.isHolding());
     } catch (const AppException&) {
         FAIL() << "Should be able to acquire lock after previous lock is released";
     }
@@ -470,7 +411,6 @@ TEST_F(BuildLockTest, WaitMode_OrphanedLockFileOnDisk) {
     // Both platforms now reclaim the orphan transparently.
     {
         BuildLock lock(outputPath.string());  // wait=true
-        EXPECT_TRUE(lock.isHolding());
     }
 
     // Lock file should have been cleaned up after the BuildLock went out of scope.
@@ -498,7 +438,6 @@ TEST_F(BuildLockTest, NoWaitMode_ReclaimsOrphanedLockFile) {
     // The orphan has no live holder, so wait=false reclaims it on both platforms.
     {
         BuildLock lock(outputPath.string(), false);
-        EXPECT_TRUE(lock.isHolding());
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_FALSE(fs::exists(lockFile));
@@ -523,7 +462,6 @@ TEST_F(BuildLockTest, ForceBuildScenario_StaleLockRecovery) {
     // Both modes recover transparently because the previous owner is gone.
     {
         BuildLock recoveryLock(outputPath.string(), false);
-        EXPECT_TRUE(recoveryLock.isHolding());
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_FALSE(fs::exists(lockFile));
@@ -570,7 +508,6 @@ TEST_F(BuildLockTest, MultiProcess_KernelReleaseOnKill) {
     ASSERT_EQ(WaitForSingleObject(child.info.hProcess, 5000), WAIT_OBJECT_0);
     EXPECT_FALSE(fs::exists(outputPath.string() + ".building"));
     BuildLock recovered(outputPath.string(), false);
-    EXPECT_TRUE(recovered.isHolding());
 }
 
 TEST_F(BuildLockTest, LiveExclusiveHandleDoesNotTruncateDiagnostics) {
@@ -590,7 +527,6 @@ TEST_F(BuildLockTest, LiveExclusiveHandleDoesNotTruncateDiagnostics) {
     in.close();
     // After the external handle closes, its file is an acquirable orphan.
     BuildLock recovered(outputPath.string(), false);
-    EXPECT_TRUE(recovered.isHolding());
 }
 #endif
 
@@ -646,7 +582,6 @@ TEST_F(BuildLockTest, MultiProcess_KernelReleaseOnKill) {
     // .building file may still be on disk (the kernel released the lock).
     {
         BuildLock recovered(outputPath.string(), false);
-        EXPECT_TRUE(recovered.isHolding());
     }
 }
 #endif
@@ -660,7 +595,6 @@ TEST_F(BuildLockTest, MultiProcess_KernelReleaseOnKill) {
 TEST_F(BuildLockTest, LockFdNotInheritedByChildren) {
     auto outputPath = testArea->getPath("cloexec_lock");
     BuildLock lock(outputPath.string());
-    ASSERT_TRUE(lock.isHolding());
     const std::string lockFile = fs::canonical(lock.getLockFilePath()).string();
 
     // Parent side: the descriptor pointing at the lock file has FD_CLOEXEC.
@@ -813,7 +747,6 @@ TEST_F(BuildLockTest, IsHeld_StaleLockFile_NotHeldAndLeftUntouched) {
 
     // The stale file stays reclaimable by a real acquisition
     BuildLock lock(outputPath.string(), false);
-    EXPECT_TRUE(lock.isHolding());
 }
 
 TEST_F(BuildLockTest, IsHeld_HolderInThisProcess) {
@@ -828,7 +761,6 @@ TEST_F(BuildLockTest, IsHeld_HolderInThisProcess) {
 #endif
 
         EXPECT_TRUE(BuildLock::isHeld(outputPath.string()));
-        EXPECT_TRUE(lock.isHolding());
 #ifndef WIN32
         EXPECT_EQ(readWholeFile(lock.getLockFilePath()), diagnostic);
 #endif
@@ -867,7 +799,6 @@ TEST_F(BuildLockTest, IsHeld_HolderInAnotherProcessThenReleased) {
     EXPECT_EQ(readWholeFile(lockFile), diagnostic);
 #endif
     BuildLock recovered(outputPath.string(), false);
-    EXPECT_TRUE(recovered.isHolding());
 }
 
 TEST_F(BuildLockTest, RemoveIfStale_RemovesOnlyAStaleLockFile) {

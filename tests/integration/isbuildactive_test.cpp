@@ -100,7 +100,6 @@ TEST_F(IsBuildActiveTest, OrthoFileWithActiveBuild) {
     // Create a build lock to simulate active build
     {
         BuildLock activeBuild(orthoOutputPath.string());
-        EXPECT_TRUE(activeBuild.isHolding());
 
         // Now isBuildActive should return true
         EXPECT_TRUE(ddb::isBuildActive(db.get(), relativePath.string()));
@@ -124,7 +123,6 @@ TEST_F(IsBuildActiveTest, PointCloudFileWithActiveBuild) {
     // Create a build lock to simulate active build
     {
         BuildLock activeBuild(pcOutputPath.string());
-        EXPECT_TRUE(activeBuild.isHolding());
 
         // Now isBuildActive should return true
         EXPECT_TRUE(ddb::isBuildActive(db.get(), relativePath.string()));
@@ -141,14 +139,11 @@ TEST_F(IsBuildActiveTest, SimpleLockTest) {
     // Test that no build is active initially
     {
         BuildLock testLock(testOutputPath.string(), false); // Try without waiting
-        EXPECT_TRUE(testLock.isHolding());
-        testLock.release();
     }
 
     // Test concurrent access is blocked
     {
         BuildLock firstLock(testOutputPath.string());
-        EXPECT_TRUE(firstLock.isHolding());
 
         EXPECT_THROW({
             BuildLock secondLock(testOutputPath.string(), false);
@@ -270,7 +265,6 @@ TEST_F(IsBuildActiveTest, ActiveLockFileIsNotCleaned) {
     // Acquire a real build lock (simulates an active build by this process)
     {
         BuildLock activeLock(orthoOutputPath.string());
-        EXPECT_TRUE(activeLock.isHolding());
 
         // isBuildActive should return true - lock is held by an active process
         EXPECT_TRUE(ddb::isBuildActive(db.get(), relativePath.string()));

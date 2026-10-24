@@ -264,13 +264,6 @@ void BuildLock::cleanup() {
     LOGD << "Build lock cleanup completed: " << lockFilePath;
 }
 
-void BuildLock::release() {
-    if (isLocked) {
-        LOGD << "Manually releasing build lock: " << lockFilePath;
-        cleanup();
-    }
-}
-
 // Move constructor
 BuildLock::BuildLock(BuildLock&& other) noexcept
     : lockFilePath(std::move(other.lockFilePath))
