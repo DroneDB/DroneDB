@@ -48,6 +48,8 @@ namespace ddb
     // Reads the rows of the stamp in stamp order and returns its checksum
     std::string readStamp(const StampEntryVisitor &onEntry, const StampMetaVisitor &onMeta) const;
 
+    void migrateLegacySchema(int dbVersion);
+
   public:
     /// Busy timeout of every index connection: only a floor for statements run outside an
     /// explicit Transaction; RetryPolicy owns the wait budget (retrypolicy.h)

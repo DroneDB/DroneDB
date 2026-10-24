@@ -321,6 +321,33 @@ namespace ddb
         std::vector<std::string> unchanged;
     };
 
+    // Whether the file of a computed item changed (or is gone) since COMPUTE: re-validates its
+    // (mtime, size) with one stat. Directories use logical size (0, or aggregate for nested
+    // DroneDBs), so only the size of regular files is compared.
+    bool changedSinceCompute(const fs::path &absPath, const ComputedAddItem &ci) {
+        try {
+            const auto state = io::Path(absPath).getState();
+            const long long size = state.directory ? ci.observedSize : static_cast<long long>(state.size);
+            return state.mtime != ci.observedMtime || size != ci.observedSize;
+        } catch (const FSException &) {
+            return true; // gone
+        }
+    }
+
+    // INSERT of the entry (insertQ is the statement of commitAddEntries)
+    void doInsert(Statement *insertQ, const Entry &e, double mtime) {
+        insertQ->bind(1, e.path);
+        insertQ->bind(2, e.hash);
+        insertQ->bind(3, entryTypeValue(e.type));
+        insertQ->bind(4, e.properties.dump());
+        insertQ->bind(5, mtime);
+        insertQ->bind(6, static_cast<long long>(e.size));
+        insertQ->bind(7, e.depth);
+        insertQ->bind(8, e.point_geom.toWkt());
+        insertQ->bind(9, e.polygon_geom.toWkt());
+        insertQ->execute();
+    }
+
     // COMMIT: Transaction(Immediate); re-verify (mtime,size) to guard against a file that
     // changed between COMPUTE and COMMIT (TOCTOU), then
     // INSERT/UPDATE. Only row writes happen inside the lock — milliseconds, not seconds.
@@ -353,16 +380,7 @@ namespace ddb
             // Re-validate filesystem state (mtime/size) between COMPUTE and COMMIT, with one
             // stat. Directories use logical size (0, or aggregate for nested DroneDBs), so
             // only the size of regular files is compared.
-            bool changed = false;
-            try {
-                const auto state = io::Path(absPath).getState();
-                const long long size = state.directory ? ci.observedSize : static_cast<long long>(state.size);
-                changed = state.mtime != ci.observedMtime || size != ci.observedSize;
-            } catch (const FSException &) {
-                changed = true; // gone
-            }
-
-            if (changed) {
+            if (changedSinceCompute(absPath, ci)) {
                 LOGD << "Skipping '" << ci.entry.path
                     << "': changed between compute and commit (will be re-detected next add)";
                 outcome.conflicts.push_back(absPath);
@@ -398,16 +416,7 @@ namespace ddb
             }
 
             if (actuallyInsert) {
-                insertQ->bind(1, ci.entry.path);
-                insertQ->bind(2, ci.entry.hash);
-                insertQ->bind(3, entryTypeValue(ci.entry.type));
-                insertQ->bind(4, ci.entry.properties.dump());
-                insertQ->bind(5, ci.observedMtime);
-                insertQ->bind(6, static_cast<long long>(ci.entry.size));
-                insertQ->bind(7, ci.entry.depth);
-                insertQ->bind(8, ci.entry.point_geom.toWkt());
-                insertQ->bind(9, ci.entry.polygon_geom.toWkt());
-                insertQ->execute();
+                doInsert(insertQ.get(), ci.entry, ci.observedMtime);
             } else {
                 doUpdate(updateQ.get(), ci.entry, ci.observedMtime);
             }

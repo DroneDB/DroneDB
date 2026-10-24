@@ -548,6 +548,9 @@ namespace
     TEST_F(CAbi, Tiles)
     {
         TestArea ta(TEST_NAME, true);
+        // DDBTile writes into the tile cache: this test's own, so it neither sees the tiles of
+        // other runs nor leaves its own in the user's profile
+        const ScopedProcessConfig cache(json{{"cacheDir", ta.getPath("cache").string()}}.dump());
         const auto raster = smallRaster(ta.getPath("ortho.tif"), 3, 512).string();
         GDALTiler tiler(raster, "", 256);
         const int z = tiler.getMinMaxZ().max;

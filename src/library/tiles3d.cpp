@@ -146,6 +146,83 @@ namespace ddb
             }
             info.georeferenced = false;
         }
+
+        // 1) region: [west, south, east, north, minHeight, maxHeight] in WGS84 radians. False when
+        // the bounding volume is not a region.
+        bool readRegionVolume(Tiles3DInfo &info, const json &bv)
+        {
+            if (!(bv.contains("region") && bv["region"].is_array() &&
+                  bv["region"].size() >= 4))
+                return false;
+            const auto &r = bv["region"];
+            info.west = r[0].get<double>() * RAD2DEG;
+            info.south = r[1].get<double>() * RAD2DEG;
+            info.east = r[2].get<double>() * RAD2DEG;
+            info.north = r[3].get<double>() * RAD2DEG;
+            info.centerLon = (info.west + info.east) / 2.0;
+            info.centerLat = (info.south + info.north) / 2.0;
+            info.centerAlt = (r.size() >= 6)
+                                 ? (r[4].get<double>() + r[5].get<double>()) / 2.0
+                                 : 0.0;
+            info.georeferenced = true;
+            info.hasBounds = true;
+            return true;
+        }
+
+        // 2) box: [cx, cy, cz, xHalf(3), yHalf(3), zHalf(3)] in the (transformed) frame. False when
+        // the bounding volume is not a box.
+        bool readBoxVolume(Tiles3DInfo &info, const json &bv, const std::vector<double> &transform)
+        {
+            if (!(bv.contains("box") && bv["box"].is_array() && bv["box"].size() >= 12))
+                return false;
+            const auto &b = bv["box"];
+            const auto c = applyTransform(transform, b[0].get<double>(),
+                                          b[1].get<double>(), b[2].get<double>());
+            // Bounding radius = distance from the centre to the farthest box corner,
+            // i.e. max over sign combinations of || +-xHalf +-yHalf +-zHalf ||. Fixing the
+            // first sign leaves 4 distinct corners (the rest are their negatives). For the
+            // usual orthogonal half-axes this equals sqrt(lx^2+ly^2+lz^2); summing the three
+            // axis lengths instead would overestimate it by up to sqrt(3). Note a
+            // componentwise |x|+|y|+|z| norm is not rotation invariant and also overestimates.
+            // Half-axes are extent vectors, so only the linear part of the transform applies
+            // (a scaled tileset would otherwise yield a wrong radius).
+            const auto hx = applyLinear(transform, b[3].get<double>(),
+                                        b[4].get<double>(), b[5].get<double>());
+            const auto hy = applyLinear(transform, b[6].get<double>(),
+                                        b[7].get<double>(), b[8].get<double>());
+            const auto hz = applyLinear(transform, b[9].get<double>(),
+                                        b[10].get<double>(), b[11].get<double>());
+            double radius = 0.0;
+            for (const double sy : {1.0, -1.0})
+                for (const double sz : {1.0, -1.0})
+                {
+                    double sq = 0.0;
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const double v = hx[k] + sy * hy[k] + sz * hz[k];
+                        sq += v * v;
+                    }
+                    radius = std::max(radius, std::sqrt(sq));
+                }
+
+            setFootprintOfCentre(info, c, radius);
+            return true;
+        }
+
+        // 3) sphere: [cx, cy, cz, radius] in the (transformed) frame. False when the bounding volume
+        // is not a sphere.
+        bool readSphereVolume(Tiles3DInfo &info, const json &bv, const std::vector<double> &transform)
+        {
+            if (!(bv.contains("sphere") && bv["sphere"].is_array() &&
+                  bv["sphere"].size() >= 4))
+                return false;
+            const auto &s = bv["sphere"];
+            const auto c = applyTransform(transform, s[0].get<double>(),
+                                          s[1].get<double>(), s[2].get<double>());
+            const double radius = s[3].get<double>();
+            setFootprintOfCentre(info, c, radius);
+            return true;
+        }
     }
 
     std::optional<Tiles3DInfo> getTiles3DInfo(const std::string &ttzPath)
@@ -197,73 +274,8 @@ namespace ddb
             root["transform"].size() == 16)
             transform = root["transform"].get<std::vector<double>>();
 
-        // 1) region: [west, south, east, north, minHeight, maxHeight] in WGS84 radians.
-        if (bv.contains("region") && bv["region"].is_array() &&
-            bv["region"].size() >= 4)
-        {
-            const auto &r = bv["region"];
-            info.west = r[0].get<double>() * RAD2DEG;
-            info.south = r[1].get<double>() * RAD2DEG;
-            info.east = r[2].get<double>() * RAD2DEG;
-            info.north = r[3].get<double>() * RAD2DEG;
-            info.centerLon = (info.west + info.east) / 2.0;
-            info.centerLat = (info.south + info.north) / 2.0;
-            info.centerAlt = (r.size() >= 6)
-                                 ? (r[4].get<double>() + r[5].get<double>()) / 2.0
-                                 : 0.0;
-            info.georeferenced = true;
-            info.hasBounds = true;
+        if (readRegionVolume(info, bv) || readBoxVolume(info, bv, transform) || readSphereVolume(info, bv, transform))
             return info;
-        }
-
-        // 2) box: [cx, cy, cz, xHalf(3), yHalf(3), zHalf(3)] in the (transformed) frame.
-        if (bv.contains("box") && bv["box"].is_array() && bv["box"].size() >= 12)
-        {
-            const auto &b = bv["box"];
-            const auto c = applyTransform(transform, b[0].get<double>(),
-                                          b[1].get<double>(), b[2].get<double>());
-            // Bounding radius = distance from the centre to the farthest box corner,
-            // i.e. max over sign combinations of || +-xHalf +-yHalf +-zHalf ||. Fixing the
-            // first sign leaves 4 distinct corners (the rest are their negatives). For the
-            // usual orthogonal half-axes this equals sqrt(lx^2+ly^2+lz^2); summing the three
-            // axis lengths instead would overestimate it by up to sqrt(3). Note a
-            // componentwise |x|+|y|+|z| norm is not rotation invariant and also overestimates.
-            // Half-axes are extent vectors, so only the linear part of the transform applies
-            // (a scaled tileset would otherwise yield a wrong radius).
-            const auto hx = applyLinear(transform, b[3].get<double>(),
-                                        b[4].get<double>(), b[5].get<double>());
-            const auto hy = applyLinear(transform, b[6].get<double>(),
-                                        b[7].get<double>(), b[8].get<double>());
-            const auto hz = applyLinear(transform, b[9].get<double>(),
-                                        b[10].get<double>(), b[11].get<double>());
-            double radius = 0.0;
-            for (const double sy : {1.0, -1.0})
-                for (const double sz : {1.0, -1.0})
-                {
-                    double sq = 0.0;
-                    for (int k = 0; k < 3; ++k)
-                    {
-                        const double v = hx[k] + sy * hy[k] + sz * hz[k];
-                        sq += v * v;
-                    }
-                    radius = std::max(radius, std::sqrt(sq));
-                }
-
-            setFootprintOfCentre(info, c, radius);
-            return info;
-        }
-
-        // 3) sphere: [cx, cy, cz, radius] in the (transformed) frame.
-        if (bv.contains("sphere") && bv["sphere"].is_array() &&
-            bv["sphere"].size() >= 4)
-        {
-            const auto &s = bv["sphere"];
-            const auto c = applyTransform(transform, s[0].get<double>(),
-                                          s[1].get<double>(), s[2].get<double>());
-            const double radius = s[3].get<double>();
-            setFootprintOfCentre(info, c, radius);
-            return info;
-        }
 
         LOGD << "Tiles3D: unsupported boundingVolume type";
         return std::nullopt;

@@ -35,7 +35,10 @@ namespace ddb
 
             // Check if it's Web Mercator (EPSG:3857)
             const SrsPtr hTargetSRS(OSRNewSpatialReference(nullptr));
-            OSRImportFromEPSG(hTargetSRS.get(), 3857);
+            if (OSRImportFromEPSG(hTargetSRS.get(), 3857) != OGRERR_NONE) {
+                LOGD << "Cannot import EPSG:3857, needs rebuild";
+                return false;
+            }
 
             if (!OSRIsSame(hSRS.get(), hTargetSRS.get())) {
                 LOGD << "File not in EPSG:3857, needs reprojection";

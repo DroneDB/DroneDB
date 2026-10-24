@@ -135,6 +135,7 @@ namespace ddb
             }
             ~LayerScope()
             {
+                // Clearing a filter cannot fail, and a destructor could not report it
                 layer_->SetSpatialFilter(nullptr);
                 layer_->SetAttributeFilter(nullptr);
                 layer_->ResetReading();
@@ -309,11 +310,11 @@ namespace ddb
 
         GDALDatasetH srcArr[1] = {layer.dataset()};
         int usageErr = 0;
-        // Closed at the end of the statement, before its bytes are taken: closing writes them
-        const bool written = adoptDataset(GDALVectorTranslate(out.c_str(), nullptr, 1, srcArr,
-                                                              opts.get(), &usageErr)) != nullptr;
+        auto written = adoptDataset(GDALVectorTranslate(out.c_str(), nullptr, 1, srcArr, opts.get(), &usageErr));
         if (!written || usageErr)
             throw GDALException("Vector translate failed for " + vectorPath);
+        // Closed before its bytes are taken: closing writes them
+        closeOutputOrThrow(std::move(written), "the result of the query of " + vectorPath);
 
         vsi_l_offset size = 0;
         const auto buf = stealMemFileBuffer(out.path(), size);

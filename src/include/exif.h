@@ -6,6 +6,7 @@
 
 #include <exiv2/exiv2.hpp>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <stdio.h>
 #include <cmath>
@@ -188,6 +189,15 @@ namespace ddb
         bool hasExif();
         bool hasXmp();
         bool hasTags();
+
+    private:
+        // The steps of extractGeo and extractCaptureTime, in their order of priority
+        bool extractExifGeo(GeoLocation &geo);
+        bool extractDjiXmpGeo(GeoLocation &geo);
+        std::optional<double> captureTimeFromXmpVideo();
+        std::optional<double> captureTimeFromGpsStamp();
+        std::optional<double> captureTimeFromOffsetTime();
+        std::optional<double> captureTimeFromGeoTimezone();
     };
 
     /**

@@ -585,9 +585,10 @@ static void applyWarp(const std::string &sourcePath,
     GtiffOptions().compress(GtiffOptions::Codec::Lzw).bigTiffIfSafer().appendTo(args);
 
     const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
-    const auto out = adoptDataset(
+    auto out = adoptDataset(
         GDALWarp(tmpPath.c_str(), nullptr, 1, &hVrt, wOpts.get(), nullptr));
     if (!out) throw GDALException("GDALWarp failed for aligned output: " + tmpPath);
+    closeOutputOrThrow(std::move(out), tmpPath);
 }
 
 // ─── J  DEM Z offset ────────────────────────────────────────────────────────
@@ -747,8 +748,10 @@ void reprojectReference(const std::string &referencePath, const std::string &sou
     if (!refSrc) throw GDALException("Cannot open reference for reprojection");
     GDALDatasetH hR = datasetHandle(refSrc);
     const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
-    if (!adoptDataset(GDALWarp(tmpReproj.c_str(), nullptr, 1, &hR, wOpts.get(), nullptr)))
+    auto reprojected = adoptDataset(GDALWarp(tmpReproj.c_str(), nullptr, 1, &hR, wOpts.get(), nullptr));
+    if (!reprojected)
         throw GDALException("Reference reprojection failed");
+    closeOutputOrThrow(std::move(reprojected), tmpReproj);
 }
 
 // What both alignment modes work from: the files, and the source and the reference read onto one

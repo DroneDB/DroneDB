@@ -5,7 +5,9 @@
 // DQ-13: GDAL calls whose result nobody looked at. A raster without a geotransform made the
 // alignment compute with GDAL's default one (0, 1, 0, 0, 0, 1); a DEM whose rows cannot be read or
 // written was "shifted" by adding the offset to whatever the failed read left in the buffer, and the
-// file kept the rows it could not write.
+// file kept the rows it could not write. And the outputs: GDAL writes the pixels it holds when the
+// output is flushed or closed (closeOutput, flushOrThrow), so a failure of either is a write that
+// failed (the exporters that rely on them are in dq13_output_failures_test.cpp).
 
 #include <algorithm>
 #include <fstream>
@@ -15,6 +17,7 @@
 
 #include "align.h"
 #include "exceptions.h"
+#include "file_size_limit.h"
 #include "gdal_raii.h"
 #include "gtest/gtest.h"
 #include "mio.h"
@@ -189,5 +192,100 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         EXPECT_THROW(applyZOffset(io::toUtf8(ta.getPath("missing.tif")), 2.5), GDALException);
+    }
+
+    // An open GeoTIFF whose pixels are all still in GDAL's block cache: nothing is written until the
+    // dataset is flushed or closed
+    GDALDatasetUniquePtr openCachedOutput(const fs::path &path)
+    {
+        GDALDriverH drv = GDALGetDriverByName("GTiff");
+        auto ds = adoptDataset(GDALCreate(drv, io::toUtf8(path).c_str(), Size, Size, 1, GDT_Float32, nullptr));
+        EXPECT_TRUE(ds);
+        std::mt19937 rng(11);
+        std::uniform_real_distribution<float> noise(0.0f, 100.0f);
+        std::vector<float> row(Size);
+        for (int y = 0; y < Size; y++)
+        {
+            for (auto &v : row)
+                v = noise(rng);
+            EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(datasetHandle(ds), 1), GF_Write, 0, y, Size, 1, row.data(), Size,
+                                   1, GDT_Float32, 0, 0),
+                      CE_None);
+        }
+        return ds;
+    }
+
+    TEST(Dq13OutputHelpers, ACloseThatCannotWriteIsReportedWithGdalsMessage)
+    {
+        if (!FileSizeLimit::supported)
+            GTEST_SKIP() << "RLIMIT_FSIZE is POSIX only";
+        TestArea ta(TEST_NAME, true);
+        auto ds = openCachedOutput(ta.getPath("out.tif"));
+
+        OutputCloseStatus status;
+        {
+            const FileSizeLimit limit(SmallFileLimit);
+            status = closeOutput(std::move(ds));
+        }
+        EXPECT_TRUE(status.failed);
+        EXPECT_FALSE(status.message.empty());
+        EXPECT_NE(status.message, "<no GDAL error>");
+    }
+
+    TEST(Dq13OutputHelpers, ACloseThatWritesEverythingReportsNothing)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto status = closeOutput(openCachedOutput(ta.getPath("out.tif")));
+        EXPECT_FALSE(status.failed) << status.message;
+        EXPECT_TRUE(bandIsReadable(ta.getPath("out.tif")));
+        EXPECT_FALSE(closeOutput(nullptr).failed) << "no dataset, nothing to close";
+    }
+
+    TEST(Dq13OutputHelpers, CloseOutputOrThrowNamesWhatItCouldNotWrite)
+    {
+        if (!FileSizeLimit::supported)
+            GTEST_SKIP() << "RLIMIT_FSIZE is POSIX only";
+        TestArea ta(TEST_NAME, true);
+        auto ds = openCachedOutput(ta.getPath("out.tif"));
+
+        const FileSizeLimit limit(SmallFileLimit);
+        try
+        {
+            closeOutputOrThrow(std::move(ds), "the dem");
+            FAIL() << "the close wrote less than it holds and reported nothing";
+        }
+        catch (const GDALException &e)
+        {
+            EXPECT_NE(std::string(e.what()).find("Cannot write the dem: "), std::string::npos) << e.what();
+        }
+    }
+
+    TEST(Dq13OutputHelpers, FlushOrThrowFailsWhenTheCachedPixelsCannotBeWritten)
+    {
+        if (!FileSizeLimit::supported)
+            GTEST_SKIP() << "RLIMIT_FSIZE is POSIX only";
+        TestArea ta(TEST_NAME, true);
+        auto ds = openCachedOutput(ta.getPath("out.tif"));
+
+        {
+            const FileSizeLimit limit(SmallFileLimit);
+            EXPECT_THROW(flushOrThrow(datasetHandle(ds), "the dem"), GDALException);
+        }
+        // The same dataset flushes once the file can grow
+        EXPECT_NO_THROW(flushOrThrow(datasetHandle(ds), "the dem"));
+    }
+
+    TEST(Dq13OutputHelpers, ABandThatRefusesItsColourIsAnError)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto path = writeReference(ta.getPath("ref.tif"));
+
+        auto update = adoptDataset(GDALOpen(io::toUtf8(path).c_str(), GA_Update));
+        ASSERT_TRUE(update);
+        EXPECT_NO_THROW(setBandColors(datasetHandle(update), {GCI_GrayIndex}));
+        // More colours than bands: the band after the last does not exist
+        CPLPushErrorHandler(CPLQuietErrorHandler);
+        EXPECT_THROW(setBandColors(datasetHandle(update), {GCI_GrayIndex, GCI_AlphaBand}), GDALException);
+        CPLPopErrorHandler();
     }
 }

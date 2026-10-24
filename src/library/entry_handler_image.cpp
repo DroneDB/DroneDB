@@ -208,6 +208,62 @@ void readPanorama(ExifParser *e, Entry &entry)
     }
 }
 
+// The EXIF/XMP parser of an image, with what keeps it alive
+struct ImageParser
+{
+    std::unique_ptr<Exiv2::Image> image; // destroyed after the parser that reads it
+    std::unique_ptr<ExifParser> owned;   // null when the parser belongs to the fingerprint context
+    ExifParser *parser = nullptr;        // null when the file cannot be read
+};
+
+// The parser of the fingerprint context if it has one (populated by fingerprint), else one that
+// opens the file
+ImageParser openImageParser(const fs::path &path, FingerprintContext &ctx)
+{
+    ImageParser result;
+    if (ctx.populated && ctx.parser)
+    {
+        result.parser = ctx.parser.get();
+        return result;
+    }
+
+    // Fallback: open file if context not populated
+    try
+    {
+        result.image = openExivImage(path);
+        if (!result.image.get())
+            throw IndexException("Cannot open " + io::toUtf8(path));
+
+        result.image->readMetadata();
+        result.owned = std::make_unique<ExifParser>(result.image.get());
+        result.parser = result.owned.get();
+    }
+    catch (Exiv2::Error &)
+    {
+        LOGD << "Cannot read EXIF data: " << io::toUtf8(path);
+        result.parser = nullptr;
+    }
+    return result;
+}
+
+// The dimensions, even without EXIF tags, since pixelWidth()/pixelHeight() read from the file
+// structure. Video dimensions still require XMP metadata (Xmp.video.Width/Height);
+// metadata-independent video probing is not currently supported.
+void readDimensions(ExifParser *e, bool image, bool video, Entry &entry)
+{
+    ImageSize imageSize(0, 0);
+    if (image)
+        imageSize = e->extractImageSize();
+    else if (video)
+        imageSize = e->extractVideoSize();
+
+    if (imageSize.width > 0 && imageSize.height > 0)
+    {
+        entry.properties["width"] = imageSize.width;
+        entry.properties["height"] = imageSize.height;
+    }
+}
+
 // EXIF/XMP tags: capture time, camera, orientation, GPS location and footprint
 void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &ctx)
 {
@@ -215,53 +271,11 @@ void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &
     bool image = entry.type == EntryType::Image || entry.type == EntryType::GeoImage || pano;
     bool video = entry.type == EntryType::Video || entry.type == EntryType::GeoVideo;
 
-    // Reuse ExifParser from context if available (populated by fingerprint)
-    ExifParser *e = nullptr;
-    std::unique_ptr<Exiv2::Image> localExivImage;
-    std::unique_ptr<ExifParser> localParser;
+    const ImageParser imageParser = openImageParser(path, ctx);
+    ExifParser *e = imageParser.parser;
 
-    if (ctx.populated && ctx.parser)
-    {
-        e = ctx.parser.get();
-    }
-    else
-    {
-        // Fallback: open file if context not populated
-        try
-        {
-            localExivImage = openExivImage(path);
-            if (!localExivImage.get())
-                throw IndexException("Cannot open " + io::toUtf8(path));
-
-            localExivImage->readMetadata();
-            localParser = std::make_unique<ExifParser>(localExivImage.get());
-            e = localParser.get();
-        }
-        catch (Exiv2::Error &)
-        {
-            LOGD << "Cannot read EXIF data: " << io::toUtf8(path);
-            e = nullptr;
-        }
-    }
-
-    // Extract image dimensions even without EXIF tags,
-    // since pixelWidth()/pixelHeight() read from the file structure.
-    // Note: video dimensions still require XMP metadata (Xmp.video.Width/Height);
-    // metadata-independent video probing is not currently supported.
     if (e)
-    {
-        ImageSize imageSize(0, 0);
-        if (image)
-            imageSize = e->extractImageSize();
-        else if (video)
-            imageSize = e->extractVideoSize();
-
-        if (imageSize.width > 0 && imageSize.height > 0)
-        {
-            entry.properties["width"] = imageSize.width;
-            entry.properties["height"] = imageSize.height;
-        }
-    }
+        readDimensions(e, image, video, entry);
 
     if (e && e->hasTags())
     {

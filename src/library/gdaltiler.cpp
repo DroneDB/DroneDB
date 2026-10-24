@@ -164,7 +164,8 @@ namespace ddb
 
         // Setup output SRS
         const SrsPtr outputSrs(OSRNewSpatialReference(nullptr));
-        OSRImportFromEPSG(outputSrs.get(), 3857); // TODO: support for geodetic?
+        if (OSRImportFromEPSG(outputSrs.get(), 3857) != OGRERR_NONE) // TODO: support for geodetic?
+            throw GDALException("Cannot import EPSG:3857 for " + openPath + ". Is PROJ available?");
 
         if (!hasGeoreference(inputDataset))
             throw GDALException(openPath + " is not georeferenced.");

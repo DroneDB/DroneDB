@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "volume.h"
 #include "cancellation.h"
+#include "timeutil.h"
 #include "dem.h"
 #include "stringutil.h"
 #include "mathutil.h"
@@ -99,18 +100,7 @@ bool solvePlane(const PlaneSums &s, Plane &out) {
     return true;
 }
 
-std::string nowIso8601() {
-    const auto t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm tm{};
-#ifdef _WIN32
-    gmtime_s(&tm, &t);
-#else
-    gmtime_r(&t, &tm);
-#endif
-    char buf[32];
-    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
-    return buf;
-}
+std::string nowIso8601() { return utcIso8601(currentUnixTimestamp()); }
 
 // The part of the raster the polygon covers, in pixels
 struct Window {
@@ -194,8 +184,9 @@ std::vector<uint8_t> rasterizeMask(const DemContext &dem, const Window &w, OGRGe
         gt[3] + w.startCol * gt[4] + w.startRow * gt[5],
         gt[4], gt[5]
     };
-    GDALSetGeoTransform(maskDs, maskGt);
-    if (!dem.projection.empty()) GDALSetProjection(maskDs, dem.projection.c_str());
+    if (GDALSetGeoTransform(maskDs, maskGt) != CE_None ||
+        (!dem.projection.empty() && GDALSetProjection(maskDs, dem.projection.c_str()) != CE_None))
+        throw AppException("Cannot georeference the mask dataset");
 
     OGRGeometryH hGeom = OGRGeometry::ToHandle(&geom);
     int bandList[1] = {1};

@@ -4,7 +4,9 @@
 #include "gdal_raii.h"
 #include "randomutil.h"
 
+#include <cerrno>
 #include <limits>
+#include <string>
 #include <utility>
 
 #include "exceptions.h"
@@ -97,6 +99,50 @@ namespace ddb
             throw GDALException("Exceeded max buf size");
         size = static_cast<int>(length);
         return data;
+    }
+
+    OutputCloseStatus closeOutput(GDALDatasetUniquePtr ds)
+    {
+        OutputCloseStatus result;
+        if (!ds)
+            return result;
+        CPLErrorReset();
+        errno = 0;
+        const CPLErr closed = closeDataset(std::move(ds));
+        result.systemError = errno;
+        result.failed = closed >= CE_Failure || CPLGetLastErrorType() >= CE_Failure;
+        const char *error = CPLGetLastErrorMsg();
+        result.message = error && *error ? error : "<no GDAL error>";
+        return result;
+    }
+
+    void closeOutputOrThrow(GDALDatasetUniquePtr ds, const std::string &what)
+    {
+        const auto closed = closeOutput(std::move(ds));
+        if (closed.failed)
+            throw GDALException("Cannot write " + what + ": " + closed.message);
+    }
+
+    void flushOrThrow(GDALDatasetH ds, const std::string &what)
+    {
+        CPLErrorReset();
+        const CPLErr flushed = GDALFlushCache(ds);
+        if (flushed >= CE_Failure || CPLGetLastErrorType() >= CE_Failure)
+        {
+            const char *error = CPLGetLastErrorMsg();
+            throw GDALException("Cannot write " + what + ": " + (error && *error ? error : "<no GDAL error>"));
+        }
+    }
+
+    void setBandColors(GDALDatasetH ds, std::initializer_list<GDALColorInterp> colors)
+    {
+        int band = 1;
+        for (const GDALColorInterp color : colors)
+        {
+            if (GDALSetRasterColorInterpretation(GDALGetRasterBand(ds, band), color) != CE_None)
+                throw GDALException("Cannot set the colour interpretation of band " + std::to_string(band));
+            band++;
+        }
     }
 
     void VsiMemFile::reset(std::string path) noexcept

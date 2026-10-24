@@ -126,8 +126,9 @@ if(BUILD_TESTING)
     # rewritten there with DDB_UPDATE_DQ06_GOLDEN=1 (see dq06_golden_support.h)
     set_source_files_properties(dq06_golden_support.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_DQ06_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/dq06_golden")
-    # The initIndex race test, the process teardown test and the GDAL data test run their own binary as child processes
-    set_source_files_properties(unit/init_index_template_test.cpp unit/process_finalize_test.cpp unit/data_dirs_test.cpp PROPERTIES
+    # The initIndex race test, the process teardown test, the GDAL data test and the test area test run their own binary as child processes
+    set_source_files_properties(unit/init_index_template_test.cpp unit/process_finalize_test.cpp unit/data_dirs_test.cpp
+        unit/testarea_isolation_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_UNIT_TESTS_NAME="$<TARGET_FILE_NAME:ddb_unit_tests>")
 
     include(GoogleTest)
@@ -274,7 +275,7 @@ if(BUILD_TESTING)
     add_custom_target(ddb_header_check DEPENDS ddb_installed_headers_cxx ddb_installed_headers_c ddb_internal_headers)
     set_target_properties(ddb_header_check PROPERTIES EXCLUDE_FROM_ALL ON)
     add_test(NAME headers.CompileOnTheirOwn
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ddb_header_check --parallel 8)
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target ddb_header_check --parallel 8)
     set_tests_properties(headers.CompileOnTheirOwn PROPERTIES LABELS headers TIMEOUT 1800)
 
     # libddb as it ships: the dataset flow of a host through the C API, in the probe's own process

@@ -80,7 +80,8 @@ namespace ddb
                                  const_cast<uint8_t *>(image.alpha.data()), image.width, image.height,
                                  GDT_Byte, 0, 0) != CE_None)
                     throw GDALException("Cannot write image alpha");
-                GDALSetRasterColorInterpretation(alphaBand, GCI_AlphaBand);
+                if (GDALSetRasterColorInterpretation(alphaBand, GCI_AlphaBand) != CE_None)
+                    throw GDALException("Cannot set the alpha band of the image");
             }
 
             return owned;
@@ -98,10 +99,11 @@ namespace ddb
                 opts.AddString(o.c_str());
             // A failed encode leaves no partial /vsimem/ file
             VsiMemFile partial(path.starts_with("/vsimem/") ? path : std::string());
-            const auto out = adoptDataset(
+            auto out = adoptDataset(
                 GDALCreateCopy(drv, path.c_str(), datasetHandle(mem), FALSE, opts.List(), nullptr, nullptr));
             if (!out)
                 throw GDALException("Cannot encode image to " + path + ": " + CPLGetLastErrorMsg());
+            closeOutputOrThrow(std::move(out), path);
             partial.release();
         }
 
@@ -163,10 +165,13 @@ namespace ddb
                 return;
             }
 
-            const VsiFilePtr f(VSIFOpenL(path.c_str(), "wb"));
+            VsiFilePtr f(VSIFOpenL(path.c_str(), "wb"));
             if (!f)
                 throw GDALException("Cannot write " + path);
             if (VSIFWriteL(bytes.data(), 1, bytes.size(), f.get()) != bytes.size())
+                throw GDALException("Cannot write " + path);
+            // The close writes what the stream still holds
+            if (VSIFCloseL(f.release()) != 0)
                 throw GDALException("Cannot write " + path);
         }
     }

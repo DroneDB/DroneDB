@@ -143,6 +143,101 @@ namespace ddb
             return true;
         }
 
+        void applyFormatLine(PlyHeader &h, const std::vector<std::string> &tokens)
+        {
+            h.formatName = tokens.size() > 1 ? tokens[1] : "";
+            h.version = tokens.size() > 2 ? tokens[2] : "";
+            if (h.formatName == "ascii")
+                h.format = PlyFormat::Ascii;
+            else if (h.formatName == "binary_little_endian")
+                h.format = PlyFormat::BinaryLittleEndian;
+            else if (h.formatName == "binary_big_endian")
+                h.format = PlyFormat::BinaryBigEndian;
+            else
+                h.format = PlyFormat::Unknown;
+        }
+
+        void applyCommentLine(PlyHeader &h, const std::string &line, const std::vector<std::string> &tokens)
+        {
+            h.comments.push_back(restAfterTokens(line, 1));
+            if (tokens.size() > 1 && tokens[1] == "TextureFile")
+            {
+                h.textureFilenames.push_back(restAfterTokens(line, 2));
+                if (!h.hasTextureFile)
+                {
+                    h.hasTextureFile = true;
+                    h.textureFilename = h.textureFilenames.back();
+                }
+            }
+        }
+
+        // An "element <name> <count>" line; false (with error) when it is malformed
+        bool applyElementLine(PlyHeader &h, const std::string &line, const std::vector<std::string> &tokens,
+                              std::string &error)
+        {
+            PlyElement e;
+            if (tokens.size() < 3)
+            {
+                error = "malformed element line: '" + line + "'";
+                return false;
+            }
+            e.name = tokens[1];
+            if (!parseCount(tokens[2], e.count))
+            {
+                error = "malformed count for element '" + e.name + "': '" + tokens[2] + "'";
+                return false;
+            }
+            if (e.name == "vertex")
+            {
+                if (e.count == 0)
+                    LOGW << "PLY file contains zero vertices";
+                if (e.count > 1000000000) // 1 billion vertices seems excessive
+                    LOGW << "PLY file reports extremely large vertex count: " << e.count;
+            }
+            h.elements.push_back(std::move(e));
+            return true;
+        }
+
+        // A "property [list <count type>] <type> <name>" line of the last element; false (with error)
+        // when it is malformed or comes before any element
+        bool applyPropertyLine(PlyHeader &h, const std::string &line, const std::vector<std::string> &tokens,
+                               std::string &error)
+        {
+            if (h.elements.empty())
+            {
+                error = "property declared before any element: '" + line + "'";
+                return false;
+            }
+            PlyProperty p;
+            if (tokens.size() >= 2 && tokens[1] == "list")
+            {
+                if (tokens.size() < 5)
+                {
+                    error = "malformed list property line: '" + line + "'";
+                    return false;
+                }
+                p.isList = true;
+                p.countTypeName = tokens[2];
+                p.countType = plyScalarTypeFromName(tokens[2]);
+                p.typeName = tokens[3];
+                p.type = plyScalarTypeFromName(tokens[3]);
+                p.name = tokens[4];
+            }
+            else
+            {
+                if (tokens.size() < 3)
+                {
+                    error = "malformed property line: '" + line + "'";
+                    return false;
+                }
+                p.typeName = tokens[1];
+                p.type = plyScalarTypeFromName(tokens[1]);
+                p.name = tokens[2];
+            }
+            h.elements.back().properties.push_back(std::move(p));
+            return true;
+        }
+
         bool parseHeaderStream(std::istream &in, PlyHeader &h, std::string &error)
         {
             h = PlyHeader();
@@ -163,100 +258,25 @@ namespace ddb
                 if (!tokens.empty())
                 {
                     const std::string &kw = tokens[0];
+                    bool wellFormed = true;
                     if (kw == "end_header")
                     {
                         h.headerLength = consumed;
                         return true;
                     }
                     else if (kw == "format")
-                    {
-                        h.formatName = tokens.size() > 1 ? tokens[1] : "";
-                        h.version = tokens.size() > 2 ? tokens[2] : "";
-                        if (h.formatName == "ascii")
-                            h.format = PlyFormat::Ascii;
-                        else if (h.formatName == "binary_little_endian")
-                            h.format = PlyFormat::BinaryLittleEndian;
-                        else if (h.formatName == "binary_big_endian")
-                            h.format = PlyFormat::BinaryBigEndian;
-                        else
-                            h.format = PlyFormat::Unknown;
-                    }
+                        applyFormatLine(h, tokens);
                     else if (kw == "comment")
-                    {
-                        h.comments.push_back(restAfterTokens(line, 1));
-                        if (tokens.size() > 1 && tokens[1] == "TextureFile")
-                        {
-                            h.textureFilenames.push_back(restAfterTokens(line, 2));
-                            if (!h.hasTextureFile)
-                            {
-                                h.hasTextureFile = true;
-                                h.textureFilename = h.textureFilenames.back();
-                            }
-                        }
-                    }
+                        applyCommentLine(h, line, tokens);
                     else if (kw == "obj_info")
-                    {
                         h.objInfo.push_back(restAfterTokens(line, 1));
-                    }
                     else if (kw == "element")
-                    {
-                        PlyElement e;
-                        if (tokens.size() < 3)
-                        {
-                            error = "malformed element line: '" + line + "'";
-                            return false;
-                        }
-                        e.name = tokens[1];
-                        if (!parseCount(tokens[2], e.count))
-                        {
-                            error = "malformed count for element '" + e.name + "': '" + tokens[2] + "'";
-                            return false;
-                        }
-                        if (e.name == "vertex")
-                        {
-                            if (e.count == 0)
-                                LOGW << "PLY file contains zero vertices";
-                            if (e.count > 1000000000) // 1 billion vertices seems excessive
-                                LOGW << "PLY file reports extremely large vertex count: " << e.count;
-                        }
-                        h.elements.push_back(std::move(e));
-                    }
+                        wellFormed = applyElementLine(h, line, tokens, error);
                     else if (kw == "property")
-                    {
-                        if (h.elements.empty())
-                        {
-                            error = "property declared before any element: '" + line + "'";
-                            return false;
-                        }
-                        PlyProperty p;
-                        if (tokens.size() >= 2 && tokens[1] == "list")
-                        {
-                            if (tokens.size() < 5)
-                            {
-                                error = "malformed list property line: '" + line + "'";
-                                return false;
-                            }
-                            p.isList = true;
-                            p.countTypeName = tokens[2];
-                            p.countType = plyScalarTypeFromName(tokens[2]);
-                            p.typeName = tokens[3];
-                            p.type = plyScalarTypeFromName(tokens[3]);
-                            p.name = tokens[4];
-                        }
-                        else
-                        {
-                            if (tokens.size() < 3)
-                            {
-                                error = "malformed property line: '" + line + "'";
-                                return false;
-                            }
-                            p.typeName = tokens[1];
-                            p.type = plyScalarTypeFromName(tokens[1]);
-                            p.name = tokens[2];
-                        }
-                        h.elements.back().properties.push_back(std::move(p));
-                    }
+                        wellFormed = applyPropertyLine(h, line, tokens, error);
                     // Any other keyword is ignored.
+                    if (!wellFormed)
+                        return false;
                 }
 
                 if (i++ > kMaxHeaderLines)

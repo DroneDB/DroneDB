@@ -47,8 +47,7 @@ void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
     if (!out)
         throw GDALException("Cannot generate preview");
 
-    GDALFlushCache(datasetHandle(out));
-    out.reset();
+    closeOutputOrThrow(std::move(out), "the preview");
 
     // Read memory buffer
     int bufSize = 0;
