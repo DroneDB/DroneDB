@@ -314,7 +314,7 @@ namespace ddb
     }
 
     // The Registry routes that the STAC outputs of DDBStac and DDBStacItemCollection link to.
-    // The data-only outputs (XI-09: DDBStacData, DDBStacItemCollectionData) have none: they
+    // The data-only outputs (DDBStacData, DDBStacItemCollectionData) have none: they
     // leave out every member built from a URL or an ID ("id", "collection", "links" and the
     // asset "href"s), which the caller (Registry) owns.
     struct StacUrls {

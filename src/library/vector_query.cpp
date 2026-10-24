@@ -250,7 +250,7 @@ namespace ddb
         // Build GDALVectorTranslate options for selected layer + paging.
         const VsiMemFile out = VsiMemFile::unique("ddb-vquery-", std::string(".") + fmt.vsiExt);
 
-        // A layer without an SRS (a local CAD drawing, DDB-12) cannot be
+        // A layer without an SRS (a local CAD drawing) cannot be
         // reprojected: return its own coordinates, as plain GeoJSON (RFC 7946
         // mandates WGS84, so its layer option is not applied either).
         const bool layerHasSrs = layer->GetSpatialRef() != nullptr;

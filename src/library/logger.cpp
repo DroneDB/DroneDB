@@ -26,7 +26,7 @@ namespace
         return plog::verbose - std::clamp(severity, plog::fatal, plog::verbose);
     }
 
-    // The console, or the host's log callback while one is registered (DQ-15, XI-08): the
+    // The console, or the host's log callback while one is registered: the
     // records go to the callback instead of the console. The console keeps its own level (info,
     // or verbose for a verbose process): the logger may let more through for the callback.
     // The console is stderr: stdout carries the output of the commands (ddb info -f json,

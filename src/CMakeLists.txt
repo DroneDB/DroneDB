@@ -3,7 +3,7 @@ add_subdirectory(library)
 
 message(STATUS "SRC_LIST: ${SRC_LIST}")
 
-# libddb is assembled from two object libraries (DQ-03), each compiled once:
+# libddb is assembled from two object libraries, each compiled once:
 #   ddb_core  every library source except the C API, plus the generated version TU (and the
 #             process initialization, ddb::registerProcess in process_init.cpp)
 #   ddb_capi  the C API: ddb.cpp, the only TU that implements the extern "C" functions of ddb.h,
@@ -13,7 +13,7 @@ message(STATUS "SRC_LIST: ${SRC_LIST}")
 # objects (ddb_embedded below) and never load libddb: no binary may contain both, otherwise the
 # plog instance and the library's singletons would exist twice in one process.
 #
-# libddb exports the C API and nothing else (DQ-14). Every object is compiled with hidden
+# libddb exports the C API and nothing else. Every object is compiled with hidden
 # visibility; only the DDB* functions of ddb.h are marked DDB_DLL (ddb_export.h), and
 # on Linux a version script made from the symbol manifest hides every other symbol, the C++
 # symbols of the static libraries linked into libddb included. The C++ code is reached by
@@ -78,7 +78,7 @@ set(COMMON_LIBS
 add_library(boolinq INTERFACE)
 target_include_directories(boolinq SYSTEM INTERFACE ${BOOLINQ_INCLUDE_DIRS})
 
-# Usage requirements, defined once (DQ-03, DQ-14):
+# Usage requirements, defined once:
 #   ddb_c_api       what code that uses libddb as a shared library needs: the folder of ddb.h and
 #                   ddb_export.h, and of the generated ddb_version.h. PUBLIC on ddb. On Windows
 #                   ddb_export.h makes the DDB* declarations dllimport.
@@ -114,7 +114,7 @@ target_link_libraries(ddb_headers INTERFACE cctz::cctz)
 # it.
 target_compile_definitions(ddb_headers INTERFACE PLOG_CHAR_IS_UTF8=1)
 # The logger instance is private to each binary (libddb, ddbcmd, ddbtest, ddb_unit_tests): no two
-# modules of a process share it, and libddb exports nothing but its C API (DQ-14). plog exported
+# modules of a process share it, and libddb exports nothing but its C API. plog exported
 # its instance through PLOG_GLOBAL (default visibility) and, on Windows, PLOG_EXPORT.
 if(NOT WIN32)
     target_compile_definitions(ddb_headers INTERFACE PLOG_LOCAL)
@@ -135,7 +135,7 @@ find_path(PDAL_HEADERS_DIR "filters/StatsFilter.hpp" PATH_SUFFIXES pdal REQUIRED
 # ddb_add_library_objects(<name> <sources>...): an object library of libddb sources with the
 # compile settings that apply to library code only: the warnings (counted by the ratchet,
 # scripts/check-warnings.py), hidden visibility and the export macro (only ddb.h's DDB_DLL
-# functions are visible, DQ-14), the MSVC Release debug info and the private third-party
+# functions are visible), the MSVC Release debug info and the private third-party
 # include directories (SYSTEM: their warnings are not ours, cmake/Warnings.cmake).
 function(ddb_add_library_objects name)
     add_library(${name} OBJECT ${ARGN})
@@ -164,7 +164,7 @@ endfunction()
 
 # ddb_gc_sections(<target>): the linker drops the sections nothing refers to (the library is built
 # with one section per function). Linux/ELF with GNU or Clang only. Stripped, libddb.so is 12 %
-# smaller and ddbcmd 5 % (DQ-14, measured).
+# smaller and ddbcmd 5 % (measured).
 function(ddb_gc_sections target)
     if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_link_options(${target} PRIVATE LINKER:--gc-sections)
@@ -174,7 +174,7 @@ endfunction()
 ddb_add_library_objects(ddb_core ${DDB_CORE_SOURCES} ${DDB_VERSION_SOURCE})
 ddb_add_library_objects(ddb_capi ${DDB_CAPI_SOURCES})
 
-# The symbol manifest (XI-01): include/ddb.symbols lists every exported DDB* function, one per
+# The symbol manifest: include/ddb.symbols lists every exported DDB* function, one per
 # line ('#' starts a comment line). It is the only copy of the list: DDBGetCapabilities() (ddb.cpp)
 # includes it as generated/ddb_symbols.inc, one string literal per name, and scripts/check-abi.py
 # compares it with the symbols libddb exports. A change to the manifest re-runs CMake;

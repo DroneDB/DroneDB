@@ -19,7 +19,7 @@ namespace ddb::parallel
     // min(defaultMax, cores). The CPU pool decides how many of them run.
     int threadsOption(const char *name, int defaultMax);
 
-    // ---- The process-wide CPU token pool (DQ-15, XI-06) ----------------------------------
+    // ---- The process-wide CPU token pool ----------------------------------
     //
     // One pool of ProcessConfig::cpuPoolSize() tokens (DDBConfigure "cpuPoolSize"; default
     // cores - 1) bounds the CPU threads libddb runs at once beside the calling threads: the

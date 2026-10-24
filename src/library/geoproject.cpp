@@ -137,7 +137,7 @@ namespace ddb
                 GDALTranslateOptionsNew(targs.List(), nullptr));
             if (!psOptions)
                 throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": invalid translate options");
-            // Both steps stop when the call is canceled (DQ-15)
+            // Both steps stop when the call is canceled
             progress.attach(psOptions.get());
 
             auto dstDataset = adoptDataset(GDALTranslate("", hSrc, psOptions.get(), nullptr));

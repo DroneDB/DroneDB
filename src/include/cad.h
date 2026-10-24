@@ -139,7 +139,7 @@ namespace ddb
         //      drawing local on purpose;
         //   3. the drawing's GEODATA object;
         //   4. a DXF (never a DWG) without CRS whose extent fits in +-180/+-90:
-        //      EPSG:4326, source "lonlat" (DDB-12 D1);
+        //      EPSG:4326, source "lonlat";
         //   5. otherwise local (not georeferenced: shown without a globe).
         CadCrs resolveCadCrs(const fs::path &originalInput, GDALDatasetH ds, const DxfInfo &info);
 

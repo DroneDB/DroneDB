@@ -129,7 +129,7 @@ class BuildAttempt {
         try {
             throw;
         } catch (const CanceledException&) {
-            // Like a transient failure: a pending build stays pending (DQ-15)
+            // Like a transient failure: a pending build stays pending
             retainPending();
             throw;
         } catch (const BuildDepMissingException& ex) {
@@ -296,7 +296,7 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
         Entry e;
         readEntry(*q, EntryColumns::Properties, e);
 
-        // Call build on each of them; a canceled call stops before the next one (DQ-15)
+        // Call build on each of them; a canceled call stops before the next one
         cancel::throwIfCanceled();
         try {
             buildInternal(db, e, outPath, force);

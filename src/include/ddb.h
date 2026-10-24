@@ -12,7 +12,7 @@
 #include <stdbool.h>
 #endif
 
-/* ddb.h is valid C11 as well as C++ (XI-03): tests/unit/c11_header.c includes it with -std=c11
+/* ddb.h is valid C11 as well as C++: tests/unit/c11_header.c includes it with -std=c11
  * -pedantic -Werror (MSVC: /std:c11 /W4 /WX). No default arguments, (void) for an empty
  * parameter list, bool from <stdbool.h> (1 byte: marshal it as U1), typedef'd types. */
 
@@ -29,7 +29,7 @@ extern "C"
 
 #define DDB_FOLDER ".ddb"
 
-/* Version (XI-01). The library, its C ABI and the release have ONE version, the "version" of
+/* Version. The library, its C ABI and the release have ONE version, the "version" of
  * package.json (semver): ddb_version.h, generated from it, defines DDB_VERSION_MAJOR/MINOR/PATCH
  * and DDB_VERSION_STRING, and DDB_ABI_MAJOR/DDB_ABI_MINOR, which are the MAJOR and the MINOR of
  * that version (the PATCH never changes the ABI). ddb_version.h is installed and published next
@@ -77,7 +77,7 @@ extern "C"
      * @return 0 to continue, non-zero to request cancellation */
     typedef int (*DDBProgressCallback)(double fraction, const char *phase, void *userData);
 
-    /* The last error (XI-02) belongs to the calling thread. Every call clears it on entry and
+    /* The last error belongs to the calling thread. Every call clears it on entry and
      * sets it when it returns a code other than DDBERR_NONE, except the accessors that never
      * touch it: DDBGetLastError, DDBGetLastErrorReason, DDBGetVersion, DDBGetAbiVersion,
      * DDBGetCapabilities, DDBFree, DDBVSIFree and DDBFreeCancelToken. Read it on the thread that made the failing
@@ -138,7 +138,7 @@ extern "C"
      * @return the JSON, or NULL only if the process ran out of memory while building it */
     DDB_DLL const char *DDBGetCapabilities(void);
 
-    /* Process configuration (DQ-15, XI-06, new in 2.0). One set of settings for the whole process,
+    /* Process configuration (new in 2.0). One set of settings for the whole process,
      * which a host sets with DDBConfigure and reads back with DDBGetEffectiveConfig. Each setting
      * takes, by precedence: the DDBConfigure value, else its environment variable, else the
      * built-in default. An environment variable that is not a valid value is ignored.
@@ -206,7 +206,7 @@ extern "C"
      *         default cache folder cannot be found (no DDB_HOME, HOME or USERPROFILE) */
     DDB_DLL DDBErr DDBGetEffectiveConfig(char **output);
 
-    /* Shutdown (DQ-15, XI-07, new in 2.0). A host calls DDBShutdown once, when it stops (after it
+    /* Shutdown (new in 2.0). A host calls DDBShutdown once, when it stops (after it
      * stopped sending work), so that the index files are left whole and the log is written out
      * before the process exits. The library has three states:
      *   running        every call works;
@@ -242,7 +242,7 @@ extern "C"
      *         shut down all the same */
     DDB_DLL DDBErr DDBShutdown(int timeoutMs);
 
-    /* Cancellation (DQ-15, XI-07, new in 2.0). A cancel token stops the work of the calls made for
+    /* Cancellation (new in 2.0). A cancel token stops the work of the calls made for
      * it, without a new variant of every export:
      *   1. DDBCreateCancelToken creates a token (one per request or job);
      *   2. DDBSetThreadCancelToken(token) on the thread that makes the call, right before it: the
@@ -289,7 +289,7 @@ extern "C"
      * @return DDBERR_NONE */
     DDB_DLL DDBErr DDBSetThreadCancelToken(DDBCancelToken *token);
 
-    /* Logging (DQ-15, XI-08, new in 2.0). A host receives libddb's log records and GDAL's messages
+    /* Logging (new in 2.0). A host receives libddb's log records and GDAL's messages
      * in one callback, each with the operation id it set on the thread that made the call, and
      * maps them to its own logger. Without a callback the records go to stderr, like GDAL's
      * messages; stdout carries only the output of the CLI commands. While a callback is
@@ -345,8 +345,8 @@ extern "C"
      * @return DDBERR_NONE */
     DDB_DLL DDBErr DDBSetThreadOperation(uint64_t opId);
 
-    /** Normalize a dataset-relative entry path, or reject it, with libddb's path rules (XI-09,
-     * entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):
+    /** Normalize a dataset-relative entry path, or reject it, with libddb's path rules
+     * (entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):
      * '/' and '\' both separate segments; empty and "." segments are dropped; the result uses '/'
      * with no leading or trailing separator. Names are compared byte for byte, without Unicode
      * normalization. ".ddb" is reserved as a segment at any depth.
@@ -365,7 +365,7 @@ extern "C"
      *         or output is NULL or reservedJson is invalid (see DDBGetLastError) */
     DDB_DLL DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output);
 
-    /* Entry paths (DQ-09, XI-09, new in 2.0). An entry path is a path inside the dataset, relative
+    /* Entry paths (new in 2.0). An entry path is a path inside the dataset, relative
      * to its root ("photos/a.jpg"), as the index stores it. Every export that takes one applies
      * the rules of DDBNormalizePath to it: '\' and '/' separate segments, "." segments and
      * repeated or trailing separators are dropped, and the call works on the normalized path
@@ -659,7 +659,7 @@ extern "C"
     DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, char **conflicts);
 
     /** DDBApplyDelta for a host that checked the hashes of the added files itself, e.g. while
-     * it received them (XI-05, new in 2.0): libddb does not read those files again.
+     * it received them (new in 2.0): libddb does not read those files again.
      * verifiedHashesJson NULL: as DDBApplyDelta (every added file is hashed, unless
      * DDB_VERIFY_PUSH_HASHES=0). Otherwise a JSON object {"<delta path>": "<sha256>"} of the
      * files the caller verified, and DDB_VERIFY_PUSH_HASHES is ignored: a listed file is
@@ -824,7 +824,7 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetBuildStatus(const char *ddbPath, const char **paths, int numPaths, char **output);
 
-    /* ---- Build manifest (XI-04, new in 2.0) -------------------------------------------------------
+    /* ---- Build manifest (new in 2.0) -------------------------------------------------------
      * libddb owns the build layout, the build state and the entry type rules: a host serves the
      * roles, paths and states these exports return, and never composes a build path, names an
      * artifact file or keeps its own list of buildable types.
@@ -887,7 +887,7 @@ extern "C"
      * a build and stays in place (DDBIsBuildActive removes it). A call opens the index once; an
      * entry that is not buildable costs no filesystem access. */
 
-    /** The entry types of libddb and what it does with them (XI-04, new in 2.0).
+    /** The entry types of libddb and what it does with them (new in 2.0).
      * @param output pointer to C-string where to store the JSON array, by id (free with DDBFree).
      *               Each element: {"id": int, "name": string, "buildable": bool,
      *               "thumbnail": "none"|"file"|"build", "sidecarExtensions": [string],
@@ -906,7 +906,7 @@ extern "C"
     DDB_DLL DDBErr DDBGetEntryTypes(char **output);
 
     /** The build state and the existing artifacts of several entries, with one index open
-     * (XI-04, new in 2.0). For a host it replaces DDBIsBuildable, DDBIsBuildActive,
+     * (new in 2.0). For a host it replaces DDBIsBuildable, DDBIsBuildActive,
      * DDBIsBuildComplete, DDBIsBuildPending, DDBGetPendingBuildInfo and DDBGetBuildStatus.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param paths array of dataset-relative entry paths (exact match; see "Entry paths")
@@ -921,7 +921,7 @@ extern "C"
      *         contention; DDBERR_EXCEPTION otherwise (no database at ddbPath, ...) */
     DDB_DLL DDBErr DDBGetBuildArtifacts(const char *ddbPath, const char **paths, int numPaths, char **output);
 
-    /** The absolute path of a file of a build, checked (XI-04, new in 2.0): it serves the
+    /** The absolute path of a file of a build, checked (new in 2.0): it serves the
      * ".../build/{hash}/{path}" URLs, tiles included.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param hash the hash of the build ("hash" of a build object): 64 hexadecimal characters
@@ -938,7 +938,7 @@ extern "C"
      *         contention */
     DDB_DLL DDBErr DDBResolveBuildFile(const char *ddbPath, const char *hash, const char *path, char **outPath);
 
-    /** Copy the build of an entry to another dataset, with its pending marker (XI-04, new in 2.0):
+    /** Copy the build of an entry to another dataset, with its pending marker (new in 2.0):
      * after copying or moving a file between datasets, its artifacts need no rebuild and a
      * deferred build stays deferred. Copies the artifact folders of the types of the source
      * entries with this hash (legacy ones included), each through a scratch folder renamed onto
@@ -1075,7 +1075,7 @@ extern "C"
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBStacItemCollection(const char *ddbPath, const char *stacCollectionRoot, const char *id, const char *stacCatalogRoot, const char *bbox, const char *datetime, int limit, int offset, char **output);
 
-    /** Data-only STAC (XI-09, new in 2.0): the document of DDBStac with id NULL, without any member
+    /** Data-only STAC (new in 2.0): the document of DDBStac with id NULL, without any member
      *  built from a URL or an ID, which the caller (Registry) owns: no "id", "collection" or
      *  "links", and no asset "href". Everything else is the same: an Item keeps its entry path
      *  as properties.title and as the key of its data asset, a Collection takes its title from
@@ -1087,7 +1087,7 @@ extern "C"
      *          DDBERR_INVALIDARGS when ddbPath or output is NULL, an error otherwise */
     DDB_DLL DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output);
 
-    /** Data-only STAC ItemCollection (XI-09, new in 2.0): the document of DDBStacItemCollection
+    /** Data-only STAC ItemCollection (new in 2.0): the document of DDBStacItemCollection
      *  without "links", and with data-only features (DDBStacData). numberMatched and
      *  numberReturned are kept. bbox, datetime, limit and offset are those of
      *  DDBStacItemCollection.
@@ -1540,7 +1540,7 @@ extern "C"
                                      const char *layerName,
                                      char **output);
 
-    /** Content of a .prj that gives a CAD drawing the coordinate system @p crs (DDB-12).
+    /** Content of a .prj that gives a CAD drawing the coordinate system @p crs.
      *
      * @param crs An authority code ("EPSG:32632"), WKT or PROJ string, written as ESRI WKT;
      *            or "local" for LOCAL_CS["Drawing"] (the drawing stays in its own coordinates).

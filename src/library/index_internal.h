@@ -32,7 +32,7 @@ namespace ddb
     // True for a .prj file: it gives its shapefile or CAD drawing a coordinate system
     bool isPrjPath(const std::string &path);
 
-    // DDB-12: after a .prj was added, changed or removed, re-parses its main entries and drops
+    // After a .prj was added, changed or removed, re-parses its main entries and drops
     // their stale vector artifacts. Best effort per file, runs after the add/remove transaction.
     void refreshPrjMains(Database *db, const fs::path &directory, const std::vector<std::string> &prjPaths,
                          bool removed);

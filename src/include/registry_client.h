@@ -4,7 +4,7 @@
 #ifndef REGISTRY_CLIENT_H
 #define REGISTRY_CLIENT_H
 
-// The client of a Registry (DQ-11). It owns what every request to the server has in common: the
+// The client of a Registry. It owns what every request to the server has in common: the
 // base URL, the authentication (login, the token and its expiry, the credentials kept in the user
 // profile), the SSL check, the mapping of an error response (RFC 9457 ProblemDetails or the
 // legacy { "error" } body) and of a transport error to an exception, and the retries. The HTTP

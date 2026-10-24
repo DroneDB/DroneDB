@@ -23,7 +23,7 @@ namespace ddb
         Default       // libddb's built-in default
     };
 
-    // The process configuration (DQ-15, XI-06): the settings a host passes to DDBConfigure
+    // The process configuration: the settings a host passes to DDBConfigure
     // (ddb.h documents them, with their environment variables and defaults). It is the only
     // place that reads them: a value set with configure() wins over the environment variable,
     // which wins over the built-in default. The environment is read whenever a value is needed,

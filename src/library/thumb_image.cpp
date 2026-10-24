@@ -194,7 +194,7 @@ RasterImage translateToImage(GDALDatasetH hSrc, const ImageTranslation& spec) {
         GDALTranslateOptionsNew(argv.List(), nullptr));
     if (!psOptions)
         throw GDALException("Failed to create GDAL translate options for " + spec.sourceLabel);
-    // The resampling reads the whole raster: it stops when the call is canceled (DQ-15)
+    // The resampling reads the whole raster: it stops when the call is canceled
     cancel::GdalProgress progress;
     progress.attach(psOptions.get());
 

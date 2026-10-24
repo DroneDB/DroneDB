@@ -8,7 +8,7 @@
 
 #include "gdal_inc.h"
 
-// The host's log callback (DQ-15, XI-08): libddb's log records (plog) and GDAL's errors go to
+// The host's log callback: libddb's log records (plog) and GDAL's errors go to
 // one callback the host registers (DDBSetLogCallback), with the operation id the host set on
 // the thread (DDBSetThreadOperation), instead of stderr.
 //

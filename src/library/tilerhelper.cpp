@@ -96,7 +96,7 @@ namespace ddb
         const fs::path &tileablePath = source.path;
         // Files an entry handler tiles itself (COPC point clouds) are read in place; the
         // others are downloaded when remote and tiled by GDAL. Each step checks whether the
-        // call was canceled (DQ-15); the GDAL steps also while they run.
+        // call was canceled; the GDAL steps also while they run.
         cancel::throwIfCanceled();
         const TilerFactory *factory = findTilerFactory(tileablePath);
         const fs::path localPath = factory != nullptr ? tileablePath : toLocalFile(tileablePath, source.pathHash);

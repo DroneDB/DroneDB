@@ -4,7 +4,7 @@
 #ifndef DDB_C_API_CAPABILITIES_H
 #define DDB_C_API_CAPABILITIES_H
 
-// What the loaded library says about its own C API (DDBGetCapabilities, XI-01): the ABI version,
+// What the loaded library says about its own C API (DDBGetCapabilities): the ABI version,
 // the error codes and reasons, the exports that honour a cancel token and the exported symbols.
 // Private to the C API (ddb_capi): nothing here is a DDB* export.
 

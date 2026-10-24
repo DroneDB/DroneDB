@@ -208,7 +208,7 @@ std::string Hash::fileSHA256(const std::string& path) {
     std::vector<unsigned char> buffer(BufferSize);
 
     while (f) {
-        // A big file takes a while: it is a checkpoint of the call (DQ-15)
+        // A big file takes a while: it is a checkpoint of the call
         cancel::throwIfCanceled();
         f.read(reinterpret_cast<char*>(buffer.data()), BufferSize);
         const size_t numBytesRead = size_t(f.gcount());

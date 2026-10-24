@@ -40,7 +40,7 @@ namespace ddb
         /// The message of a Registry error body, or "" when it has none (not JSON, no known
         /// field). Reads an RFC 9457 ProblemDetails body (detail, then title) and the legacy
         /// { "error" } body, so the client works with a Registry before and after its
-        /// ProblemDetails switch (RQ-05).
+        /// ProblemDetails switch.
         static std::string errorMessage(const std::string &body);
 
         /// Whether an error body asks the client not to try again ("noRetry": true, which

@@ -122,7 +122,7 @@ namespace ddb
                 return static_cast<unsigned int>(*n);
             }
 
-            // Reads DDB_OBJ2TILES_MAX_CORES (spec C1): a core count (parseCoreCount); anything
+            // Reads DDB_OBJ2TILES_MAX_CORES: a core count (parseCoreCount); anything
             // else is logged and treated as unset. The value is clamped to the hardware
             // concurrency. Returns the effective cap, or nullopt for "no cap".
             std::optional<unsigned int> readMaxCores()
@@ -262,8 +262,8 @@ namespace ddb
                 return false;
             }
 
-            // Per-child core cap (C1): only the child's environment is changed. The child's
-            // cores are CPU tokens (DQ-15), held while it runs.
+            // Per-child core cap: only the child's environment is changed. The child's
+            // cores are CPU tokens, held while it runs.
             const auto requestedCap = readMaxCores();
             const auto hw = static_cast<unsigned int>(parallel::hardwareThreads());
             const auto cpu = parallel::tryAcquireThreads(requestedCap ? *requestedCap : hw);

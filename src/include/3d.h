@@ -184,7 +184,7 @@ namespace ddb
     /**
      * @brief Compute Obj2Tiles parameters based on model face count.
      *
-     * Maps info.faceCount to a (divisions, lods, octree) band from the spec.
+     * Maps info.faceCount to a (divisions, lods, octree) band.
      * The resulting tile-hierarchy depth (divisions + lods - 1 when octree)
      * is always <= MAX_TILE_DEPTH (6, i.e. <= 4096 finest-LOD tiles),
      * regardless of faceCount, so pathologically large models cannot make

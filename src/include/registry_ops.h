@@ -4,8 +4,7 @@
 #ifndef REGISTRY_OPS_H
 #define REGISTRY_OPS_H
 
-// What a dataset does with a Registry: pull, push and clone (DQ-11: out of the Registry class,
-// one unit each). The *Dataset functions work over a RegistryClient that is logged in; push,
+// What a dataset does with a Registry: pull, push and clone, one unit each. The *Dataset functions work over a RegistryClient that is logged in; push,
 // pull and clone are what the CLI runs from the dataset folder: they find the Registry, log in
 // through withAuthenticatedRegistry (registry_auth.h) and ask `credentials` when they must.
 

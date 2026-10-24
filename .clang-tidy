@@ -1,4 +1,4 @@
-# clang-tidy checks for DroneDB (DQ-01). CI runs them on the lines a change touches only
+# clang-tidy checks for DroneDB. CI runs them on the lines a change touches only
 # (scripts/lint-changed-lines.sh tidy), report-only for now: no mass rewrite of existing code.
 #
 # Disabled checks, and why:

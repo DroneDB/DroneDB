@@ -242,9 +242,9 @@ namespace ddb
         if (!hSrcBand1)
             throw GDALException("Cannot read band 1 from " + inputGTiff);
 
-        // Threads, warp memory and block cache come from one budget (DDB-08) so
+        // Threads, warp memory and block cache come from one budget so
         // that several builds running in one process stay within known bounds;
-        // the threads beyond this one take CPU tokens (DQ-15), held until the
+        // the threads beyond this one take CPU tokens, held until the
         // output is closed.
         const BuildResourceBudget budget = BuildResourceBudget::fromConfig();
         const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
@@ -277,7 +277,7 @@ namespace ddb
         const ScopedGdalCacheMax cacheGuard(budget.cacheBytes);
 
         // Progress for diagnostic logging during long warp operations; the warp stops when
-        // the build is canceled (DQ-15)
+        // the build is canceled
         std::atomic<int> warpPct{0};
         cancel::GdalProgress progress([&warpPct](double fraction) { logWarpProgress(warpPct, fraction); });
         progress.attach(psOptions.get());

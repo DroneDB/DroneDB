@@ -5,16 +5,16 @@ add_subdirectory(cmd)
 # cxxopts parses the command line; only the CLI uses it, libddb does not
 find_package(cxxopts CONFIG REQUIRED)
 
-# The commands, the registry and the handler that maps their exceptions to exit codes (DQ-12):
-# an object library, so the unit tests (tests/unit/dq12_cli_test.cpp) link the same objects the
+# The commands, the registry and the handler that maps their exceptions to exit codes:
+# an object library, so the unit tests (tests/unit/cli_test.cpp) link the same objects the
 # CLI is made of. They use the library's headers (ddb_static_api): the CLI is linked with the
-# library objects, not with libddb, which exports nothing but its C API (DQ-14).
+# library objects, not with libddb, which exports nothing but its C API.
 add_library(ddb_cli_commands OBJECT ${CMD_SRC_LIST})
 target_include_directories(ddb_cli_commands PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(ddb_cli_commands PUBLIC ddb_static_api cxxopts::cxxopts PRIVATE ddb_warnings)
 
 # crash_handlers + segvcatch are CLI-only: they replace process-wide signal handlers,
-# which libddb must never do inside a host process (DDB-11 B6).
+# which libddb must never do inside a host process.
 add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
     ${CMAKE_SOURCE_DIR}/vendor/segvcatch/segvcatch.cpp $<TARGET_OBJECTS:ddb_cli_commands>)
 

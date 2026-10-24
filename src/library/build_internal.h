@@ -61,7 +61,7 @@ std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e);
 std::vector<std::string> indexedPathsWithPrefix(Database* db, const std::string& prefix);
 
 // The build targets of many entries of one index, with two prepared statements reused for
-// every lookup (getBuildStatus, the XI-04 manifest): only path, hash and type are read.
+// every lookup (getBuildStatus, the build manifest): only path, hash and type are read.
 class IndexBuildTargets {
   public:
     explicit IndexBuildTargets(Database* db);
@@ -75,7 +75,7 @@ class IndexBuildTargets {
     std::unique_ptr<Statement> byPrefix_;
 };
 
-// ---- Artifact manifest (build_manifest.cpp, XI-04) -------------------------
+// ---- Artifact manifest (build_manifest.cpp) ---------------------------------
 
 // One name in a directory listing
 struct DirectoryName {

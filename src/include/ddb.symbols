@@ -1,4 +1,4 @@
-# libddb symbol manifest (XI-01): every function libddb exports whose name starts with DDB.
+# libddb symbol manifest: every function libddb exports whose name starts with DDB.
 #
 # Format: one symbol name per line, sorted in byte order (LC_ALL=C sort), no duplicates. Lines
 # starting with '#' are comments.

@@ -1,4 +1,4 @@
-# Compiler warnings for DroneDB's own code (DQ-01, decision D10).
+# Compiler warnings for DroneDB's own code.
 #
 # ddb_warnings is an INTERFACE target: link it PRIVATE to every target built from src/, apps/ or
 # tests/, so the flags reach their sources but never a consumer of libddb.

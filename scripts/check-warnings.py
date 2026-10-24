@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compiler warning ratchet (DQ-01, decision D10): a change may not add a warning to our code.
+"""Compiler warning ratchet: a change may not add a warning to our code.
 
 The baseline (cmake/warnings-baseline.txt) has one line per file and warning flag:
 
@@ -180,7 +180,7 @@ def display(path: Path) -> str:
 
 def write_baseline(path: Path, counts: dict[tuple[str, str], int], compiler: str | None) -> None:
     header = [
-        f"# Warning baseline for {SCRIPT} (DQ-01). Do not edit by hand: after removing",
+        f"# Warning baseline for {SCRIPT}. Do not edit by hand: after removing",
         f"# warnings, run {SCRIPT} --update <log of a full build> and commit this file.",
         f"# Compiler: {compiler or 'unknown'} (the CI build_ubuntu job measures with this compiler)",
         "# Format: <path> <flag> <number of distinct line:column locations>",

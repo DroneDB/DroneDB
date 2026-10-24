@@ -292,7 +292,7 @@ namespace ddb
                 {
                     Entry e;
                     e.path = relPath.generic();
-                    // tx's destructor rolls back on this early return (I4/C8).
+                    // tx's destructor rolls back on this early return.
                     if (!callback(e, false, error))
                         return;
                 }

@@ -18,7 +18,7 @@ namespace ddb
     // The Gaussian Splat artifact names (GsplatBuildSubfolder, GsplatRadFileName,
     // GsplatBoundsFileName, GsplatGeorefFileName, ...) are in build_layout.h.
 
-    // Web LOD delivery profile (see TBD/GaussianSplats/LOD-Support.md): bhatt-lod ("quality")
+    // Web LOD delivery profile: bhatt-lod ("quality")
     // with full spherical harmonics (degree 3) so the streamed .rad preserves the look of the
     // source and can be served as the SOLE delivery artifact (the .spz is dropped after build).
     // Single-file RAD so Registry can serve it with HTTP range requests.

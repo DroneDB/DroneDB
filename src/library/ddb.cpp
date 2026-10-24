@@ -163,14 +163,14 @@ DDBErr DDBGetEffectiveConfig(char** output) {
     });
 }
 
-// ------------------------------------------------------------------ shutdown (XI-07)
+// ------------------------------------------------------------------ shutdown
 
 // Once no call is in flight, DDBShutdown closes what the process keeps open between calls
 DDBErr DDBShutdown(int timeoutMs) {
     return capi::shutdown(timeoutMs, &ddb::closeKeptResources);
 }
 
-// ------------------------------------------------------------------ cancellation (XI-07)
+// ------------------------------------------------------------------ cancellation
 
 // DDBCancelToken is opaque to the caller: the library's cancel::Token
 static cancel::Token* tokenOf(DDBCancelToken* token) noexcept {
@@ -203,7 +203,7 @@ DDBErr DDBSetThreadCancelToken(DDBCancelToken* token) {
     return guarded<kNewExportCodes, capi::CallKind::Setting>([&] { cancel::setThreadToken(tokenOf(token)); });
 }
 
-// ------------------------------------------------------------------ logging (XI-08)
+// ------------------------------------------------------------------ logging
 
 static_assert(DDB_LOG_TRACE == logfwd::kTrace && DDB_LOG_DEBUG == logfwd::kDebug && DDB_LOG_INFO == logfwd::kInfo &&
                   DDB_LOG_WARNING == logfwd::kWarning && DDB_LOG_ERROR == logfwd::kError &&
@@ -1053,7 +1053,7 @@ DDBErr DDBGetBuildStatus(const char* ddbPath, const char** paths, int numPaths, 
     });
 }
 
-// ------------------------------------------------------------------ build manifest (XI-04)
+// ------------------------------------------------------------------ build manifest
 
 DDBErr DDBGetEntryTypes(char** output) {
     return guardedOutput<kNewExportCodes>(output, [&] {
@@ -1476,7 +1476,7 @@ DDBErr DDBAlignRaster(const char* sourcePath,
 // The export shared by DDBExportRaster (legacy ABI) and DDBExportRaster2: the C arguments in a
 // request, and the C progress callback as the library's. Throws on errors (mapped to a DDBErr by
 // guarded() in the callers), CanceledException when the progress callback asked to stop or the
-// call was canceled (DQ-15).
+// call was canceled.
 static void exportRasterImpl(const char* inputPath, const char* outputPath,
                             const char* preset, const char* bands,
                             const char* formula, const char* bandFilter,

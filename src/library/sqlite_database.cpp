@@ -23,7 +23,7 @@ namespace ddb
         LOGD << "Opening connection to " << file;
         if (sqlite3_open(file.c_str(), &db) != SQLITE_OK)
             throw DBException("Can't open database: " + file);
-        // Statements stop when the work of the thread running them is canceled (DQ-15)
+        // Statements stop when the work of the thread running them is canceled
         cancel::installSqliteProgressHandler(db);
 
         this->openFile = file;

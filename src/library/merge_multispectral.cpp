@@ -346,7 +346,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     int nBands = GDALGetRasterCount(hVrt);
     bool useJpeg = (dt == GDT_Byte && (nBands == 3 || nBands == 4));
 
-    // Warp and compression threads: this one and those the CPU pool allows (DQ-15), held
+    // Warp and compression threads: this one and those the CPU pool allows, held
     // until the output is closed
     const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
     const MergeEncoding encoding{dt, useJpeg, parallel::gdalNumThreads(cpu)};

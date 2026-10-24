@@ -4,7 +4,7 @@
 #ifndef DDB_C_API_UTIL_H
 #define DDB_C_API_UTIL_H
 
-// The C API adapter (DQ-10, XI-02, XI-03): how ddb.cpp turns C arguments into C++ values and a
+// The C API adapter: how ddb.cpp turns C arguments into C++ values and a
 // C++ failure into a DDBErr code and the last error. Private to the C API (ddb_capi) and its unit
 // tests: nothing here is a DDB* export.
 //
@@ -38,7 +38,7 @@
 
 namespace ddb::capi {
 
-// ------------------------------------------------------------------ last error (XI-02)
+// ------------------------------------------------------------------ last error
 
 // The last error of the calling thread: the message and the reason of its last failed call.
 // Every guarded call clears it on entry. The exempt accessors (DDBGetLastError,
@@ -81,8 +81,8 @@ constexpr CodeSet codeSet(Codes... codes) noexcept {
 // DDBBuild BUILDDEPMISSING/BUILDINPROGRESS, DDBExportRaster2 CANCELED: see ddb.cpp). Any other
 // failure stays DDBERR_EXCEPTION, with its own message and reason. DDBERR_INVALIDARGS and
 // DDBERR_RETRYABLE are returned by the exports added in 2.0 only; the older exports switch
-// in a later version, together with Registry (RQ-08). One exception: a refused entry path is
-// DDBERR_INVALIDARGS in every export (InvalidPathException, DQ-09).
+// in a later version, together with Registry. One exception: a refused entry path is
+// DDBERR_INVALIDARGS in every export (InvalidPathException).
 inline constexpr CodeSet kFrozenCodes = codeSet(DDBERR_BUSY);
 // The exports added in 2.0: every code a failure maps to
 inline constexpr CodeSet kNewExportCodes = codeSet(DDBERR_BUSY,
@@ -99,7 +99,7 @@ struct Failure {
     std::string message;  // never empty
     std::string reason;   // "" when the failure has none
     // Every export returns the code, also one that may not return it: a refused entry path
-    // (InvalidPathException, DQ-09) is DDBERR_INVALIDARGS in the exports of 1.x too
+    // (InvalidPathException) is DDBERR_INVALIDARGS in the exports of 1.x too
     bool everyExport = false;
 };
 
@@ -139,7 +139,7 @@ DDBErr reportShutdown() noexcept;
 // reported as that, when it is not a more specific failure than DDBERR_EXCEPTION.
 CodeSet withRuntimeCodes(CodeSet allowed) noexcept;
 
-// ------------------------------------------------------------------ calls in flight and shutdown (XI-07)
+// ------------------------------------------------------------------ calls in flight and shutdown
 
 // What a guarded call is to the shutdown (DDBShutdown)
 enum class CallKind {
@@ -294,8 +294,7 @@ DDBErr guardedBuffer(uint8_t** outBuffer, int* outBufferSize, Body&& body) noexc
 // ------------------------------------------------------------------ arguments
 
 // The checks of a C argument, with no exception: the require* functions below throw when one
-// fails. (Before DQ-05 they were utils::isNullOrEmptyOrWhitespace, isValid*Param and
-// hasNullStringInArray.)
+// fails.
 
 // True when text is NULL, empty or whitespace only
 bool isNullOrEmptyOrWhitespace(const char* text) noexcept;
@@ -323,7 +322,7 @@ void requireOutput(T* output, const char* message = "Output pointer is null") {
         throw InvalidArgsException(message);
 }
 
-// An options struct that starts with uint32_t structSize (XI-03), copied: the caller's
+// An options struct that starts with uint32_t structSize, copied: the caller's
 // structSize must cover every field of the first version of the struct (minSize), and the
 // bytes a newer caller adds beyond sizeof(T) must be zero, since this library cannot honour an
 // option it does not know. Throws InvalidArgsException otherwise, or when options is NULL.
@@ -353,7 +352,7 @@ inline std::string optStr(const char* text) {
 // A list of paths that must hold at least one path, none NULL, empty or whitespace only
 std::vector<std::string> requirePathList(const char** paths, int numPaths);
 
-// ---- dataset-relative entry paths (DQ-09, XI-09)
+// ---- dataset-relative entry paths
 //
 // The paths of the exports that name an entry of the index ("photos/a.jpg") go through the rule
 // of DDBNormalizePath (entry_path.h): '\' and '/' separate segments, "." segments and repeated
@@ -374,7 +373,7 @@ std::vector<std::string> toStringList(const char** items, int count);
 // JSON text; a NULL or malformed text throws InvalidArgsException
 json parseJsonArg(const char* text);
 
-// A path argument (UTF-8) as a path, whatever the locale (io::fromUtf8, XI-03); the caller has
+// A path argument (UTF-8) as a path, whatever the locale (io::fromUtf8); the caller has
 // checked that it is not NULL
 fs::path pathArg(const char* utf8);
 

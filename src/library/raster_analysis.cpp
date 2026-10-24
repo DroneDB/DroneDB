@@ -91,7 +91,7 @@ std::optional<std::vector<float>> readAreaBand(GDALRasterBandH hBand, GDALDataTy
     const size_t roiCount = static_cast<size_t>(roiW) * roiH;
     std::vector<float> roiData(roiCount);
 
-    // The read stops when the call is canceled (DQ-15)
+    // The read stops when the call is canceled
     cancel::GdalProgress progress;
     GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
     const auto failed = [] {
@@ -568,7 +568,7 @@ json bandStatistics(GDALDatasetH hDs) {
     for (int i = 1; i <= nBands; i++) {
         GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
         double bMin, bMax, bMean, bStdDev;
-        // A pass over the band (or an overview): it stops when the call is canceled (DQ-15)
+        // A pass over the band (or an overview): it stops when the call is canceled
         cancel::GdalProgress progress;
         const CPLErr statsErr = GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev,
                                                             progress.function(), progress.data());

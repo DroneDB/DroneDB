@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// The build manifest (XI-04, build_manifest.h): entry types, the state and the existing
+// The build manifest (build_manifest.h): entry types, the state and the existing
 // artifacts of entries, build file resolution and the copy of a build to another dataset. Every
 // path comes from the EntryHandler registry and build_layout.h.
 
@@ -46,7 +46,7 @@ json stringOrNull(const std::string& s) {
     return s.empty() ? json(nullptr) : json(s);
 }
 
-// Integer Unix epoch seconds (XI-09), or null
+// Integer Unix epoch seconds, or null
 json unixSecondsOrNull(const std::optional<time_t>& t) {
     return t ? json(static_cast<long long>(*t)) : json(nullptr);
 }

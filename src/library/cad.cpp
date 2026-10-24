@@ -163,7 +163,7 @@ namespace ddb
                                    kDxfAdvice);
             }
 
-            // dwg2dxf exits 0 on files it could not decode (DDB-12 RESULTS §2, §5):
+            // dwg2dxf exits 0 on files it could not decode:
             // only a DXF that GDAL opens and that has features counts as converted.
             const char *drivers[] = {"DXF", nullptr};
             auto dataset = adoptDataset(GDALOpenEx(io::toUtf8(outDxf).c_str(),
@@ -600,7 +600,7 @@ namespace ddb
                 return crs;
             }
 
-            // 4. (D1) DXF coordinates that can be degrees keep the historical EPSG:4326
+            // 4. DXF coordinates that can be degrees keep the historical EPSG:4326
             // assumption: GIS tools export lon/lat as DXF without any CRS. Never for DWG,
             // which only CAD software writes (it stores GEODATA when georeferenced): the
             // DWG drawings that fit in +-180/+-90 were design drawings in drawing units.

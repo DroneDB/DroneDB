@@ -5,7 +5,7 @@
 #ifndef JSON_FWD_H
 #define JSON_FWD_H
 
-// The name of the JSON type, without its definition (DQ-05): enough for a header that declares
+// The name of the JSON type, without its definition: enough for a header that declares
 // functions taking or returning a json, or holding a reference or a pointer to one. A header
 // that needs the complete type (a json member, an inline body) and every .cpp include json.h.
 

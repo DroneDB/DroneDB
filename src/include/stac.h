@@ -42,7 +42,7 @@ namespace ddb
                                     const std::string &stacCatalogRoot = "",
                                     const StacItemQuery &query = {});
 
-    // Data-only STAC (XI-09): the documents of generateStac (with id "") and
+    // Data-only STAC: the documents of generateStac (with id "") and
     // generateStacItemCollection without any member built from a URL or an ID: no "id",
     // "collection" or "links", and no asset "href". Everything else is the same. Throws
     // EntryNotFoundException for an entry that is not in the index.

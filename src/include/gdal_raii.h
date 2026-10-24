@@ -4,7 +4,7 @@
 #ifndef GDAL_RAII_H
 #define GDAL_RAII_H
 
-// The one RAII vocabulary for GDAL, OGR, OSR and VSI resources (DQ-04). Every resource that a
+// The one RAII vocabulary for GDAL, OGR, OSR and VSI resources. Every resource that a
 // GDAL call hands over is owned by one of these types from the line that receives it, so a
 // throw on any later line releases it. No GDALClose, OSRDestroySpatialReference, CSLDestroy,
 // VSIFree or VSIUnlink is called by hand outside this header (and gdal_raii.cpp).

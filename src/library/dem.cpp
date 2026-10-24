@@ -60,7 +60,7 @@ namespace ddb
     std::vector<float> DemContext::readElevations(int x, int y, int w, int h, int bufferW, int bufferH) const
     {
         std::vector<float> samples(static_cast<size_t>(bufferW) * bufferH);
-        // The read stops when the call is canceled (DQ-15)
+        // The read stops when the call is canceled
         cancel::GdalProgress progress;
         GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
         if (GDALRasterIOEx(band, GF_Read, x, y, w, h, samples.data(), bufferW, bufferH, GDT_Float32, 0, 0, &extra) !=

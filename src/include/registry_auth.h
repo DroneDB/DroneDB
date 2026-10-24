@@ -4,7 +4,7 @@
 #ifndef REGISTRY_AUTH_H
 #define REGISTRY_AUTH_H
 
-// How an operation on a Registry gets logged in (DQ-11). The library never asks anybody for a
+// How an operation on a Registry gets logged in. The library never asks anybody for a
 // password: when the credentials it has are missing or rejected, it asks a CredentialProvider,
 // and the program that embeds it decides how (the CLI prompts on the terminal, a service has
 // none).

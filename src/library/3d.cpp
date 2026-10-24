@@ -543,7 +543,7 @@ struct PreparedModel {
     std::optional<ModelInfo> info;  // face count + bounds when a converter supplied them
 };
 
-// Validates a model written by a converter into a temp folder (P3). Every
+// Validates a model written by a converter into a temp folder. Every
 // satisfiable dependency of the original input was checked and staged before the
 // conversion, so a name still missing here can never be satisfied by uploading a
 // file: its temp-folder-relative name must not reach ".pending" (it would retry
@@ -572,7 +572,7 @@ void validateConvertedDependencies(const std::string& convertedObj, const std::s
 //     folder and reports face count and bounds.
 //   - anything else (OBJ): validated in place.
 // The dataset root applies to the original input only; converted outputs in a
-// temp folder are validated without it (P3). tempGuard owns that temp folder.
+// temp folder are validated without it. tempGuard owns that temp folder.
 PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer,
                                 const std::string& datasetRoot, io::ScopedTempDir& tempGuard) {
     const fs::path inputPath = io::fromUtf8(input);
@@ -624,7 +624,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
 }
 
 // "out/3dtiles/" and "out/3dtiles//" -> "out/3dtiles", so the lock, the temp and
-// the -old siblings are derived from the folder name (P8).
+// the -old siblings are derived from the folder name.
 fs::path stripTrailingSeparators(const std::string& dir) {
     fs::path p = io::fromUtf8(dir);
     while (!p.empty() && !p.has_filename() && p.has_relative_path())
@@ -864,7 +864,7 @@ obj2tiles::Obj2TilesOptions chooseObj2TilesOptions(const std::string& inputObj, 
     return opts;
 }
 
-// Two-step swap (A3): outDir -> "<outDir>-old", temp -> outDir, drop -old.
+// Two-step swap: outDir -> "<outDir>-old", temp -> outDir, drop -old.
 // A crash in between is repaired by recoverTilesSwap on the next run. outGuard owns tempOut and
 // lets go of it once it is in place.
 void publishTiles(const fs::path& tempOut, const fs::path& outDir, const fs::path& oldDir,

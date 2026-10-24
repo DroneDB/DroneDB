@@ -4,8 +4,7 @@
 #ifndef DELTA_APPLY_H
 #define DELTA_APPLY_H
 
-// Applying a delta to a dataset (DQ-11: out of registry.h, where it lived with the network
-// client although it touches no network: pull and DDBApplyDelta both use it).
+// Applying a delta to a dataset. It touches no network: pull and DDBApplyDelta both use it.
 
 #include <iostream>
 #include <string>
@@ -52,7 +51,7 @@ struct Conflict {
 /// A conflict is its path in JSON: the output of DDBApplyDelta is the array of them
 void to_json(json &j, const Conflict &conflict);
 
-// The files of a delta whose content the caller already checked (XI-05): delta path ->
+// The files of a delta whose content the caller already checked: delta path ->
 // the SHA-256 the caller computed (e.g. while it received the file)
 using VerifiedHashes = std::unordered_map<std::string, std::string>;
 

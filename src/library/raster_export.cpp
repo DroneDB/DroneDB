@@ -110,7 +110,7 @@ private:
     bool committed_ = false;
 };
 
-// One cancellation for the whole call (DQ-15): the token of this call is canceled by the
+// One cancellation for the whole call: the token of this call is canceled by the
 // caller's token, by the shutdown, and by the progress callback when it asks to stop,
 // so every checkpoint of the export, GDAL's included, honours all three.
 class ExportSession
@@ -226,7 +226,7 @@ GDALDatasetUniquePtr createRgbaOutput(const char *outputPath, GDALDatasetH hSrcD
 
     GtiffOptions createOpts;
     createOpts.tiled(grid.tw).compress(GtiffOptions::Codec::Deflate).predictorFor(GDT_Byte).bigTiffIfSafer();
-    // Compression threads: this one and those the CPU pool allows (DQ-15), held until
+    // Compression threads: this one and those the CPU pool allows, held until
     // the output is closed
     const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
     createOpts.add(parallel::gdalNumThreads(cpu));

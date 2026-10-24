@@ -51,7 +51,7 @@ static constexpr const char* GdalDataMarker = "gdalvrt.xsd";
 static std::once_flag initialization_flag;
 
 // Exiv2's XMP toolkit must be initialized before threads parse images (indexing runs on
-// several threads, DDB-09); the lock serializes the namespaces it registers while decoding.
+// several threads); the lock serializes the namespaces it registers while decoding.
 static void initializeXmp() {
     static std::mutex xmpMutex;
     const auto lockUnlock = [](void* data, bool lock) {
@@ -223,14 +223,14 @@ void initializeGDALandPROJ() {
 
     setupGdalData();
     GDALAllRegister();
-    // GDAL's messages go to the host's log callback when one is registered (DQ-15), else to
+    // GDAL's messages go to the host's log callback when one is registered, else to
     // GDAL's default handler as before
     ddb::logfwd::installGdalErrorHandler();
 
     // No OGR_CT_FORCE_TRADITIONAL_GIS_ORDER: every transformation of libddb goes through
     // CoordsTransformer, which sets the traditional axis order (x = easting or longitude) on
     // its own copies of the two SRSs, and the SRS the code reads (srsFromWkt, srsFromEpsg...)
-    // carry that order too (DQ-06).
+    // carry that order too.
     CPLSetConfigOption("PROJ_NETWORK", "ON");
 
     // Disable PAM (.aux.xml) files globally - we don't need sidecar files

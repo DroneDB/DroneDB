@@ -191,7 +191,7 @@ std::vector<uint8_t> rasterizeMask(const DemContext &dem, const Window &w, OGRGe
     OGRGeometryH hGeom = OGRGeometry::ToHandle(&geom);
     int bandList[1] = {1};
     double burn[1] = {1.0};
-    // The rasterization stops when the call is canceled (DQ-15)
+    // The rasterization stops when the call is canceled
     cancel::GdalProgress progress;
     if (GDALRasterizeGeometries(maskDs, 1, bandList, 1, &hGeom,
                                 nullptr, nullptr, burn, nullptr,

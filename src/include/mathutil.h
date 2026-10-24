@@ -23,7 +23,7 @@ constexpr bool isPowerOfTwo(T value) {
 
 // The conversion factor. `x * kDegToRad` is not `deg2rad(x)`: that one is `(x * kPi) / 180.0`,
 // which rounds differently in the last bit for some x. Code that always multiplied by the factor
-// keeps doing so (its results are pinned by the golden outputs of DQ-06).
+// keeps doing so (its results are pinned by the golden outputs of the geo and raster tests).
 inline constexpr double kDegToRad = kPi / 180.0;
 
 constexpr double rad2deg(double rad) noexcept {

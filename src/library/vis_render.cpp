@@ -163,7 +163,7 @@ namespace ddb
                 read[plan.nodata.alphaBandIdx] = true;
         }
 
-        cancel::GdalProgress progress; // the call is canceled (DQ-15)
+        cancel::GdalProgress progress; // the call is canceled
         GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
         for (int b = 0; b < plan.bandCount; b++)
         {

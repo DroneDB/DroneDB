@@ -11,7 +11,7 @@
 
 struct sqlite3;
 
-// Cancellation of the work of a call (DQ-15, XI-07). Two things stop work: the cancel token of
+// Cancellation of the work of a call. Two things stop work: the cancel token of
 // the calling thread (DDBSetThreadCancelToken, canceled by DDBCancel or by a progress callback),
 // and the shutdown (DDBShutdown), which stops the work of every thread. The work checks them at
 // its checkpoints: throwIfCanceled() between steps, every item of parallel::forEachIndex, the

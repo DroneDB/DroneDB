@@ -5,10 +5,9 @@
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
-// Reading from the terminal (DQ-05: out of utils.h, which pulled termios.h and windows.h into
-// every file; DQ-11: out of the library, which must never prompt: a host such as the Registry
-// has no stdin to ask. The credentials the library needs come from a CredentialProvider, and the
-// CLI's is cmd::InteractiveCredentials).
+// Reading from the terminal. It lives in the CLI, not in the library, which must never prompt: a
+// host such as the Registry has no stdin to ask. The credentials the library needs come from a
+// CredentialProvider, and the CLI's is cmd::InteractiveCredentials.
 
 #include <string>
 

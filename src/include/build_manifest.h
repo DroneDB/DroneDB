@@ -16,7 +16,7 @@
 #include "json_fwd.h"
 
 /**
- * The build manifest (XI-04, decision D8): what a host needs to serve the builds of a dataset
+ * The build manifest: what a host needs to serve the builds of a dataset
  * without knowing their layout. libddb answers, from the EntryHandler registry, which entry
  * types exist and what they build (entryTypesJson), the state and the existing artifacts of
  * entries (BuildStateReader, getBuildArtifactsJson, listEntriesWithBuildJson), the file behind

@@ -20,7 +20,7 @@ namespace ddb::capi {
 namespace {
 
 // Every exported DDB* function, one string literal per line of src/include/ddb.symbols:
-// src/CMakeLists.txt generates the list from the manifest, which stays the only copy (XI-01)
+// src/CMakeLists.txt generates the list from the manifest, which stays the only copy
 constexpr std::string_view kExportedSymbols[] = {
 #include "ddb_symbols.inc"
 };
@@ -43,7 +43,7 @@ constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
                                     DDB_ERROR_CODE(SHUTDOWN)};
 #undef DDB_ERROR_CODE
 
-// The exports whose work checks the caller's cancel token while it runs (DQ-15, XI-07): their
+// The exports whose work checks the caller's cancel token while it runs: their
 // steps check cancel::throwIfCanceled() or run through a checkpoint (GDAL progress, raster
 // reads, forEachIndex items, SQLite statements, external tools). Sorted, so the capabilities
 // list is stable. DDBExportRaster2 also stops when its progress callback asks to.

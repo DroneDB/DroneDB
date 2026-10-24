@@ -28,7 +28,7 @@ namespace ddb::parallel
         // PDAL stage runs, PDAL installs its own process-wide GDAL handler
         // (pdal::Stage::startLogging), which writes into that stage's Log; that Log is not
         // synchronized with the stage's thread, so a GDAL error raised by another thread at the
-        // same time races with it (TSan, DQ-01). Parallel sections parse rasters while other
+        // same time races with it (found by TSan). Parallel sections parse rasters while other
         // threads run PDAL readers.
         class ThreadGdalErrorHandler
         {

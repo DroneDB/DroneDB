@@ -115,7 +115,7 @@ fs::path generateThumb(const fs::path& inputPath,
     LOGD << "Size = " << thumbSize;
 
     // COPC, RAD and SPZ files are rendered by their entry handler's generator, every other
-    // file as an image (whose GDAL steps stop when the call is canceled, DQ-15)
+    // file as an image (whose GDAL steps stop when the call is canceled)
     cancel::throwIfCanceled();
     if (const ThumbnailGenerator* generator = findThumbnailGenerator(inputPath))
         generator->generate(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);

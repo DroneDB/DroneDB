@@ -4,7 +4,7 @@
 #ifndef HTTP_CLIENT_H
 #define HTTP_CLIENT_H
 
-// The HTTP seam of the network code (DQ-11). RegistryClient, PushManager, ShareClient, the DSM
+// The HTTP seam of the network code. RegistryClient, PushManager, ShareClient, the DSM
 // download and the tile download talk to an IHttpClient and never to cpr: cpr is included by
 // one implementation file (cpr_http_client.cpp), so no installed header needs it, and a test
 // substitutes a fake that answers from a script.

@@ -290,7 +290,7 @@ class VectorEntryHandler : public EntryHandler {
         buildVector(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.baseOutputPath), ctx.force);
     }
 
-    // The .dbf/.shx/.cpg of a shapefile; a .prj also gives a CAD drawing its CRS (DDB-12)
+    // The .dbf/.shx/.cpg of a shapefile; a .prj also gives a CAD drawing its CRS
     std::vector<SidecarRule> sidecarRules() const override {
         return {{{"shp"}, {"cpg", "dbf", "shx", "prj"}},
                 {{"dxf", "dwg"}, {"prj"}}};

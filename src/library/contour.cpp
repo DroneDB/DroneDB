@@ -161,7 +161,7 @@ ContourLayer generateContourLayer(const DemContext &dem, double interval, const 
         opts.SetNameValue("NODATA", std::to_string(dem.nodata.value).c_str());
     }
 
-    // The generation stops when the call is canceled (DQ-15)
+    // The generation stops when the call is canceled
     cancel::GdalProgress progress;
     const CPLErr cErr = GDALContourGenerateEx(dem.band, hLayer, opts.List(),
                                               progress.function(), progress.data());

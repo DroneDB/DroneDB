@@ -216,7 +216,7 @@ void buildPending(Database* db, const std::string& outputPath, bool force) {
         }
 
         for (const auto& e : entries) {
-            // A canceled call stops before the next build (DQ-15)
+            // A canceled call stops before the next build
             cancel::throwIfCanceled();
             try {
                 LOGD << "Retrying pending build for " << e.path;

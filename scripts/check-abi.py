@@ -2,7 +2,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
-"""libddb ABI checks (XI-01): the exported symbols, the ABI version and the release version.
+"""libddb ABI checks: the exported symbols, the ABI version and the release version.
 
 The library, its C ABI and the release have ONE version: the "version" of package.json (semver).
 The ABI is its MAJOR and MINOR (DDB_ABI_MAJOR/DDB_ABI_MINOR in ddb_version.h, generated from
@@ -10,7 +10,7 @@ package.json by CMake and included by ddb.h); the PATCH never changes the ABI.
 src/include/ddb.symbols lists every function libddb exports whose name starts with DDB (format
 in its header). Three checks keep it, ddb.h and the release in step:
 
-  exports  The symbols the built library exports are EXACTLY the manifest (DQ-14): the C API and
+  exports  The symbols the built library exports are EXACTLY the manifest: the C API and
            nothing else, no C++ symbol of libddb and none of the third-party libraries linked
            into it. Linux: the defined dynamic symbols of libddb.so (nm -D --defined-only);
            Windows: the export table of ddb.dll, read from the PE file. Also: the manifest is

@@ -5,7 +5,7 @@
 #ifndef STRINGUTIL_H
 #define STRINGUTIL_H
 
-// The string helpers of libddb (DQ-05), ddb::str: the one home of case conversion, trimming,
+// The string helpers of libddb, ddb::str: the one home of case conversion, trimming,
 // splitting and joining. Nothing here depends on the locale: letters are the ASCII ones, and
 // every byte of a multi-byte UTF-8 sequence (high bit set) is left as it is. For comparisons
 // that fold case for every script see utf8.h (utf8::foldCase).

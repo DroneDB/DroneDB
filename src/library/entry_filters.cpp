@@ -18,7 +18,7 @@ std::vector<EntryType> parseEntryTypeList(const char* types, bool allowDirectory
     if (types == nullptr || std::strlen(types) == 0)
         return typeFilter;
 
-    // "image," is the list "image": a trailing separator ends the list, as before DQ-05
+    // "image," is the list "image": a trailing separator ends the list
     std::vector<std::string> pieces = str::split(types, ',');
     if (pieces.back().empty())
         pieces.pop_back();
@@ -77,7 +77,7 @@ bool isAscii(const std::string& s) {
 
 }  // namespace
 
-// XI-09: the comparison folds case for every script (Unicode simple case folding, utf8.h) when
+// The comparison folds case for every script (Unicode simple case folding, utf8.h) when
 // both strings are valid UTF-8; libddb 1.12 and earlier folded ASCII letters only. Otherwise
 // (and for ASCII-only strings, where both rules agree) it compares bytes, ASCII letters in any
 // case, and '?' takes a UTF-8 lead byte with its continuation bytes.

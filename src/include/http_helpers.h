@@ -5,8 +5,7 @@
 #ifndef HTTP_HELPERS_H
 #define HTTP_HELPERS_H
 
-// Small helpers over an IHttpClient (DQ-11: cpr is gone from this header; the DQ-05 helpers of
-// the registry and share code moved into RegistryClient, readFile had no caller).
+// Small helpers over an IHttpClient. The header does not include cpr.
 
 #include <string>
 

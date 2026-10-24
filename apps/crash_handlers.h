@@ -12,7 +12,7 @@
 // install them on behalf of a host: in a .NET host they turn managed
 // NullReferenceException/DivideByZeroException (which the CLR raises from
 // SIGSEGV/SIGFPE) into process termination, and they can replace the host's
-// SIGTERM handling (DDB-11 B6).
+// SIGTERM handling.
 void installCrashHandlers();
 
 #endif // CRASH_HANDLERS_H

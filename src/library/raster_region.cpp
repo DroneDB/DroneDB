@@ -302,7 +302,7 @@ namespace ddb
         const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.List(), nullptr));
         if (!opts)
             throw GDALException("Cannot build GDALWarp options");
-        cancel::GdalProgress progress; // the warp stops when the call is canceled (DQ-15)
+        cancel::GdalProgress progress; // the warp stops when the call is canceled
         progress.attach(opts.get());
 
         int usageErr = 0;
@@ -715,7 +715,7 @@ namespace ddb
         CPLStringList argv = cslFromStrings(argStore);
         const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.List(), nullptr));
         if (!opts) throw GDALException("Cannot build warp options");
-        cancel::GdalProgress progress; // the warp stops when the call is canceled (DQ-15)
+        cancel::GdalProgress progress; // the warp stops when the call is canceled
         progress.attach(opts.get());
         int usageErr = 0;
         auto warp = adoptDataset(

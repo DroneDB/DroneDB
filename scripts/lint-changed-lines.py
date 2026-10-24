@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""clang-format and clang-tidy on the lines a change touches only (DQ-01): no mass reformat.
+"""clang-format and clang-tidy on the lines a change touches only: no mass reformat.
 
 The change is "git diff <merge-base of BASE and HEAD>" (committed and uncommitted changes),
 restricted to src/, apps/ and tests/.

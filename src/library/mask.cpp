@@ -203,7 +203,7 @@ namespace ddb
 
         GtiffOptions creation = maskCreationOptions(src);
 
-        // Compression threads: this one and those the CPU pool allows (DQ-15), held until
+        // Compression threads: this one and those the CPU pool allows, held until
         // the output is closed
         const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
         creation.add(parallel::gdalNumThreads(cpu));
@@ -221,7 +221,7 @@ namespace ddb
                 GDALNearblackOptionsNew(targs.List(), nullptr));
             if (!psOptions)
                 throw GDALException("Failed to create nearblack options");
-            // The pass over the raster stops when the call is canceled (DQ-15)
+            // The pass over the raster stops when the call is canceled
             progress.attach(psOptions.get());
 
             outDataset = adoptDataset(

@@ -3,7 +3,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 """Generates src/library/case_folding_table.h, the Unicode simple case folding table of libddb's
-case-insensitive name matching (utf8::foldCase, XI-09).
+case-insensitive name matching (utf8::foldCase).
 
 Simple case folding is the mappings of CaseFolding.txt with status C (common) and S (simple):
 each maps one code point to one code point, so a folded string has as many code points as the

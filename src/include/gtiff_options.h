@@ -4,7 +4,7 @@
 #ifndef GTIFF_OPTIONS_H
 #define GTIFF_OPTIONS_H
 
-// The creation options of the GeoTIFFs and COGs that libddb writes (DQ-06): one vocabulary for
+// The creation options of the GeoTIFFs and COGs that libddb writes: one vocabulary for
 // the mask, COG, merge, align and export code, which wrote the same KEY=VALUE strings by hand
 // (TILED=YES 5 times, BIGTIFF=IF_SAFER 6, COMPRESS 15, the float-predictor decision twice).
 //

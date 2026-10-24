@@ -11,7 +11,7 @@
 #include "mio.h"
 
 /**
- * On-disk layout of the build artifacts (DQ-08, decision D8): every folder, file and marker
+ * On-disk layout of the build artifacts: every folder, file and marker
  * name of a build, defined once. Code that reads or writes a build uses these names and never
  * spells one out. Registry, the Hub and existing datasets depend on these exact bytes, so a
  * value here never changes without a migration (tests/unit/build_layout_test.cpp pins them).
@@ -26,7 +26,7 @@
  *     <hash>/3dtiles-old               previous tileset during a swap (BackupFolderSuffix)
  *     <hash>/3dtiles-temp-trash-<rand> 3D Tiles leftovers moved aside by a cleanup
  *
- * The role-tagged artifact manifest (XI-04) is composed from these names.
+ * The role-tagged artifact manifest is composed from these names.
  */
 namespace ddb {
 

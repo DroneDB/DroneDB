@@ -44,7 +44,7 @@ bool verifyPushHashesByDefault() {
 
 namespace {
 
-// The file adds of `d` whose hash applyDelta checks: all but those in `verified` (XI-05). An
+// The file adds of `d` whose hash applyDelta checks: all but those in `verified`. An
 // entry of `verified` must name a file the delta adds and carry the delta's hash for it: the
 // caller checked other bytes than the delta declares, or another file, and a hash it did not
 // verify is never trusted. Both throw InvalidArgsException, before anything changes.
@@ -336,7 +336,7 @@ std::unordered_map<std::string, bool> computeDeltaLocals(Delta d,
         if (add.hash.empty())
             continue;
 
-        // Checking a local file hashes it when it changed: a checkpoint of the call (DQ-15)
+        // Checking a local file hashes it when it changed: a checkpoint of the call
         cancel::throwIfCanceled();
         q->bind(1, add.hash);
         if (q->fetch()) {

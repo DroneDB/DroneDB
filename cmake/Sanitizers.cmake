@@ -1,4 +1,4 @@
-# Sanitizer and coverage builds (DQ-01). All options are OFF by default; see docs/sanitizers.md.
+# Sanitizer and coverage builds. All options are OFF by default; see docs/sanitizers.md.
 #
 #   DDB_ENABLE_ASAN      AddressSanitizer (+ LeakSanitizer on Linux)
 #   DDB_ENABLE_UBSAN     UndefinedBehaviorSanitizer, combinable with ASan

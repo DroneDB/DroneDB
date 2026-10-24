@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(ddb LANGUAGES CXX C)
 
-# C++20 (DQ-01). CMAKE_CXX_EXTENSIONS is left at its default.
+# C++20. CMAKE_CXX_EXTENSIONS is left at its default.
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -125,11 +125,11 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(MsvcReleaseDebugInfo)
 include(Warnings)
-# DDB_ENABLE_ASAN/UBSAN/TSAN/COVERAGE (DQ-01). Directory-wide options: must stay before
+# DDB_ENABLE_ASAN/UBSAN/TSAN/COVERAGE. Directory-wide options: must stay before
 # add_subdirectory(vendor) so the vendored code built in this tree is instrumented too.
 include(Sanitizers)
 
-# compile_commands.json for clang-tidy and editors (DQ-01); ignored by the Visual Studio generators
+# compile_commands.json for clang-tidy and editors; ignored by the Visual Studio generators
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Option to build tests
@@ -160,7 +160,7 @@ install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}cmd
     ARCHIVE DESTINATION lib
 )
 
-# Install the public headers: the C API and nothing else (DQ-14). libddb exports only the DDB*
+# Install the public headers: the C API and nothing else. libddb exports only the DDB*
 # functions of ddb.h, so the C++ headers of src/include could not be used with it. ddb.h includes
 # ddb_export.h (the export macro) and ddb_version.h (generated from package.json); the symbol
 # manifest lists the exports. Each header compiles on its own (tests/CMakeLists.txt,

@@ -244,7 +244,7 @@ namespace ddb
         const GDALDataType type = GDALGetRasterDataType(GDALGetRasterBand(inputDataset, 1));
 
         // A read through a warped VRT of a large raster can take long: it stops when the call
-        // is canceled (DQ-15)
+        // is canceled
         cancel::GdalProgress progress;
         GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
         if (type == GDT_Byte || type == GDT_Unknown)

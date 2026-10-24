@@ -12,7 +12,7 @@
 namespace cmd
 {
 
-    // The options several commands share (DQ-12): one declaration of each, so the name, the
+    // The options several commands share: one declaration of each, so the name, the
     // short letter, the text and the default are the same in every command's help. They add the
     // option where they are called, so the order of the help is the order of the calls.
 

@@ -87,23 +87,23 @@ VegetationEngine& VegetationEngine::instance() {
 }
 
 void VegetationEngine::initFormulas() {
-    // Phase 0 - RGB indices
+    // RGB indices
     formulas_.push_back({"VARI", "Visual Atmospheric Resistance Index", "(G - R) / (G + R - B)", "Areas of green vegetation on RGB images", -1, 1, true, "RGB"});
     formulas_.push_back({"EXG", "Excess Green Index", "(2 * G) - (R + B)", "Emphasizes green foliage", 0, 0, false, "RGB"});
     formulas_.push_back({"GLI", "Green Leaf Index", "((G * 2) - R - B) / ((G * 2) + R + B)", "Green leaves and stems", -1, 1, true, "RGB"});
     formulas_.push_back({"vNDVI", "Visible NDVI", "0.5268 * (R^-0.1294 * G^0.3389 * B^-0.3118)", "Approximated NDVI for RGB sensors", 0, 0, false, "RGB"});
 
-    // Phase 0 - NIR indices
+    // NIR indices
     formulas_.push_back({"NDVI", "Normalized Difference Vegetation Index", "(N - R) / (N + R)", "Amount of green vegetation", -1, 1, true, "RN"});
     formulas_.push_back({"NDWI", "Normalized Difference Water Index", "(G - N) / (G + N)", "Water content", -1, 1, true, "GN"});
     formulas_.push_back({"GNDVI", "Green NDVI", "(N - G) / (N + G)", "NDVI on green spectrum", -1, 1, true, "GN"});
     formulas_.push_back({"SAVI", "Soil Adjusted Vegetation Index", "(1.5 * (N - R)) / (N + R + 0.5)", "NDVI with soil correction", -1, 1, true, "RN", true});
     formulas_.push_back({"EVI", "Enhanced Vegetation Index", "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)", "Better where NDVI saturates", -1, 1, true, "RBN", true});
 
-    // Phase 0 - Red Edge
+    // Red edge
     formulas_.push_back({"NDRE", "Normalized Difference Red Edge", "(N - Re) / (N + Re)", "Green vegetation in mature crops", -1, 1, true, "NRe"});
 
-    // Phase 1 formulas
+    // More indices
     formulas_.push_back({"NDYI", "Normalized Difference Yellowness Index", "(G - B) / (G + B)", "Yellowness detection", -1, 1, true, "GB"});
     formulas_.push_back({"MPRI", "Modified Photochemical Reflectance Index", "(G - R) / (G + R)", "Photochemical reflectance", -1, 1, true, "RG"});
     formulas_.push_back({"OSAVI", "Optimized Soil Adjusted Vegetation Index", "(N - R) / (N + R + 0.16)", "Optimized for sparse vegetation", -1, 1, true, "RN", true});

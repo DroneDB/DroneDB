@@ -15,14 +15,14 @@
 #include "fs.h"
 
 /**
- * Entry-type handler registry (DQ-08, decision D8): everything libddb knows about one entry
+ * Entry-type handler registry: everything libddb knows about one entry
  * type lives in one EntryHandler (src/library/entry_handler_<type>.cpp), registered once by
  * its EntryType. Detection, metadata parsing, build dispatch, completeness, sidecars,
  * thumbnails, tiling and the artifact manifest all ask the registry, so a new type is one new
  * handler file plus one registration (registerBuiltinEntryHandlers, entry_handler_registry.cpp)
  * and no other code changes.
  *
- * The artifact list of a handler (artifacts()) is the role-tagged manifest of XI-04: the roles
+ * The artifact list of a handler (artifacts()) is the role-tagged build manifest: the roles
  * are a stable vocabulary that says what an artifact is for, the paths are composed from the
  * names in build_layout.h.
  */
@@ -33,7 +33,7 @@ class Tiler;
 struct Entry;
 struct FingerprintContext;
 
-// ---- Artifact manifest (XI-04) -------------------------------------------------------------
+// ---- Artifact manifest -------------------------------------------------------------
 
 enum class ArtifactKind { File, Directory };
 
@@ -163,7 +163,7 @@ class EntryHandler {
     bool buildable() const { return !subfolder().empty(); }
     // An entry of this type is built (a handler may exclude some entries, e.g. by location)
     virtual bool isBuildable(const Entry& /*e*/) const { return buildable(); }
-    // Every artifact a build of this type can produce (XI-04 manifest)
+    // Every artifact a build of this type can produce (the build manifest)
     virtual std::vector<BuildArtifact> artifacts() const { return {}; }
     // The top-level folders of artifacts() in "<build root>/<hash>/", in order, without
     // duplicates (legacy artifacts excluded)

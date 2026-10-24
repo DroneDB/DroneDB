@@ -99,7 +99,7 @@ namespace ddb
     /// Reads window of every band as float, masks the transparent and nodata pixels and applies
     /// the formula: buffers.result holds window.outPixels() values, NODATA_SENTINEL where a pixel
     /// has none, the pixels that mask being those of `mask`. With BandsRead the bands that are not
-    /// read have a null entry in buffers.ptrs. The read stops with the call that is canceled (DQ-15).
+    /// read have a null entry in buffers.ptrs. The read stops with the call that is canceled.
     void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
                               FormulaBuffers &buffers, NodataMask mask = NodataMask::AnyBand);
 

@@ -4,7 +4,7 @@
 #ifndef ENV_H
 #define ENV_H
 
-// Integer settings read from the environment (DQ-07), ddb::env: the one parser of the
+// Integer settings read from the environment, ddb::env: the one parser of the
 // DDB_*_MAX_*, *_TIMEOUT_SECONDS, *_SIZE and *_MB variables. A value is a non-empty string of
 // decimal digits in the accepted range: no sign, no space, no suffix ("12abc", "-1", "0x10" and
 // "1e3" are invalid, where std::stoul read 12, a huge number, 0 and 1). An empty variable is

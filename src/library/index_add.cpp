@@ -145,7 +145,7 @@ namespace ddb
     };
 
     // Result of the COMPUTE phase: a fully parsed entry, ready to be written. Computed with
-    // no transaction held so hashing/EXIF/GDAL/PDAL cost never blocks other writers (I1).
+    // no transaction held so hashing/EXIF/GDAL/PDAL cost never blocks other writers.
     struct ComputedAddItem {
         Entry entry;
         bool isUpdate = false;
@@ -277,7 +277,7 @@ namespace ddb
 
     // COMPUTE: hashing, fingerprinting, EXIF/GDAL/PDAL metadata extraction. No transaction is
     // held during this phase; this is the part that used to run for the whole duration of the
-    // write lock (C1/I1). Items are independent, so they run on indexThreads() threads; the
+    // write lock. Items are independent, so they run on indexThreads() threads; the
     // results, errors and unchanged paths keep the input order.
     //
     // Item-scoped exceptions (FSException, GDALException, PDALException, JSONException,
@@ -428,7 +428,7 @@ namespace ddb
             if (callback != nullptr)
                 if (!callback(ci.entry, updated)) {
                     // tx's destructor rolls back; log it explicitly so a canceled batch
-                    // is never a silent loss (C8).
+                    // is never a silent loss.
                     LOGD << "Add operation canceled by callback, rolling back transaction";
                     return outcome;
                 }
@@ -442,7 +442,7 @@ namespace ddb
 
     } // namespace
 
-    // DDB-12: a .prj gives its shapefile or CAD drawing a coordinate system.
+    // A .prj gives its shapefile or CAD drawing a coordinate system.
     // Adding, changing or removing one changes the main file's footprint and
     // makes its built vector artifacts stale: re-parse the main entry and drop
     // those artifacts, so the next build (the .prj's own, or any later one)

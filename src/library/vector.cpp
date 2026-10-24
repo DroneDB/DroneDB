@@ -227,7 +227,7 @@ namespace ddb
                 GDALVectorTranslateOptionsNew(argv.List(), nullptr));
             if (!opts)
                 throw AppException("Cannot create GDAL VectorTranslate options for GPKG");
-            cancel::GdalProgress progress; // stops when the build is canceled (DQ-15)
+            cancel::GdalProgress progress; // stops when the build is canceled
             progress.attach(opts.get());
 
             CPLErrorReset();
@@ -605,7 +605,7 @@ namespace ddb
                 GDALVectorTranslateOptionsNew(argv.List(), nullptr));
             if (!opts)
                 throw AppException("Cannot create GDAL VectorTranslate options for MVT");
-            cancel::GdalProgress progress; // stops when the build is canceled (DQ-15)
+            cancel::GdalProgress progress; // stops when the build is canceled
             progress.attach(opts.get());
 
             // Reset GDAL error state so CPLGetLastErrorMsg() reflects this op.
