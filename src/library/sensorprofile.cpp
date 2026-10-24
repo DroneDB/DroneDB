@@ -16,34 +16,6 @@
 
 namespace ddb {
 
-// --- BandMapping ---
-
-BandMapping BandMapping::Parse(const std::string &s) {
-    BandMapping bm;
-    // Accept both "4-3-2" and "4,3,2"
-    char sep = (s.find(',') != std::string::npos) ? ',' : '-';
-    std::istringstream iss(s);
-    std::string token;
-    std::vector<int> vals;
-    while (std::getline(iss, token, sep)) {
-        vals.push_back(std::stoi(token));
-    }
-    if (vals.size() >= 3) {
-        bm.r = vals[0];
-        bm.g = vals[1];
-        bm.b = vals[2];
-    }
-    return bm;
-}
-
-std::string BandMapping::toInternalString() const {
-    return std::to_string(r) + "-" + std::to_string(g) + "-" + std::to_string(b);
-}
-
-std::string BandMapping::toApiString() const {
-    return std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b);
-}
-
 // --- JSON serialization ---
 
 void to_json(json &j, const BandMapping &bm) {
@@ -56,14 +28,6 @@ void from_json(const json &j, BandMapping &bm) {
     j.at("b").get_to(bm.b);
 }
 
-void to_json(json &j, const BandInfo &bi) {
-    j = json{{"index", bi.index}, {"name", bi.name}};
-    if (bi.wavelength > 0) j["wavelength"] = bi.wavelength;
-    if (bi.resolution > 0) j["resolution"] = bi.resolution;
-    if (!bi.domain.empty()) j["domain"] = bi.domain;
-    if (!bi.description.empty()) j["description"] = bi.description;
-}
-
 void from_json(const json &j, BandInfo &bi) {
     j.at("index").get_to(bi.index);
     j.at("name").get_to(bi.name);
@@ -71,19 +35,6 @@ void from_json(const json &j, BandInfo &bi) {
     if (j.contains("resolution")) j.at("resolution").get_to(bi.resolution);
     if (j.contains("domain")) j.at("domain").get_to(bi.domain);
     if (j.contains("description")) j.at("description").get_to(bi.description);
-}
-
-void to_json(json &j, const RenderPreset &rp) {
-    j = json{{"id", rp.id}, {"name", rp.name}};
-    if (!rp.description.empty()) j["description"] = rp.description;
-    if (rp.type == "bands" || rp.type.empty()) {
-        j["bandMapping"] = rp.bandMapping;
-    }
-    j["isDefault"] = rp.isDefault;
-    if (!rp.type.empty()) j["type"] = rp.type;
-    if (!rp.stretch.empty()) j["stretch"] = rp.stretch;
-    if (!rp.formula.empty()) j["formula"] = rp.formula;
-    if (!rp.colormap.empty()) j["colormap"] = rp.colormap;
 }
 
 void from_json(const json &j, RenderPreset &rp) {
@@ -98,25 +49,11 @@ void from_json(const json &j, RenderPreset &rp) {
     if (j.contains("colormap")) j.at("colormap").get_to(rp.colormap);
 }
 
-void to_json(json &j, const DetectionCriteria &dc) {
-    j = json{{"bandCount", dc.bandCount}, {"priority", dc.priority}};
-    if (!dc.dataType.empty()) j["dataType"] = dc.dataType;
-    if (!dc.metadataPatterns.empty()) j["metadataPatterns"] = dc.metadataPatterns;
-}
-
 void from_json(const json &j, DetectionCriteria &dc) {
     j.at("bandCount").get_to(dc.bandCount);
     if (j.contains("dataType")) j.at("dataType").get_to(dc.dataType);
     if (j.contains("metadataPatterns")) j.at("metadataPatterns").get_to(dc.metadataPatterns);
     if (j.contains("priority")) j.at("priority").get_to(dc.priority);
-}
-
-void to_json(json &j, const SensorProfile &sp) {
-    j = json{
-        {"id", sp.id}, {"name", sp.name}, {"sensorCategory", sp.sensorCategory},
-        {"detection", sp.detection}, {"bands", sp.bands}, {"presets", sp.presets}
-    };
-    if (!sp.description.empty()) j["description"] = sp.description;
 }
 
 void from_json(const json &j, SensorProfile &sp) {
@@ -134,13 +71,6 @@ void from_json(const json &j, SensorProfile &sp) {
 SensorProfileManager& SensorProfileManager::instance() {
     static SensorProfileManager inst;
     return inst;
-}
-
-void SensorProfileManager::invalidateDetections() {
-    // Detections made with the previous profiles are dropped, and those in progress
-    // are not stored (see detectSensor)
-    generation_++;
-    detections_.clear();
 }
 
 void SensorProfileManager::ensureLoaded() const {
@@ -180,73 +110,6 @@ void SensorProfileManager::ensureLoaded() const {
 
     loaded_ = true;
     LOGD << "Lazy-loaded " << profiles_.size() << " sensor profiles";
-}
-
-void SensorProfileManager::loadDefaults(const std::string &jsonPath) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    invalidateDetections();
-
-    std::string path = jsonPath;
-    if (path.empty()) {
-        fs::path dataFile = io::getDataPath("sensor-profiles.json");
-        path = io::toUtf8(dataFile);
-    }
-
-    if (path.empty() || !fs::exists(io::fromUtf8(path))) {
-        LOGD << "Sensor profiles file not found, using empty profiles";
-        loaded_ = true;
-        return;
-    }
-
-    std::ifstream ifs(io::fromUtf8(path));
-    if (!ifs.is_open()) {
-        throw AppException("Cannot open sensor profiles file: " + path);
-    }
-
-    json root = json::parse(ifs);
-    profiles_.clear();
-
-    if (root.contains("profiles")) {
-        for (const auto &pj : root["profiles"]) {
-            SensorProfile sp = pj.get<SensorProfile>();
-            profiles_.push_back(sp);
-        }
-    }
-
-    // Sort by priority descending
-    std::sort(profiles_.begin(), profiles_.end(), [](const SensorProfile &a, const SensorProfile &b) {
-        return a.detection.priority > b.detection.priority;
-    });
-
-    loaded_ = true;
-    LOGD << "Loaded " << profiles_.size() << " sensor profiles";
-}
-
-void SensorProfileManager::loadOverrides(const std::string &jsonStr) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    invalidateDetections();
-
-    ensureLoaded();
-
-    json root = json::parse(jsonStr);
-    if (root.contains("profiles")) {
-        for (const auto &pj : root["profiles"]) {
-            SensorProfile sp = pj.get<SensorProfile>();
-            // Override existing profile with same id
-            auto it = std::find_if(profiles_.begin(), profiles_.end(),
-                [&sp](const SensorProfile &p) { return p.id == sp.id; });
-            if (it != profiles_.end()) {
-                *it = sp;
-            } else {
-                profiles_.push_back(sp);
-            }
-        }
-    }
-
-    // Re-sort
-    std::sort(profiles_.begin(), profiles_.end(), [](const SensorProfile &a, const SensorProfile &b) {
-        return a.detection.priority > b.detection.priority;
-    });
 }
 
 static std::string gdalDataTypeName(GDALDataType type) {
@@ -300,7 +163,6 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
     // and rescan its metadata, and the lock is not held during the GDAL work
     const auto version = fileVersion(io::fromUtf8(rasterPath));
     std::vector<SensorProfile> profiles;
-    uint64_t generation;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         ensureLoaded();
@@ -316,14 +178,13 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
             }
         }
         profiles = profiles_;
-        generation = generation_;
     }
 
     auto result = detectSensorUncached(rasterPath, profiles);
 
     std::lock_guard<std::mutex> lock(mutex_);
     uncachedDetections_++;
-    if (!version.empty() && generation == generation_) {
+    if (!version.empty()) {
         detections_.remove_if([&](const CachedDetection &d) { return d.path == rasterPath; });
         detections_.push_front(CachedDetection{rasterPath, version, result});
         if (detections_.size() > MaxCachedDetections)

@@ -17,11 +17,6 @@
 namespace ddb
 {
 
-    void to_json(json &j, const SimpleEntry &e)
-    {
-        j = json{{"path", e.path}, {"hash", e.hash}};
-    }
-
     void to_json(json &j, const RemoveAction &e)
     {
         j = json{{"path", e.path}, {"hash", e.hash}};
@@ -75,11 +70,6 @@ namespace ddb
                 d.metaRemoves.push_back(id);
             }
         }
-    }
-
-    Delta getDelta(Database *sourceDb, Database *targetDb)
-    {
-        return getDelta(sourceDb->getStamp(), targetDb->getStamp());
     }
 
     void delta(Database *sourceDb, Database *targetDb, std::ostream &output, OutputFormat format)

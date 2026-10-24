@@ -14,7 +14,10 @@
 #include "sensorprofile.h"
 #include "gdal_inc.h"
 
+#include "mio.h"
+
 #include <cmath>
+#include <fstream>
 
 namespace {
 
@@ -274,15 +277,14 @@ TEST(thermal, nonThermalDetection) {
 // Sensor Profile Detection for Thermal
 // ============================================================
 
-TEST(thermal, sensorProfileDetectsFlir) {
-    auto& spm = SensorProfileManager::instance();
-    spm.loadDefaults();
-
-    // The sensor profiles JSON should include thermal profiles
+TEST(thermal, sensorProfilesIncludeThermal) {
+    // The sensor profiles file shipped next to the library includes thermal profiles
     // that match when a thermal raster is provided
-    auto profiles = spm.getProfiles();
+    std::ifstream file(io::fromUtf8(io::toUtf8(io::getDataPath("sensor-profiles.json"))));
+    ASSERT_TRUE(file.is_open());
+
     bool hasThermal = false;
-    for (const auto& p : profiles) {
+    for (const auto& p : json::parse(file).at("profiles").get<std::vector<SensorProfile>>()) {
         if (p.sensorCategory == "thermal") {
             hasThermal = true;
             break;

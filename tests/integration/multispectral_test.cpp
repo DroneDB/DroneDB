@@ -6,6 +6,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "utils.h"
 
 #include "ddb.h"
 #include "sensorprofile.h"
@@ -31,14 +32,6 @@ using namespace ddb;
 // ============================================================
 // Sensor Profile Tests
 // ============================================================
-
-TEST(multispectral, sensorProfileLoad) {
-    auto& spm = SensorProfileManager::instance();
-    spm.loadDefaults();
-    // Should have loaded profiles even if file doesn't exist (will log warning)
-    // If file exists, should have >= 1 profile
-    SUCCEED();
-}
 
 TEST(multispectral, detectSensorRGB) {
     TestArea ta(TEST_NAME);
@@ -178,9 +171,8 @@ TEST(multispectral, defaultBandMappingFallback) {
 // ============================================================
 
 TEST(multispectral, vegetationFormulaList) {
-    auto& ve = VegetationEngine::instance();
     BandFilter rgbFilter = VegetationEngine::parseFilter("RGB", 3);
-    auto formulas = ve.getFormulasForFilter(rgbFilter, RasterDataKind{"UInt16", false, 3});
+    auto formulas = availableFormulas(rgbFilter, RasterDataKind{"UInt16", false, 3});
 
     // RGB filter should have at least VARI, EXG, GLI, vNDVI
     bool hasVARI = false;
@@ -191,9 +183,8 @@ TEST(multispectral, vegetationFormulaList) {
 }
 
 TEST(multispectral, vegetationFormulaNIR) {
-    auto& ve = VegetationEngine::instance();
     BandFilter rgbnFilter = VegetationEngine::parseFilter("RGBN", 4);
-    auto formulas = ve.getFormulasForFilter(rgbnFilter, RasterDataKind{"UInt16", false, 4});
+    auto formulas = availableFormulas(rgbnFilter, RasterDataKind{"UInt16", false, 4});
 
     // RGBN filter should have NDVI
     bool hasNDVI = false;

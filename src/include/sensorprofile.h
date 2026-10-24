@@ -19,10 +19,6 @@ struct BandMapping {
     int g = 2;
     int b = 3;
 
-    static BandMapping Parse(const std::string &s);
-    std::string toInternalString() const;
-    std::string toApiString() const;
-
     bool operator==(const BandMapping &o) const {
         return r == o.r && g == o.g && b == o.b;
     }
@@ -81,9 +77,6 @@ class SensorProfileManager {
 public:
     static SensorProfileManager& instance();
 
-    void loadDefaults(const std::string &jsonPath = "");
-    void loadOverrides(const std::string &jsonStr);
-
     // Detection is memoised per file version (fileVersion)
     SensorDetectionResult detectSensor(const std::string &rasterPath) const;
     // Detections that opened the raster (cache misses), for tests and diagnostics
@@ -92,8 +85,6 @@ public:
     BandMapping getBandMappingForPreset(const std::string &rasterPath, const std::string &presetId) const;
 
     std::string getRasterInfoJson(const std::string &rasterPath) const;
-
-    const std::vector<SensorProfile>& getProfiles() const { return profiles_; }
 
 private:
     SensorProfileManager() = default;
@@ -108,7 +99,6 @@ private:
     BandMapping getFallbackMapping(const std::string &rasterPath, int bandCount) const;
     SensorDetectionResult detectSensorUncached(const std::string &rasterPath,
                                                const std::vector<SensorProfile> &profiles) const;
-    void invalidateDetections();
 
     struct CachedDetection {
         std::string path;
@@ -121,7 +111,6 @@ private:
     mutable std::vector<SensorProfile> profiles_;
     mutable bool loaded_ = false;
     mutable std::list<CachedDetection> detections_; // most recently used first
-    mutable uint64_t generation_ = 0;
     mutable uint64_t uncachedDetections_ = 0;
 
     void ensureLoaded() const;
@@ -130,13 +119,9 @@ private:
 // JSON serialization
 void to_json(json &j, const BandMapping &bm);
 void from_json(const json &j, BandMapping &bm);
-void to_json(json &j, const BandInfo &bi);
 void from_json(const json &j, BandInfo &bi);
-void to_json(json &j, const RenderPreset &rp);
 void from_json(const json &j, RenderPreset &rp);
-void to_json(json &j, const DetectionCriteria &dc);
 void from_json(const json &j, DetectionCriteria &dc);
-void to_json(json &j, const SensorProfile &sp);
 void from_json(const json &j, SensorProfile &sp);
 
 } // namespace ddb

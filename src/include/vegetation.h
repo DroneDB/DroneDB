@@ -79,12 +79,9 @@ public:
 
     const std::vector<VegetationFormula>& getAllFormulas() const { return formulas_; }
 
-    // The formulas a raster can compute: those whose bands filter maps and whose data it can take
-    std::vector<VegetationFormula> getFormulasForFilter(const BandFilter &filter, const RasterDataKind &data) const;
-
     // Why a raster cannot compute a formula, "" when it can: the one availability rule, which
-    // the lists of formulas (getFormulasForFilter, the raster metadata) and the planning of every
-    // render (planFormula) all ask. A band the filter does not map is "Requires bands: ..."
+    // the list of formulas of the raster metadata and the planning of every
+    // render (planFormula) both ask. A band the filter does not map is "Requires bands: ..."
     static std::string unavailableReason(const VegetationFormula &formula, const BandFilter &filter,
                                          const RasterDataKind &data);
 
@@ -147,9 +144,6 @@ public:
 
     // Get the listed colormaps as JSON (summary with sample colors)
     json getColormapsJson() const;
-
-    // Get formulas as JSON for a given filter
-    json getFormulasJson(const BandFilter &filter, const RasterDataKind &data) const;
 
 private:
     VegetationEngine();

@@ -174,15 +174,6 @@ std::string VegetationEngine::unavailableReason(const VegetationFormula &formula
     return dataRefusal(formula, data);
 }
 
-std::vector<VegetationFormula> VegetationEngine::getFormulasForFilter(const BandFilter &filter,
-                                                                      const RasterDataKind &data) const {
-    std::vector<VegetationFormula> result;
-    for (const auto &f : formulas_) {
-        if (unavailableReason(f, filter, data).empty()) result.push_back(f);
-    }
-    return result;
-}
-
 const VegetationFormula* VegetationEngine::getFormula(const std::string &id) const {
     for (const auto &f : formulas_) {
         if (f.id == id) return &f;
@@ -462,23 +453,6 @@ json VegetationEngine::getColormapsJson() const {
         }
         cj["colors"] = colors;
         arr.push_back(cj);
-    }
-    return arr;
-}
-
-json VegetationEngine::getFormulasJson(const BandFilter &filter, const RasterDataKind &data) const {
-    auto formulas = getFormulasForFilter(filter, data);
-    json arr = json::array();
-    for (const auto &f : formulas) {
-        json fj;
-        fj["id"] = f.id;
-        fj["name"] = f.name;
-        fj["expr"] = f.expr;
-        fj["help"] = f.help;
-        if (f.hasRange) {
-            fj["range"] = {f.rangeMin, f.rangeMax};
-        }
-        arr.push_back(fj);
     }
     return arr;
 }

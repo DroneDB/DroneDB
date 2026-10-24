@@ -89,7 +89,6 @@ namespace ddb
         }
     };
 
-    void to_json(json &j, const SimpleEntry &e);
     void to_json(json &j, const RemoveAction &e);
     void to_json(json &j, const AddAction &e);
     void to_json(json &j, const Delta &d);
@@ -109,8 +108,6 @@ namespace ddb
                            const std::vector<SimpleEntry> &destination,
                            std::vector<AddAction> &adds,
                            std::vector<RemoveAction> &removes);
-
-    Delta getDelta(Database *sourceDb, Database *targetDb);
 
     /// Writes the delta as text (one "A"/"D" line per change) or JSON; any other format throws an
     /// InvalidArgsException

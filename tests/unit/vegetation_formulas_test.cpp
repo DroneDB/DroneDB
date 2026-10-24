@@ -22,6 +22,7 @@
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 #include "raster_test_utils.h"
 
 #include "ddb.h"
@@ -315,7 +316,7 @@ namespace
 
         const auto ids = [&](const BandFilter &filter, const RasterDataKind &data) {
             std::vector<std::string> out;
-            for (const VegetationFormula &f : engine.getFormulasForFilter(filter, data))
+            for (const VegetationFormula &f : availableFormulas(filter, data))
                 out.push_back(f.id);
             return out;
         };
@@ -345,9 +346,6 @@ namespace
         EXPECT_EQ(VegetationEngine::unavailableReason(*engine.getFormula("EVI"), all, floating), "");
         const std::string reason = VegetationEngine::unavailableReason(*engine.getFormula("EVI"), all, integer);
         EXPECT_EQ(reason, "EVI needs reflectance values (0 to 1, a floating-point raster): the raster is UInt16, whose values are not reflectance");
-
-        // The JSON list is the same list
-        EXPECT_EQ(engine.getFormulasJson(all, integer).size(), onIntegers.size());
     }
 
     // What a raster is asked before a formula is planned (thumbnails, tiles, exports and the statistics of
