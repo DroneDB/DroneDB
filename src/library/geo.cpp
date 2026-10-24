@@ -48,7 +48,7 @@ namespace ddb
 
     double angNormalize(double x)
     {
-        x = remainderx(x, (double)(360));
+        x = remainderx(x, static_cast<double>(360));
         return x != -180 ? x : 180;
     }
 

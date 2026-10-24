@@ -123,13 +123,13 @@ namespace ddb
     {
         if (d < 0.0)
             d = -d; // No negative numbers allowed
-        int deg = (int)d;
+        int deg = static_cast<int>(d);
         d -= deg;
         d *= 60;
-        int min = (int)d;
+        int min = static_cast<int>(d);
         d -= min;
         d *= 60;
-        int sec = (int)round(d * 10000.0);
+        int sec = static_cast<int>(round(d * 10000.0));
 
         return std::to_string(deg) + "/1 " +
                std::to_string(min) + "/1 " +
@@ -143,7 +143,7 @@ namespace ddb
             d = -d; // No negative numbers allowed
         d *= pow(10.0, precision);
 
-        std::string res = std::to_string((int)d) + "/1";
+        std::string res = std::to_string(static_cast<int>(d)) + "/1";
         for (int i = 0; i < precision; i++)
             res += "0";
         return res;
