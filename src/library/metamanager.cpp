@@ -3,6 +3,7 @@
 #include "metakey.h"
 #include "stringutil.h"
 #include "database.h"
+#include "entry_path.h"
 #include "mio.h"
 #include "exceptions.h"
 #include "timeutil.h"
@@ -274,7 +275,8 @@ namespace ddb
             // Singular entries should be unique
             // (do not allow duplicates, keep latest by mtime)
             const auto key = meta["key"].get<std::string>();
-            const auto path = meta["path"].get<std::string>();
+            // "" is the dataset itself; the path of an entry is normalized (entry_path.h)
+            const auto path = optionalEntryPath(meta["path"].get<std::string>(), "meta path");
             const auto mtime = meta["mtime"].get<long long>();
 
             // Singular key?

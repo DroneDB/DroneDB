@@ -215,21 +215,6 @@ namespace ddb
 
     namespace
     {
-        // Dataset-relative folder without "." parts and trailing separators ("" = root)
-        std::string normalizeFolder(const std::string &folder)
-        {
-            std::string normalized = io::toGenericUtf8(io::fromUtf8(folder).lexically_normal());
-            while (!normalized.empty() && normalized.back() == '/')
-                normalized.pop_back();
-            if (normalized == ".")
-                normalized.clear();
-
-            const fs::path p = io::fromUtf8(normalized);
-            if (p.is_absolute() || p.has_root_name() || (!normalized.empty() && *p.begin() == ".."))
-                throw InvalidArgsException("Invalid folder: " + folder);
-            return normalized;
-        }
-
         // LIKE pattern (escape character '/') matching every path whose file name may match
         // namePattern; matchesNamePattern() decides. '%' can span folders, so it selects more.
         // SQLite's LIKE folds ASCII letters only, so when matchesNamePattern() folds Unicode (a
@@ -272,7 +257,7 @@ namespace ddb
 
     std::vector<Entry> listEntries(Database *db, const EntryQuery &query)
     {
-        const std::string folder = normalizeFolder(query.folder);
+        const std::string folder = requireEntryFolder(query.folder);
 
         SqlConditions conditions;
 

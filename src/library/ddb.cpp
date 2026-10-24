@@ -81,6 +81,8 @@ using namespace ddb;
 // The template argument names the codes besides NONE and EXCEPTION it may return: none means
 // kFrozenCodes (exports of 1.x), kNewExportCodes is for the exports added in 2.0.
 using capi::codeBit;
+using capi::entryPathArg;
+using capi::entryPathList;
 using capi::guarded;
 using capi::guardedBuffer;
 using capi::guardedOutput;
@@ -89,6 +91,7 @@ using capi::isValidNonEmptyStringParam;
 using capi::isValidStringParam;
 using capi::kNewExportCodes;
 using capi::kFrozenCodes;
+using capi::optEntryPathArg;
 using capi::optStr;
 using capi::parseJsonArg;
 using capi::pathArg;
@@ -515,13 +518,13 @@ DDBErr DDBCheckpoint(const char* ddbPath, int* complete) {
 DDBErr DDBGet(const char* ddbPath, const char* path, char** output) {
     return guardedOutput<kFrozenCodes | codeBit(DDBERR_NOTFOUND)>(output, [&] {
         requireDdbPath(ddbPath);
-        requireText(path, "No path provided");
+        const auto entryPath = entryPathArg(path, "No path provided");
 
         const auto db = ddb::open(std::string(ddbPath), false);
 
-        const auto entry = ddb::getEntryWithMeta(db.get(), std::string(path));
+        const auto entry = ddb::getEntryWithMeta(db.get(), entryPath);
         if (!entry)
-            throw EntryNotFoundException("No entry " + std::string(path));
+            throw EntryNotFoundException("No entry " + entryPath);
         return json(*entry).dump();
     });
 }
@@ -604,10 +607,13 @@ DDBErr DDBSearch(const char* ddbPath, const char* query, char** output, const ch
 
         requireOutput(output);
 
+        // The query is a pattern over entry paths: '*' is an ordinary character of the rule
+        const auto pattern = optEntryPathArg(query, "query");
+
         const auto db = ddb::open(std::string(ddbPath), false);
 
         std::ostringstream ss;
-        searchIndex(db.get(), query, ss, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}));
+        searchIndex(db.get(), pattern, ss, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}));
         return ss.str();
     });
 }
@@ -1055,11 +1061,11 @@ DDBErr DDBRescanEx(const char* ddbPath, char** output, const char* types, const 
 DDBErr DDBMoveEntry(const char* ddbPath, const char* source, const char* dest) {
     return guarded([&] {
         requireDdbPath(ddbPath);
-        requireText(source, "No source path provided");
-        requireText(dest, "No dest path provided");
+        const auto from = entryPathArg(source, "No source path provided", "source path");
+        const auto to = entryPathArg(dest, "No dest path provided", "dest path");
 
         const auto ddb = ddb::open(std::string(ddbPath), true);
-        moveEntry(ddb.get(), std::string(source), std::string(dest));
+        moveEntry(ddb.get(), from, to);
     });
 }
 
@@ -1072,11 +1078,12 @@ DDBErr DDBBuild(const char* ddbPath, const char* source, const char* dest, bool 
     return guarded<kBuildCodes>([&] {
         requireText(ddbPath, "No ddb path provided");
 
-        const auto ddb = ddb::open(std::string(ddbPath), true);
-
-        // dest and source can be null (optional parameters)
+        // dest and source can be null (optional parameters); dest is a folder of the
+        // filesystem, source an entry path
         const auto destPath = optStr(dest);
-        const auto path = optStr(source);
+        const auto path = optEntryPathArg(source, "source path");
+
+        const auto ddb = ddb::open(std::string(ddbPath), true);
 
         if (path.empty()) {
             if (pendingOnly)
@@ -1113,8 +1120,9 @@ DDBErr DDBIsBuildable(const char* ddbPath, const char* path, bool* isBuildable) 
 
         requireOutput(isBuildable, "Buildable parameter is null");
 
+        const auto entryPath = optEntryPathArg(path);
         const auto ddb = ddb::open(std::string(ddbPath), true);
-        return ddb::isBuildable(ddb.get(), std::string(path));
+        return ddb::isBuildable(ddb.get(), entryPath);
     });
 }
 
@@ -1153,29 +1161,29 @@ DDBErr DDBGetPendingBuildInfo(const char* ddbPath, char** output) {
 DDBErr DDBIsBuildActive(const char* ddbPath, const char* path, bool* isBuildActive) {
     return guardedOutput(isBuildActive, [&] {
         requireDdbPath(ddbPath);
-        requireText(path, "No path provided");
+        const auto entryPath = entryPathArg(path, "No path provided");
         requireOutput(isBuildActive, "isBuildActive parameter is null");
 
         const auto ddb = ddb::open(std::string(ddbPath), true);
-        return ddb::isBuildActive(ddb.get(), std::string(path));
+        return ddb::isBuildActive(ddb.get(), entryPath);
     });
 }
 
 DDBErr DDBIsBuildComplete(const char* ddbPath, const char* path, bool* isBuildComplete) {
     return guardedOutput(isBuildComplete, [&] {
         requireDdbPath(ddbPath);
-        requireText(path, "No path provided");
+        const auto entryPath = entryPathArg(path, "No path provided");
         requireOutput(isBuildComplete, "isBuildComplete parameter is null");
 
         const auto ddb = ddb::open(std::string(ddbPath), true);
-        return ddb::isBuildComplete(ddb.get(), std::string(path));
+        return ddb::isBuildComplete(ddb.get(), entryPath);
     });
 }
 
 DDBErr DDBGetBuildStatus(const char* ddbPath, const char** paths, int numPaths, char** output) {
     return guardedOutput(output, [&] {
         requireDdbPath(ddbPath);
-        const auto pathList = capi::toStringList(paths, numPaths);
+        const auto pathList = entryPathList(paths, numPaths);
         requireOutput(output);
 
         const auto ddb = ddb::open(std::string(ddbPath), true);
@@ -1200,7 +1208,7 @@ DDBErr DDBGetEntryTypes(char** output) {
 DDBErr DDBGetBuildArtifacts(const char* ddbPath, const char** paths, int numPaths, char** output) {
     return guardedOutput<kNewExportCodes>(output, [&] {
         requireDdbPath(ddbPath);
-        const auto pathList = capi::toStringList(paths, numPaths);
+        const auto pathList = entryPathList(paths, numPaths);
         requireOutput(output);
 
         const auto db = ddb::open(std::string(ddbPath), false);
@@ -1257,11 +1265,12 @@ DDBErr DDBMetaAdd(const char* ddbPath,
                         {{path, "No path provided"}, {key, "No key provided"}, {data, "No data provided"}},
                         output);
 
+        const auto entryPath = optEntryPathArg(path);
         const auto ddbPathStr = std::string(ddbPath);
         const auto ddb = ddb::open(ddbPathStr, true);
         return ddb->getMetaManager()->add(std::string(key),
                                           std::string(data),
-                                          std::string(path),
+                                          entryPath,
                                           ddbPathStr);
     });
 }
@@ -1276,11 +1285,12 @@ DDBErr DDBMetaSet(const char* ddbPath,
                         {{path, "No path provided"}, {key, "No key provided"}, {data, "No data provided"}},
                         output);
 
+        const auto entryPath = optEntryPathArg(path);
         const auto ddbPathStr = std::string(ddbPath);
         const auto ddb = ddb::open(ddbPathStr, true);
         return ddb->getMetaManager()->set(std::string(key),
                                           std::string(data),
-                                          std::string(path),
+                                          entryPath,
                                           ddbPathStr);
     });
 }
@@ -1298,9 +1308,10 @@ DDBErr DDBMetaGet(const char* ddbPath, const char* path, const char* key, char**
     return guardedOutput(output, [&] {
         requireMetaArgs(ddbPath, {{path, "No path provided"}, {key, "No key provided"}}, output);
 
+        const auto entryPath = optEntryPathArg(path);
         const auto ddbPathStr = std::string(ddbPath);
         const auto ddb = ddb::open(ddbPathStr, true);
-        return ddb->getMetaManager()->get(std::string(key), std::string(path), ddbPathStr);
+        return ddb->getMetaManager()->get(std::string(key), entryPath, ddbPathStr);
     });
 }
 
@@ -1308,8 +1319,9 @@ DDBErr DDBMetaUnset(const char* ddbPath, const char* path, const char* key, char
     return guardedOutput(output, [&] {
         requireMetaArgs(ddbPath, {{path, "No path provided"}, {key, "No key provided"}}, output);
 
+        const auto entryPath = optEntryPathArg(path);
         const auto ddb = ddb::open(std::string(ddbPath), true);
-        return ddb->getMetaManager()->unset(std::string(key), std::string(path), std::string(ddbPath));
+        return ddb->getMetaManager()->unset(std::string(key), entryPath, std::string(ddbPath));
     });
 }
 
@@ -1317,9 +1329,10 @@ DDBErr DDBMetaList(const char* ddbPath, const char* path, char** output) {
     return guardedOutput(output, [&] {
         requireMetaArgs(ddbPath, {{path, "No path provided"}}, output);
 
+        const auto entryPath = optEntryPathArg(path);
         const auto ddbPathStr = std::string(ddbPath);
         const auto ddb = ddb::open(ddbPathStr, true);
-        return ddb->getMetaManager()->list(std::string(path), ddbPathStr);
+        return ddb->getMetaManager()->list(entryPath, ddbPathStr);
     });
 }
 
@@ -1407,9 +1420,10 @@ DDBErr DDBStac(const char* ddbPath,
 
         // entry, stacCollectionRoot, id, stacCatalogRoot can be null/empty - they are optional
         // parameters
+        const auto entryPath = optEntryPathArg(entry, "entry path");
         const auto ddb = ddb::open(std::string(ddbPath), false);
         return ddb::generateStac(std::string(ddbPath),
-                                 optStr(entry),
+                                 entryPath,
                                  optStr(stacCollectionRoot),
                                  optStr(id),
                                  optStr(stacCatalogRoot));
@@ -1451,7 +1465,7 @@ DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output) {
         requireDdbPath(ddbPath);
         requireOutput(output);
 
-        return ddb::generateStacData(std::string(ddbPath), optStr(entry));
+        return ddb::generateStacData(std::string(ddbPath), optEntryPathArg(entry, "entry path"));
     });
 }
 

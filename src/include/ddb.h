@@ -49,7 +49,8 @@ extern "C"
      * codes its documentation names, DDBERR_NONE and DDBERR_EXCEPTION. In 2.0 the exports
      * that existed in 1.x keep the codes they always returned: an invalid argument and a
      * retryable failure are DDBERR_EXCEPTION there; DDBERR_INVALIDARGS and DDBERR_RETRYABLE are
-     * returned by the exports added in 2.0 only. Every export but the exempt ones (see
+     * returned by the exports added in 2.0 only, with one exception: an entry path that the
+     * path rules refuse is DDBERR_INVALIDARGS in every export (see "Entry paths"). Every export but the exempt ones (see
      * DDBShutdown) returns DDBERR_SHUTDOWN once DDBShutdown started, and DDBERR_CANCELED when
      * the caller set a cancel token on the thread (DDBSetThreadCancelToken) and canceled it. */
     typedef enum DDBErr
@@ -338,7 +339,7 @@ extern "C"
      * NUL-terminated API), "encoding" (not valid UTF-8), "absolute" (leading '/' or '\', a UNC
      * path, a drive "X:"), "traversal" (a ".." segment), "empty" (nothing left, e.g. "./"),
      * "reserved". New codes may be added; treat an unknown code as a rejection.
-     * The existing exports do not apply these rules yet (new in 2.0).
+     * Every export that takes an entry path applies these rules (see "Entry paths").
      * @param path the path (UTF-8)
      * @param reservedJson NULL, "" or a JSON array of extra names reserved as the FIRST segment
      *                     only, e.g. [".uploads"]; each name is one segment (no separator, not
@@ -348,6 +349,32 @@ extern "C"
      * @return DDBERR_NONE for an accepted and for a rejected path; DDBERR_INVALIDARGS when path
      *         or output is NULL or reservedJson is invalid (see DDBGetLastError) */
     DDB_DLL DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output);
+
+    /* Entry paths (DQ-09, XI-09, new in 2.0). An entry path is a path inside the dataset, relative
+     * to its root ("photos/a.jpg"), as the index stores it. Every export that takes one applies
+     * the rules of DDBNormalizePath to it: '\' and '/' separate segments, "." segments and
+     * repeated or trailing separators are dropped, and the call works on the normalized path
+     * (so "a\b", "./a//b/" and "a/b" are one entry). A path that is absolute, has a ".." segment,
+     * names the reserved ".ddb" folder (at any depth) or is not valid UTF-8 is refused: the call
+     * returns DDBERR_INVALIDARGS (also the exports of 1.x, whose other invalid arguments stay
+     * DDBERR_EXCEPTION), changes nothing, and DDBGetLastError() reads
+     * "Invalid <argument> '<path>': <rejection code>" (DDBGetLastErrorReason() is ""). Only the
+     * paths of these exports are entry paths:
+     *   DDBGet (path), DDBListEntries and DDBListEntriesEx (folder: "" and "." are the root),
+     *   DDBSearch (query: a pattern over entry paths, "" for all), DDBMoveEntry (source, dest),
+     *   DDBBuild (source: "" for all), DDBIsBuildable, DDBIsBuildActive, DDBIsBuildComplete (path),
+     *   DDBGetBuildStatus and DDBGetBuildArtifacts (paths), DDBMetaAdd, DDBMetaSet, DDBMetaGet,
+     *   DDBMetaUnset and DDBMetaList (path: "" is the dataset itself), DDBMetaRestore (the "path"
+     *   of each row of the dump), DDBStac and DDBStacData (entry: "" is the collection),
+     *   DDBResolveBuildFile (path, relative to the build folder: it applied the rules since 2.0),
+     *   and the paths inside a delta (DDBApplyDelta, DDBApplyDeltaEx, DDBComputeDeltaLocals: the
+     *   adds, the removes and the keys of verifiedHashes; "" stays the dataset root of delta
+     *   files written by older versions).
+     * The paths of the filesystem are not entry paths and keep their meaning (an absolute path, or
+     * a path relative to the working directory, in the platform's separators): the files
+     * DDBAdd, DDBAddWithOptions and DDBAddWithHints add, the paths of DDBRemove, DDBList and
+     * DDBInfo (DDBRemove and DDBList resolve them against the dataset root), dataset folders
+     * (ddbPath), output files and DDBBuild's dest. */
 
     /** Initialize a DroneDB database
      * @param directory Path to directory where to initialize the database
@@ -417,7 +444,8 @@ extern "C"
 
     /** Remove one or more files to a DroneDB database
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param paths array of paths to add to index
+     * @param paths array of filesystem paths of files in the dataset (absolute, or relative
+     *        to the working directory): not entry paths (see "Entry paths")
      * @param numPaths number of paths
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths);
@@ -456,14 +484,17 @@ extern "C"
 
     /** Retrieve a single entry from the index, including its metadata
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param path dataset-relative path of the entry (exact match, no wildcards)
+     * @param path dataset-relative path of the entry (exact match, no wildcards; an entry path,
+     *        see "Entry paths")
      * @param output pointer to C-string where to store result (JSON)
-     * @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path, an error otherwise */
+     * @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path,
+     *         DDBERR_INVALIDARGS if the path is refused, an error otherwise */
     DDB_DLL DDBErr DDBGet(const char *ddbPath, const char *path, char **output);
 
     /** List files inside index
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param paths array of paths to parse
+     * @param paths array of filesystem paths (absolute, or relative to the working directory;
+     *        none: the working directory) resolved against the dataset root: not entry paths
      * @param numPaths number of paths
      * @param output pointer to C-string where to store result
      * @param format output format. One of: ["text", "json"]
@@ -475,7 +506,8 @@ extern "C"
     /** List the entries below a folder that match a file name pattern and entry types. The
      * filters run in the index query, so non-matching entries are never read or serialized.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param folder dataset-relative folder, "" for the dataset root; a file selects itself
+     * @param folder dataset-relative folder ("" and "." for the dataset root; an entry path, see
+     *        "Entry paths"); a file selects itself
      * @param recursive the whole subtree of the folder (true) or its children only (false)
      * @param namePattern file name pattern ('*' any characters, '?' one character, letters in any
      *                    case: Unicode simple case folding since 2.0, ASCII only before; a
@@ -491,7 +523,8 @@ extern "C"
 
     /** Search files inside index
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param query search string
+     * @param query search string: a pattern over entry paths ('*' any characters; see "Entry
+     *        paths"), "" for every entry
      * @param output pointer to C-string where to store result
      * @param format output format. One of: ["text", "json"]
      * @return DDBERR_NONE on success, an error otherwise */
@@ -594,7 +627,8 @@ extern "C"
     /** Apply a delta on a database. The added files are moved out of sourcePath, and each
      * must match the hash in the delta (checked before any change; set the environment
      * variable DDB_VERIFY_PUSH_HASHES=0 to skip the check; DDBApplyDeltaEx skips it per file)
-     * @param delta JSON delta between databases
+     * @param delta JSON delta between databases; its paths are entry paths (see "Entry paths":
+     *        one refused path refuses the call before anything changes)
      * @param sourcePath path to source database (or path to partial files to be added)
      * @param ddbPath path to DroneDB database to which the delta should be applied
      * @param mergeStrategy merge strategy to use
@@ -625,7 +659,7 @@ extern "C"
     /** Compute map of local files that are available for delta adds operations
      * @param delta JSON delta between databases
      * @param ddbPath path to DroneDB database to which the delta should be applied
-     * @param hlDestFolder path to folder where to create hard links for available files (or "" to not create hard links)
+     * @param hlDestFolder path to folder where to create hard links for available files (or "" to not create hard links); the delta's paths (entry paths, see "Entry paths") are created under it
      * @param output pointer to C-string where to store map of hashes (JSON)
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBComputeDeltaLocals(const char *delta, const char *ddbPath, const char *hlDestFolder, char **output);
@@ -677,14 +711,14 @@ extern "C"
 
     /** Move entry
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     * @param source source entry path
+     * @param source source entry path (see "Entry paths")
      * @param dest dest entry path
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success, DDBERR_INVALIDARGS if a path is refused, an error otherwise */
     DDB_DLL DDBErr DDBMoveEntry(const char *ddbPath, const char *source, const char *dest);
 
     /** Build
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     * @param source source entry path (optional, if not specified: build all)
+     * @param source source entry path (see "Entry paths"; optional, if not specified: build all)
      * @param dest dest filesystem path (optional, if not specified: default path)
      * @param force rebuild if already existing (default false)
      * @param pendingOnly retry only pending (deferred) builds (default false). Each due
@@ -712,7 +746,7 @@ extern "C"
 
     /** IsBuildable
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     * @param path Entry path
+     * @param path Entry path (see "Entry paths")
      * @param isBuildable if the entry is buildable
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBuildable);
@@ -741,7 +775,7 @@ extern "C"
 
     /** IsBuildActive
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     * @param path Entry path to check if build is active for this entry
+     * @param path Entry path (see "Entry paths") to check if build is active for this entry
      * @param isBuildActive if a build is currently active for this entry
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildActive(const char *ddbPath, const char *path, bool *isBuildActive);
@@ -751,7 +785,7 @@ extern "C"
      *  non-zero content. Returns false for non-buildable entries, missing
      *  outputs, or empty stub folders left by interrupted builds.
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     * @param path Entry path to check
+     * @param path Entry path (see "Entry paths") to check
      * @param isBuildComplete out: true if build output is complete and valid
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildComplete(const char *ddbPath, const char *path, bool *isBuildComplete);
@@ -759,7 +793,8 @@ extern "C"
     /** GetBuildStatus
      *  DDBIsBuildable and DDBIsBuildComplete for several entries with one index open.
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     * @param paths array of dataset-relative entry paths (exact match)
+     * @param paths array of dataset-relative entry paths (exact match; see "Entry paths": one
+     *        refused path refuses the call), "path" below is the normalized spelling
      * @param numPaths number of paths
      * @param output pointer to C-string where to store result (JSON array, one element per
      *               input path, in input order). Each element:
@@ -853,7 +888,7 @@ extern "C"
      * (XI-04, new in 2.0). For a host it replaces DDBIsBuildable, DDBIsBuildActive,
      * DDBIsBuildComplete, DDBIsBuildPending, DDBGetPendingBuildInfo and DDBGetBuildStatus.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param paths array of dataset-relative entry paths (exact match)
+     * @param paths array of dataset-relative entry paths (exact match; see "Entry paths")
      * @param numPaths number of paths (0 is allowed)
      * @param output pointer to C-string where to store the JSON array, one element per input
      *               path, in input order (free with DDBFree):
@@ -929,7 +964,8 @@ extern "C"
      * the build manifest above), read with the same index connection, so a listing with build
      * states is one call.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param folder dataset-relative folder, "" or NULL for the dataset root; a file selects itself
+     * @param folder dataset-relative folder ("", NULL and "." for the dataset root; an entry path, see
+     *        "Entry paths"); a file selects itself
      * @param namePattern file name pattern as DDBListEntries takes it, "" or NULL for every name
      * @param types comma-separated entry types as DDBListEntries takes them, "" or NULL for all
      * @param options see DDBListEntriesOptions
@@ -944,7 +980,7 @@ extern "C"
 
     /** Add metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     *  @param path Entry path to associate metadata with (or "" to add metadata to the DroneDB database itself)
+     *  @param path Entry path (see "Entry paths") to associate metadata with (or "" to add metadata to the DroneDB database itself)
      *  @param key Metadata key
      *  @param data Metadata data (JSON)
      *  @param output pointer to C-string where to store result (JSON) */
@@ -952,7 +988,7 @@ extern "C"
 
     /** Set metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     *  @param path Entry path to associate metadata with (or "" to add metadata to the DroneDB database itself)
+     *  @param path Entry path (see "Entry paths") to associate metadata with (or "" to add metadata to the DroneDB database itself)
      *  @param key Metadata key
      *  @param data Metadata data (JSON)
      *  @param output pointer to C-string where to store result (JSON) */
@@ -966,21 +1002,21 @@ extern "C"
 
     /** Get metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     *  @param path Entry path to retrieve metadata from (or "" to get metadata from the DroneDB database itself)
+     *  @param path Entry path (see "Entry paths") to retrieve metadata from (or "" to get metadata from the DroneDB database itself)
      *  @param key Metadata key
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBMetaGet(const char *ddbPath, const char *path, const char *key, char **output);
 
     /** Unset metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     *  @param path Entry path to unset metadata for (or "" to unset metadata for the DroneDB database itself)
+     *  @param path Entry path (see "Entry paths") to unset metadata for (or "" to unset metadata for the DroneDB database itself)
      *  @param key Metadata key
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBMetaUnset(const char *ddbPath, const char *path, const char *key, char **output);
 
     /** List metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     *  @param path Entry path to list metadata for (or "" to list metadata for the DroneDB database itself)
+     *  @param path Entry path (see "Entry paths") to list metadata for (or "" to list metadata for the DroneDB database itself)
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBMetaList(const char *ddbPath, const char *path, char **output);
 
@@ -992,13 +1028,14 @@ extern "C"
 
     /** Restore metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     *  @param dump JSON dump generated with DDBMetaDump
+     *  @param dump JSON dump generated with DDBMetaDump; the "path" of each row is an entry path
+     *         (see "Entry paths") or "" for the dataset itself
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump, char **output);
 
     /** Generate STAC
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     *  @param entry path of entry in DroneDB database to generate a STAC item for (can be empty)
+     *  @param entry path of entry in DroneDB database to generate a STAC item for (an entry path, see "Entry paths"; can be empty)
      *  @param stacCollectionRoot Absolute URL of the STAC collection
      *  @param id STAC asset ID to use instead of folder name (must be unique for entire catalog)
      *  @param stacCatalogRoot Absolute URL of the STAC catalog
@@ -1023,7 +1060,7 @@ extern "C"
      *  as properties.title and as the key of its data asset, a Collection takes its title from
      *  the dataset name or else the dataset folder name.
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     *  @param entry path of the entry to generate a STAC Item for; NULL or "" for the Collection
+     *  @param entry path of the entry to generate a STAC Item for (an entry path, see "Entry paths"); NULL or "" for the Collection
      *  @param output pointer to C-string where to store result (JSON, free with DDBFree)
      *  @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path,
      *          DDBERR_INVALIDARGS when ddbPath or output is NULL, an error otherwise */

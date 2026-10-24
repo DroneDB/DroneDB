@@ -9,6 +9,7 @@
 #include <unordered_set>
 
 #include "delta.h"
+#include "entry_path.h"
 #include "exceptions.h"
 #include "hash.h"
 #include "logger.h"
@@ -70,18 +71,33 @@ void verifyDeltaHashes(const std::vector<const AddAction*>& files, const fs::pat
     });
 }
 
-// A delta path must name something inside the dataset
-void checkDeltaPaths(const Delta& d) {
-    const auto check = [](const std::string& path) {
-        const fs::path p = io::fromUtf8(path);
-        const bool escapes = std::any_of(p.begin(), p.end(), [](const fs::path& part) { return part == ".."; });
-        if (p.is_absolute() || p.has_root_name() || p.has_root_directory() || escapes)
-            throw InvalidArgsException("Invalid path in delta: " + path);
-    };
-    for (const auto& add : d.adds)
-        check(add.path);
-    for (const auto& rem : d.removes)
-        check(rem.path);
+// A path of a delta in its normalized spelling (entry_path.h), or an InvalidPathException when it
+// names something outside the dataset or in its .ddb folder. "" stays: older versions listed the
+// dataset root so, and applyDelta skips it.
+std::string deltaPath(const std::string& path) {
+    return optionalEntryPath(path, "path in delta");
+}
+
+// `d` with every path normalized: the delta comes from another host, and its paths are written
+// under the dataset (and under the hard link folder of computeDeltaLocals)
+Delta withNormalizedPaths(Delta d) {
+    for (auto& add : d.adds)
+        add.path = deltaPath(add.path);
+    for (auto& rem : d.removes)
+        rem.path = deltaPath(rem.path);
+    return d;
+}
+
+// The verified hashes under the normalized spelling of their paths, as the delta has them
+VerifiedHashes withNormalizedPaths(const VerifiedHashes& verified) {
+    VerifiedHashes normalized;
+    for (const auto& [path, hash] : verified) {
+        const auto key = deltaPath(path);
+        const auto [it, inserted] = normalized.emplace(key, hash);
+        if (!inserted && it->second != hash)
+            throw InvalidArgsException("Two verified hashes for " + key + ": paths that name the same file");
+    }
+    return normalized;
 }
 
 // Decides whether delta entries can be applied over the destination's version of a path, by the
@@ -126,7 +142,7 @@ class ApplyPolicy {
 
 }  // namespace
 
-std::vector<Conflict> applyDelta(const Delta& d,
+std::vector<Conflict> applyDelta(const Delta& rawDelta,
                                  Database* destination,
                                  const DeltaApplication& application,
                                  std::ostream& out) {
@@ -134,13 +150,14 @@ std::vector<Conflict> applyDelta(const Delta& d,
     const json& sourceMetaDump = application.sourceMetaDump;
     std::vector<Conflict> conflicts;
     ApplyPolicy policy(destination, application.mergeStrategy, conflicts);
-    const auto unverifiedFiles = filesToVerify(d, application.verifiedHashes);
+    // Before anything changes: a path outside the dataset refuses the whole delta
+    const Delta d = withNormalizedPaths(rawDelta);
+    const auto unverifiedFiles = filesToVerify(d, withNormalizedPaths(application.verifiedHashes));
 
     // File operations
     if (d.adds.size() > 0 || d.removes.size() > 0) {
         const fs::path destPath = destination->rootDirectory();
 
-        checkDeltaPaths(d);
         if (application.verifyHashes)
             verifyDeltaHashes(unverifiedFiles, sourcePath);
 
@@ -260,6 +277,8 @@ std::vector<Conflict> applyDelta(const Delta& d,
 std::unordered_map<std::string, bool> computeDeltaLocals(Delta d,
                                                          Database* db,
                                                          const std::string& hlDestFolder) {
+    d = withNormalizedPaths(std::move(d));
+
     // Do we have files locally? If so we don't need to
     // download them, we just create hard links (or copies) to it after
     // validating that they are indeed the same

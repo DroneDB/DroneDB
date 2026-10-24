@@ -13,6 +13,7 @@
 #include <new>
 
 #include "cancellation.h"
+#include "entry_path.h"
 #include "gdal_inc.h"
 #include "log_forwarding.h"
 #include "logger.h"
@@ -181,6 +182,10 @@ Failure classifyCurrentException() {
         return makeFailure(DDBERR_SHUTDOWN, e.what());
     } catch (const CanceledException& e) {
         return makeFailure(DDBERR_CANCELED, e.what());
+    } catch (const InvalidPathException& e) {
+        Failure f = makeFailure(DDBERR_INVALIDARGS, e.what());
+        f.everyExport = true;
+        return f;
     } catch (const InvalidArgsException& e) {
         return makeFailure(DDBERR_INVALIDARGS, e.what());
     } catch (const RetryableBuildException& e) {
@@ -214,7 +219,7 @@ DDBErr reportCurrentException(CodeSet allowed) noexcept {
     try {
         const Failure f = attributeToCancellation(classifyCurrentException());
         setLastError(f.message, f.reason);
-        return restrictCode(f.code, allowed);
+        return restrictCode(f.code, f.everyExport ? allowed | codeBit(f.code) : allowed);
     } catch (...) {
         // The failure could not even be copied
         setLastError("Out of memory");
@@ -433,6 +438,22 @@ std::vector<std::string> requirePathList(const char** paths, int numPaths) {
     if (isNullOrEmptyOrWhitespace(paths, numPaths))
         throw InvalidArgsException("No paths provided");
     return std::vector<std::string>(paths, paths + numPaths);
+}
+
+std::string entryPathArg(const char* path, const char* missingMessage, std::string_view what) {
+    requireText(path, missingMessage);
+    return requireEntryPath(path, what);
+}
+
+std::string optEntryPathArg(const char* path, std::string_view what) {
+    return path != nullptr ? optionalEntryPath(path, what) : std::string();
+}
+
+std::vector<std::string> entryPathList(const char** paths, int count) {
+    auto list = toStringList(paths, count);
+    for (auto& path : list)
+        path = requireEntryPath(path);
+    return list;
 }
 
 std::vector<std::string> toStringList(const char** items, int count) {

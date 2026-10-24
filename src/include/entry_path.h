@@ -80,6 +80,21 @@ bool hasDotNotation(const std::string& path);
 /// Normalizes a dataset-relative path, or rejects it (rules above)
 EntryPathResult normalizeEntryPath(std::string_view path, const ReservedRules& rules = {});
 
+/// The normalized spelling of a dataset-relative entry path, or an InvalidPathException ("Invalid
+/// <what> '<path>': <rejection code>"; the path is left out of the message when it is not valid
+/// UTF-8). The one place the C API and the library refuse an entry path: `what` names the
+/// argument in the message ("path", "source path"). Not for filesystem paths (files being added,
+/// output files, dataset roots), which are not entry paths.
+std::string requireEntryPath(std::string_view path, std::string_view what = "path", const ReservedRules& rules = {});
+
+/// An optional entry path: "" is none and stays "" (the dataset itself, or no path), anything
+/// else is requireEntryPath
+std::string optionalEntryPath(std::string_view path, std::string_view what = "path");
+
+/// A dataset-relative folder: "" and a path that names the root only (".", "./") are the dataset
+/// root, "", anything else is requireEntryPath
+std::string requireEntryFolder(std::string_view folder, std::string_view what = "folder");
+
 }  // namespace ddb
 
 #endif  // ENTRY_PATH_H

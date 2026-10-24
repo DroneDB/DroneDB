@@ -175,6 +175,9 @@ TEST(ErrorMapper, codeTable) {
                   {DDBERR_SHUTDOWN, DDBERR_SHUTDOWN, "shutting down", ""});
     expectMapping("InvalidArgsException", [] { throw InvalidArgsException("bad"); },
                   {DDBERR_EXCEPTION, DDBERR_INVALIDARGS, "bad", ""});
+    // A refused entry path is INVALIDARGS in every export (DQ-09), the exports of 1.x included
+    expectMapping("InvalidPathException", [] { throw InvalidPathException("Invalid path 'x': traversal"); },
+                  {DDBERR_INVALIDARGS, DDBERR_INVALIDARGS, "Invalid path 'x': traversal", ""});
     expectMapping("RetryableBuildException(LowDiskSpace)",
                   [] { throw RetryableBuildException("disk", RetryableBuildReason::LowDiskSpace); },
                   {DDBERR_EXCEPTION, DDBERR_RETRYABLE, "disk", "lowDiskSpace"});

@@ -299,3 +299,23 @@ Registry has to adopt first.
   rendered from the file like an `Image`). `Video` and `GeoVideo` stay `"none"`. A value of an
   existing field changes (the schema's enum already allows it): Registry follows the field, so a
   Registry on the new libddb renders panorama thumbnails again. No other fixture changed.
+
+* 2026-10-24: every export that takes a dataset-relative entry path applies the rules of
+  `DDBNormalizePath` to it (DQ-09, XI-09; behaviour change, no output changed, so no fixture
+  did): `\` and `/` separate segments, `.` segments and repeated or trailing separators are
+  dropped, and a path that is absolute, has a `..` segment, names a `.ddb` folder or is not valid
+  UTF-8 is refused with `DDBERR_INVALIDARGS` (also by the exports of 1.x, which keep
+  `DDBERR_EXCEPTION` for their other invalid arguments), with the message `Invalid <argument>
+  '<path>': <code>` and an empty `DDBGetLastErrorReason()`. A valid path behaves as before (the
+  vectors above are the same input Registry's `DatasetPathPolicy` already sends). Covered:
+  `DDBGet`, `DDBListEntries`, `DDBListEntriesEx` (a folder: `""` and `"."` are the root; a
+  `..` segment is refused, where `a/../b` used to be resolved), `DDBSearch` (the query is a
+  pattern over entry paths), `DDBMoveEntry` (a trailing separator is dropped, where it used to be
+  an error), `DDBBuild` (`source`), `DDBIsBuildable`, `DDBIsBuildActive`, `DDBIsBuildComplete`,
+  `DDBGetBuildStatus`, `DDBGetBuildArtifacts` (the `path` members of their outputs are the
+  normalized spelling), `DDBMeta*` (`path`, and the rows of `DDBMetaRestore`), `DDBStac`,
+  `DDBStacData`, and the paths of a delta (`DDBApplyDelta`, `DDBApplyDeltaEx`,
+  `DDBComputeDeltaLocals`, `verifiedHashes` keys: a delta path in `.ddb`, or spelled with `\`,
+  used to be accepted). Not covered, because they are filesystem paths: `DDBAdd*`, `DDBRemove`,
+  `DDBList`, `DDBInfo`, dataset folders, output files, `DDBBuild`'s `dest`. The tests are
+  `tests/unit/c_abi_entry_path_test.cpp` (every vector through every export).

@@ -554,9 +554,11 @@ namespace
         d.adds.push_back(f.stage("new/a.txt", "alpha"));
         const auto h = d.adds[1].hash;
 
-        // Another file, a folder add (no hash), a path of the delta spelled differently
+        // Another file, a folder add (no hash), a name that differs by its case (the paths are
+        // compared byte for byte). "new\\a.txt" is the delta's "new/a.txt" since DQ-09: both
+        // are normalized before they are compared (c_abi_entry_path_test.cpp)
         for (const VerifiedHashes &bad : {VerifiedHashes{{"other.txt", h}}, VerifiedHashes{{"new", ""}},
-                                          VerifiedHashes{{"new\\a.txt", h}}})
+                                          VerifiedHashes{{"new/A.txt", h}}})
         {
             EXPECT_THROW(f.applyVerified(d, bad), InvalidArgsException) << bad.begin()->first;
             EXPECT_THROW(f.applyVerified(d, bad, false), InvalidArgsException) << bad.begin()->first;

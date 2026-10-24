@@ -69,6 +69,13 @@ namespace ddb
     {
         using AppException::AppException;
     };
+    // A dataset path the rules of entry_path.h refuse (outside the dataset, the reserved .ddb
+    // folder, ...). Every C export that takes entry paths returns it as DDBERR_INVALIDARGS,
+    // also the exports of 1.x (whose other invalid arguments stay DDBERR_EXCEPTION).
+    class InvalidPathException : public InvalidArgsException
+    {
+        using InvalidArgsException::InvalidArgsException;
+    };
     // The requested entry is not in the index. The exports added in 2.0 return it as
     // DDBERR_NOTFOUND; the older ones keep returning DDBERR_EXCEPTION.
     class EntryNotFoundException : public AppException {

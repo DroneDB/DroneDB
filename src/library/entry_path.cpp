@@ -139,6 +139,42 @@ EntryPathResult normalizeEntryPath(std::string_view path, const ReservedRules& r
     return result;
 }
 
+namespace {
+
+// The InvalidPathException of a rejection
+[[noreturn]] void throwRejected(std::string_view path, std::string_view what, std::string_view code) {
+    std::string message = "Invalid " + std::string(what);
+    // A message is UTF-8 (DDBGetLastError): the bytes of a path that is not are left out
+    if (utf8::isValid(path) && path.find('\0') == std::string_view::npos)
+        message += " '" + std::string(path) + "'";
+    throw InvalidPathException(message + ": " + std::string(code));
+}
+
+}  // namespace
+
+std::string requireEntryPath(std::string_view path, std::string_view what, const ReservedRules& rules) {
+    auto result = normalizeEntryPath(path, rules);
+    if (!result.accepted())
+        throwRejected(path, what, result.rejected);
+    return std::move(result.path);
+}
+
+std::string optionalEntryPath(std::string_view path, std::string_view what) {
+    return path.empty() ? std::string() : requireEntryPath(path, what);
+}
+
+std::string requireEntryFolder(std::string_view folder, std::string_view what) {
+    if (folder.empty())
+        return {};
+    auto result = normalizeEntryPath(folder);
+    if (result.accepted())
+        return std::move(result.path);
+    // Nothing left once the "." segments are dropped: the root
+    if (result.rejected == kEmpty)
+        return {};
+    throwRejected(folder, what, result.rejected);
+}
+
 bool hasDotNotation(const std::string& path) {
     for (const std::string& segment : str::split(path, '/'))
         if (segment == ".." || segment == ".")

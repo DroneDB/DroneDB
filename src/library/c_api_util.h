@@ -81,7 +81,8 @@ constexpr CodeSet codeSet(Codes... codes) noexcept {
 // DDBBuild BUILDDEPMISSING/BUILDINPROGRESS, DDBExportRaster2 CANCELED: see ddb.cpp). Any other
 // failure stays DDBERR_EXCEPTION, with its own message and reason. DDBERR_INVALIDARGS and
 // DDBERR_RETRYABLE are returned by the exports added in 2.0 only; the older exports switch
-// in a later version, together with Registry (RQ-08).
+// in a later version, together with Registry (RQ-08). One exception: a refused entry path is
+// DDBERR_INVALIDARGS in every export (InvalidPathException, DQ-09).
 inline constexpr CodeSet kFrozenCodes = codeSet(DDBERR_BUSY);
 // The exports added in 2.0: every code a failure maps to
 inline constexpr CodeSet kNewExportCodes = codeSet(DDBERR_BUSY,
@@ -97,6 +98,9 @@ struct Failure {
     DDBErr code = DDBERR_EXCEPTION;
     std::string message;  // never empty
     std::string reason;   // "" when the failure has none
+    // Every export returns the code, also one that may not return it: a refused entry path
+    // (InvalidPathException, DQ-09) is DDBERR_INVALIDARGS in the exports of 1.x too
+    bool everyExport = false;
 };
 
 // Maps the exception being handled; call it inside a catch block only:
@@ -106,6 +110,7 @@ struct Failure {
 //   BuildInProgressException   BUILDINPROGRESS
 //   ShutdownException          SHUTDOWN (a call stopped by DDBShutdown)
 //   CanceledException          CANCELED
+//   InvalidPathException       INVALIDARGS, returned by every export (a refused entry path)
 //   InvalidArgsException       INVALIDARGS
 //   RetryableBuildException    RETRYABLE, reason from kRetryableReasons
 //   std::bad_alloc             EXCEPTION, "Out of memory"
@@ -347,6 +352,23 @@ inline std::string optStr(const char* text) {
 
 // A list of paths that must hold at least one path, none NULL, empty or whitespace only
 std::vector<std::string> requirePathList(const char** paths, int numPaths);
+
+// ---- dataset-relative entry paths (DQ-09, XI-09)
+//
+// The paths of the exports that name an entry of the index ("photos/a.jpg") go through the rule
+// of DDBNormalizePath (entry_path.h): '\' and '/' separate segments, "." segments and repeated
+// separators are dropped, and a path that is absolute, has a ".." segment or names the reserved
+// ".ddb" folder is refused with DDBERR_INVALIDARGS (InvalidPathException), by the exports of 1.x
+// too. A filesystem path (a file being added, an output file, a dataset root) is not an entry
+// path and goes through pathArg.
+
+// A required entry path: requireText(path, missingMessage), then normalized; `what` names the
+// argument in the refusal ("source path")
+std::string entryPathArg(const char* path, const char* missingMessage, std::string_view what = "path");
+// An optional entry path: NULL and "" are none (""), anything else is normalized
+std::string optEntryPathArg(const char* path, std::string_view what = "path");
+// A list of entry paths, possibly empty, none NULL; each one normalized (an empty one is refused)
+std::vector<std::string> entryPathList(const char** paths, int count);
 // A list of strings, possibly empty, without NULL elements (the array itself is not NULL)
 std::vector<std::string> toStringList(const char** items, int count);
 // JSON text; a NULL or malformed text throws InvalidArgsException
