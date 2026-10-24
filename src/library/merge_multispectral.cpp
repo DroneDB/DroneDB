@@ -203,7 +203,7 @@ SeparateVrt buildAlignedVrt(const std::vector<std::string> &inputPaths, const Al
             throw GDALException("Cannot create shifted dataset for band " + std::to_string(i));
         }
 
-        GDALFlushCache(datasetHandle(shiftedDs));
+        flushOrThrow(datasetHandle(shiftedDs), "the shifted band " + std::to_string(i));
         shiftedFiles.push_back(std::move(shiftedFile));
         shiftedDatasets.push_back(std::move(shiftedDs));
     }
@@ -385,8 +385,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
         throw GDALException("Cannot create merged output: " + outputPath);
     }
 
-    GDALFlushCache(datasetHandle(out));
-    out.reset();
+    closeOutputOrThrow(std::move(out), outputPath);
 
     // A no-op when the shift path already closed them
     merged.close();

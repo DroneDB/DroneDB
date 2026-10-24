@@ -36,7 +36,7 @@ SeparateVrt buildSeparateVrt(std::vector<GDALDatasetUniquePtr> sources,
     v.vrt = adoptDataset(GDALBuildVRT(v.file.c_str(), static_cast<int>(handles.size()),
                                       handles.data(), nullptr, opts.get(), nullptr));
     if (!v.vrt) throw GDALException(error);
-    GDALFlushCache(v.handle());
+    flushOrThrow(v.handle(), "the VRT of the merge");
     return v;
 }
 

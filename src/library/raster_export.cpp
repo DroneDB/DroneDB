@@ -238,12 +238,11 @@ GDALDatasetUniquePtr createRgbaOutput(const char *outputPath, GDALDatasetH hSrcD
         throw GDALException("Cannot create output GeoTIFF");
     GDALDatasetH hOut = datasetHandle(outGuard);
 
-    if (hasGeoTransform) GDALSetGeoTransform(hOut, geoTransform);
-    if (!projection.empty()) GDALSetProjection(hOut, projection.c_str());
-    GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 1), GCI_RedBand);
-    GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 2), GCI_GreenBand);
-    GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 3), GCI_BlueBand);
-    GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 4), GCI_AlphaBand);
+    if (hasGeoTransform && GDALSetGeoTransform(hOut, geoTransform) != CE_None)
+        throw GDALException("Cannot set the geotransform of the output GeoTIFF");
+    if (!projection.empty() && GDALSetProjection(hOut, projection.c_str()) != CE_None)
+        throw GDALException("Cannot set the projection of the output GeoTIFF");
+    setBandColors(hOut, {GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand});
     return outGuard;
 }
 
@@ -315,10 +314,10 @@ void exportFormula(const RasterExport &request, ExportSession &session, GDALData
 
     renderWindows(hSrcDs, plan, grid, range, hOut, session);
 
-    GDALFlushCache(hOut);
+    flushOrThrow(hOut, outputPath);
     // Add internal overviews for efficient zoomed/partial reads.
     buildInternalOverviews(hOut, width, height);
-    outGuard.reset();  // closes hOut
+    closeOutputOrThrow(std::move(outGuard), outputPath);
     srcGuard.reset();  // closes hSrcDs
     partialOutput.commit();
     session.report(1.0, "rendering");
@@ -429,8 +428,7 @@ void exportBands(const RasterExport &request, ExportSession &session, GDALDatase
         throw GDALException("Cannot create output GeoTIFF");
     }
 
-    GDALFlushCache(datasetHandle(out));
-    out.reset();
+    closeOutputOrThrow(std::move(out), outputPath);
     // Reopen in update mode to add internal overviews (efficient zoomed
     // reads). Best-effort: a failure here is non-fatal.
     if (const auto ovr = adoptDataset(GDALOpen(outputPath, GA_Update)))

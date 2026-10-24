@@ -230,7 +230,7 @@ namespace ddb
         if (!outDataset)
             throw GDALException("GDALNearblack failed to create output: " + output);
 
-        outDataset.reset();
+        closeOutputOrThrow(std::move(outDataset), output);
 
         LOGD << "Masked borders: " << input << " -> " << output;
     }

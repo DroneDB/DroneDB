@@ -127,12 +127,14 @@ namespace ddb
                 createOpts.AddString(co.c_str());
             // Closed before its bytes are taken: closing writes them
             cancel::GdalProgress progress;
-            if (!adoptDataset(GDALCreateCopy(driver, out.c_str(), ds, FALSE, createOpts.List(),
-                                             progress.function(), progress.data())))
+            auto encoded = adoptDataset(GDALCreateCopy(driver, out.c_str(), ds, FALSE, createOpts.List(),
+                                                       progress.function(), progress.data()));
+            if (!encoded)
             {
                 cancel::throwIfCanceled();
                 throw GDALException("Cannot encode the render of " + label);
             }
+            closeOutputOrThrow(std::move(encoded), "the render of " + label);
 
             takeRenderBytes(out, outBytes, outSize, label);
         }
@@ -269,7 +271,7 @@ namespace ddb
             return;
         }
         // Closed before its bytes are taken: closing writes them
-        warped.reset();
+        closeOutputOrThrow(std::move(warped), "the render of " + inputPath);
 
         takeRenderBytes(out, outBytes, outSize, inputPath);
     }
@@ -661,9 +663,7 @@ namespace ddb
                                  rgba.data() + b, width, height, GDT_Byte, 4, 4 * width) != CE_None)
                     throw GDALException("Cannot write the index render of " + inputPath);
             }
-            GDALColorInterp ci[4] = { GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand };
-            for (int b = 0; b < 4; ++b)
-                GDALSetRasterColorInterpretation(GDALGetRasterBand(hRgba, b + 1), ci[b]);
+            setBandColors(hRgba, {GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand});
         } else {
             // Composite RGBA over white (255,255,255) so nodata regions are
             // visible but distinct from valid red samples after JPEG encode.
@@ -685,9 +685,7 @@ namespace ddb
                                  rgb.data() + b, width, height, GDT_Byte, 3, 3 * width) != CE_None)
                     throw GDALException("Cannot write the index render of " + inputPath);
             }
-            GDALColorInterp ci[3] = { GCI_RedBand, GCI_GreenBand, GCI_BlueBand };
-            for (int b = 0; b < 3; ++b)
-                GDALSetRasterColorInterpretation(GDALGetRasterBand(hRgba, b + 1), ci[b]);
+            setBandColors(hRgba, {GCI_RedBand, GCI_GreenBand, GCI_BlueBand});
         }
 
         encodeDataset(hRgba, fi, outBytes, outSize, inputPath);

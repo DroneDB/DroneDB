@@ -116,6 +116,16 @@ struct ContourLayer {
     OGRLayerH layer = nullptr;
 };
 
+// Adds a field to the layer, or throws: a layer without it would shift the fields the generator
+// and the readers address by index
+void addField(OGRLayerH layer, const char *name, OGRFieldType type) {
+    OGRFieldDefnH defn = OGR_Fld_Create(name, type);
+    const OGRErr created = OGR_L_CreateField(layer, defn, TRUE);
+    OGR_Fld_Destroy(defn);
+    if (created != OGRERR_NONE)
+        throw GDALException(std::string("Cannot create the field '") + name + "' of the contour layer");
+}
+
 // Runs the GDAL contour generator over the band into a new in-memory layer in the CRS of the raster
 ContourLayer generateContourLayer(const DemContext &dem, double interval, const ContourOptions &options) {
     const bool rasterHasSrs = dem.srs != nullptr;
@@ -135,13 +145,9 @@ ContourLayer generateContourLayer(const DemContext &dem, double interval, const 
     if (!hLayer) throw GDALException("Cannot create contour layer");
     out.layer = hLayer;
 
-    OGRFieldDefnH fId = OGR_Fld_Create("id", OFTInteger);
-    OGR_L_CreateField(hLayer, fId, TRUE);
-    OGR_Fld_Destroy(fId);
-
-    OGRFieldDefnH fElev = OGR_Fld_Create("elev", OFTReal);
-    OGR_L_CreateField(hLayer, fElev, TRUE);
-    OGR_Fld_Destroy(fElev);
+    // In this order: the generator writes into them by index (idFieldIdx, elevFieldIdx)
+    addField(hLayer, "id", OFTInteger);
+    addField(hLayer, "elev", OFTReal);
 
     // --- Run GDAL contour generator --------------------------------------
 

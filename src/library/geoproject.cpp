@@ -185,8 +185,13 @@ namespace ddb
                 throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": " + CPLGetLastErrorMsg());
             }
 
-            GDALFlushCache(datasetHandle(wrpDataset));
-            wrpDataset.reset();
+            // The close writes what GDAL still holds: a failure leaves a partial file
+            const auto closed = closeOutput(std::move(wrpDataset));
+            if (closed.failed)
+            {
+                io::assureIsRemoved(io::fromUtf8(tmpOutFile));
+                throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": " + closed.message);
+            }
         }
 
     } // namespace

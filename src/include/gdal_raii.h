@@ -29,6 +29,7 @@
 // The handle-typed deleters name the handle type itself (`using pointer = ...H`): the C handles
 // are void* in release GDAL builds but typed pointers when GDAL's DEBUG define is on.
 
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -71,6 +72,34 @@ namespace ddb
         return CE_None;
 #endif
     }
+
+    // What closing an output dataset reported (closeOutput)
+    struct OutputCloseStatus
+    {
+        int systemError = 0;   // errno right after the close (ENOSPC: the volume is full)
+        bool failed = false;   // GDAL reported a failure: the data was not (all) written
+        std::string message;   // GDAL's last error message ("<no GDAL error>" when it has none)
+    };
+
+    // Closes an output dataset and reports how it went. An output's close writes what GDAL still
+    // holds in its caches (and the header or directory of the file), so a failure is a write that
+    // failed, however well the calls before it went. Captures the OS error and GDAL's message
+    // before anything else (releasing the source datasets, removing a staging file, logging) can
+    // replace them.
+    OutputCloseStatus closeOutput(GDALDatasetUniquePtr ds);
+
+    // closeOutput that throws GDALException("Cannot write <what>: <GDAL's message>") on a failure.
+    // For the outputs that are not builds (a build maps a full volume to a retryable failure, with
+    // the status of closeOutput).
+    void closeOutputOrThrow(GDALDatasetUniquePtr ds, const std::string &what);
+
+    // GDALFlushCache of a dataset that stays open (an output that gets overviews next), throwing
+    // GDALException("Cannot write <what>: <GDAL's message>") when the flush fails
+    void flushOrThrow(GDALDatasetH ds, const std::string &what);
+
+    // Sets the colour interpretation of the bands 1..n of a dataset, throwing GDALException when
+    // a band refuses it (a dataset opened read-only does)
+    void setBandColors(GDALDatasetH ds, std::initializer_list<GDALColorInterp> colors);
 
     // The C handles of owned datasets, for the C calls that take an array of them
     // (GDALBuildVRT, GDALWarp)
@@ -204,6 +233,8 @@ namespace ddb
 
     struct VsiFileCloser
     {
+        // Releases a handle: a file that was written is closed with VSIFCloseL(release()), whose
+        // result says whether its last bytes were written
         void operator()(VSILFILE *f) const noexcept { VSIFCloseL(f); }
     };
     // An open VSILFILE (VSIFOpenL)

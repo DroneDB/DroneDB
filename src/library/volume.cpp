@@ -193,8 +193,9 @@ std::vector<uint8_t> rasterizeMask(const DemContext &dem, const Window &w, OGRGe
         gt[3] + w.startCol * gt[4] + w.startRow * gt[5],
         gt[4], gt[5]
     };
-    GDALSetGeoTransform(maskDs, maskGt);
-    if (!dem.projection.empty()) GDALSetProjection(maskDs, dem.projection.c_str());
+    if (GDALSetGeoTransform(maskDs, maskGt) != CE_None ||
+        (!dem.projection.empty() && GDALSetProjection(maskDs, dem.projection.c_str()) != CE_None))
+        throw AppException("Cannot georeference the mask dataset");
 
     OGRGeometryH hGeom = OGRGeometry::ToHandle(&geom);
     int bandList[1] = {1};

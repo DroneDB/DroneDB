@@ -586,6 +586,7 @@ namespace ddb
             if (const auto srs = srsFromGeoData(info))
             {
                 OGRSpatialReference s;
+                // For the label only (srsLabel of an empty SRS is ""): the CRS is the string itself
                 s.SetFromUserInput(srs->c_str());
                 crs.georeferenced = true;
                 crs.source = "geodata";

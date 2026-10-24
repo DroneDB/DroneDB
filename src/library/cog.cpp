@@ -300,14 +300,10 @@ namespace ddb
                                               RetryableBuildReason::NoSpaceOnDevice);
             throw GDALException("GDALWarp failed to create output COG: " + outputCog);
         }
-        CPLErrorReset();
-        errno = 0;
-        newDataset.reset();
-        const int closeSystemError = errno;
-        const bool closeFailed = CPLGetLastErrorType() >= CE_Failure;
+        const auto closed = closeOutput(std::move(newDataset));
         srcDataset.reset();
-        if (closeFailed) {
-            if (closeSystemError == ENOSPC)
+        if (closed.failed) {
+            if (closed.systemError == ENOSPC)
                 throw RetryableBuildException("COG close ran out of space: " + outputCog,
                                               RetryableBuildReason::NoSpaceOnDevice);
             throw GDALException("Failed to close output COG: " + outputCog);

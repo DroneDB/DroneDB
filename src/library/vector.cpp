@@ -36,30 +36,6 @@ namespace ddb
 
         // ---- helpers ---------------------------------------------------------
 
-        struct VectorCloseStatus
-        {
-            int systemError = 0;
-            bool failed = false;
-            std::string message;
-        };
-
-        // Capture output close/flush failures before freeing options, releasing
-        // source datasets or deleting staging files can replace GDAL/OS errors.
-        VectorCloseStatus closeVectorOutput(GDALDatasetUniquePtr dataset)
-        {
-            VectorCloseStatus result;
-            if (!dataset) return result;
-            CPLErrorReset();
-            errno = 0;
-            const CPLErr closeResult = closeDataset(std::move(dataset));
-            result.systemError = errno;
-            result.failed = closeResult >= CE_Failure;
-            result.failed = result.failed || CPLGetLastErrorType() >= CE_Failure;
-            const char *error = CPLGetLastErrorMsg();
-            result.message = error && *error ? error : "<no GDAL error>";
-            return result;
-        }
-
         [[noreturn]] void throwVectorWriteFailure(const std::string &operation,
                                                   const std::string &output,
                                                   int systemError,
@@ -266,7 +242,7 @@ namespace ddb
             const std::string translateMessage = error && *error ? error : "<no GDAL error>";
 
             opts.reset();
-            const auto closeStatus = closeVectorOutput(std::move(out));
+            const auto closeStatus = closeOutput(std::move(out));
 
             if (translateFailed)
                 cancel::throwIfCanceled();
@@ -449,14 +425,17 @@ namespace ddb
                  feature.reset(src->GetNextFeature()))
             {
                 OGRFeature copy(out->GetLayerDefn());
-                copy.SetFieldsFrom(feature.get(), fieldMap.data());
+                bool copied = copy.SetFieldsFrom(feature.get(), fieldMap.data()) == OGRERR_NONE;
                 if (const OGRGeometry *geom = feature->GetGeometryRef())
-                    copy.SetGeometryDirectly(isMvtEncodable(*geom) ? geom->clone()
-                                                                   : toMvtEncodable(*geom).release());
-                if (out->CreateFeature(&copy) != OGRERR_NONE) skipped++;
+                    copied = copied && copy.SetGeometryDirectly(isMvtEncodable(*geom)
+                                                                    ? geom->clone()
+                                                                    : toMvtEncodable(*geom).release()) == OGRERR_NONE;
+                if (!copied || out->CreateFeature(&copy) != OGRERR_NONE) skipped++;
             }
             src->ResetReading();
-            if (inTransaction) dst->CommitTransaction();
+            // The features of the transaction are only in the layer once it is committed
+            if (inTransaction && dst->CommitTransaction() != OGRERR_NONE)
+                throw GDALException("Cannot commit the sanitized layer '" + name + "': " + CPLGetLastErrorMsg());
 
             if (skipped > 0)
                 LOGD << "MVT sanitization: " << skipped << " features of layer '" << name
@@ -626,7 +605,7 @@ namespace ddb
             const std::string translateMessage = error && *error ? error : "<no GDAL error>";
 
             opts.reset();
-            const auto closeStatus = closeVectorOutput(std::move(out));
+            const auto closeStatus = closeOutput(std::move(out));
 
             // Release sanitization resources whether or not translate succeeded.
             sanitizedDS.reset();
