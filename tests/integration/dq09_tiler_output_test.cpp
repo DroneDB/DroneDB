@@ -14,7 +14,7 @@
 #include "gdal_raii.h"
 #include "ogr_spatialref.h"
 #include "mio.h"
-#include "tilerhelper.h"
+#include "tile_test_support.h"
 #include "test.h"
 #include "testarea.h"
 
@@ -68,8 +68,8 @@ namespace
         const auto tif = makeRaster(ta);
 
         std::ostringstream asText, asJson;
-        TilerHelper::runTiler(tif, ta.getFolder("text"), 256, false, asText, OutputFormat::Text, "14-17");
-        TilerHelper::runTiler(tif, ta.getFolder("json"), 256, false, asJson, OutputFormat::Json, "14-17");
+        TilerHelper::runTiler(tif, ta.getFolder("text"), asText, tilerRun(OutputFormat::Text, "14-17"));
+        TilerHelper::runTiler(tif, ta.getFolder("json"), asJson, tilerRun(OutputFormat::Json, "14-17"));
 
         const auto textTiles = lines(asText.str());
         ASSERT_GT(textTiles.size(), 3u);
@@ -88,7 +88,7 @@ namespace
         const auto tif = makeRaster(ta);
 
         std::ostringstream all;
-        TilerHelper::runTiler(tif, ta.getFolder("all"), 256, false, all, OutputFormat::Text, "16");
+        TilerHelper::runTiler(tif, ta.getFolder("all"), all, tilerRun(OutputFormat::Text, "16"));
         const std::string first = *lines(all.str()).begin();
         // <folder>/<z>/<x>/<y>.png, with the platform's separators
         const fs::path tile = io::fromUtf8(first);
@@ -97,7 +97,7 @@ namespace
         const std::string y = io::toUtf8(tile.stem());
 
         std::ostringstream out;
-        TilerHelper::runTiler(tif, ta.getFolder("single"), 256, false, out, OutputFormat::Json, "16", x, y);
+        TilerHelper::runTiler(tif, ta.getFolder("single"), out, tilerRun(OutputFormat::Json, "16", x, y));
         const json tiles = json::parse(out.str());
         ASSERT_EQ(tiles.size(), 1u);
         EXPECT_TRUE(tiles[0].is_string());
@@ -109,7 +109,7 @@ namespace
         const auto tif = makeRaster(ta);
 
         std::ostringstream out;
-        TilerHelper::runTiler(tif, ta.getFolder("tiles"), 256, false, out, OutputFormat::Text, "16");
+        TilerHelper::runTiler(tif, ta.getFolder("tiles"), out, tilerRun(OutputFormat::Text, "16"));
         const auto tiles = lines(out.str());
         EXPECT_GE(tiles.size(), 1u);
         for (const auto &t : tiles)

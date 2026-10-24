@@ -18,6 +18,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "tile_test_support.h"
 #include "tilerhelper.h"
 
 namespace
@@ -235,7 +236,7 @@ namespace
             int size = 0;
             try
             {
-                TilerHelper::getTile(copc, z, x, y, 256, true, false, "", &buf, &size);
+                TilerHelper::getTile(inMemory(testTile(copc, z, x, y, 256, true, false), &buf, &size));
             }
             catch (const GDALException &)
             {

@@ -21,6 +21,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "tile_test_support.h"
 #include "thumbs.h"
 #include "tilerhelper.h"
 
@@ -182,7 +183,7 @@ namespace
         {
             uint8_t *buf = nullptr;
             int size = 0;
-            TilerHelper::getTile(copc, 20, 256337, 369481, 256, true, false, "", &buf, &size);
+            TilerHelper::getTile(inMemory(testTile(copc, 20, 256337, 369481, 256, true, false), &buf, &size));
             const auto img = decodeImage(takeBuffer(buf, size));
             if (std::count(img.alpha().begin(), img.alpha().end(), 255) > 1000)
                 opaqueTiles++;

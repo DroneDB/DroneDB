@@ -18,6 +18,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "tile_encoder.h"
+#include "tile_test_support.h"
 #include "tilerhelper.h"
 
 namespace
@@ -47,7 +48,9 @@ namespace
     {
         uint8_t *buf = nullptr;
         int size = 0;
-        TilerHelper::getTile(raster, t.z, t.x, t.y, 256, false, false, "", format, &buf, &size);
+        auto request = inMemory(testTile(raster, t.z, t.x, t.y, 256, false, false), &buf, &size);
+        request.format = format;
+        TilerHelper::getTile(request);
         return takeBuffer(buf, size);
     }
 

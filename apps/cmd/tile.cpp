@@ -58,7 +58,14 @@ namespace cmd
         auto y = opts["y"].as<std::string>();
         auto tileSize = opts["size"].as<int>();
 
-        ddb::TilerHelper::runTiler(ddb::io::fromUtf8(input), ddb::io::fromUtf8(output), tileSize, tms, std::cout, format, z, x, y);
+        ddb::TilerRun run;
+        run.tileSize = tileSize;
+        run.tms = tms;
+        run.format = format;
+        run.zRange = z;
+        run.x = x;
+        run.y = y;
+        ddb::TilerHelper::runTiler(ddb::io::fromUtf8(input), ddb::io::fromUtf8(output), std::cout, run);
         return EXIT_SUCCESS;
     }
 

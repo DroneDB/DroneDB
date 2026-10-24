@@ -7,6 +7,7 @@
 #include "gdal_inc.h"
 
 #include <functional>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -20,6 +21,39 @@
 namespace ddb
 {
 
+    // Where the tiles of a file come from, and where they are kept
+    struct TileSource
+    {
+        fs::path path;             // a georaster, a geoimage, a COPC point cloud or a URL
+        int tileSize = 256;
+        bool tms = false;          // tile rows count from the bottom (TMS) instead of the top (XYZ)
+        bool forceRecreate = false;
+        fs::path outputFolder;     // tile files go here (empty: only a requested buffer is filled)
+        std::string pathHash;      // known hash of a remote file: names its local copy ("" when unknown)
+    };
+
+    // One tile of a source
+    struct TileRequest
+    {
+        TileSource source;
+        int tz = 0, tx = 0, ty = 0;
+        std::string format = "png";                // "png", "jpeg" or "webp"
+        std::optional<ThumbVisParams> visParams;   // visualization of rasters (point clouds render as usual)
+        uint8_t **outBuffer = nullptr;             // the encoded tile goes here instead of a file
+        int *outBufferSize = nullptr;
+    };
+
+    // What `ddb tile` writes: the tiles of one source, as text or a JSON array
+    struct TilerRun
+    {
+        int tileSize = 256;
+        bool tms = false;
+        OutputFormat format = OutputFormat::Text;
+        std::string zRange = "auto";   // "N" or "min-max"
+        std::string x = "auto";        // with y: a single tile of each zoom level
+        std::string y = "auto";
+    };
+
     class TilerHelper
     {
         // Parses a string (either "N" or "min-max") and returns
@@ -30,11 +64,10 @@ namespace ddb
         static fs::path getCacheFolderName(const fs::path &tileablePath,
                                            time_t modifiedTime, int tileSize);
 
-        // Runs render with a tiler for tileablePath: one prepared earlier and kept in
+        // Runs render with a tiler for the source: one prepared earlier and kept in
         // RasterCache when available, otherwise a new one (geoprojecting the file first
         // when it is not a georaster)
-        static std::string withTiler(const fs::path &tileablePath, int tileSize, bool tms, bool forceRecreate,
-                                     const fs::path &outputFolder, const std::string &tileablePathHash,
+        static std::string withTiler(const TileSource &source,
                                      const std::function<std::string(Tiler &)> &render);
 
         // Local copy of tileablePath: the path itself, or for a URL the file downloaded
@@ -42,51 +75,17 @@ namespace ddb
         static fs::path toLocalFile(const fs::path &tileablePath, const std::string &tileablePathHash);
 
     public:
-        DDB_DLL static void runTiler(const fs::path &input,
-                                     const fs::path &output,
-                                     int tileSize = 256,
-                                     bool tms = false,
-                                     std::ostream &os = std::cout,
-                                     OutputFormat format = OutputFormat::Text,
-                                     const std::string &zRange = "auto",
-                                     const std::string &x = "auto",
-                                     const std::string &y = "auto");
+        // Writes the tiles of input under output, one path per line (or one JSON string per
+        // member of an array) to os
+        DDB_DLL static void runTiler(const fs::path &input, const fs::path &output, std::ostream &os,
+                                     const TilerRun &run = {});
 
-        // Get a single tile from user cache
-        DDB_DLL static fs::path getFromUserCache(const fs::path &tileablePath,
-                                                 int tz, int tx, int ty,
-                                                 int tileSize, bool tms,
-                                                 bool forceRecreate,
-                                                 const std::string &tileablePathHash = "");
+        // Get a single tile from user cache: request.source.outputFolder, format, visParams and
+        // the buffer are not used (the cache names its own folder and keeps PNG files)
+        DDB_DLL static fs::path getFromUserCache(const TileRequest &request);
 
-        // Get a single tile
-        DDB_DLL static fs::path getTile(const fs::path &tileablePath,
-                                        int tz, int tx, int ty,
-                                        int tileSize, bool tms,
-                                        bool forceRecreate,
-                                        const fs::path &outputFolder,
-                                        uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
-                                        const std::string &tileablePathHash = "");
-
-        // Get a single tile with explicit output format ("png", "jpeg" or "webp")
-        DDB_DLL static fs::path getTile(const fs::path &tileablePath,
-                                        int tz, int tx, int ty,
-                                        int tileSize, bool tms,
-                                        bool forceRecreate,
-                                        const fs::path &outputFolder,
-                                        const std::string &outputFormat,
-                                        uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
-                                        const std::string &tileablePathHash = "");
-
-        // Get a single tile with visualization parameters
-        DDB_DLL static fs::path getTile(const fs::path &tileablePath,
-                                        int tz, int tx, int ty,
-                                        int tileSize, bool tms,
-                                        bool forceRecreate,
-                                        const fs::path &outputFolder,
-                                        const ThumbVisParams &visParams,
-                                        uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
-                                        const std::string &tileablePathHash = "");
+        // Get a single tile: its path, or the encoded bytes in the request's buffer
+        DDB_DLL static fs::path getTile(const TileRequest &request);
 
         // Prepare a tileable file for tiling (if needed)
         // for example, geoimages that can be tiled are first geoprojected

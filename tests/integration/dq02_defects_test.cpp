@@ -44,7 +44,7 @@
 #include "testfs.h"
 #include "utils.h"
 #include "thermal.h"
-#include "tilerhelper.h"
+#include "tile_test_support.h"
 #include "timezone.h"
 #include "userprofile.h"
 
@@ -606,7 +606,7 @@ namespace
         std::ostringstream out;
 
         const int before = openDatasetCount();
-        EXPECT_THROW(TilerHelper::runTiler(tif, ta.getFolder("tiles"), 256, false, out, OutputFormat::Text, "abc"),
+        EXPECT_THROW(TilerHelper::runTiler(tif, ta.getFolder("tiles"), out, tilerRun(OutputFormat::Text, "abc")),
                      std::invalid_argument);
         EXPECT_EQ(openDatasetCount(), before);
     }

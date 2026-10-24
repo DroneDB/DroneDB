@@ -60,11 +60,9 @@ namespace ddb
         return Hash::strCRC64(os.str());
     }
 
-    fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
-                                           int tx, int ty, int tileSize, bool tms,
-                                           bool forceRecreate,
-                                           const std::string &tileablePathHash)
+    fs::path TilerHelper::getFromUserCache(const TileRequest &request)
     {
+        const fs::path &tileablePath = request.source.path;
         if (!fs::exists(tileablePath))
             throw FSException(io::toUtf8(tileablePath) + " does not exist");
         if (oneIn(1000))
@@ -73,69 +71,75 @@ namespace ddb
         const time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
         const fs::path tileCacheFolder =
             UserProfile::get()->getTilesDir() /
-            getCacheFolderName(tileablePath, modifiedTime, tileSize);
-        fs::path outputFile = tileCacheFolder / std::to_string(tz) /
-                              std::to_string(tx) / (std::to_string(ty) + ".png");
+            getCacheFolderName(tileablePath, modifiedTime, request.source.tileSize);
+        fs::path outputFile = tileCacheFolder / std::to_string(request.tz) /
+                              std::to_string(request.tx) / (std::to_string(request.ty) + ".png");
 
         // Cache hit
-        if (fs::exists(outputFile) && !forceRecreate)
+        if (fs::exists(outputFile) && !request.source.forceRecreate)
         {
             return outputFile;
         }
 
-        return TilerHelper::getTile(tileablePath, tz, tx, ty, tileSize, tms, forceRecreate, tileCacheFolder, nullptr, nullptr, tileablePathHash);
+        TileRequest cached;
+        cached.source = request.source;
+        cached.source.outputFolder = tileCacheFolder;
+        cached.tz = request.tz;
+        cached.tx = request.tx;
+        cached.ty = request.ty;
+        return TilerHelper::getTile(cached);
     }
 
-    std::string TilerHelper::withTiler(const fs::path &tileablePath, int tileSize, bool tms, bool forceRecreate,
-                                       const fs::path &outputFolder, const std::string &tileablePathHash,
+    std::string TilerHelper::withTiler(const TileSource &source,
                                        const std::function<std::string(Tiler &)> &render)
     {
+        const fs::path &tileablePath = source.path;
         // Files an entry handler tiles itself (COPC point clouds) are read in place; the
         // others are downloaded when remote and tiled by GDAL. Each step checks whether the
         // call was canceled (DQ-15); the GDAL steps also while they run.
         cancel::throwIfCanceled();
         const TilerFactory *factory = findTilerFactory(tileablePath);
-        const fs::path localPath = factory != nullptr ? tileablePath : toLocalFile(tileablePath, tileablePathHash);
+        const fs::path localPath = factory != nullptr ? tileablePath : toLocalFile(tileablePath, source.pathHash);
         cancel::throwIfCanceled();
 
         // A forced recreation must not be served by a tiler prepared before it
-        if (forceRecreate)
+        if (source.forceRecreate)
             RasterCache::instance().release(localPath);
 
-        const TilerKey key{io::toUtf8(localPath), tileSize, tms, io::toUtf8(outputFolder)};
+        const TilerKey key{io::toUtf8(localPath), source.tileSize, source.tms, io::toUtf8(source.outputFolder)};
         auto tiler = RasterCache::instance().acquireTiler(key, [&]() -> std::unique_ptr<Tiler> {
             if (factory != nullptr)
-                return factory->create(localPath, outputFolder, tileSize, tms);
+                return factory->create(localPath, source.outputFolder, source.tileSize, source.tms);
 
-            const fs::path fileToTile = toGeoTIFF(localPath, tileSize, forceRecreate, "", tileablePathHash);
-            return std::make_unique<GDALTiler>(io::toUtf8(fileToTile), io::toUtf8(outputFolder), tileSize, tms);
+            const fs::path fileToTile = toGeoTIFF(localPath, source.tileSize, source.forceRecreate, "", source.pathHash);
+            return std::make_unique<GDALTiler>(io::toUtf8(fileToTile), io::toUtf8(source.outputFolder), source.tileSize,
+                                               source.tms);
         });
         cancel::throwIfCanceled();
         return render(*tiler);
     }
 
-    fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
+    fs::path TilerHelper::getTile(const TileRequest &request)
     {
-        return getTile(tileablePath, tz, tx, ty, tileSize, tms, forceRecreate, outputFolder, std::string("png"),
-                       outBuffer, outBufferSize, tileablePathHash);
-    }
+        const int tz = request.tz, tx = request.tx, ty = request.ty;
+        uint8_t **outBuffer = request.outBuffer;
+        int *outBufferSize = request.outBufferSize;
 
-    fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const std::string &outputFormat, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
-    {
-        const ImageFormat format = parseImageFormat(outputFormat);
-        return io::fromUtf8(withTiler(tileablePath, tileSize, tms, forceRecreate, outputFolder, tileablePathHash,
-                                      [&](Tiler &t) { return t.tile(tz, tx, ty, format, outBuffer, outBufferSize); }));
-    }
+        if (request.visParams)
+        {
+            const ThumbVisParams &visParams = *request.visParams;
+            return io::fromUtf8(withTiler(request.source, [&](Tiler &t) {
+                // Visualization parameters apply to rasters; point clouds render as usual
+                if (auto *raster = dynamic_cast<GDALTiler *>(&t))
+                    return raster->tile(tz, tx, ty, visParams, outBuffer, outBufferSize);
+                return t.tile(tz, tx, ty, outBuffer, outBufferSize);
+            }));
+        }
 
-    fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const ThumbVisParams &visParams, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
-    {
-        return io::fromUtf8(withTiler(tileablePath, tileSize, tms, forceRecreate, outputFolder, tileablePathHash,
-                                      [&](Tiler &t) {
-                                          // Visualization parameters apply to rasters; point clouds render as usual
-                                          if (auto *raster = dynamic_cast<GDALTiler *>(&t))
-                                              return raster->tile(tz, tx, ty, visParams, outBuffer, outBufferSize);
-                                          return t.tile(tz, tx, ty, outBuffer, outBufferSize);
-                                      }));
+        const ImageFormat format = parseImageFormat(request.format);
+        return io::fromUtf8(withTiler(request.source, [&](Tiler &t) {
+            return t.tile(tz, tx, ty, format, outBuffer, outBufferSize);
+        }));
     }
 
     fs::path TilerHelper::toLocalFile(const fs::path &tileablePath, const std::string &tileablePathHash)
@@ -290,14 +294,10 @@ namespace ddb
         }
     }
 
-    void TilerHelper::runTiler(const fs::path &input,
-                               const fs::path &output,
-                               int tileSize, bool tms,
-                               std::ostream &os,
-                               OutputFormat format, const std::string &zRange,
-                               const std::string &x, const std::string &y)
+    void TilerHelper::runTiler(const fs::path &input, const fs::path &output, std::ostream &os,
+                               const TilerRun &run)
     {
-        requireOutputFormat(format, {OutputFormat::Text, OutputFormat::Json});
+        requireOutputFormat(run.format, {OutputFormat::Text, OutputFormat::Json});
 
         // Owned: parseZRange, std::stoi and tile() throw on bad input or failed tiles
         std::unique_ptr<Tiler> tiler;
@@ -305,29 +305,29 @@ namespace ddb
         if (const TilerFactory *factory = findTilerFactory(input))
         {
             // Tiled by its entry handler (COPC point cloud)
-            tiler = factory->create(input, output, tileSize, tms);
+            tiler = factory->create(input, output, run.tileSize, run.tms);
         }
         else
         {
             // Assume image/geotiff
-            fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
-            tiler = std::make_unique<GDALTiler>(io::toUtf8(geotiff), io::toUtf8(output), tileSize, tms);
+            fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, run.tileSize, true);
+            tiler = std::make_unique<GDALTiler>(io::toUtf8(geotiff), io::toUtf8(output), run.tileSize, run.tms);
         }
 
         BoundingBox<int> zb;
-        if (zRange == "auto")
+        if (run.zRange == "auto")
         {
             zb = tiler->getMinMaxZ();
         }
         else
         {
-            zb = parseZRange(zRange);
+            zb = parseZRange(run.zRange);
         }
 
         // One tile per line, or one JSON string per member of an array (escaped, separated across
         // zoom levels as well)
         std::optional<JsonArrayWriter> asJson;
-        if (format == OutputFormat::Json)
+        if (run.format == OutputFormat::Json)
             asJson.emplace(os);
         const auto write = [&](const std::string &tilePath)
         {
@@ -339,10 +339,10 @@ namespace ddb
 
         for (int z = zb.min; z <= zb.max; z++)
         {
-            if (x != "auto" && y != "auto")
+            if (run.x != "auto" && run.y != "auto")
             {
                 // Just one tile
-                write(tiler->tile(z, std::stoi(x), std::stoi(y)));
+                write(tiler->tile(z, std::stoi(run.x), std::stoi(run.y)));
             }
             else
             {

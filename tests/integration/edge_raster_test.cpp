@@ -65,7 +65,7 @@ class EdgeRasterTest : public ::testing::Test {
 
         std::ostringstream os;
         ASSERT_NO_THROW({
-            ddb::TilerHelper::runTiler(cogPath, tilesDir, 256, false, os);
+            ddb::TilerHelper::runTiler(cogPath, tilesDir, os);
         }) << "Tiling must not throw";
 
         // Verify output is non-empty (tiles were generated)

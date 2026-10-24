@@ -744,6 +744,26 @@ DDBErr DDBGenerateMemoryThumbnail(const char* filePath,
     });
 }
 
+namespace {
+
+// The tile (tz, tx, ty) of inputPath; inputPathHash (null or empty when unknown) names the local
+// copy of a remote file
+ddb::TileRequest tileRequest(const char* inputPath, int tz, int tx, int ty, int tileSize, bool tms,
+                             bool forceRecreate, const char* inputPathHash = nullptr) {
+    ddb::TileRequest request;
+    request.source.path = pathArg(inputPath);
+    request.source.tileSize = tileSize;
+    request.source.tms = tms;
+    request.source.forceRecreate = forceRecreate;
+    request.source.pathHash = optStr(inputPathHash);
+    request.tz = tz;
+    request.tx = tx;
+    request.ty = ty;
+    return request;
+}
+
+}  // namespace
+
 DDBErr DDBTile(const char* inputPath,
                int tz,
                int tx,
@@ -757,13 +777,8 @@ DDBErr DDBTile(const char* inputPath,
         requireOutput(outputTilePath, "Output tile path pointer is null");
         requireTileArgs(tz, tx, ty, tileSize);
 
-        const auto tilePath = ddb::TilerHelper::getFromUserCache(pathArg(inputPath),
-                                                                 tz,
-                                                                 tx,
-                                                                 ty,
-                                                                 tileSize,
-                                                                 tms,
-                                                                 forceRecreate);
+        const auto tilePath = ddb::TilerHelper::getFromUserCache(
+            tileRequest(inputPath, tz, tx, ty, tileSize, tms, forceRecreate));
         return io::toUtf8(tilePath);
     });
 }
@@ -784,17 +799,10 @@ DDBErr DDBMemoryTile(const char* inputPath,
         requireTileArgs(tz, tx, ty, tileSize);
 
         // inputPathHash can be null or empty, it's optional
-        ddb::TilerHelper::getTile(pathArg(inputPath),
-                                  tz,
-                                  tx,
-                                  ty,
-                                  tileSize,
-                                  tms,
-                                  forceRecreate,
-                                  "",
-                                  buffer,
-                                  bufferSize,
-                                  optStr(inputPathHash));
+        auto request = tileRequest(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, inputPathHash);
+        request.outBuffer = buffer;
+        request.outBufferSize = bufferSize;
+        ddb::TilerHelper::getTile(request);
     });
 }
 
@@ -817,18 +825,11 @@ DDBErr DDBMemoryTileFmt(const char* inputPath,
         const std::string fmtStr =
             (outputFormat && *outputFormat) ? std::string(outputFormat) : std::string("png");
 
-        ddb::TilerHelper::getTile(pathArg(inputPath),
-                                  tz,
-                                  tx,
-                                  ty,
-                                  tileSize,
-                                  tms,
-                                  forceRecreate,
-                                  "",
-                                  fmtStr,
-                                  buffer,
-                                  bufferSize,
-                                  optStr(inputPathHash));
+        auto request = tileRequest(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, inputPathHash);
+        request.format = fmtStr;
+        request.outBuffer = buffer;
+        request.outBufferSize = bufferSize;
+        ddb::TilerHelper::getTile(request);
     });
 }
 
@@ -1694,14 +1695,13 @@ DDBErr DDBMemoryTileEx(const char* inputPath,
         if (colormap) vizKey += std::string(",cm:") + colormap;
         if (rescale) vizKey += std::string(",rs:") + rescale;
 
-        ddb::TilerHelper::getTile(pathArg(inputPath),
-                                  tz, tx, ty,
-                                  tileSize, tms,
-                                  forceRecreate,
-                                  "",
-                                  visParams(preset, bands, formula, bandFilter, colormap, rescale),
-                                  buffer, bufferSize,
-                                  optStr(inputPathHash) + vizKey);
+        // The visualization is part of the name of the local copy of a remote file
+        auto request = tileRequest(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, nullptr);
+        request.source.pathHash = optStr(inputPathHash) + vizKey;
+        request.visParams = visParams(preset, bands, formula, bandFilter, colormap, rescale);
+        request.outBuffer = buffer;
+        request.outBufferSize = bufferSize;
+        ddb::TilerHelper::getTile(request);
     });
 }
 

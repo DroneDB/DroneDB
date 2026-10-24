@@ -11,6 +11,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "tile_test_support.h"
 #include "tilerhelper.h"
 #include "userprofile.h"
 #include <algorithm>
@@ -116,14 +117,14 @@ TEST(testTiler, image) {
     fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
 
     fs::path outTile =
-        TilerHelper::getTile(copcPath, 20, 256337, 369481, 256, true, true, ta.getFolder());
+        TilerHelper::getTile(testTile(copcPath, 20, 256337, 369481, 256, true, true, ta.getFolder()));
 
     EXPECT_TRUE(fs::exists(outTile));
 
     /* I'm disabling this test because it is flaky on some systems
     uint8_t *buffer;
     int bufSize;
-    TilerHelper::getTile(copcPath, 20, 256337, 369481, 256, true, true, "", &buffer, &bufSize);
+    TilerHelper::getTile(inMemory(testTile(copcPath, 20, 256337, 369481, 256, true, true), &buffer, &bufSize));
 
     EXPECT_TRUE(bufSize > 0);
     EXPECT_EQ(io::Path(outTile).getSize(), bufSize);
@@ -165,7 +166,7 @@ TEST(testTiler, toledoPointCloud) {
 
     for (const auto& tile : testTiles) {
         fs::path outTile =
-            TilerHelper::getTile(copcPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder());
+            TilerHelper::getTile(testTile(copcPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder()));
 
         EXPECT_TRUE(fs::exists(outTile))
             << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
@@ -217,7 +218,7 @@ MANUAL_TEST(tilerBenchmark, lewis) {
 
     for (const auto& tile : testTiles) {
         fs::path outTile =
-            TilerHelper::getTile(copcPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder());
+            TilerHelper::getTile(testTile(copcPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder()));
 
         EXPECT_TRUE(fs::exists(outTile))
             << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
@@ -236,7 +237,7 @@ TEST(testTiler, userCache) {
         testDataUrl("test-datasets/drone_dataset_brighton_beach/DJI_0018.JPG"),
         "DJI_0032.JPG");
     fs::path tileDir = ta.getFolder("tiles");
-    fs::path tile = TilerHelper::getFromUserCache(image, 20, 256335, 369483, 512, true, true, "");
+    fs::path tile = TilerHelper::getFromUserCache(testTile(image, 20, 256335, 369483, 512, true, true));
 
     EXPECT_TRUE(io::Path(tile).getSize() > 0);
 }
