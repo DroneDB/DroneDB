@@ -415,7 +415,9 @@ namespace
                 EXPECT_NE(algorithm.value("disabledReason", "").find("reflectance"), std::string::npos) << id;
             }
             else if (id == "NDVI" || id == "NDRE" || id == "NDWI")
+            {
                 EXPECT_FALSE(algorithm.contains("disabled")) << id;
+            }
         }
     }
 }
