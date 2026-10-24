@@ -141,7 +141,10 @@ function(ddb_add_library_objects name)
     target_link_libraries(${name} PUBLIC ddb_core_usage PRIVATE ddb_warnings)
     # DDB_BUILDING_LIBRARY: ddb_export.h makes DDB_DLL an export (it is defined for these objects,
     # not for the ddb target, which has no source of its own)
-    target_compile_definitions(${name} PRIVATE DDB_BUILDING_LIBRARY)
+    # ZD_EXPORT empty: vendor/zonedetect is compiled into libddb, but its header declares the API
+    # dllimport on MSVC unless ZD_EXPORT is set, and MSVC exports a definition of a dllimport
+    # function (C4273), so ddb.dll exported the 13 ZD* functions
+    target_compile_definitions(${name} PRIVATE DDB_BUILDING_LIBRARY ZD_EXPORT=)
     set_target_properties(${name} PROPERTIES
         CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
     target_include_directories(${name} SYSTEM PRIVATE
