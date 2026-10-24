@@ -1560,7 +1560,7 @@ TEST(plyconv, realObj2TilesParsesTexturedRepeatedSpaceFilename) {
     runThroughObj2Tiles(result.objPath, ta.getPath("public_tiles"));
     // The full tiles builder also converts the original filename privately.
     const fs::path tiles = ta.getPath("build_tiles");
-    EXPECT_NO_THROW(buildModel3DTiles(ply.string(), tiles.string(), true));
+    EXPECT_NO_THROW(buildModel3DTiles(ply.string(), tiles.string(), {.overwrite = true}));
     EXPECT_TRUE(fs::is_regular_file(tiles / "tileset.json"));
     for (const fs::path output : {ta.getPath("public_tiles"), tiles}) {
         std::ifstream input(output / "tileset.json");

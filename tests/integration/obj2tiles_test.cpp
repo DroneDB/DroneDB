@@ -111,7 +111,7 @@ TEST(obj2tiles, buildThrowsWhenBinaryMissing) {
     ddb::obj2tiles::findObj2TilesBinary(true);
 
     const fs::path out = ta.getPath("out3dtiles");
-    EXPECT_THROW(ddb::buildModel3DTiles(obj.string(), out.string(), true), Obj2TilesException);
+    EXPECT_THROW(ddb::buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}), Obj2TilesException);
     // Nothing must be left behind at the destination when generation fails.
     EXPECT_FALSE(fs::exists(out));
 }
@@ -127,7 +127,7 @@ MANUAL_TEST(obj2tiles, endToEndGeneration) {
     writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
 
     const fs::path out = ta.getPath("out3dtiles");
-    const std::string tileset = ddb::buildModel3DTiles(obj.string(), out.string(), true);
+    const std::string tileset = ddb::buildModel3DTiles(obj.string(), out.string(), {.overwrite = true});
     ASSERT_TRUE(fs::exists(tileset));
     ASSERT_TRUE(fs::exists(out / "tileset.json"));
 
@@ -415,7 +415,7 @@ MANUAL_TEST(obj2tiles, endToEndGeoreferenced) {
                  R"({"latitude": 45.46, "longitude": 9.19, "altitude": 120.0})");
 
     const fs::path out = ta.getPath("out3dtiles");
-    const std::string tileset = ddb::buildModel3DTiles(obj.string(), out.string(), true);
+    const std::string tileset = ddb::buildModel3DTiles(obj.string(), out.string(), {.overwrite = true});
     ASSERT_TRUE(fs::exists(tileset));
 
     std::ifstream in(tileset);

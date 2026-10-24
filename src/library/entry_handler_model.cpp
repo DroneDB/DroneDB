@@ -142,7 +142,10 @@ class ModelEntryHandler : public EntryHandler {
         // "ddb tiles3d" command on this output folder).
         const fs::path tilesFolder = ctx.baseOutputPath / Tiles3DBuildSubfolder;
         try {
-            buildModel3DTiles(inputPath, io::toUtf8(tilesFolder), true, std::nullopt, true, datasetRoot);
+            Tiles3DOptions tilesOptions;
+            tilesOptions.overwrite = true;
+            tilesOptions.datasetRoot = datasetRoot;
+            buildModel3DTiles(inputPath, io::toUtf8(tilesFolder), tilesOptions);
         } catch (const BuildInProgressException& tilesEx) {
             LOGW << "3D Tiles for " << ctx.entry.path << " not generated: another tiles build holds "
                  << buildLockPath(io::toUtf8(tilesFolder))

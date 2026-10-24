@@ -229,11 +229,11 @@ TEST(tiles3dBuild, failedRebuildKeepsPreviousTiles) {
     const fs::path out = ta.getPath("3dtiles");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
-    ASSERT_EQ(buildModel3DTiles(obj.string(), out.string(), true), (out / "tileset.json").string());
+    ASSERT_EQ(buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}), (out / "tileset.json").string());
     writeFile(out / "marker.txt", "previous");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), false));
-    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), true), Obj2TilesException);
+    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}), Obj2TilesException);
 
     EXPECT_EQ(readText(out / "marker.txt"), "previous");
     EXPECT_TRUE(fs::exists(out / "tileset.json"));
@@ -241,14 +241,14 @@ TEST(tiles3dBuild, failedRebuildKeepsPreviousTiles) {
 
     // Missing binary: fails fast and leaves the tiles alone too.
     usePath(kBogusBinary);
-    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), true), Obj2TilesException);
+    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}), Obj2TilesException);
     EXPECT_EQ(readText(out / "marker.txt"), "previous");
 
     // Invalid input (missing MTL): the previous tiles stay as well.
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
     const fs::path broken = ta.getPath("broken.obj");
     writeFile(broken, "mtllib broken.mtl\n" + gridObj());
-    EXPECT_THROW(buildModel3DTiles(broken.string(), out.string(), true), BuildDepMissingException);
+    EXPECT_THROW(buildModel3DTiles(broken.string(), out.string(), {.overwrite = true}), BuildDepMissingException);
     EXPECT_EQ(readText(out / "marker.txt"), "previous");
     expectNoLeftovers(out);
 }
@@ -264,14 +264,14 @@ TEST(tiles3dBuild, successfulRebuildReplacesTiles) {
     writeFile(out / "marker.txt", "previous");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
-    buildModel3DTiles(obj.string(), out.string(), true);
+    buildModel3DTiles(obj.string(), out.string(), {.overwrite = true});
 
     EXPECT_FALSE(fs::exists(out / "marker.txt"));
     EXPECT_TRUE(fs::exists(out / "args.txt"));
     expectNoLeftovers(out);
 
     // overwrite = false keeps refusing a non-empty output folder.
-    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), false), AppException);
+    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string()), AppException);
     EXPECT_TRUE(fs::exists(out / "args.txt"));
 }
 
@@ -290,7 +290,7 @@ TEST(tiles3dBuild, restoresOldWhenOnlyOldExists) {
     // The restore happens under the lock before Obj2Tiles runs, so it holds even
     // when the rebuild then fails.
     usePath(writeFakeObj2Tiles(ta.getFolder(), false));
-    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), true), Obj2TilesException);
+    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}), Obj2TilesException);
 
     EXPECT_EQ(readText(out / "marker.txt"), "previous");
     EXPECT_FALSE(fs::exists(old));
@@ -312,7 +312,7 @@ TEST(tiles3dBuild, deletesOldWhenBothExistThenRebuildSucceeds) {
     writeFile(old / "marker.txt", "older");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
-    buildModel3DTiles(obj.string(), out.string(), true);
+    buildModel3DTiles(obj.string(), out.string(), {.overwrite = true});
 
     EXPECT_FALSE(fs::exists(old));
     EXPECT_TRUE(fs::exists(out / "args.txt"));
@@ -334,7 +334,7 @@ TEST(tiles3dBuild, bothExistAndRebuildFailsKeepsNewerTiles) {
     writeFile(old / "marker.txt", "older");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), false));
-    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), true), Obj2TilesException);
+    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}), Obj2TilesException);
     EXPECT_EQ(readText(out / "marker.txt"), "newer");
     EXPECT_FALSE(fs::exists(old));
 }
@@ -348,20 +348,20 @@ TEST(tiles3dBuild, trailingSeparatorOutputDir) {
     const fs::path out = ta.getPath("3dtiles");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
-    const std::string tileset = buildModel3DTiles(obj.string(), out.string() + "/", true);
+    const std::string tileset = buildModel3DTiles(obj.string(), out.string() + "/", {.overwrite = true});
     EXPECT_EQ(fs::path(tileset), out / "tileset.json");
     EXPECT_TRUE(fs::exists(out / "tileset.json"));
     writeFile(out / "marker.txt", "previous");
 
     // The siblings are derived from the folder name, not created inside it.
     usePath(writeFakeObj2Tiles(ta.getFolder(), false));
-    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string() + "//", true), Obj2TilesException);
+    EXPECT_THROW(buildModel3DTiles(obj.string(), out.string() + "//", {.overwrite = true}), Obj2TilesException);
     EXPECT_EQ(readText(out / "marker.txt"), "previous");
     EXPECT_TRUE(folderNames(out).empty()) << "nothing may be created inside the output folder";
     expectNoLeftovers(out);
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
-    buildModel3DTiles(obj.string(), out.string() + "/", true);
+    buildModel3DTiles(obj.string(), out.string() + "/", {.overwrite = true});
     EXPECT_FALSE(fs::exists(out / "marker.txt"));
     EXPECT_TRUE(fs::exists(out / "tileset.json"));
     expectNoLeftovers(out);
@@ -380,7 +380,7 @@ TEST(tiles3dBuild, busyTilesLockLeavesOutputAlone) {
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
     {
         BuildLock other(out.string());
-        EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), true), BuildInProgressException);
+        EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}), BuildInProgressException);
     }
     EXPECT_EQ(readText(out / "marker.txt"), "previous");
     EXPECT_TRUE(fs::exists(ta.getPath("3dtiles-temp-0123456789abcdef/partial")));
@@ -401,7 +401,7 @@ TEST(tiles3dBuild, plyIsConvertedToObjForTiles) {
     const fs::path out = ta.getPath("3dtiles");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
-    buildModel3DTiles(ply.string(), out.string(), true);
+    buildModel3DTiles(ply.string(), out.string(), {.overwrite = true});
 
     const auto args = readLines(out / "args.txt");
     ASSERT_GE(args.size(), 2u);
@@ -488,7 +488,7 @@ TEST(tiles3dBuild, noUvGltfReachesObj2TilesAsObj) {
     const fs::path out = ta.getPath("3dtiles");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
-    buildModel3DTiles(gltf.string(), out.string(), true);
+    buildModel3DTiles(gltf.string(), out.string(), {.overwrite = true});
 
     const auto args = readLines(out / "args.txt");
     ASSERT_FALSE(args.empty());
@@ -504,7 +504,7 @@ TEST(tiles3dBuild, realObj2TilesFromPly) {
     writeFile(ply, gridPly(12));
     const fs::path out = ta.getPath("3dtiles");
 
-    const std::string tileset = buildModel3DTiles(ply.string(), out.string(), true);
+    const std::string tileset = buildModel3DTiles(ply.string(), out.string(), {.overwrite = true});
     ASSERT_TRUE(fs::exists(tileset));
     bool anyB3dm = false;
     for (const auto& e : fs::recursive_directory_iterator(out))
@@ -523,7 +523,7 @@ TEST(tiles3dBuild, realObj2TilesFromNoUvGltf) {
     writeNoUvGltf(gltf);
     const fs::path out = ta.getPath("3dtiles");
 
-    const std::string tileset = buildModel3DTiles(gltf.string(), out.string(), true);
+    const std::string tileset = buildModel3DTiles(gltf.string(), out.string(), {.overwrite = true});
     ASSERT_TRUE(fs::exists(tileset));
     EXPECT_TRUE(anyB3dmHasColor(out)) << "glTF vertex colours must reach the tiles";
     expectNoLeftovers(out);
@@ -538,7 +538,7 @@ MANUAL_TEST(tiles3dBuild, realObj2TilesFromBrightonPly) {
         testDataUrl("3d/brighton.ply"), "brighton.ply");
     const fs::path out = ta.getPath("3dtiles");
 
-    const std::string tileset = buildModel3DTiles(ply.string(), out.string(), true);
+    const std::string tileset = buildModel3DTiles(ply.string(), out.string(), {.overwrite = true});
     ASSERT_TRUE(fs::exists(tileset));
     expectNoLeftovers(out);
 }
@@ -872,7 +872,7 @@ TEST(tiles3dBuild, converterInfoSkipsGetModelInfo) {
     writeFile(ply, gridPly(6));
     {
         CaptureScope cap(plog::debug);
-        buildModel3DTiles(ply.string(), ta.getPath("t_ply").string(), true);
+        buildModel3DTiles(ply.string(), ta.getPath("t_ply").string(), {.overwrite = true});
         EXPECT_TRUE(cap.contains("from the converter"));
         EXPECT_FALSE(cap.contains("getModelInfo failed"));
     }
@@ -880,7 +880,7 @@ TEST(tiles3dBuild, converterInfoSkipsGetModelInfo) {
     writeFile(obj, gridObj(6));
     {
         CaptureScope cap(plog::debug);
-        buildModel3DTiles(obj.string(), ta.getPath("t_obj").string(), true);
+        buildModel3DTiles(obj.string(), ta.getPath("t_obj").string(), {.overwrite = true});
         EXPECT_FALSE(cap.contains("from the converter")) << "an OBJ has no converter stats";
         EXPECT_TRUE(cap.contains("K faces"));
     }

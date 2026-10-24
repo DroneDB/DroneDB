@@ -34,6 +34,21 @@ namespace ddb
         double altitude = 0.0;  ///< Altitude of the model origin, meters.
     };
 
+    /** What @ref buildModel3DTiles may be told besides the model and the destination. */
+    struct Tiles3DOptions
+    {
+        /// When true, an existing non-empty output directory is replaced (only once the new
+        /// tileset is complete); when false, a non-empty one causes an exception.
+        bool overwrite = false;
+        /// Explicit georeferencing origin (overrides auto-detection).
+        std::optional<ModelGeoref> georef;
+        /// When true and @c georef is empty, attempt sidecar detection.
+        bool autoDetectGeoref = true;
+        /// Root folder of the dataset that contains the model, or empty when unknown (same
+        /// meaning as in @ref buildNexus).
+        std::string datasetRoot;
+    };
+
     /**
      * @brief Build a Nexus (.nxz) file from an OBJ/GLTF/GLB/PLY model.
      *
@@ -109,13 +124,7 @@ namespace ddb
      *
      * @param inputObj Path to the input OBJ (or GLTF/GLB) model.
      * @param outputDir Destination directory for the tileset (e.g. `<hash>/3dtiles`).
-     * @param overwrite When true, an existing non-empty @p outputDir is replaced (only
-     *                  once the new tileset is complete); when false, a non-empty
-     *                  @p outputDir causes an exception.
-     * @param georef Optional explicit georeferencing origin (overrides auto-detection).
-     * @param autoDetectGeoref When true and @p georef is empty, attempt sidecar detection.
-     * @param datasetRoot Root folder of the dataset that contains @p inputObj, or empty
-     *                    when unknown (same meaning as in @ref buildNexus).
+     * @param options See @ref Tiles3DOptions.
      * @return The path to the generated `tileset.json`.
      * @throws Obj2TilesException if the Obj2Tiles binary is unavailable or fails.
      * @throws BuildInProgressException if another tiles build holds the lock on @p outputDir.
@@ -124,10 +133,7 @@ namespace ddb
      *         @ref buildNexus).
      */
     DDB_DLL std::string buildModel3DTiles(const std::string &inputObj, const std::string &outputDir,
-                                          bool overwrite = false,
-                                          std::optional<ModelGeoref> georef = std::nullopt,
-                                          bool autoDetectGeoref = true,
-                                          const std::string &datasetRoot = "");
+                                          const Tiles3DOptions &options = {});
 
     /** Read-only sentinel check used by tiles recovery and build cleanup. */
     DDB_DLL bool isModel3DTilesComplete(const fs::path &outputDir);

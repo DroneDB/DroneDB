@@ -851,68 +851,20 @@ std::optional<ModelGeoref> detectModelGeoref(const std::string& inputObj) {
     return std::nullopt;
 }
 
-std::string buildModel3DTiles(const std::string& inputObj, const std::string& outputDir,
-                              bool overwrite, std::optional<ModelGeoref> georef,
-                              bool autoDetectGeoref, const std::string& datasetRoot) {
-    // Fail fast: if Obj2Tiles is unavailable, skip georef detection, conversion and
-    // dependency validation entirely. Callers treat 3D Tiles as best-effort and keep
-    // producing Nexus.
-    if (obj2tiles::findObj2TilesBinary().empty())
-        throw Obj2TilesException(
-            "Obj2Tiles binary not found; cannot generate 3D Tiles. Set DDB_OBJ2TILES_PATH "
-            "or place Obj2Tiles next to the DroneDB executable.");
+namespace {
 
-    fs::path outDir = stripTrailingSeparators(outputDir);
-    {
-        const std::string name = io::toUtf8(outDir.filename());
-        if (name.empty() || name == "." || name == "..")
-            throw AppException("Invalid 3D Tiles output directory: " + outputDir);
-    }
-    if (!outDir.has_parent_path())
-        outDir = fs::current_path() / outDir;
-    const fs::path parent = outDir.parent_path();
-    io::assureFolderExists(parent);
-
-    const std::string outName = io::toUtf8(outDir.filename());
-    const fs::path oldDir = backupFolderPath(outDir);
-
-    // One tiles build per output folder ("<outDir>.building"), held until return.
-    // It also gates removeOrphanTempFolders (cleanupBuild) for the -temp-/-old
-    // siblings. Throws BuildInProgressException when another build holds it.
-    BuildLock tilesLock(io::toUtf8(outDir));
-
-    recoverTilesSwap(outDir, oldDir);
-
-    if (!overwrite && fs::exists(outDir) && !fs::is_empty(outDir))
-        throw AppException("Directory " + io::toUtf8(outDir) + " already exists (delete it first)");
-
-    // Resolve georeferencing from sidecars next to the ORIGINAL input (before any
-    // conversion moves us into a temp directory). An explicit georef argument
-    // always wins.
-    if (!georef.has_value() && autoDetectGeoref)
-        georef = detectModelGeoref(inputObj);
-
-    // Validate dependencies and convert to OBJ when needed (glTF/GLB, PLY).
-    io::ScopedTempDir inputGuard;
-    const PreparedModel model =
-        prepareModelInput(inputObj, ModelConsumer::Tiles, datasetRoot, inputGuard);
+// The Obj2Tiles parameters for a model: the face-count heuristic picks the tile hierarchy, or
+// DDB_OBJ2TILES_FORCE_DEFAULTS (--force-defaults) skips it; georeferenced when georef is given.
+//
+// Face count → (divisions, lods, octree) heuristic selects the right tile
+// hierarchy depth for the model's complexity. Small models (<10K faces) get
+// a single tile at the finest LOD; large models get progressively deeper
+// splits, hard-capped at depth 6 (≤ 4096 finest-LOD tiles).
+// --force-defaults / DDB_OBJ2TILES_FORCE_DEFAULTS env var skips the heuristic
+// and uses hardcoded defaults for testing/debugging.
+obj2tiles::Obj2TilesOptions chooseObj2TilesOptions(const std::string& inputObj, const PreparedModel& model,
+                                                   const std::optional<ModelGeoref>& georef) {
     const std::string& actualInputObj = model.path;
-
-    // Produce into a sibling temporary directory; outDir is untouched until
-    // Obj2Tiles succeeds. The guard removes the temp folder on any failure.
-    const fs::path tempOut = parent / io::fromUtf8(outName + TempFolderInfix + randomString(16));
-    io::ScopedTempDir outGuard;
-    io::assureIsRemoved(tempOut);
-    io::assureFolderExists(tempOut);
-    outGuard.reset(tempOut);
-
-    // Compute Obj2Tiles parameters based on model face count.
-    // Face count → (divisions, lods, octree) heuristic selects the right tile
-    // hierarchy depth for the model's complexity. Small models (<10K faces) get
-    // a single tile at the finest LOD; large models get progressively deeper
-    // splits, hard-capped at depth 6 (≤ 4096 finest-LOD tiles).
-    // --force-defaults / DDB_OBJ2TILES_FORCE_DEFAULTS env var skips the heuristic
-    // and uses hardcoded defaults for testing/debugging.
     const bool forceDefaults = [] {
         const char* env = std::getenv("DDB_OBJ2TILES_FORCE_DEFAULTS");
         return env && env[0] != '0' && env[0] != '\0';
@@ -967,13 +919,14 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
         opts.localMode = true;
         LOGD << "Building non-georeferenced (local) 3D Tiles for " << inputObj;
     }
+    return opts;
+}
 
-    std::string err;
-    if (!obj2tiles::runObj2Tiles(io::fromUtf8(actualInputObj), tempOut, opts, err))
-        throw Obj2TilesException("Could not build 3D Tiles for " + inputObj + ": " + err);
-
-    // Two-step swap (A3): outDir -> "<outDir>-old", temp -> outDir, drop -old.
-    // A crash in between is repaired by recoverTilesSwap on the next run.
+// Two-step swap (A3): outDir -> "<outDir>-old", temp -> outDir, drop -old.
+// A crash in between is repaired by recoverTilesSwap on the next run. outGuard owns tempOut and
+// lets go of it once it is in place.
+void publishTiles(const fs::path& tempOut, const fs::path& outDir, const fs::path& oldDir,
+                  io::ScopedTempDir& outGuard) {
     std::error_code ec;
     // An incomplete backup may have been retained by recovery. Keep it through
     // publication rather than overwrite it with another incomplete final.
@@ -1017,6 +970,71 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
             LOGW << "Cannot remove previous 3D Tiles " << io::toUtf8(oldDir) << ": " << e.what();
         }
     }
+}
+
+}  // namespace
+
+std::string buildModel3DTiles(const std::string& inputObj, const std::string& outputDir,
+                              const Tiles3DOptions& options) {
+    // Fail fast: if Obj2Tiles is unavailable, skip georef detection, conversion and
+    // dependency validation entirely. Callers treat 3D Tiles as best-effort and keep
+    // producing Nexus.
+    if (obj2tiles::findObj2TilesBinary().empty())
+        throw Obj2TilesException(
+            "Obj2Tiles binary not found; cannot generate 3D Tiles. Set DDB_OBJ2TILES_PATH "
+            "or place Obj2Tiles next to the DroneDB executable.");
+
+    fs::path outDir = stripTrailingSeparators(outputDir);
+    {
+        const std::string name = io::toUtf8(outDir.filename());
+        if (name.empty() || name == "." || name == "..")
+            throw AppException("Invalid 3D Tiles output directory: " + outputDir);
+    }
+    if (!outDir.has_parent_path())
+        outDir = fs::current_path() / outDir;
+    const fs::path parent = outDir.parent_path();
+    io::assureFolderExists(parent);
+
+    const std::string outName = io::toUtf8(outDir.filename());
+    const fs::path oldDir = backupFolderPath(outDir);
+
+    // One tiles build per output folder ("<outDir>.building"), held until return.
+    // It also gates removeOrphanTempFolders (cleanupBuild) for the -temp-/-old
+    // siblings. Throws BuildInProgressException when another build holds it.
+    BuildLock tilesLock(io::toUtf8(outDir));
+
+    recoverTilesSwap(outDir, oldDir);
+
+    if (!options.overwrite && fs::exists(outDir) && !fs::is_empty(outDir))
+        throw AppException("Directory " + io::toUtf8(outDir) + " already exists (delete it first)");
+
+    // Resolve georeferencing from sidecars next to the ORIGINAL input (before any
+    // conversion moves us into a temp directory). An explicit georef argument
+    // always wins.
+    std::optional<ModelGeoref> georef = options.georef;
+    if (!georef.has_value() && options.autoDetectGeoref)
+        georef = detectModelGeoref(inputObj);
+
+    // Validate dependencies and convert to OBJ when needed (glTF/GLB, PLY).
+    io::ScopedTempDir inputGuard;
+    const PreparedModel model =
+        prepareModelInput(inputObj, ModelConsumer::Tiles, options.datasetRoot, inputGuard);
+
+    // Produce into a sibling temporary directory; outDir is untouched until
+    // Obj2Tiles succeeds. The guard removes the temp folder on any failure.
+    const fs::path tempOut = parent / io::fromUtf8(outName + TempFolderInfix + randomString(16));
+    io::ScopedTempDir outGuard;
+    io::assureIsRemoved(tempOut);
+    io::assureFolderExists(tempOut);
+    outGuard.reset(tempOut);
+
+    const obj2tiles::Obj2TilesOptions opts = chooseObj2TilesOptions(inputObj, model, georef);
+
+    std::string err;
+    if (!obj2tiles::runObj2Tiles(io::fromUtf8(model.path), tempOut, opts, err))
+        throw Obj2TilesException("Could not build 3D Tiles for " + inputObj + ": " + err);
+
+    publishTiles(tempOut, outDir, oldDir, outGuard);
 
     return io::toUtf8(outDir / TilesetFileName);
 }

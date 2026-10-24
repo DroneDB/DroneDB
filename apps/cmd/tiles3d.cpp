@@ -81,7 +81,11 @@ namespace cmd
 
         const bool autoDetect = !forceLocal && !georef.has_value();
 
-        std::cout << ddb::buildModel3DTiles(input, output, overwrite, georef, autoDetect) << std::endl;
+        ddb::Tiles3DOptions tilesOptions;
+        tilesOptions.overwrite = overwrite;
+        tilesOptions.georef = georef;
+        tilesOptions.autoDetectGeoref = autoDetect;
+        std::cout << ddb::buildModel3DTiles(input, output, tilesOptions) << std::endl;
         return EXIT_SUCCESS;
     }
 
