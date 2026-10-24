@@ -55,6 +55,7 @@
 #include "passwordmanager.h"
 #include "process_config.h"
 #include "process_init.h"
+#include "raster_export.h"
 #include "raster_region.h"
 #include "raster_utils.h"
 #include "vector_query.h"
@@ -1834,82 +1835,9 @@ DDBErr DDBAlignRaster(const char* sourcePath,
     });
 }
 
-// Build internal, power-of-two overviews on a freshly written GeoTIFF so the
-// output supports efficient zoomed/partial reads (closer to a cloud-optimized
-// layout). Levels are added while the largest dimension stays >= 256 px, using
-// the same DEFLATE+PREDICTOR compression for the pyramids. Best-effort: a
-// failure to build overviews is non-fatal (the full-resolution data is intact).
-static void buildInternalOverviews(GDALDatasetH hDs, int width, int height) {
-    std::vector<int> levels;
-    int factor = 2;
-    while (std::max(width, height) / factor >= 256 && levels.size() < 8) {
-        levels.push_back(factor);
-        factor *= 2;
-    }
-    if (levels.empty()) return;
-    // Thread-local config so concurrent exports do not clobber global GDAL state.
-    const ScopedThreadConfigOption compress("COMPRESS_OVERVIEW", "DEFLATE");
-    const ScopedThreadConfigOption predictor("PREDICTOR_OVERVIEW", "2");
-    GDALBuildOverviews(hDs, "AVERAGE", static_cast<int>(levels.size()),
-                       levels.data(), 0, nullptr, nullptr, nullptr);
-}
-
-// Auto-compute a windowed tile size for the formula export branch.
-// - Explicit tileSize > 0: clamped to [64, 8192], then rounded up to the
-//   nearest multiple of 16 (GeoTIFF tiling requirement).
-// - Auto (tileSize == 0): starts from max(blockSize, 512) clamped to
-//   [256, 1024], then halved until the per-tile working set
-//   (bandCount input floats + formula result float + RGBA bytes,
-//   x2 headroom) fits within ~64 MB, with a floor of 256; the
-//   result is then rounded up to the nearest multiple of 16.
-static int computeExportTileSize(GDALDatasetH hSrcDs, int bandCount, int tileSize) {
-    int result;
-    if (tileSize > 0) {
-        result = std::clamp(tileSize, 64, 8192);
-    } else {
-        int bx = 0, by = 0;
-        GDALGetBlockSize(GDALGetRasterBand(hSrcDs, 1), &bx, &by);
-        int t = std::clamp(std::max(bx, 512), 256, 1024);
-
-        const size_t budgetBytes = 64ull * 1024 * 1024;
-        // Working set per tile: bandCount input floats + formula result float +
-        // RGBA bytes, with a x2 headroom factor for GDAL internal buffers.
-        auto tileBytes = [&](int s) {
-            const size_t pix = static_cast<size_t>(s) * s;
-            return pix * (static_cast<size_t>(bandCount) * sizeof(float) + sizeof(float) + 4) * 2;
-        };
-        while (t > 256 && tileBytes(t) > budgetBytes) t /= 2;
-        result = std::max(t, 256);
-    }
-
-    // GeoTIFF requires tile dimensions to be a multiple of 16. Round up and
-    // re-clamp so the value is valid both as a processing window and as the
-    // output BLOCKXSIZE/BLOCKYSIZE.
-    result = ((result + 15) / 16) * 16;
-    return std::clamp(result, 64, 8192);
-}
-
-// The output file of an export, deleted unless the export completed (commit): a failed or
-// canceled export leaves no partial file
-class PartialOutput {
-   public:
-    explicit PartialOutput(const char* path) : path_(path) {}
-    ~PartialOutput() {
-        if (!committed_)
-            VSIUnlink(path_);
-    }
-    PartialOutput(const PartialOutput&) = delete;
-    PartialOutput& operator=(const PartialOutput&) = delete;
-    void commit() noexcept { committed_ = true; }
-
-   private:
-    const char* path_;
-    bool committed_ = false;
-};
-
-// Internal block-windowed raster export shared by DDBExportRaster (legacy ABI)
-// and DDBExportRaster2. Throws on errors (mapped to a DDBErr by guarded() in the
-// callers), CanceledException when the progress callback asked to stop or the
+// The export shared by DDBExportRaster (legacy ABI) and DDBExportRaster2: the C arguments in a
+// request, and the C progress callback as the library's. Throws on errors (mapped to a DDBErr by
+// guarded() in the callers), CanceledException when the progress callback asked to stop or the
 // call was canceled (DQ-15).
 static void exportRasterImpl(const char* inputPath, const char* outputPath,
                             const char* preset, const char* bands,
@@ -1919,267 +1847,23 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
                             DDBProgressCallback progress, void* progressUserData) {
     requireText(inputPath, "No input path provided");
     requireText(outputPath, "No output path provided");
-    // Creating the output truncates an existing file, so it must not be the input
-    io::assureDistinctOutput(pathArg(inputPath), pathArg(outputPath));
 
-    // One cancellation for the whole call (DQ-15): the token of this call is canceled by the
-    // caller's token, by the shutdown, and by the progress callback when it asks to stop
-    // (non-zero), so every checkpoint below, GDAL's included, honours all three.
-    cancel::CallToken callToken;
-    // Reports progress; never throws (GDAL calls it through its progress callback)
-    const auto askCallback = [&](double fraction, const char* phase) {
-        if (progress != nullptr && progress(fraction, phase, progressUserData) != 0)
-            callToken.cancel("Export canceled by the progress callback");
-    };
-    // Reports progress, then stops the export when it was canceled
-    const auto checkpoint = [&](double fraction, const char* phase) {
-        askCallback(fraction, phase);
-        cancel::throwIfCanceled();
-    };
-
-    // Closed on any return or throw
-    auto srcGuard = adoptDataset(GDALOpen(inputPath, GA_ReadOnly));
-    if (!srcGuard)
-        throw GDALException("Cannot open " + std::string(inputPath));
-    GDALDatasetH hSrcDs = datasetHandle(srcGuard);
-
-    const int width = GDALGetRasterXSize(hSrcDs);
-    const int height = GDALGetRasterYSize(hSrcDs);
-    const int bandCount = GDALGetRasterCount(hSrcDs);
-
-    const std::string formulaStr = optStr(formula);
-    const std::string bandsStr = optStr(bands);
-    const std::string presetStr = optStr(preset);
-    const std::string filterStr = optStr(bandFilter);
-    const std::string colormapStr = optStr(colormap);
-    const std::string rescaleStr = optStr(rescale);
-
-    // Get source geotransform and projection
-    double geoTransform[6];
-    bool hasGeoTransform = (GDALGetGeoTransform(hSrcDs, geoTransform) == CE_None);
-    const char* projRef = GDALGetProjectionRef(hSrcDs);
-    std::string projection = projRef ? std::string(projRef) : "";
-
-    if (!formulaStr.empty()) {
-        // Formula mode: apply formula + colormap, export as RGBA GeoTIFF.
-        // Block-windowed so peak memory is O(tileW * tileH * bandCount) and
-        // independent of the full raster size.
-        const ddb::FormulaPlan plan =
-            ddb::planFormula(hSrcDs, inputPath, formulaStr, filterStr, colormapStr, true);
-
-        const int tw = computeExportTileSize(hSrcDs, bandCount, tileSize);
-        const int th = tw;
-        const int ntx = (width + tw - 1) / tw;
-        const int nty = (height + th - 1) / th;
-        const size_t totalTiles = static_cast<size_t>(ntx) * nty;
-
-        // Reads a window of every band and applies the formula: buffers.result is its values
-        auto computeWindow = [&](int x0, int y0, int winW, int winH, ddb::FormulaBuffers& buffers) {
-            ddb::computeFormulaValues(hSrcDs, plan, ddb::RasterWindow{x0, y0, winW, winH, winW, winH}, buffers);
+    ddb::RasterExport request;
+    request.input = inputPath;
+    request.output = outputPath;
+    request.preset = optStr(preset);
+    request.bands = optStr(bands);
+    request.formula = optStr(formula);
+    request.bandFilter = optStr(bandFilter);
+    request.colormap = optStr(colormap);
+    request.rescale = optStr(rescale);
+    request.tileSize = tileSize;
+    if (progress != nullptr) {
+        request.progress = [progress, progressUserData](double fraction, const char* phase) {
+            return progress(fraction, phase, progressUserData) != 0;
         };
-
-        // Determine rescale range. Explicit rescale and formula-defined ranges
-        // keep the export fully memory-bounded. The auto-percentile fallback
-        // performs an extra windowed pass that collects valid values (only hit
-        // when neither an explicit range nor a formula range is available).
-        std::pair<float, float> range;
-        if (const auto fixedRange = ddb::fixedDisplayRange(rescaleStr, *plan.formula)) {
-            range = *fixedRange;
-        } else {
-            // Auto-percentile fallback: collect valid values with a windowed
-            // pass. To keep memory bounded regardless of raster size, values
-            // are uniformly subsampled into a fixed-capacity reservoir instead
-            // of storing every pixel.
-            constexpr size_t kMaxSamples = 4ull * 1024 * 1024;  // 16 MB of floats
-            ddb::FormulaBuffers buffers;
-            std::vector<float> valid;
-            valid.reserve(std::min<size_t>(kMaxSamples,
-                static_cast<size_t>(width) * height));
-            // Deterministic, thread-local RNG (fixed seed) for reproducible
-            // reservoir sampling, independent of the global std::rand() state.
-            std::mt19937 reservoirRng(1337u);
-            std::uniform_real_distribution<double> reservoirUni(0.0, 1.0);
-            size_t seen = 0;
-            for (int ty = 0; ty < nty; ty++) {
-                for (int tx = 0; tx < ntx; tx++) {
-                    cancel::throwIfCanceled();
-                    const int x0 = tx * tw, y0 = ty * th;
-                    const int winW = std::min(tw, width - x0);
-                    const int winH = std::min(th, height - y0);
-                    computeWindow(x0, y0, winW, winH, buffers);
-                    for (float v : buffers.result) {
-                        if (!ddb::isFormulaValue(v)) continue;
-                        seen++;  // count this element before drawing (Algorithm R)
-                        if (valid.size() < kMaxSamples) {
-                            valid.push_back(v);
-                        } else {
-                            // Reservoir sampling: draw j from [0, seen) where seen
-                            // already includes this element → probability k/seen.
-                            const size_t j = static_cast<size_t>(reservoirUni(reservoirRng) * seen);
-                            if (j < kMaxSamples) valid[j] = v;
-                        }
-                    }
-                }
-            }
-            range = ddb::percentileDisplayRange(valid);
-        }
-
-        // Create tiled output GeoTIFF with 4 bands (RGBA)
-        GDALDriverH gtiffDrv = GDALGetDriverByName("GTiff");
-        if (!gtiffDrv)
-            throw GDALException("GTiff driver not available");
-
-        GtiffOptions createOpts;
-        createOpts.tiled(tw).compress(GtiffOptions::Codec::Deflate).predictorFor(GDT_Byte).bigTiffIfSafer();
-        // Compression threads: this one and those the CPU pool allows (DQ-15), held until
-        // the output is closed
-        const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
-        createOpts.add(parallel::gdalNumThreads(cpu));
-
-        // Deleted unless the export completes; declared first, so the dataset is closed
-        // before the file is deleted
-        PartialOutput partialOutput(outputPath);
-        // Closed on any throw. On success we close it explicitly after the finalization.
-        auto outGuard = adoptDataset(
-            GDALCreate(gtiffDrv, outputPath, width, height, 4, GDT_Byte, createOpts.list().List()));
-        if (!outGuard)
-            throw GDALException("Cannot create output GeoTIFF");
-        GDALDatasetH hOut = datasetHandle(outGuard);
-
-        if (hasGeoTransform) GDALSetGeoTransform(hOut, geoTransform);
-        if (!projection.empty()) GDALSetProjection(hOut, projection.c_str());
-        GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 1), GCI_RedBand);
-        GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 2), GCI_GreenBand);
-        GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 3), GCI_BlueBand);
-        GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 4), GCI_AlphaBand);
-
-        ddb::FormulaBuffers buffers;
-        std::vector<uint8_t> rgba;
-        std::vector<uint8_t> chanData;
-        size_t doneTiles = 0;
-
-        checkpoint(0.0, "rendering");
-        for (int ty = 0; ty < nty; ty++) {
-            for (int tx = 0; tx < ntx; tx++) {
-                checkpoint(static_cast<double>(doneTiles) / totalTiles, "rendering");
-
-                const int x0 = tx * tw, y0 = ty * th;
-                const int winW = std::min(tw, width - x0);
-                const int winH = std::min(th, height - y0);
-                const size_t winPix = static_cast<size_t>(winW) * winH;
-
-                computeWindow(x0, y0, winW, winH, buffers);
-
-                rgba.resize(winPix * 4);
-                ddb::VegetationEngine::instance().applyColormap(buffers.result.data(), rgba.data(), winPix,
-                                                                *plan.colormap, range.first, range.second,
-                                                                NODATA_SENTINEL);
-
-                chanData.resize(winPix);
-                for (int ch = 0; ch < 4; ch++) {
-                    for (size_t i = 0; i < winPix; i++) chanData[i] = rgba[i * 4 + ch];
-                    GDALRasterBandH hBand = GDALGetRasterBand(hOut, ch + 1);
-                    if (GDALRasterIO(hBand, GF_Write, x0, y0, winW, winH,
-                                     chanData.data(), winW, winH, GDT_Byte, 0, 0) != CE_None)
-                        throw GDALException("Cannot write output tile");
-                }
-                doneTiles++;
-            }
-        }
-
-        GDALFlushCache(hOut);
-        // Add internal overviews for efficient zoomed/partial reads.
-        buildInternalOverviews(hOut, width, height);
-        outGuard.reset();  // closes hOut
-        srcGuard.reset();  // closes hSrcDs
-        partialOutput.commit();
-        askCallback(1.0, "rendering");
-        return;
-    } else {
-        // Non-formula mode: band selection + rescale, export as GeoTIFF
-        std::vector<int> selectedBands;
-        try {
-            if (!bandsStr.empty()) {
-                std::istringstream ss(bandsStr);
-                std::string token;
-                while (std::getline(ss, token, ',')) {
-                    int b = std::stoi(token);
-                    if (b < 1 || b > bandCount)
-                        throw InvalidArgsException("Band index out of range: " + token);
-                    selectedBands.push_back(b);
-                }
-            } else if (!presetStr.empty()) {
-                auto& spm = ddb::SensorProfileManager::instance();
-                auto mapping = spm.getBandMappingForPreset(std::string(inputPath), presetStr);
-                selectedBands = {mapping.r, mapping.g, mapping.b};
-            } else {
-                for (int i = 1; i <= std::min(3, bandCount); i++) selectedBands.push_back(i);
-            }
-        } catch (const std::exception& e) {
-            LOGW << "Error parsing bands/preset: " << e.what();
-            throw;
-        }
-
-        // Use GDALTranslate for band selection + rescale. Its progress goes to the
-        // callback, and it stops when the export is canceled.
-        checkpoint(0.0, "converting");
-        CPLStringList targs;
-        targs.AddString("-ot");
-        targs.AddString("Byte");
-
-        for (int b : selectedBands) {
-            targs.AddString("-b");
-            targs.AddString(std::to_string(b).c_str());
-        }
-
-        GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrcDs, 1));
-        if (srcType != GDT_Byte) {
-            if (!rescaleStr.empty()) {
-                auto commaPos = rescaleStr.find(',');
-                if (commaPos != std::string::npos) {
-                    targs.AddString("-scale");
-                    targs.AddString(rescaleStr.substr(0, commaPos).c_str());
-                    targs.AddString(rescaleStr.substr(commaPos + 1).c_str());
-                    targs.AddString("0");
-                    targs.AddString("255");
-                }
-            } else {
-                targs.AddString("-scale");
-            }
-        }
-
-        targs.AddString("-of");
-        targs.AddString("GTiff");
-        GtiffOptions().tiled().compress(GtiffOptions::Codec::Deflate).appendTo(targs);
-
-        const GdalOptionsPtr<GDALTranslateOptions> psOptions(
-            GDALTranslateOptionsNew(targs.List(), nullptr));
-        if (!psOptions)
-            throw GDALException("Cannot create GDALTranslate options");
-        cancel::GdalProgress translateProgress([&](double fraction) { askCallback(fraction, "converting"); });
-        translateProgress.attach(psOptions.get());
-
-        PartialOutput partialOutput(outputPath);
-        int bUsageError = FALSE;
-        auto out = adoptDataset(GDALTranslate(outputPath, hSrcDs, psOptions.get(), &bUsageError));
-        srcGuard.reset();  // closes hSrcDs
-
-        if (!out || bUsageError) {
-            out.reset();
-            cancel::throwIfCanceled();
-            throw GDALException("Cannot create output GeoTIFF");
-        }
-
-        GDALFlushCache(datasetHandle(out));
-        out.reset();
-        // Reopen in update mode to add internal overviews (efficient zoomed
-        // reads). Best-effort: a failure here is non-fatal.
-        if (const auto ovr = adoptDataset(GDALOpen(outputPath, GA_Update))) {
-            buildInternalOverviews(datasetHandle(ovr), width, height);
-        }
-        partialOutput.commit();
-        askCallback(1.0, "converting");
     }
+    ddb::exportRaster(request);
 }
 
 DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
