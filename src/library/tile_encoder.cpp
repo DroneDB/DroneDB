@@ -12,6 +12,7 @@
 
 #include "exceptions.h"
 #include "gdal_raii.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -237,6 +238,20 @@ namespace ddb
             throw InvalidArgsException("Invalid image buffer");
         if (outBuffer != nullptr && outBufferSize == nullptr)
             throw InvalidArgsException("Output buffer size pointer is null");
+
+        // A tile written to a file appears whole or not at all: the tile cache serves any file that
+        // exists, and requests for the same tile run concurrently. It is encoded in memory and
+        // published by renaming a sibling onto the path (a failed write keeps the previous file).
+        if (outBuffer == nullptr && !path.starts_with("/vsimem/"))
+        {
+            uint8_t *data = nullptr;
+            int size = 0;
+            encode(image, options, &data, &size);
+            const VsiFreePtr<uint8_t> owned(data);
+            io::writeFileAtomic(io::fromUtf8(path),
+                                std::string(reinterpret_cast<const char *>(data), static_cast<size_t>(size)), "tile");
+            return;
+        }
 
         if (image.hasAlpha() && allEqual(image.alpha, 0))
         {
