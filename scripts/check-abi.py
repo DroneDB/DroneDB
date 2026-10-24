@@ -10,12 +10,13 @@ package.json by CMake and included by ddb.h); the PATCH never changes the ABI.
 src/include/ddb.symbols lists every function libddb exports whose name starts with DDB (format
 in its header). Three checks keep it, ddb.h and the release in step:
 
-  exports  The DDB* symbols the built library exports equal the manifest. Linux: the defined
-           dynamic symbols of libddb.so (nm -D --defined-only); Windows: the export table of
-           ddb.dll, read from the PE file. Also: the manifest is well formed (names, byte order,
-           no duplicates), ddb.h includes ddb_version.h and defines no version macro of its own,
-           and every DDB_DLL declaration of ddb.h is in the manifest. An exported DDB* symbol
-           that is not a function (a variable) fails too.
+  exports  The symbols the built library exports are EXACTLY the manifest (DQ-14): the C API and
+           nothing else, no C++ symbol of libddb and none of the third-party libraries linked
+           into it. Linux: the defined dynamic symbols of libddb.so (nm -D --defined-only);
+           Windows: the export table of ddb.dll, read from the PE file. Also: the manifest is
+           well formed (names, byte order, no duplicates), ddb.h includes ddb_version.h and
+           defines no version macro of its own, and every DDB_DLL declaration of ddb.h is in the
+           manifest. An exported DDB* symbol that is not a function (a variable) fails too.
   bump     Semver against a base commit (default: the previous release tag v*.*.*): the version
            never goes down, a removed export needs a higher MAJOR, an added export a higher
            MAJOR or MINOR (a PATCH bump alone does not do). The manifest lists names only: a
@@ -53,6 +54,8 @@ VERSION_INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"ddb_version\.h"', re.M)
 # A declaration "DDB_DLL <type> DDBName(", as tests/c_abi_coverage.cmake reads it
 DECLARATION_RE = re.compile(r"DDB_DLL[^;(]*?[ *](DDB[A-Za-z0-9_]+)\s*\(")
 RELEASE_TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+)$")
+# Symbols named in the message about exports that are not in the manifest
+EXAMPLES = 10
 
 
 class InputError(Exception):
@@ -234,19 +237,25 @@ def check_exports(repo, library):
     if undeclared:
         errors.append(f"declared DDB_DLL in {HEADER} but not in {MANIFEST}: {', '.join(undeclared)}")
 
-    exports = {name: function for name, function in library_exports(library).items()
-               if SYMBOL_RE.match(name)}
-    variables = sorted(name for name, function in exports.items() if not function)
+    exports = library_exports(library)
+    variables = sorted(name for name, function in exports.items() if SYMBOL_RE.match(name) and not function)
     if variables:
         errors.append(f"{library} exports DDB* symbols that are not functions: {', '.join(variables)}")
     missing = sorted(set(symbols) - set(exports))
     if missing:
         errors.append(f"in {MANIFEST} but not exported by {library}: {', '.join(missing)}")
-    unlisted = sorted(set(exports) - set(symbols))
+    unlisted = sorted(name for name in set(exports) - set(symbols) if SYMBOL_RE.match(name))
     if unlisted:
         errors.append(f"exported by {library} but not in {MANIFEST} (add them, and bump "
                       f"the MINOR of {PACKAGE_JSON} if not done since the last release): "
                       f"{', '.join(unlisted)}")
+    foreign = sorted(name for name in exports if not SYMBOL_RE.match(name))
+    if foreign:
+        shown = ", ".join(foreign[:EXAMPLES])
+        more = f" (and {len(foreign) - EXAMPLES} more)" if len(foreign) > EXAMPLES else ""
+        errors.append(f"{library} exports {len(foreign)} symbols that are not DDB* functions, only the C "
+                      f"API of {HEADER} may be exported (DDB_DLL on the function, hidden visibility "
+                      f"for the rest, the version script from the manifest on Linux): {shown}{more}")
     for error in errors:
         report(error)
     if not errors:
