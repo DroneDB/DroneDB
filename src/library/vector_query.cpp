@@ -301,13 +301,9 @@ namespace ddb
             argStore.emplace_back(layerName);
         }
 
-        std::vector<char *> argv;
-        argv.reserve(argStore.size() + 1);
-        for (auto &arg : argStore) argv.push_back(const_cast<char *>(arg.c_str()));
-        argv.push_back(nullptr);
-
+        CPLStringList argv = cslFromStrings(argStore);
         const GdalOptionsPtr<GDALVectorTranslateOptions> opts(
-            GDALVectorTranslateOptionsNew(argv.data(), nullptr));
+            GDALVectorTranslateOptionsNew(argv.List(), nullptr));
         if (!opts)
             throw GDALException("Cannot build GDALVectorTranslate options");
 

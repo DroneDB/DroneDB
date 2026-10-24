@@ -158,7 +158,7 @@ namespace ddb
             throw GDALException("No projection found in " + openPath);
         }
 
-        char *wktp = const_cast<char *>(inputSrsWkt.c_str());
+        char *wktp = inputSrsWkt.data();
         if (OSRImportFromWkt(inputSrs.get(), &wktp) != OGRERR_NONE)
             throw GDALException("Cannot read spatial reference system for " + openPath + ". Is PROJ available?");
 

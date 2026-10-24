@@ -16,7 +16,8 @@ namespace ddb
         if (wkt == nullptr || wkt[0] == '\0')
             return nullptr;
         SrsPtr srs(OSRNewSpatialReference(nullptr));
-        char *wktPtr = const_cast<char *>(wkt);
+        std::string wktCopy(wkt); // OSRImportFromWkt takes a char** it advances (it never writes)
+        char *wktPtr = wktCopy.data();
         if (OSRImportFromWkt(srs.get(), &wktPtr) != OGRERR_NONE)
             return nullptr;
         OSRSetAxisMappingStrategy(srs.get(), OAMS_TRADITIONAL_GIS_ORDER);

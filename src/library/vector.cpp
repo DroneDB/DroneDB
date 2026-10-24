@@ -246,13 +246,9 @@ namespace ddb
                 argStore.push_back("-s_srs");
                 argStore.push_back(sourceSrs);
             }
-            std::vector<char *> argv;
-            argv.reserve(argStore.size() + 1);
-            for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
-            argv.push_back(nullptr);
-
+            CPLStringList argv = cslFromStrings(argStore);
             GdalOptionsPtr<GDALVectorTranslateOptions> opts(
-                GDALVectorTranslateOptionsNew(argv.data(), nullptr));
+                GDALVectorTranslateOptionsNew(argv.List(), nullptr));
             if (!opts)
                 throw AppException("Cannot create GDAL VectorTranslate options for GPKG");
             cancel::GdalProgress progress; // stops when the build is canceled (DQ-15)
@@ -608,13 +604,9 @@ namespace ddb
                 argStore.push_back("-s_srs");
                 argStore.push_back(sourceSrs);
             }
-            std::vector<char *> argv;
-            argv.reserve(argStore.size() + 1);
-            for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
-            argv.push_back(nullptr);
-
+            CPLStringList argv = cslFromStrings(argStore);
             GdalOptionsPtr<GDALVectorTranslateOptions> opts(
-                GDALVectorTranslateOptionsNew(argv.data(), nullptr));
+                GDALVectorTranslateOptionsNew(argv.List(), nullptr));
             if (!opts)
                 throw AppException("Cannot create GDAL VectorTranslate options for MVT");
             cancel::GdalProgress progress; // stops when the build is canceled (DQ-15)
