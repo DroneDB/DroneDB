@@ -528,13 +528,14 @@ json formulaStatistics(const std::vector<float> &formulaResult) {
     if (valid.empty())
         return json();
 
-    double mean = sum / valid.size();
-    double variance = (sumSq / valid.size()) - (mean * mean);
+    const double count = static_cast<double>(valid.size());
+    double mean = sum / count;
+    double variance = (sumSq / count) - (mean * mean);
     double stddev = std::sqrt(std::max(0.0, variance));
 
     std::sort(valid.begin(), valid.end());
-    double p2 = valid[static_cast<size_t>(valid.size() * 0.02)];
-    double p98 = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
+    double p2 = valid[static_cast<size_t>(count * 0.02)];
+    double p98 = valid[std::min(valid.size() - 1, static_cast<size_t>(count * 0.98))];
 
     // Histogram
     int bins = 255;

@@ -200,9 +200,9 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
     const std::string line =
         R"({"type":"LineString","coordinates":[[10.001,44.999],[10.007,44.993]]})";
     const auto withString = [](const std::function<DDBErr(char**)>& call) {
-        char* out = nullptr;
-        const DDBErr rc = call(&out);
-        DDBFree(out);
+        char* text = nullptr;
+        const DDBErr rc = call(&text);
+        DDBFree(text);
         return rc;
     };
     const std::string orthoHash = ddb::Hash::fileSHA256((in.dataset / "ortho.tif").string());
@@ -215,20 +215,20 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
         ddb::Delta d;
         d.adds.push_back(ddb::AddAction(name, ddb::Hash::strSHA256(content)));
         const std::string delta = json(d).dump();
-        return withString([&](char** out) {
+        return withString([&](char** text) {
             return ex ? DDBApplyDeltaEx(delta.c_str(),
                                         sourceFolder.c_str(),
                                         dataset.c_str(),
                                         1,
                                         "[]",
                                         nullptr,
-                                        out)
+                                        text)
                       : DDBApplyDelta(delta.c_str(),
                                       sourceFolder.c_str(),
                                       dataset.c_str(),
                                       1,
                                       "[]",
-                                      out);
+                                      text);
         });
     };
     return {
@@ -237,12 +237,12 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
         {"DDBBuild", [=] { return DDBBuild(dataset.c_str(), "ortho.tif", nullptr, true, false); }},
         {"DDBCalculateVolume",
          [=] {
-             return withString([&](char** out) {
+             return withString([&](char** text) {
                  return DDBCalculateVolume(dem.c_str(),
                                            polygon.c_str(),
                                            "lowest_perimeter",
                                            0.0,
-                                           out);
+                                           text);
              });
          }},
         {"DDBComputeDeltaLocals",
@@ -250,20 +250,20 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
              ddb::Delta d;
              d.adds.push_back(ddb::AddAction("copy.tif", orthoHash));
              const std::string delta = json(d).dump();
-             return withString([&](char** out) {
-                 return DDBComputeDeltaLocals(delta.c_str(), dataset.c_str(), "", out);
+             return withString([&](char** text) {
+                 return DDBComputeDeltaLocals(delta.c_str(), dataset.c_str(), "", text);
              });
          }},
         {"DDBDetectAllStockpiles",
          [=] {
-             return withString([&](char** out) {
-                 return DDBDetectAllStockpiles(dem.c_str(), 0.5f, 0.0, 10, out);
+             return withString([&](char** text) {
+                 return DDBDetectAllStockpiles(dem.c_str(), 0.5f, 0.0, 10, text);
              });
          }},
         {"DDBDetectStockpile",
          [=] {
-             return withString([&](char** out) {
-                 return DDBDetectStockpile(dem.c_str(), 44.996, 10.004, 100.0, 0.5f, out);
+             return withString([&](char** text) {
+                 return DDBDetectStockpile(dem.c_str(), 44.996, 10.004, 100.0, 0.5f, text);
              });
          }},
         {"DDBExportRaster",
@@ -284,8 +284,8 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
          }},
         {"DDBGenerateContours",
          [=] {
-             return withString([&](char** out) {
-                 return DDBGenerateContours(dem.c_str(), 5.0, 0, 0.0, NAN, NAN, 0.0, 1, out);
+             return withString([&](char** text) {
+                 return DDBGenerateContours(dem.c_str(), 5.0, 0, 0.0, NAN, NAN, 0.0, 1, text);
              });
          }},
         {"DDBGenerateMemoryThumbnail",
@@ -304,31 +304,31 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
          [=] { return DDBGenerateThumbnail(raster.c_str(), 256, thumb.c_str()); }},
         {"DDBGetRasterAreaStats",
          [=] {
-             return withString([&](char** out) {
-                 return DDBGetRasterAreaStats(raster.c_str(), 0, 0, 100, 100, out);
+             return withString([&](char** text) {
+                 return DDBGetRasterAreaStats(raster.c_str(), 0, 0, 100, 100, text);
              });
          }},
         {"DDBGetRasterMetadata",
          [=] {
-             return withString([&](char** out) {
-                 return DDBGetRasterMetadata(raster.c_str(), nullptr, nullptr, out);
+             return withString([&](char** text) {
+                 return DDBGetRasterMetadata(raster.c_str(), nullptr, nullptr, text);
              });
          }},
         {"DDBGetRasterPointValue",
          [=] {
              return withString(
-                 [&](char** out) { return DDBGetRasterPointValue(raster.c_str(), 10, 10, out); });
+                 [&](char** text) { return DDBGetRasterPointValue(raster.c_str(), 10, 10, text); });
          }},
         {"DDBGetRasterProfile",
          [=] {
-             return withString([&](char** out) {
-                 return DDBGetRasterProfile(dem.c_str(), line.c_str(), 20, out);
+             return withString([&](char** text) {
+                 return DDBGetRasterProfile(dem.c_str(), line.c_str(), 20, text);
              });
          }},
         {"DDBGetRasterValueInfo",
          [=] {
              return withString(
-                 [&](char** out) { return DDBGetRasterValueInfo(raster.c_str(), out); });
+                 [&](char** text) { return DDBGetRasterValueInfo(raster.c_str(), text); });
          }},
         {"DDBMaskBorders",
          [=] { return DDBMaskBorders(raster.c_str(), masked.c_str(), 15, false); }},

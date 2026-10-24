@@ -24,7 +24,6 @@ src/library/authmanager.cpp -Wshadow 1
 src/library/cog.cpp -Wconversion 2
 src/library/contour.cpp -Wdeprecated-declarations 1
 src/library/database.cpp -Wcatch-value= 1
-src/library/ddb.cpp -Wconversion 4
 src/library/entry.cpp -Wshadow 1
 src/library/exif.cpp -Wconversion 5
 src/library/exifeditor.cpp -Wshadow 1
