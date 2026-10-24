@@ -301,23 +301,24 @@ namespace ddb
         return options;
     }
 
-    pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads, double minX,
-                                    double minY, double maxX, double maxY, double resolution)
+    pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads,
+                                    const CopcWindow &window)
     {
         pdal::Options options = copcReaderOptions(copcPath, threads);
         std::ostringstream bounds;
-        bounds << std::setprecision(17) << "([" << minX << "," << maxX << "],[" << minY << "," << maxY << "])";
+        bounds << std::setprecision(17) << "([" << window.minX << "," << window.maxX << "],[" << window.minY << ","
+               << window.maxY << "])";
         options.add("bounds", bounds.str());
-        options.add("resolution", resolution);
+        options.add("resolution", window.resolution);
         return options;
     }
 
-    void readCopcWindow(const std::string &copcPath, double minX, double minY, double maxX, double maxY,
-                        double resolution, const std::function<void(PointBatch &)> &sink)
+    void readCopcWindow(const std::string &copcPath, const CopcWindow &window,
+                        const std::function<void(PointBatch &)> &sink)
     {
         const auto threads = copcReadThreads(copcPath);
         pdal::CopcReader reader;
-        reader.setOptions(copcWindowOptions(copcPath, threads, minX, minY, maxX, maxY, resolution));
+        reader.setOptions(copcWindowOptions(copcPath, threads, window));
         forEachPointBatch(reader, sink);
     }
 

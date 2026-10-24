@@ -918,14 +918,25 @@ namespace
         }
     }
 
+    // The request the tests make: the files (as paths under cwd), a Registry tag and a password
+    ShareRequest shareOf(std::vector<std::string> input, const std::string &tag, const std::string &cwd = "")
+    {
+        ShareRequest request;
+        request.input = std::move(input);
+        request.tag = tag;
+        request.cwd = cwd;
+        return request;
+    }
+
     TEST(Dq11ShareService, SharesThroughALoginWithTheProvidersCredentials)
     {
         ShareFixture f(TEST_NAME);
         ScriptedCredentials provider({AuthCredentials("alice", "pw")});
         ShareService service(f.net.deps());
 
-        const auto url = service.share({io::toUtf8(f.folder / "a.txt"), io::toUtf8(f.folder / "sub" / "b.txt")},
-                                       "registry.test/org/ds", "", provider, io::toUtf8(f.folder));
+        const auto url = service.share(shareOf({io::toUtf8(f.folder / "a.txt"), io::toUtf8(f.folder / "sub" / "b.txt")},
+                                                     "registry.test/org/ds", io::toUtf8(f.folder)),
+                                       provider);
 
         EXPECT_EQ(url, "https://registry.test/r/share-token");
         EXPECT_EQ(provider.asked, 1);
@@ -944,7 +955,7 @@ namespace
         f.net.credentials.saveCredentials(Url, AuthCredentials("alice", "pw"));
         ScriptedCredentials provider;
         ShareService service(f.net.deps());
-        service.share({io::toUtf8(f.folder / "a.txt")}, "registry.test/org/ds", "", provider, io::toUtf8(f.folder));
+        service.share(shareOf({io::toUtf8(f.folder / "a.txt")}, "registry.test/org/ds", io::toUtf8(f.folder)), provider);
         EXPECT_EQ(provider.asked, 0);
     }
 
@@ -955,7 +966,7 @@ namespace
         ScriptedCredentials provider;
         provider.refuse = true;
         ShareService service(f.net.deps());
-        EXPECT_THROW(service.share({io::toUtf8(f.folder / "a.txt")}, "registry.test/org/ds", "", provider, io::toUtf8(f.folder)),
+        EXPECT_THROW(service.share(shareOf({io::toUtf8(f.folder / "a.txt")}, "registry.test/org/ds", io::toUtf8(f.folder)), provider),
                      AuthException);
         EXPECT_TRUE(f.net.http.calls.empty());
     }
@@ -969,7 +980,7 @@ namespace
         f.net.http.on("MULTIPART", "/share/upload/share-token", {problem(401, "Unauthorized"), jsonReply({{"hash", "h"}})});
         ScriptedCredentials provider({AuthCredentials("alice", "pw")});
         ShareService service(f.net.deps());
-        const auto url = service.share({io::toUtf8(f.folder / "a.txt")}, "registry.test/org/ds", "", provider, io::toUtf8(f.folder));
+        const auto url = service.share(shareOf({io::toUtf8(f.folder / "a.txt")}, "registry.test/org/ds", io::toUtf8(f.folder)), provider);
         EXPECT_EQ(url, "https://registry.test/r/share-token");
         EXPECT_EQ(provider.asked, 1);
         EXPECT_EQ(f.net.http.callsTo("POST", "/share/init").size(), 2u);
@@ -980,8 +991,8 @@ namespace
         ShareFixture f(TEST_NAME);
         ScriptedCredentials provider;
         ShareService service(f.net.deps());
-        EXPECT_THROW(service.share({}, "registry.test/org/ds", "", provider), InvalidArgsException);
-        EXPECT_THROW(service.share({io::toUtf8(f.folder / "missing.txt")}, "registry.test/org/ds", "", provider, io::toUtf8(f.folder)),
+        EXPECT_THROW(service.share(shareOf({}, "registry.test/org/ds"), provider), InvalidArgsException);
+        EXPECT_THROW(service.share(shareOf({io::toUtf8(f.folder / "missing.txt")}, "registry.test/org/ds", io::toUtf8(f.folder)), provider),
                      InvalidArgsException);
         EXPECT_EQ(provider.asked, 0);
         EXPECT_TRUE(f.net.http.calls.empty());

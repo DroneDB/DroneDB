@@ -124,8 +124,14 @@ namespace cmd
         try
         {
             ddb::ShareService ss(registryDeps());
-            const std::string url =
-                ss.share(input, tag, password, provider, cwd, showProgress, sslVerify);
+            ddb::ShareRequest request;
+            request.input = input;
+            request.tag = tag;
+            request.password = password;
+            request.cwd = cwd;
+            request.callback = showProgress;
+            request.sslVerify = sslVerify;
+            const std::string url = ss.share(request, provider);
             if (!quiet)
                 pb.done();
             std::cout << url << std::endl;

@@ -212,7 +212,7 @@ namespace ddb
 
         std::vector<uint8_t> rgba(window.outPixels() * 4);
         VegetationEngine::instance().applyColormap(buffers.result.data(), rgba.data(), window.outPixels(),
-                                                   *plan.colormap, range.first, range.second, NODATA_SENTINEL);
+                                                   *plan.colormap, {range.first, range.second, NODATA_SENTINEL});
         return rgba;
     }
 

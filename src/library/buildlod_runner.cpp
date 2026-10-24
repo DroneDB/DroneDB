@@ -53,19 +53,20 @@ namespace ddb
                          int maxSh,
                          const fs::path &binary)
         {
-            const auto result = runBuildLodResult(input, outputRad, quality, maxSh, binary);
+            const auto result = runBuildLodResult({input, outputRad, quality, maxSh, binary});
             errorOut = result.error;
             return result.succeeded;
         }
 
-        ToolRunResult runBuildLodResult(const fs::path &input,
-                                       const fs::path &outputRad,
-                                       bool quality,
-                                       int maxSh,
-                                       const fs::path &binary,
+        ToolRunResult runBuildLodResult(const BuildLodRequest &request,
                                        const process::Options &options,
                                        const process::IProcessRunner &runner)
         {
+            const fs::path &input = request.input;
+            const fs::path &outputRad = request.outputRad;
+            const bool quality = request.quality;
+            const int maxSh = request.maxSh;
+            const fs::path &binary = request.binary;
             ToolRunResult result;
             process::Options popts = options;
             // 24 hours: keeps steady-clock deadlines representable

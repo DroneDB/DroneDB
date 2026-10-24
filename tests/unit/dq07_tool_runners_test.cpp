@@ -565,7 +565,7 @@ struct BuildLodFixture {
     }
 
     ToolRunResult run(bool quality = true, int maxSh = 1) {
-        return buildlod::runBuildLodResult(input, outRad, quality, maxSh, tool, process::Options(), fake);
+        return buildlod::runBuildLodResult({input, outRad, quality, maxSh, tool}, process::Options(), fake);
     }
 };
 

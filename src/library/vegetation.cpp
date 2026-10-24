@@ -341,9 +341,10 @@ void VegetationEngine::applyColormap(const float *values,
                                       uint8_t *rgba,
                                       size_t pixelCount,
                                       const Colormap &cmap,
-                                      float vmin, float vmax,
-                                      float nodata) const {
-    float range = vmax - vmin;
+                                      const ColormapScale &scale) const {
+    const float vmin = scale.vmin;
+    const float nodata = scale.nodata;
+    float range = scale.vmax - vmin;
     if (std::abs(range) < 1e-10f) range = 1.0f;
 
     for (size_t i = 0; i < pixelCount; i++) {

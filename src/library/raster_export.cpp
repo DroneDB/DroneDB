@@ -270,8 +270,8 @@ void renderWindows(GDALDatasetH hSrcDs, const FormulaPlan &plan, const WindowGri
 
             rgba.resize(winPix * 4);
             VegetationEngine::instance().applyColormap(buffers.result.data(), rgba.data(), winPix,
-                                                       *plan.colormap, range.first, range.second,
-                                                       NODATA_SENTINEL);
+                                                       *plan.colormap,
+                                                       {range.first, range.second, NODATA_SENTINEL});
 
             chanData.resize(winPix);
             for (int ch = 0; ch < 4; ch++)

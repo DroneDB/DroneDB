@@ -15,6 +15,7 @@
 #include "tiler.h"
 #include "pointcloud.h"
 #include "coordstransformer.h"
+#include "copc_utils.h"
 #include "point_rasterizer.h"
 
 #include <functional>
@@ -42,7 +43,7 @@ namespace ddb
         // readers.copc reads the others (remote files, ramp-coloured clouds)
         std::unique_ptr<CopcNodeReader> nodeReader;
 
-        void readWithPdal(double minX, double minY, double maxX, double maxY, double resolution,
+        void readWithPdal(const CopcWindow &window,
                           const std::function<void(PointBatch &)> &sink);
 
     public:

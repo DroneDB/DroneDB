@@ -291,24 +291,108 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
 
 
 /**
+ * @brief Rewrites the embedded texture references of an exported MTL ("*0", "*1") to the files
+ * the embedded textures were extracted to. A failure is logged, not thrown.
+ *
+ * @param mtl The MTL file next to the exported OBJ
+ * @param textureMap Embedded texture index -> extracted file name
+ */
+static void fixEmbeddedTextureReferences(const fs::path& mtl, const std::map<int, std::string>& textureMap) {
+    if (textureMap.empty())
+        return;
+    try {
+        std::ifstream in(mtl);
+        if (in) {
+            std::stringstream ss;
+            ss << in.rdbuf();
+            in.close();
+
+            std::string content = ss.str();
+            std::istringstream lines(content);
+            std::ostringstream out;
+            std::string line;
+            bool changed = false;
+
+            const char* keys[] = {"map_Kd", "map_Ks", "map_Bump", "map_d",
+                                 "map_Pr", "map_Pm", "map_Ps", "map_Ke",
+                                 "map_Ka", "bump", "map_bump"};
+
+            while (std::getline(lines, line)) {
+                bool handled = false;
+                for (auto* key : keys) {
+                    if (line.starts_with(key)) {
+                        size_t pos = line.find_first_of(" \t");
+                        if (pos != std::string::npos) {
+                            std::string value = line.substr(pos + 1);
+                            str::trim(value);
+
+                            // Check if it's an embedded texture reference (e.g., "*0")
+                            if (!value.empty() && value[0] == '*') {
+                                try {
+                                    int texIndex = std::stoi(value.substr(1));
+                                    auto it = textureMap.find(texIndex);
+                                    if (it != textureMap.end()) {
+                                        std::string newLine = std::string(key) + " " + it->second;
+                                        out << newLine << "\n";
+                                        LOGD << "MTL fix: " << key << " " << value << " -> " << it->second;
+                                        changed = true;
+                                        handled = true;
+                                    }
+                                } catch (const std::invalid_argument &) {
+                                    // Not a numeric index, keep original line.
+                                } catch (const std::out_of_range &) {
+                                    // Index out of int range, keep original line.
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                if (!handled)
+                    out << line << "\n";
+            }
+
+            if (changed) {
+                std::ofstream outFile(mtl, std::ios::trunc);
+                if (outFile) {
+                    outFile << out.str();
+                    outFile.close();
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        LOGW << "Failed to fix MTL embedded texture references: " << e.what();
+    }
+}
+
+/** How a scene is exported by @ref exportWithAssimp */
+struct AssimpExportOptions {
+    bool forcePLY;         ///< Force PLY format even if UVs are present
+    bool preferPLYIfNoUV;  ///< Prefer PLY if no UVs and vertex colors are present
+    bool hasUVs;           ///< Whether the scene has UV coordinates
+};
+
+/** The files @ref exportWithAssimp wrote */
+struct AssimpOutputs {
+    std::string geomPath;  ///< The geometry file (OBJ or PLY)
+    std::string mtlPath;   ///< The MTL file (OBJ only, empty otherwise)
+};
+
+/**
  * @brief Export a scene to OBJ or PLY format using Assimp
  *
  * @param scene The Assimp scene to export
  * @param outBaseNoExt Base output path without extension
- * @param forcePLY Force PLY format even if UVs are present
- * @param preferPLYIfNoUV Prefer PLY if no UVs and vertex colors are present
- * @param hasUVs Whether the scene has UV coordinates
- * @param outGeomPath Output parameter for the generated geometry file path
- * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
+ * @param options Which format to export
+ * @return The files written
  * @throws AppException if export fails
  */
-static void exportWithAssimp(const aiScene* scene,
-                             const fs::path& outBaseNoExt,
-                             bool forcePLY,
-                             bool preferPLYIfNoUV,
-                             bool hasUVs,
-                             std::string& outGeomPath,
-                             std::string& outMtlPath) {
+static AssimpOutputs exportWithAssimp(const aiScene* scene,
+                                      const fs::path& outBaseNoExt,
+                                      const AssimpExportOptions& options) {
+    const bool forcePLY = options.forcePLY;
+    const bool preferPLYIfNoUV = options.preferPLYIfNoUV;
+    const bool hasUVs = options.hasUVs;
     Assimp::Exporter exporter;
     fs::create_directories(outBaseNoExt.parent_path());
 
@@ -329,8 +413,8 @@ static void exportWithAssimp(const aiScene* scene,
         throw AppException("Assimp export failed: " + std::string(exporter.GetErrorString()));
     }
 
-    outGeomPath = io::toUtf8(geomPath);
-    outMtlPath.clear();
+    AssimpOutputs outputs;
+    outputs.geomPath = io::toUtf8(geomPath);
 
     if (!usePLY) {
         // .mtl with the same base name next to the OBJ
@@ -341,80 +425,17 @@ static void exportWithAssimp(const aiScene* scene,
             mtl.replace_extension(".mtl");
         }
         if (fs::exists(mtl)) {
-            outMtlPath = io::toUtf8(mtl);
+            outputs.mtlPath = io::toUtf8(mtl);
 
             // Fix embedded texture references in MTL file (e.g., "*0", "*1")
-            if (!textureMap.empty()) {
-                try {
-                    std::ifstream in(mtl);
-                    if (in) {
-                        std::stringstream ss;
-                        ss << in.rdbuf();
-                        in.close();
-
-                        std::string content = ss.str();
-                        std::istringstream lines(content);
-                        std::ostringstream out;
-                        std::string line;
-                        bool changed = false;
-
-                        const char* keys[] = {"map_Kd", "map_Ks", "map_Bump", "map_d",
-                                             "map_Pr", "map_Pm", "map_Ps", "map_Ke",
-                                             "map_Ka", "bump", "map_bump"};
-
-                        while (std::getline(lines, line)) {
-                            bool handled = false;
-                            for (auto* key : keys) {
-                                if (line.starts_with(key)) {
-                                    size_t pos = line.find_first_of(" \t");
-                                    if (pos != std::string::npos) {
-                                        std::string value = line.substr(pos + 1);
-                                        str::trim(value);
-
-                                        // Check if it's an embedded texture reference (e.g., "*0")
-                                        if (!value.empty() && value[0] == '*') {
-                                            try {
-                                                int texIndex = std::stoi(value.substr(1));
-                                                auto it = textureMap.find(texIndex);
-                                                if (it != textureMap.end()) {
-                                                    std::string newLine = std::string(key) + " " + it->second;
-                                                    out << newLine << "\n";
-                                                    LOGD << "MTL fix: " << key << " " << value << " -> " << it->second;
-                                                    changed = true;
-                                                    handled = true;
-                                                }
-                                            } catch (const std::invalid_argument &) {
-                                                // Not a numeric index, keep original line.
-                                            } catch (const std::out_of_range &) {
-                                                // Index out of int range, keep original line.
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                            if (!handled)
-                                out << line << "\n";
-                        }
-
-                        if (changed) {
-                            std::ofstream outFile(mtl, std::ios::trunc);
-                            if (outFile) {
-                                outFile << out.str();
-                                outFile.close();
-                            }
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    LOGW << "Failed to fix MTL embedded texture references: " << e.what();
-                }
-            }
+            fixEmbeddedTextureReferences(mtl, textureMap);
         }
     }
 
-    LOGD << "Exported " << (usePLY ? "PLY: " : "OBJ: ") << outGeomPath;
-    if (!outMtlPath.empty())
-        LOGD << "MTL: " << outMtlPath;
+    LOGD << "Exported " << (usePLY ? "PLY: " : "OBJ: ") << outputs.geomPath;
+    if (!outputs.mtlPath.empty())
+        LOGD << "MTL: " << outputs.mtlPath;
+    return outputs;
 }
 
 
@@ -514,13 +535,9 @@ void convertGltfTo3dModel(const std::string& inputGltf,
     // Export geometry
     fs::path outBase = io::fromUtf8(outputBasePath);
 
-    exportWithAssimp(scene,
-                     outBase,
-                     forcePLY,
-                     preferPLYIfNoUV,
-                     hasUV,
-                     outGeomPath,
-                     outMtlPath);
+    const AssimpOutputs exported = exportWithAssimp(scene, outBase, {forcePLY, preferPLYIfNoUV, hasUV});
+    outGeomPath = exported.geomPath;
+    outMtlPath = exported.mtlPath;
 
     // For OBJ: patch MTL for KTX2 -> PNG
     if (!outMtlPath.empty()) {

@@ -632,7 +632,7 @@ TEST(PendingBuild, InvalidBuildLodDeadlineIsPermanentAndDoesNotTouchRunnerOutput
         writeFile(output, "previous output");
         writeFile(adjacent, "adjacent output");
         EnvVarGuard deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", invalid);
-        const auto result = buildlod::runBuildLodResult(input, output, true, 1, testChildPath());
+        const auto result = buildlod::runBuildLodResult({input, output, true, 1, testChildPath()});
         EXPECT_FALSE(result.succeeded);
         EXPECT_FALSE(result.timedOut);
         EXPECT_NE(result.error.find("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS"), std::string::npos);
@@ -662,7 +662,7 @@ TEST(PendingBuild, MaximumBuildLodDeadlineParsesAndLaunchesTool) {
     process::Options options;
     options.envOverrides.emplace_back("DDB_TEST_CHILD_MODE", "no-output");
     const auto started = std::chrono::steady_clock::now();
-    const auto result = buildlod::runBuildLodResult(input, output, true, 1, testChildPath(), options);
+    const auto result = buildlod::runBuildLodResult({input, output, true, 1, testChildPath()}, options);
     // Exit 0 with no output proves parsing accepted the upper bound and launched
     // the child. The missing-output contract still makes this a permanent failure.
     EXPECT_FALSE(result.succeeded);

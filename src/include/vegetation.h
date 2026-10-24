@@ -45,6 +45,14 @@ struct ColormapEntry {
     uint8_t r, g, b, a;
 };
 
+// The values a colormap spans: vmin maps to its first color, vmax to its last; a value equal to
+// nodata (or NaN) is transparent
+struct ColormapScale {
+    float vmin = 0;
+    float vmax = 1;
+    float nodata = 0;
+};
+
 struct Colormap {
     std::string id;
     std::string name;
@@ -86,13 +94,12 @@ public:
     // rgba: output RGBA buffer (4 * pixelCount bytes)
     // pixelCount: number of pixels
     // cmap: colormap to use
-    // vmin, vmax: rescale range
+    // scale: the range of values the colormap spans, and the value that is no data
     void applyColormap(const float *values,
                        uint8_t *rgba,
                        size_t pixelCount,
                        const Colormap &cmap,
-                       float vmin, float vmax,
-                       float nodata) const;
+                       const ColormapScale &scale) const;
 
     // The symbols (R, G, B, N, e for RedEdge, T) a formula reads, from its requiredBands
     static std::vector<char> requiredSymbols(const VegetationFormula &formula);

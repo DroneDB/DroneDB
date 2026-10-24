@@ -139,14 +139,15 @@ namespace ddb
 
     ShareService::ShareService(const RegistryDeps &registryDeps) : deps(registryDeps) {}
 
-    std::string ShareService::share(const std::vector<std::string> &input,
-                                    const std::string &tag,
-                                    const std::string &password,
-                                    CredentialProvider &credentials,
-                                    const std::string &cwd,
-                                    const ShareCallback &cb,
-                                    bool sslVerify)
+    std::string ShareService::share(const ShareRequest &request, CredentialProvider &credentials)
     {
+        const std::vector<std::string> &input = request.input;
+        const std::string &tag = request.tag;
+        const std::string &password = request.password;
+        const std::string &cwd = request.cwd;
+        const ShareCallback &cb = request.callback;
+        const bool sslVerify = request.sslVerify;
+
         if (input.empty())
             throw InvalidArgsException("No files to share");
 

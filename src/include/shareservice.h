@@ -25,6 +25,17 @@ namespace ddb
                                size_t txBytes, size_t totalBytes)>
         ShareCallback;
 
+    // What to share
+    struct ShareRequest
+    {
+        std::vector<std::string> input;  // the files (directories are skipped), already expanded
+        std::string tag;                 // the Registry, organization and dataset: <host>/<org>/<ds>
+        std::string password;            // of the share ("" = none)
+        std::string cwd;                 // the folder the paths of input are relative to
+        ShareCallback callback;          // progress, optional
+        bool sslVerify = true;
+    };
+
     class ShareService
     {
         RegistryDeps deps;
@@ -35,13 +46,7 @@ namespace ddb
         // Uploads the files (directories are skipped) to a new share of the Registry in `tag`
         // and returns the URL of the result. The login goes through withAuthenticatedRegistry:
         // `credentials` is asked when none are saved or the saved ones are refused.
-        DDB_DLL std::string share(const std::vector<std::string> &input,
-                                  const std::string &tag,
-                                  const std::string &password,
-                                  CredentialProvider &credentials,
-                                  const std::string &cwd = "",
-                                  const ShareCallback &cb = nullptr,
-                                  bool sslVerify = true);
+        DDB_DLL std::string share(const ShareRequest &request, CredentialProvider &credentials);
     };
 
 } // namespace ddb

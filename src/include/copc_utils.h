@@ -104,15 +104,22 @@ namespace ddb
     /// decompression threads that `threads` (copcReadThreads) allows
     DDB_DLL pdal::Options copcReaderOptions(const std::string &copcPath, const parallel::CpuTokens &threads);
 
-    /// readers.copc options for the points of a 2D window (cloud CRS, bounds included) down to
-    /// the depth for resolution; the bounds text keeps every bit of the doubles
-    DDB_DLL pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads,
-                                            double minX, double minY, double maxX, double maxY, double resolution);
+    /// A 2D window of a COPC file (cloud CRS, bounds included) and the resolution to read it at
+    struct CopcWindow
+    {
+        double minX = 0, minY = 0, maxX = 0, maxY = 0;
+        double resolution = 0;
+    };
 
-    /// The points readers.copc returns for that window and resolution, in batches (the
-    /// reference CopcNodeReader matches)
-    DDB_DLL void readCopcWindow(const std::string &copcPath, double minX, double minY, double maxX, double maxY,
-                                double resolution, const std::function<void(PointBatch &)> &sink);
+    /// readers.copc options for the points of a window, down to the depth for its resolution;
+    /// the bounds text keeps every bit of the doubles
+    DDB_DLL pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads,
+                                            const CopcWindow &window);
+
+    /// The points readers.copc returns for that window, in batches (the reference
+    /// CopcNodeReader matches)
+    DDB_DLL void readCopcWindow(const std::string &copcPath, const CopcWindow &window,
+                                const std::function<void(PointBatch &)> &sink);
 
     /// Runs the (streamable) PDAL pipeline that ends at tail without holding its points:
     /// they go to sink in batches of up to chunkSize. Batches carry the Red/Green/Blue

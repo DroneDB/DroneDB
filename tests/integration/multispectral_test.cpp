@@ -246,7 +246,7 @@ TEST(multispectral, applyColormap) {
 
     const auto* cmap = ve.getColormap("rdylgn");
     ASSERT_NE(cmap, nullptr);
-    ve.applyColormap(values.data(), rgba.data(), values.size(), *cmap, -1.0f, 1.0f, nodata);
+    ve.applyColormap(values.data(), rgba.data(), values.size(), *cmap, {-1.0f, 1.0f, nodata});
 
     // All pixels should have alpha = 255 (no nodata in input)
     for (size_t i = 0; i < values.size(); i++) {
@@ -263,7 +263,7 @@ TEST(multispectral, applyColormapNodata) {
 
     const auto* cmap = ve.getColormap("rdylgn");
     ASSERT_NE(cmap, nullptr);
-    ve.applyColormap(values.data(), rgba.data(), values.size(), *cmap, -1.0f, 1.0f, nodata);
+    ve.applyColormap(values.data(), rgba.data(), values.size(), *cmap, {-1.0f, 1.0f, nodata});
 
     // First pixel should have alpha = 255
     EXPECT_EQ(rgba[3], 255);

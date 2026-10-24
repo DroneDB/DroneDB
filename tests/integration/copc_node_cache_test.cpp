@@ -62,7 +62,7 @@ namespace
     std::vector<Point> readWithPdal(const fs::path &copc, const Window &w, double resolution)
     {
         std::vector<Point> points;
-        readCopcWindow(copc.string(), w.minX, w.minY, w.maxX, w.maxY, resolution,
+        readCopcWindow(copc.string(), {w.minX, w.minY, w.maxX, w.maxY, resolution},
                        [&](PointBatch &b) { append(points, b); });
         std::sort(points.begin(), points.end());
         return points;

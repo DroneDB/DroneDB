@@ -512,7 +512,7 @@ namespace ddb
                 "(set DDB_BUILDLOD_PATH or place build-lod next to the DroneDB executable)");
 
         const fs::path outRad = io::fromUtf8(outdir) / GsplatRadFileName;
-        const auto lodResult = buildlod::runBuildLodResult(io::fromUtf8(input), outRad, /*quality=*/true, GsplatRadMaxSh);
+        const auto lodResult = buildlod::runBuildLodResult({io::fromUtf8(input), outRad, /*quality=*/true, GsplatRadMaxSh});
         if (!lodResult.succeeded) {
             lodResult.throwIfRetryable("build-lod failed for " + input + ": ");
             throw AppException("build-lod failed for " + input + ": " + lodResult.error);

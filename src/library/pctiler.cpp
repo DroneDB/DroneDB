@@ -184,7 +184,7 @@ namespace ddb
         if (!drawn)
         {
             rasterizer.emplace(tileSize, mapping, pointRadius, pointRadius);
-            readWithPdal(minX, minY, maxX, maxY, copcResolution, draw);
+            readWithPdal({minX, minY, maxX, maxY, copcResolution}, draw);
         }
 
         LOGD << "Drew " << rasterizer->drawn() << " points";
@@ -192,12 +192,12 @@ namespace ddb
         return writeTile(rasterizer->toImage(), format, tz, tx, ty, outBuffer, outBufferSize);
     }
 
-    void PointCloudTiler::readWithPdal(double minX, double minY, double maxX, double maxY, double resolution,
+    void PointCloudTiler::readWithPdal(const CopcWindow &window,
                                        const std::function<void(PointBatch &)> &sink)
     {
         const auto copcThreads = copcReadThreads(inputPath);  // until the reader has run
         pdal::CopcReader copcReader;
-        copcReader.setOptions(copcWindowOptions(inputPath, copcThreads, minX, minY, maxX, maxY, resolution));
+        copcReader.setOptions(copcWindowOptions(inputPath, copcThreads, window));
         pdal::Stage *main = &copcReader;
 
         std::unique_ptr<pdal::ColorinterpFilter> colorFilter;

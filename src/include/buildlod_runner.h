@@ -53,12 +53,18 @@ namespace ddb
                                  int maxSh = 1,
                                  const fs::path &binary = fs::path());
 
+        // What to convert and how (the arguments of runBuildLod without its error text)
+        struct BuildLodRequest
+        {
+            fs::path input;
+            fs::path outputRad;
+            bool quality = true;
+            int maxSh = 1;
+            fs::path binary; // empty: findBuildLodBinary()
+        };
+
         // Native build callers use structured failures; legacy callers retain bool/errorOut.
-        DDB_DLL ToolRunResult runBuildLodResult(const fs::path &input,
-                                                  const fs::path &outputRad,
-                                                  bool quality = true,
-                                                  int maxSh = 1,
-                                                  const fs::path &binary = fs::path(),
+        DDB_DLL ToolRunResult runBuildLodResult(const BuildLodRequest &request,
                                                   const process::Options &options = process::Options(),
                                                   const process::IProcessRunner &runner = process::systemProcessRunner());
 

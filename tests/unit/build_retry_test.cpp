@@ -55,8 +55,8 @@ TEST(BuildRetryClassification, BuildLodIdleTimeoutIsStructured) {
     process::Options options;
     options.idleTimeout = std::chrono::milliseconds(150);
     options.envOverrides.emplace_back("DDB_TEST_CHILD_MODE", "idle");
-    const auto result = buildlod::runBuildLodResult(input, area.getPath("model.rad"), true, 1,
-                                                  testChildPath(), options);
+    const auto result = buildlod::runBuildLodResult({input, area.getPath("model.rad"), true, 1, testChildPath()},
+                                                  options);
     EXPECT_FALSE(result.succeeded);
     EXPECT_TRUE(result.timedOut);
     EXPECT_THROW(result.throwIfRetryable("primary build: "), RetryableBuildException);
@@ -80,8 +80,8 @@ TEST(BuildRetryClassification, ExitZeroWithoutOutputIsPermanent) {
     std::ofstream(input) << "test input";
     process::Options options;
     options.envOverrides.emplace_back("DDB_TEST_CHILD_MODE", "no-output");
-    const auto result = buildlod::runBuildLodResult(input, area.getPath("model.rad"), true, 1,
-                                                  testChildPath(), options);
+    const auto result = buildlod::runBuildLodResult({input, area.getPath("model.rad"), true, 1, testChildPath()},
+                                                  options);
     EXPECT_FALSE(result.succeeded);
     EXPECT_FALSE(result.timedOut);
     EXPECT_NO_THROW(result.throwIfRetryable("primary build: "));
@@ -91,8 +91,7 @@ TEST(BuildRetryClassification, OrdinaryToolExitIsPermanentAndBoolApiStillReports
     TestArea area(TEST_NAME, true);
     const fs::path input = area.getPath("input.spz");
     std::ofstream(input) << "test input";
-    const auto result = buildlod::runBuildLodResult(input, area.getPath("model.rad"), true, 1,
-                                                  testChildPath());
+    const auto result = buildlod::runBuildLodResult({input, area.getPath("model.rad"), true, 1, testChildPath()});
     EXPECT_FALSE(result.succeeded);
     EXPECT_FALSE(result.timedOut);
     EXPECT_NO_THROW(result.throwIfRetryable("primary build: "));
