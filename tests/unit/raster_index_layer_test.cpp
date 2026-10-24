@@ -10,6 +10,7 @@
 // (NodataMask::BandsRead), where every other caller of the engine leaves a pixel out when any band
 // has none (NodataMask::AnyBand).
 
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -68,6 +69,33 @@ namespace
         GDALDatasetH handle = GDALDataset::ToHandle(ds.get());
         const RasterWindow window{0, 0, dq06::kSize, dq06::kSize, dq06::kSize, dq06::kSize};
         return renderPlannedFormulaRgba(handle, layerPlan(handle, index), window, "", mask);
+    }
+
+    // The multispectral raster of the DQ-06 tests with a sixth band that is alpha, 255 everywhere: a
+    // Float32 raster, or a UInt16 one (the bands are scaled to its range, as ODM writes them)
+    fs::path makeMultispectralWithAlpha(const fs::path &path, GDALDataType type, bool withPatches)
+    {
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = dq06::kSize;
+        spec.bands = 6;
+        spec.type = type;
+        spec.alphaBand = true;
+        spec.epsg = 3857;
+        spec.originX = dq06::kOriginX;
+        spec.originY = dq06::kOriginY;
+        spec.pixelSize = dq06::kPixel;
+        // The nodata is -9999, or 0 where the type cannot hold a negative value
+        const double scale = type == GDT_UInt16 ? 60000.0 : 1.0;
+        const double nodata = type == GDT_UInt16 ? 0.0 : dq06::kNodata;
+        spec.value = [=](int band, int x, int y) {
+            const double value = withPatches ? dq06::reflectanceWithNodata(band, x, y, nodata / scale)
+                                             : dq06::reflectance(band, x, y);
+            return std::floor(value * scale * 1000.0) / 1000.0;
+        };
+        testutils::createGeoRaster(path, spec);
+        if (withPatches)
+            dq06::setNodata(path, nodata);
+        return path;
     }
 
     std::string publicColormapIds()
@@ -238,18 +266,7 @@ namespace
     TEST_F(RasterIndexLayer, aTransparentPixelStaysTransparent)
     {
         TestArea ta(TEST_NAME, true);
-        testutils::GeoRasterSpec spec;
-        spec.width = spec.height = dq06::kSize;
-        spec.bands = 6;
-        spec.type = GDT_Float32;
-        spec.alphaBand = true;
-        spec.epsg = 3857;
-        spec.originX = dq06::kOriginX;
-        spec.originY = dq06::kOriginY;
-        spec.pixelSize = dq06::kPixel;
-        spec.value = [](int band, int x, int y) { return dq06::reflectance(band, x, y); };
-        const fs::path alphaRaster = ta.getPath("alpha.tif");
-        testutils::createGeoRaster(alphaRaster, spec);
+        const fs::path alphaRaster = makeMultispectralWithAlpha(ta.getPath("alpha.tif"), GDT_Float32, false);
         {
             std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(alphaRaster.string().c_str(), GA_Update)));
             ASSERT_NE(ds, nullptr);
@@ -269,6 +286,46 @@ namespace
             EXPECT_EQ(img.alpha()[5 * width + 5], 255);
             EXPECT_EQ(img.alpha()[49 * width + 49], 255);
             EXPECT_EQ(img.alpha()[80 * width + 80], 255);
+        }
+    }
+
+    // ODM writes the alpha band of a UInt16 orthophoto as 255. The warp of the layer must not rescale
+    // it by the 65535 of the type, which made every pixel of such a raster transparent
+    TEST_F(RasterIndexLayer, anAlphaOf255InAUInt16BandIsOpaque)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path raster = makeMultispectralWithAlpha(ta.getPath("odm.tif"), GDT_UInt16, false);
+        for (const char *index : {"NDVI", "NDRE", "NDWI", "SAVI", "EVI"})
+        {
+            SCOPED_TRACE(index);
+            const testutils::DecodedImage img = renderLayer(raster, index);
+            size_t transparent = 0;
+            for (const uint8_t alpha : img.alpha())
+                transparent += alpha == 0;
+            EXPECT_EQ(transparent, 0u);
+        }
+    }
+
+    // A raster with an alpha band and a nodata value: the nodata pixels of a band are nodata (they
+    // were turned into valid zeros when the warp took the alpha for the validity of the pixels)
+    TEST_F(RasterIndexLayer, theNodataOfARasterWithAlphaIsNodataOfItsBands)
+    {
+        TestArea ta(TEST_NAME, true);
+        for (const GDALDataType type : {GDT_Float32, GDT_UInt16})
+        {
+            const fs::path raster = makeMultispectralWithAlpha(
+                ta.getPath(type == GDT_Float32 ? "f32.tif" : "u16.tif"), type, true);
+            const testutils::DecodedImage ndvi = renderLayer(raster, "NDVI");
+            const size_t width = static_cast<size_t>(ndvi.width);
+            SCOPED_TRACE(type == GDT_Float32 ? "Float32" : "UInt16");
+            // Band 3 (blue) is not read by NDVI: its patch is drawn
+            for (size_t y = 20; y < 40; y++)
+                for (size_t x = 20; x < 40; x++)
+                    EXPECT_EQ(ndvi.alpha()[y * width + x], 255) << x << "," << y;
+            // Band 5 (NIR) is: its patch is not
+            for (size_t y = 60; y < 80; y++)
+                for (size_t x = 80; x < 100; x++)
+                    EXPECT_EQ(ndvi.alpha()[y * width + x], 0) << x << "," << y;
         }
     }
 

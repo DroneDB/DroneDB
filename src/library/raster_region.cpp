@@ -459,7 +459,13 @@ namespace ddb
             "-te_srs", srs,
             "-ts", std::to_string(width), std::to_string(height),
             "-r", "bilinear", "-multi",
-            "-ot", "Float32"
+            "-ot", "Float32",
+            // The alpha band, if there is one, is warped like the others, so the engine reads the
+            // source's own 0 (no data) and not what the warper makes of it: with a source alpha the
+            // warper rescales it by the maximum of the band's type (65535 for UInt16, where ODM writes
+            // 255), which turned a fully opaque raster into alpha 0, and it turns the pixels that are
+            // nodata in a band into 0 instead of leaving them nodata.
+            "-nosrcalpha"
         };
         const RenderInFlight inFlight;
         parallel::CpuTokens warpTokens;
