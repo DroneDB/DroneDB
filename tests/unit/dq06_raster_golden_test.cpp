@@ -106,9 +106,9 @@ namespace
     // of the pixel (a moved or mixed-up pixel changes it).
     json pixelStatistics(GDALDataset &ds)
     {
-        const size_t width = ds.GetRasterXSize(), height = ds.GetRasterYSize();
-        std::vector<double> plane(width * height);
-        std::vector<GByte> valid(width * height);
+        const int width = ds.GetRasterXSize(), height = ds.GetRasterYSize();
+        std::vector<double> plane(static_cast<size_t>(width) * height);
+        std::vector<GByte> valid(plane.size());
         json bands = json::array();
         for (int b = 1; b <= ds.GetRasterCount(); b++)
         {
@@ -134,8 +134,8 @@ namespace
             bands.push_back({{"valid", count},
                              {"min", lowest},
                              {"max", highest},
-                             {"mean", count > 0 ? sum / count : 0.0},
-                             {"weightedMean", count > 0 ? weighted / count : 0.0}});
+                             {"mean", count > 0 ? sum / static_cast<double>(count) : 0.0},
+                             {"weightedMean", count > 0 ? weighted / static_cast<double>(count) : 0.0}});
         }
         return bands;
     }
