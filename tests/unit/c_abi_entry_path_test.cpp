@@ -56,7 +56,7 @@ struct PathVector {
     bool accepted = false;
     std::string normalized;  // when accepted
     std::string rejected;    // the code, when not
-    bool blank = false;      // "" or whitespace only: the exports with a required path say "no path"
+    bool blank = false;  // "" or whitespace only: the exports with a required path say "no path"
 };
 
 std::vector<PathVector> loadVectors() {
@@ -75,7 +75,9 @@ std::vector<PathVector> loadVectors() {
             p.normalized = expected["path"].get<std::string>();
         else
             p.rejected = expected["rejected"].get<std::string>();
-        p.blank = std::all_of(p.input.begin(), p.input.end(), [](unsigned char c) { return std::isspace(c) != 0; });
+        p.blank = std::all_of(p.input.begin(), p.input.end(), [](unsigned char c) {
+            return std::isspace(c) != 0;
+        });
         vectors.push_back(std::move(p));
     }
     return vectors;
@@ -93,8 +95,9 @@ bool creatableEverywhere(const std::string& path) {
         std::string lower;
         for (const unsigned char c : segment)
             lower += static_cast<char>(std::tolower(c));
-        if (segment.find_first_of("<>:\"|?*\\") != std::string::npos || segment.empty() || segment.back() == ' ' ||
-            segment.back() == '.' || lower == DDB_FOLDER || deviceNames.count(lower) > 0)
+        if (segment.find_first_of("<>:\"|?*\\") != std::string::npos || segment.empty() ||
+            segment.back() == ' ' || segment.back() == '.' || lower == DDB_FOLDER ||
+            deviceNames.count(lower) > 0)
             return false;
         start = end + 1;
     }
@@ -106,7 +109,8 @@ struct Dataset {
     TestArea area;
     fs::path root;
 
-    explicit Dataset(const std::string& name, const std::string& path = "") : area(name, true), root(area.getFolder("ds")) {
+    explicit Dataset(const std::string& name, const std::string& path = "")
+        : area(name, true), root(area.getFolder("ds")) {
         char* out = nullptr;
         EXPECT_EQ(DDBInit(root.string().c_str(), &out), DDBERR_NONE) << DDBGetLastError();
         take(out);
@@ -131,7 +135,8 @@ struct Dataset {
     // The paths of every entry, as DDBListEntries lists them
     std::vector<std::string> entries() const {
         char* out = nullptr;
-        EXPECT_EQ(DDBListEntries(path().c_str(), "", true, "", "", false, &out), DDBERR_NONE) << DDBGetLastError();
+        EXPECT_EQ(DDBListEntries(path().c_str(), "", true, "", "", false, &out), DDBERR_NONE)
+            << DDBGetLastError();
         std::vector<std::string> paths;
         for (const auto& e : json::parse(take(out)))
             paths.push_back(e["path"].get<std::string>());
@@ -198,49 +203,61 @@ std::vector<PathExport> pathExports(Output& last) {
     const auto keep = [&last](char* out) { last.text = take(out); };
     std::vector<PathExport> exports;
 
-    exports.push_back({"DDBGet", Blank::Required,
-                       [=](const Dataset& ds, const std::string& p) {
-                           char* out = nullptr;
-                           const DDBErr rc = DDBGet(ds.path().c_str(), p.c_str(), &out);
-                           keep(out);
-                           return rc;
-                       },
-                       [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
+    exports.push_back(
+        {"DDBGet",
+         Blank::Required,
+         [=](const Dataset& ds, const std::string& p) {
+             char* out = nullptr;
+             const DDBErr rc = DDBGet(ds.path().c_str(), p.c_str(), &out);
+             keep(out);
+             return rc;
+         },
+         [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
 
-    exports.push_back({"DDBListEntries", Blank::Folder,
-                       [=](const Dataset& ds, const std::string& p) {
-                           char* out = nullptr;
-                           const DDBErr rc = DDBListEntries(ds.path().c_str(), p.c_str(), true, "", "", false, &out);
-                           keep(out);
-                           return rc;
-                       },
-                       [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
+    exports.push_back(
+        {"DDBListEntries",
+         Blank::Folder,
+         [=](const Dataset& ds, const std::string& p) {
+             char* out = nullptr;
+             const DDBErr rc =
+                 DDBListEntries(ds.path().c_str(), p.c_str(), true, "", "", false, &out);
+             keep(out);
+             return rc;
+         },
+         [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
 
-    exports.push_back({"DDBListEntriesEx", Blank::Folder,
-                       [=](const Dataset& ds, const std::string& p) {
-                           char* out = nullptr;
-                           DDBListEntriesOptions options{};
-                           options.structSize = sizeof(options);
-                           options.recursive = true;
-                           const DDBErr rc = DDBListEntriesEx(ds.path().c_str(), p.c_str(), "", "", &options, &out);
-                           keep(out);
-                           return rc;
-                       },
-                       [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
+    exports.push_back(
+        {"DDBListEntriesEx",
+         Blank::Folder,
+         [=](const Dataset& ds, const std::string& p) {
+             char* out = nullptr;
+             DDBListEntriesOptions options{};
+             options.structSize = sizeof(options);
+             options.recursive = true;
+             const DDBErr rc =
+                 DDBListEntriesEx(ds.path().c_str(), p.c_str(), "", "", &options, &out);
+             keep(out);
+             return rc;
+         },
+         [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
 
-    exports.push_back({"DDBSearch", Blank::Optional,
-                       [=](const Dataset& ds, const std::string& p) {
-                           char* out = nullptr;
-                           const DDBErr rc = DDBSearch(ds.path().c_str(), p.c_str(), &out, "json");
-                           keep(out);
-                           return rc;
-                       },
-                       [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
+    exports.push_back(
+        {"DDBSearch",
+         Blank::Optional,
+         [=](const Dataset& ds, const std::string& p) {
+             char* out = nullptr;
+             const DDBErr rc = DDBSearch(ds.path().c_str(), p.c_str(), &out, "json");
+             keep(out);
+             return rc;
+         },
+         [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
 
-    exports.push_back({"DDBMetaAdd", Blank::Optional,
+    exports.push_back({"DDBMetaAdd",
+                       Blank::Optional,
                        [=](const Dataset& ds, const std::string& p) {
                            char* out = nullptr;
-                           const DDBErr rc = DDBMetaAdd(ds.path().c_str(), p.c_str(), "notes", "\"n\"", &out);
+                           const DDBErr rc =
+                               DDBMetaAdd(ds.path().c_str(), p.c_str(), "notes", "\"n\"", &out);
                            keep(out);
                            return rc;
                        },
@@ -250,10 +267,12 @@ std::vector<PathExport> pathExports(Output& last) {
                            EXPECT_EQ(json::parse(take(out)).size(), 1u);
                        }});
 
-    exports.push_back({"DDBMetaSet", Blank::Optional,
+    exports.push_back({"DDBMetaSet",
+                       Blank::Optional,
                        [=](const Dataset& ds, const std::string& p) {
                            char* out = nullptr;
-                           const DDBErr rc = DDBMetaSet(ds.path().c_str(), p.c_str(), "note", "\"n\"", &out);
+                           const DDBErr rc =
+                               DDBMetaSet(ds.path().c_str(), p.c_str(), "note", "\"n\"", &out);
                            keep(out);
                            return rc;
                        },
@@ -263,7 +282,8 @@ std::vector<PathExport> pathExports(Output& last) {
                            take(out);
                        }});
 
-    exports.push_back({"DDBMetaGet", Blank::Optional,
+    exports.push_back({"DDBMetaGet",
+                       Blank::Optional,
                        [=](const Dataset& ds, const std::string& p) {
                            // The entry (or the dataset) holds the key
                            char* out = nullptr;
@@ -273,20 +293,27 @@ std::vector<PathExport> pathExports(Output& last) {
                            keep(out);
                            return rc;
                        },
-                       [&last](const Dataset&, const std::string&) { EXPECT_EQ(json::parse(last.text).value("data", ""), "n"); }});
+                       [&last](const Dataset&, const std::string&) {
+                           EXPECT_EQ(json::parse(last.text).value("data", ""), "n");
+                       }});
 
-    exports.push_back({"DDBMetaUnset", Blank::Optional,
+    exports.push_back({"DDBMetaUnset",
+                       Blank::Optional,
                        [=](const Dataset& ds, const std::string& p) {
                            char* out = nullptr;
                            if (const DDBErr set = setNote(ds, p); set != DDBERR_NONE)
                                return set;
-                           const DDBErr rc = DDBMetaUnset(ds.path().c_str(), p.c_str(), "note", &out);
+                           const DDBErr rc =
+                               DDBMetaUnset(ds.path().c_str(), p.c_str(), "note", &out);
                            keep(out);
                            return rc;
                        },
-                       [&last](const Dataset&, const std::string&) { EXPECT_EQ(json::parse(last.text).value("removed", 0), 1); }});
+                       [&last](const Dataset&, const std::string&) {
+                           EXPECT_EQ(json::parse(last.text).value("removed", 0), 1);
+                       }});
 
-    exports.push_back({"DDBMetaList", Blank::Optional,
+    exports.push_back({"DDBMetaList",
+                       Blank::Optional,
                        [=](const Dataset& ds, const std::string& p) {
                            char* out = nullptr;
                            if (const DDBErr set = setNote(ds, p); set != DDBERR_NONE)
@@ -300,8 +327,11 @@ std::vector<PathExport> pathExports(Output& last) {
                            EXPECT_EQ(firstPath(last.text), n);
                        }});
 
-    exports.push_back({"DDBMoveEntry", Blank::Required,
-                       [](const Dataset& ds, const std::string& p) { return DDBMoveEntry(ds.path().c_str(), p.c_str(), "moved.txt"); },
+    exports.push_back({"DDBMoveEntry",
+                       Blank::Required,
+                       [](const Dataset& ds, const std::string& p) {
+                           return DDBMoveEntry(ds.path().c_str(), p.c_str(), "moved.txt");
+                       },
                        [](const Dataset& ds, const std::string& n) {
                            char* out = nullptr;
                            ASSERT_DDB_OK(DDBGet(ds.path().c_str(), "moved.txt", &out));
@@ -309,8 +339,11 @@ std::vector<PathExport> pathExports(Output& last) {
                            EXPECT_EQ(DDBGet(ds.path().c_str(), n.c_str(), &out), DDBERR_NOTFOUND);
                        }});
 
-    exports.push_back({"DDBMoveEntry (dest)", Blank::Required,
-                       [](const Dataset& ds, const std::string& p) { return DDBMoveEntry(ds.path().c_str(), "keep.txt", p.c_str()); },
+    exports.push_back({"DDBMoveEntry (dest)",
+                       Blank::Required,
+                       [](const Dataset& ds, const std::string& p) {
+                           return DDBMoveEntry(ds.path().c_str(), "keep.txt", p.c_str());
+                       },
                        [](const Dataset& ds, const std::string& n) {
                            char* out = nullptr;
                            ASSERT_DDB_OK(DDBGet(ds.path().c_str(), n.c_str(), &out));
@@ -318,31 +351,39 @@ std::vector<PathExport> pathExports(Output& last) {
                            EXPECT_EQ(DDBGet(ds.path().c_str(), "keep.txt", &out), DDBERR_NOTFOUND);
                        }});
 
-    exports.push_back({"DDBBuild", Blank::Optional,
+    exports.push_back({"DDBBuild",
+                       Blank::Optional,
                        [](const Dataset& ds, const std::string& p) {
                            return DDBBuild(ds.path().c_str(), p.c_str(), nullptr, false, false);
                        },
                        nullptr});
 
-    exports.push_back({"DDBIsBuildable", Blank::Required,
-                       sameBooleanForTheNormalizedPath([](const Dataset& ds, const std::string& p, bool* out) {
-                           return DDBIsBuildable(ds.path().c_str(), p.c_str(), out);
-                       }),
-                       nullptr});
+    exports.push_back(
+        {"DDBIsBuildable",
+         Blank::Required,
+         sameBooleanForTheNormalizedPath([](const Dataset& ds, const std::string& p, bool* out) {
+             return DDBIsBuildable(ds.path().c_str(), p.c_str(), out);
+         }),
+         nullptr});
 
-    exports.push_back({"DDBIsBuildActive", Blank::Required,
-                       sameBooleanForTheNormalizedPath([](const Dataset& ds, const std::string& p, bool* out) {
-                           return DDBIsBuildActive(ds.path().c_str(), p.c_str(), out);
-                       }),
-                       nullptr});
+    exports.push_back(
+        {"DDBIsBuildActive",
+         Blank::Required,
+         sameBooleanForTheNormalizedPath([](const Dataset& ds, const std::string& p, bool* out) {
+             return DDBIsBuildActive(ds.path().c_str(), p.c_str(), out);
+         }),
+         nullptr});
 
-    exports.push_back({"DDBIsBuildComplete", Blank::Required,
-                       sameBooleanForTheNormalizedPath([](const Dataset& ds, const std::string& p, bool* out) {
-                           return DDBIsBuildComplete(ds.path().c_str(), p.c_str(), out);
-                       }),
-                       nullptr});
+    exports.push_back(
+        {"DDBIsBuildComplete",
+         Blank::Required,
+         sameBooleanForTheNormalizedPath([](const Dataset& ds, const std::string& p, bool* out) {
+             return DDBIsBuildComplete(ds.path().c_str(), p.c_str(), out);
+         }),
+         nullptr});
 
-    exports.push_back({"DDBGetBuildStatus", Blank::List,
+    exports.push_back({"DDBGetBuildStatus",
+                       Blank::List,
                        [=](const Dataset& ds, const std::string& p) {
                            const char* paths[] = {p.c_str()};
                            char* out = nullptr;
@@ -355,26 +396,31 @@ std::vector<PathExport> pathExports(Output& last) {
                            EXPECT_TRUE(json::parse(last.text)[0].value("exists", false));
                        }});
 
-    exports.push_back({"DDBGetBuildArtifacts", Blank::List,
-                       [=](const Dataset& ds, const std::string& p) {
-                           const char* paths[] = {p.c_str()};
-                           char* out = nullptr;
-                           const DDBErr rc = DDBGetBuildArtifacts(ds.path().c_str(), paths, 1, &out);
-                           keep(out);
-                           return rc;
-                       },
-                       [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
+    exports.push_back(
+        {"DDBGetBuildArtifacts",
+         Blank::List,
+         [=](const Dataset& ds, const std::string& p) {
+             const char* paths[] = {p.c_str()};
+             char* out = nullptr;
+             const DDBErr rc = DDBGetBuildArtifacts(ds.path().c_str(), paths, 1, &out);
+             keep(out);
+             return rc;
+         },
+         [&last](const Dataset&, const std::string& n) { EXPECT_EQ(firstPath(last.text), n); }});
 
-    exports.push_back({"DDBStac", Blank::Optional,
+    exports.push_back({"DDBStac",
+                       Blank::Optional,
                        [=](const Dataset& ds, const std::string& p) {
                            char* out = nullptr;
-                           const DDBErr rc = DDBStac(ds.path().c_str(), p.c_str(), "", "", "", &out);
+                           const DDBErr rc =
+                               DDBStac(ds.path().c_str(), p.c_str(), "", "", "", &out);
                            keep(out);
                            return rc;
                        },
                        nullptr});
 
-    exports.push_back({"DDBStacData", Blank::Optional,
+    exports.push_back({"DDBStacData",
+                       Blank::Optional,
                        [=](const Dataset& ds, const std::string& p) {
                            char* out = nullptr;
                            const DDBErr rc = DDBStacData(ds.path().c_str(), p.c_str(), &out);
@@ -483,7 +529,8 @@ TEST(CAbiEntryPath, everyAcceptedVectorReachesTheEntryAtItsNormalizedSpelling) {
             SCOPED_TRACE(e.name);
             // The file exists only at the normalized spelling; "keep.txt" is the other entry
             Dataset ds(TEST_NAME, v.normalized);
-            ASSERT_NE(std::find(ds.entries().begin(), ds.entries().end(), v.normalized), ds.entries().end());
+            ASSERT_NE(std::find(ds.entries().begin(), ds.entries().end(), v.normalized),
+                      ds.entries().end());
 
             const DDBErr rc = e.call(ds, v.input);
             ASSERT_EQ(rc, DDBERR_NONE) << DDBGetLastError();
@@ -513,7 +560,8 @@ TEST(CAbiEntryPath, anAcceptedPathThatIsNotIndexedIsNotFoundUnderItsNormalizedSp
 // "a\\b" and "a/./b/" are "a/b" for an existing entry: the path DDBGet reports is the entry's
 TEST(CAbiEntryPath, separatorsAndDotSegmentsReachTheSameEntry) {
     const Dataset ds(TEST_NAME, "sub/dir/file.txt");
-    for (const char* spelling : {"sub/dir/file.txt", "sub\\dir\\file.txt", "./sub//dir/./file.txt", "sub/dir/file.txt/"}) {
+    for (const char* spelling :
+         {"sub/dir/file.txt", "sub\\dir\\file.txt", "./sub//dir/./file.txt", "sub/dir/file.txt/"}) {
         char* out = nullptr;
         ASSERT_DDB_OK(DDBGet(ds.path().c_str(), spelling, &out));
         EXPECT_EQ(firstPath(take(out)), "sub/dir/file.txt") << spelling;
@@ -581,7 +629,8 @@ TEST(CAbiEntryPath, buildDestinationIsAFilesystemFolder) {
     Dataset ds(TEST_NAME);
     const std::string dest = ds.area.getFolder("elsewhere").string();
     ASSERT_DDB_OK(DDBBuild(ds.path().c_str(), "keep.txt", dest.c_str(), false, false));
-    EXPECT_EQ(DDBBuild(ds.path().c_str(), "keep.txt/../x", dest.c_str(), false, false), DDBERR_INVALIDARGS);
+    EXPECT_EQ(DDBBuild(ds.path().c_str(), "keep.txt/../x", dest.c_str(), false, false),
+              DDBERR_INVALIDARGS);
 }
 
 // ------------------------------------------------------------------ the paths of a delta
@@ -630,14 +679,26 @@ TEST(CAbiEntryPath, deltaPathsAreRefusedBeforeAnythingChanges) {
         const auto before = c.ds.entries();
 
         char* conflicts = nullptr;
-        EXPECT_EQ(DDBApplyDelta(deltaJson.c_str(), source.c_str(), c.ds.path().c_str(), MergeStrategy::KeepTheirs, "[]",
+        EXPECT_EQ(DDBApplyDelta(deltaJson.c_str(),
+                                source.c_str(),
+                                c.ds.path().c_str(),
+                                MergeStrategy::KeepTheirs,
+                                "[]",
                                 &conflicts),
                   DDBERR_INVALIDARGS);
-        EXPECT_NE(std::string(DDBGetLastError()).find(v.rejected), std::string::npos) << DDBGetLastError();
-        EXPECT_EQ(DDBApplyDeltaEx(deltaJson.c_str(), source.c_str(), c.ds.path().c_str(), MergeStrategy::KeepTheirs, "[]",
-                                  nullptr, &conflicts),
+        EXPECT_NE(std::string(DDBGetLastError()).find(v.rejected), std::string::npos)
+            << DDBGetLastError();
+        EXPECT_EQ(DDBApplyDeltaEx(deltaJson.c_str(),
+                                  source.c_str(),
+                                  c.ds.path().c_str(),
+                                  MergeStrategy::KeepTheirs,
+                                  "[]",
+                                  nullptr,
+                                  &conflicts),
                   DDBERR_INVALIDARGS);
-        EXPECT_EQ(DDBComputeDeltaLocals(deltaJson.c_str(), c.ds.path().c_str(), c.ds.area.getFolder("links").string().c_str(),
+        EXPECT_EQ(DDBComputeDeltaLocals(deltaJson.c_str(),
+                                        c.ds.path().c_str(),
+                                        c.ds.area.getFolder("links").string().c_str(),
                                         &conflicts),
                   DDBERR_INVALIDARGS);
 
@@ -662,8 +723,13 @@ TEST(CAbiEntryPath, deltaPathsAreAppliedAtTheirNormalizedSpelling) {
         const std::string source = c.source.string();
 
         char* conflicts = nullptr;
-        ASSERT_DDB_OK(DDBApplyDeltaEx(deltaJson.c_str(), source.c_str(), c.ds.path().c_str(), MergeStrategy::KeepTheirs, "[]",
-                                      verified.c_str(), &conflicts));
+        ASSERT_DDB_OK(DDBApplyDeltaEx(deltaJson.c_str(),
+                                      source.c_str(),
+                                      c.ds.path().c_str(),
+                                      MergeStrategy::KeepTheirs,
+                                      "[]",
+                                      verified.c_str(),
+                                      &conflicts));
         EXPECT_EQ(take(conflicts), "[]");
         EXPECT_TRUE(fs::exists(c.ds.root / io::fromUtf8(v.normalized)));
         const auto entries = c.ds.entries();
@@ -682,14 +748,16 @@ TEST(CAbiEntryPath, localLinksStayUnderTheirFolder) {
     const std::string deltaJson = json(d).dump();
     const std::string links = c.ds.area.getFolder("links").string();
     char* out = nullptr;
-    EXPECT_EQ(DDBComputeDeltaLocals(deltaJson.c_str(), c.ds.path().c_str(), links.c_str(), &out), DDBERR_INVALIDARGS);
+    EXPECT_EQ(DDBComputeDeltaLocals(deltaJson.c_str(), c.ds.path().c_str(), links.c_str(), &out),
+              DDBERR_INVALIDARGS);
     EXPECT_FALSE(fs::exists(c.ds.area.getPath("outside.txt")));
     EXPECT_FALSE(fs::exists(c.ds.area.getPath("links/../outside.txt")));
 
     // A valid path is linked under the folder
     Delta ok;
     ok.adds.push_back(AddAction("a\\b/./copy.txt", c.keepHash()));
-    ASSERT_DDB_OK(DDBComputeDeltaLocals(json(ok).dump().c_str(), c.ds.path().c_str(), links.c_str(), &out));
+    ASSERT_DDB_OK(
+        DDBComputeDeltaLocals(json(ok).dump().c_str(), c.ds.path().c_str(), links.c_str(), &out));
     EXPECT_EQ(json::parse(take(out)).size(), 1u);
     EXPECT_TRUE(fs::exists(fs::path(links) / "a" / "b" / "copy.txt"));
 }
@@ -698,7 +766,11 @@ TEST(CAbiEntryPath, localLinksStayUnderTheirFolder) {
 TEST(CAbiEntryPath, restoredMetaPathsAreNormalized) {
     const Dataset ds(TEST_NAME, "sub/a.txt");
     const auto row = [](const std::string& path, const std::string& id) {
-        return json{{"id", id}, {"path", path}, {"key", "note"}, {"data", "\"restored\""}, {"mtime", 1700000000}};
+        return json{{"id", id},
+                    {"path", path},
+                    {"key", "note"},
+                    {"data", "\"restored\""},
+                    {"mtime", 1700000000}};
     };
 
     char* out = nullptr;
@@ -714,7 +786,8 @@ TEST(CAbiEntryPath, restoredMetaPathsAreNormalized) {
     take(out);
     for (const char* bad : {"../x", ".ddb/x", "/abs"}) {
         const std::string refused = json::array({row(bad, "id-3")}).dump();
-        EXPECT_EQ(DDBMetaRestore(ds.path().c_str(), refused.c_str(), &out), DDBERR_INVALIDARGS) << bad;
+        EXPECT_EQ(DDBMetaRestore(ds.path().c_str(), refused.c_str(), &out), DDBERR_INVALIDARGS)
+            << bad;
     }
     ASSERT_DDB_OK(DDBMetaList(ds.path().c_str(), "", &out));
     EXPECT_EQ(json::parse(take(out)).size(), 2u) << "the refused rows were not restored";

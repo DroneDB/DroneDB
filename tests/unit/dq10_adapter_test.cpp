@@ -44,7 +44,8 @@ TEST(Dq10StacQuery, bboxAndDatetime) {
     EXPECT_EQ(instant.datetimeEnd, "2024-05-01T10:00:00Z");
 
     // An interval, with open ends
-    const auto interval = parseStacItemQuery("", "2024-01-01T00:00:00Z/2024-12-31T23:59:59Z", 10, 0);
+    const auto interval =
+        parseStacItemQuery("", "2024-01-01T00:00:00Z/2024-12-31T23:59:59Z", 10, 0);
     EXPECT_EQ(interval.datetimeStart, "2024-01-01T00:00:00Z");
     EXPECT_EQ(interval.datetimeEnd, "2024-12-31T23:59:59Z");
     const auto openStart = parseStacItemQuery("", "../2024-12-31T23:59:59Z", 10, 0);
@@ -82,7 +83,8 @@ TEST(Dq10BuildJson, shapesOfTheBuildOutputs) {
     pending.missingDependencies = {"a/b.shx"};
     pending.lastAttempt = 1700000000;
     pending.retryAfter = 1700000060;
-    EXPECT_EQ(json(pending), json::parse(R"({"hash":"h","path":"a/b.shp","missingDependencies":["a/b.shx"],
+    EXPECT_EQ(json(pending),
+              json::parse(R"({"hash":"h","path":"a/b.shp","missingDependencies":["a/b.shx"],
         "lastAttempt":1700000000,"retryAfter":1700000060})"));
     EXPECT_EQ(json(std::vector<PendingBuildInfo>{}).dump(), "[]");
 
@@ -90,7 +92,8 @@ TEST(Dq10BuildJson, shapesOfTheBuildOutputs) {
     status.path = "x.tif";
     status.exists = true;
     status.complete = true;
-    EXPECT_EQ(json(status), json::parse(R"({"path":"x.tif","exists":true,"buildable":false,"complete":true})"));
+    EXPECT_EQ(json(status),
+              json::parse(R"({"path":"x.tif","exists":true,"buildable":false,"complete":true})"));
 
     CleanupResult cleanup;
     cleanup.removedEntries = {"gone.txt"};
@@ -122,10 +125,13 @@ TEST(Dq10MergeJson, validationShape) {
     EXPECT_EQ(j["ok"], true);
     EXPECT_EQ(j["errors"], json::array());
     EXPECT_EQ(j["warnings"], json::array({"w"}));
-    EXPECT_EQ(j["summary"], json::parse(R"({"totalBands":5,"dataType":"UInt16","width":4,"height":3,"crs":"EPSG:32632",
+    EXPECT_EQ(
+        j["summary"],
+        json::parse(R"({"totalBands":5,"dataType":"UInt16","width":4,"height":3,"crs":"EPSG:32632",
         "pixelSizeX":0.5,"pixelSizeY":0.5,"estimatedSize":1234})"));
-    EXPECT_EQ(j["alignment"]["bands"][0],
-              json::parse(R"({"index":0,"name":"Red","wavelength":668,"shiftX":0.25,"shiftY":0.0})"));
+    EXPECT_EQ(
+        j["alignment"]["bands"][0],
+        json::parse(R"({"index":0,"name":"Red","wavelength":668,"shiftX":0.25,"shiftY":0.0})"));
     EXPECT_EQ(j["alignment"]["maxShiftPixels"], 1.5);
     EXPECT_EQ(j["alignment"]["correctionApplied"], false);
 }
@@ -147,8 +153,9 @@ TEST(Dq10Delta, verifiedHashesAreAJsonObjectOfStrings) {
 }
 
 TEST(Dq10Delta, aConflictIsItsPathInJson) {
-    const std::vector<Conflict> conflicts = {Conflict("a.txt", ConflictType::BothModified),
-                                             Conflict("b/c.txt", ConflictType::RemoteDeleteLocalModified)};
+    const std::vector<Conflict> conflicts = {
+        Conflict("a.txt", ConflictType::BothModified),
+        Conflict("b/c.txt", ConflictType::RemoteDeleteLocalModified)};
     EXPECT_EQ(json(conflicts).dump(), R"(["a.txt","b/c.txt"])");
 }
 

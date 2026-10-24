@@ -8,7 +8,7 @@
 
 namespace ddb {
 
-void to_json(json &j, const PendingBuildInfo &info) {
+void to_json(json& j, const PendingBuildInfo& info) {
     j = json{{"hash", info.hash},
              {"path", info.path},
              {"missingDependencies", info.missingDependencies},
@@ -16,14 +16,14 @@ void to_json(json &j, const PendingBuildInfo &info) {
              {"retryAfter", info.retryAfter}};
 }
 
-void to_json(json &j, const BuildStatus &status) {
+void to_json(json& j, const BuildStatus& status) {
     j = json{{"path", status.path},
              {"exists", status.exists},
              {"buildable", status.buildable},
              {"complete", status.complete}};
 }
 
-void to_json(json &j, const CleanupResult &result) {
+void to_json(json& j, const CleanupResult& result) {
     j = json{{"entries", result.removedEntries}, {"builds", result.removedBuilds}};
 }
 

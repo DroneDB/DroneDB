@@ -39,7 +39,7 @@ json effective() {
 
 // Puts GDAL's cache and the setting back, whatever the test did
 class GdalCacheFixture : public ::testing::Test {
-   protected:
+protected:
     void SetUp() override {
         before_ = GDALGetCacheMax64();
         ASSERT_DDB_OK(DDBConfigure(R"({"gdalCacheMb": null})"));
@@ -68,7 +68,8 @@ TEST_F(GdalCacheFixture, configuredSizeIsTheCacheSizeRaisingAndLowering) {
 
 TEST_F(GdalCacheFixture, nullRestoresTheCacheGdalHad) {
     ASSERT_DDB_OK(DDBConfigure(R"({"gdalCacheMb": 96})"));
-    ASSERT_DDB_OK(DDBConfigure(R"({"gdalCacheMb": 3000})"));  // the second change keeps the first "before"
+    ASSERT_DDB_OK(
+        DDBConfigure(R"({"gdalCacheMb": 3000})"));  // the second change keeps the first "before"
     ASSERT_DDB_OK(DDBConfigure(R"({"gdalCacheMb": null})"));
     EXPECT_EQ(GDALGetCacheMax64(), start_);
     EXPECT_EQ(effective()["sources"]["gdalCacheMb"], "default");
@@ -133,8 +134,12 @@ TEST_F(GdalCacheFixture, buildInFlightKeepsItsCacheUntilItEnds) {
 
 TEST_F(GdalCacheFixture, invalidValueChangesNothing) {
     ASSERT_DDB_OK(DDBConfigure(R"({"gdalCacheMb": 96})"));
-    for (const char* invalid : {R"({"gdalCacheMb": 15})", R"({"gdalCacheMb": 1048577})", R"({"gdalCacheMb": 0})",
-                                R"({"gdalCacheMb": -1})", R"({"gdalCacheMb": 64.5})", R"({"gdalCacheMb": "64"})",
+    for (const char* invalid : {R"({"gdalCacheMb": 15})",
+                                R"({"gdalCacheMb": 1048577})",
+                                R"({"gdalCacheMb": 0})",
+                                R"({"gdalCacheMb": -1})",
+                                R"({"gdalCacheMb": 64.5})",
+                                R"({"gdalCacheMb": "64"})",
                                 R"({"gdalCacheMb": 200, "ioThreads": 0})"}) {
         // The valid member of the last one is not applied either: every member is checked first
         EXPECT_EQ(DDBConfigure(invalid), DDBERR_INVALIDARGS) << invalid;
