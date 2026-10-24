@@ -442,8 +442,10 @@ bool isDirectTemperatureRaster(const std::string &filePath) {
 
 // ---- Detection ----
 
-bool isThermalImage(const std::string &filePath) {
-    // Method 1: Check EXIF Make/Model
+namespace {
+
+// Methods 1-3: the EXIF make and model, the FLIR XMP namespace, the DJI thermal tags
+bool hasThermalExifOrXmp(const std::string &filePath) {
     try {
         auto exivImage = openExivImage(io::fromUtf8(filePath));
         if (exivImage.get()) {
@@ -469,135 +471,166 @@ bool isThermalImage(const std::string &filePath) {
     } catch (const std::exception &e) {
         LOGD << "isThermalImage: EXIF/XMP probing failed: " << e.what();
     }
+    return false;
+}
+
+// What the GDAL metadata of a single-band raster says: every metadata string in lowercase, the
+// unit, and the scale and offset
+struct ThermalSignals {
+    std::string allMeta;
+    std::string unitStr;
+    std::string unitLower;
+    int hasScale = FALSE, hasOffset = FALSE;
+    double scale = 0, offset = 0;
+};
+
+ThermalSignals readThermalSignals(GDALDatasetH hDs) {
+    // Collect all metadata strings for keyword scanning
+    std::vector<std::string> metaStrings;
+
+    // Dataset-level metadata across all domains
+    const CPLStringList mdDomains(GDALGetMetadataDomainList(hDs), TRUE);
+    for (int d = 0; d < mdDomains.size(); d++) {
+        CSLConstList md = GDALGetMetadata(hDs, mdDomains[d]);
+        if (md) {
+            for (int k = 0; md[k] != nullptr; k++)
+                metaStrings.push_back(md[k]);
+        }
+    }
+
+    // Band-level metadata and description
+    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+    const char *bandDesc = GDALGetDescription(hBand);
+    if (bandDesc && bandDesc[0]) metaStrings.push_back(bandDesc);
+
+    CSLConstList bmd = GDALGetMetadata(hBand, nullptr);
+    if (bmd) {
+        for (int k = 0; bmd[k] != nullptr; k++)
+            metaStrings.push_back(bmd[k]);
+    }
+
+    ThermalSignals signals;
+
+    // Band unit info
+    const char *unitType = GDALGetRasterUnitType(hBand);
+    signals.unitStr = unitType ? unitType : "";
+
+    // Scale/offset (e.g., Landsat Collection 2: scale=0.00341802, offset=149.0)
+    signals.scale = GDALGetRasterScale(hBand, &signals.hasScale);
+    signals.offset = GDALGetRasterOffset(hBand, &signals.hasOffset);
+
+    // Build a single lowercase string for keyword search
+    for (const auto &s : metaStrings) {
+        signals.allMeta += s;
+        signals.allMeta += ' ';
+    }
+    str::toLower(signals.allMeta);
+
+    signals.unitLower = signals.unitStr;
+    str::toLower(signals.unitLower);
+    return signals;
+}
+
+// Whether the signals describe a thermal raster: a DEM's keywords and units rule it out, then
+// thermal keywords, units and the Landsat scale/offset pattern make it one
+bool looksThermal(const ThermalSignals &signals) {
+    const std::string &allMeta = signals.allMeta;
+    const std::string &unitStr = signals.unitStr;
+    const std::string &unitLower = signals.unitLower;
+
+    // DEM negative signals - reject early
+    static const std::vector<std::string> demKeywords = {
+        "dem", "dtm", "dsm", "elevation", "height"
+    };
+    static const std::vector<std::string> demUnits = {
+        "m", "ft", "meter", "meters", "feet", "foot"
+    };
+    static const std::vector<std::string> demCrsKeywords = {
+        "vertical", "geoid", "ellipsoid height"
+    };
+
+    for (const auto &kw : demKeywords) {
+        if (allMeta.find(kw) != std::string::npos) {
+            LOGD << "GDAL metadata contains DEM keyword '" << kw << "', not thermal";
+            return false;
+        }
+    }
+    for (const auto &u : demUnits) {
+        if (unitLower == u) {
+            LOGD << "Band unit '" << unitStr << "' indicates DEM, not thermal";
+            return false;
+        }
+    }
+    for (const auto &kw : demCrsKeywords) {
+        if (allMeta.find(kw) != std::string::npos) {
+            LOGD << "GDAL metadata contains vertical CRS keyword '" << kw << "', not thermal";
+            return false;
+        }
+    }
+
+    // Thermal positive signals
+    static const std::vector<std::string> thermalKeywords = {
+        "thermal", "temperature", "surface_temperature",
+        "lst", "tir", "brightness_temperature", "bt", "lwir"
+    };
+    static const std::vector<std::string> thermalUnits = {
+        "kelvin", "celsius", "degc", "degk",
+        "\xc2\xb0""c", "\xc2\xb0""k"  // UTF-8 for °C, °K
+    };
+
+    for (const auto &kw : thermalKeywords) {
+        if (allMeta.find(kw) != std::string::npos) {
+            LOGD << "GDAL metadata contains thermal keyword '" << kw << "'";
+            return true;
+        }
+    }
+    for (const auto &u : thermalUnits) {
+        if (unitLower.find(u) != std::string::npos) {
+            LOGD << "Band unit '" << unitStr << "' indicates thermal";
+            return true;
+        }
+    }
+    if (unitLower == "k") {
+        LOGD << "Band unit 'K' indicates Kelvin (thermal)";
+        return true;
+    }
+
+    // Landsat-style thermal scale/offset pattern
+    if (signals.hasScale && signals.hasOffset && signals.scale > 0.001 && signals.scale < 0.01 &&
+        signals.offset > 100 && signals.offset < 200) {
+        LOGD << "Scale/offset pattern (scale=" << signals.scale << ", offset=" << signals.offset
+             << ") consistent with Landsat thermal encoding";
+        return true;
+    }
+    return false;
+}
+
+// Method 5: GDAL metadata classification for labeled thermal rasters
+// (e.g., Landsat surface temperature, processed thermal GeoTIFFs)
+// Uses explicit metadata signals; avoids value-range heuristics to prevent
+// false positives on DEMs or other single-band Float32 rasters.
+bool isThermalByGdalMetadata(const std::string &filePath) {
+    auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset) return false;
+    GDALDatasetH hDs = datasetHandle(dataset);
+    if (GDALGetRasterCount(hDs) != 1) return false;
+
+    const ThermalSignals signals = readThermalSignals(hDs);
+    dataset.reset();
+    return looksThermal(signals);
+}
+
+} // anonymous namespace
+
+bool isThermalImage(const std::string &filePath) {
+    // Methods 1-3: EXIF Make/Model, FLIR XMP namespace, DJI thermal tags
+    if (hasThermalExifOrXmp(filePath)) return true;
 
     // Method 4: Check for FLIR APP1 segment
     FlirSegmentInfo seg = findFlirSegment(filePath);
     if (seg.found) return true;
 
-    // Method 5: GDAL metadata classification for labeled thermal rasters
-    // (e.g., Landsat surface temperature, processed thermal GeoTIFFs)
-    // Uses explicit metadata signals; avoids value-range heuristics to prevent
-    // false positives on DEMs or other single-band Float32 rasters.
-    {
-        if (auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
-            GDALDatasetH hDs = datasetHandle(dataset);
-            int nBands = GDALGetRasterCount(hDs);
-            if (nBands == 1) {
-                // Collect all metadata strings for keyword scanning
-                std::vector<std::string> metaStrings;
-
-                // Dataset-level metadata across all domains
-                const CPLStringList mdDomains(GDALGetMetadataDomainList(hDs), TRUE);
-                for (int d = 0; d < mdDomains.size(); d++) {
-                    CSLConstList md = GDALGetMetadata(hDs, mdDomains[d]);
-                    if (md) {
-                        for (int k = 0; md[k] != nullptr; k++)
-                            metaStrings.push_back(md[k]);
-                    }
-                }
-
-                // Band-level metadata and description
-                GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-                const char *bandDesc = GDALGetDescription(hBand);
-                if (bandDesc && bandDesc[0]) metaStrings.push_back(bandDesc);
-
-                CSLConstList bmd = GDALGetMetadata(hBand, nullptr);
-                if (bmd) {
-                    for (int k = 0; bmd[k] != nullptr; k++)
-                        metaStrings.push_back(bmd[k]);
-                }
-
-                // Band unit info
-                const char *unitType = GDALGetRasterUnitType(hBand);
-                std::string unitStr = unitType ? unitType : "";
-
-                // Scale/offset (e.g., Landsat Collection 2: scale=0.00341802, offset=149.0)
-                int hasScale = FALSE, hasOffset = FALSE;
-                double scale = GDALGetRasterScale(hBand, &hasScale);
-                double offset = GDALGetRasterOffset(hBand, &hasOffset);
-
-                dataset.reset();
-
-                // Build a single lowercase string for keyword search
-                std::string allMeta;
-                for (const auto &s : metaStrings) {
-                    allMeta += s;
-                    allMeta += ' ';
-                }
-                str::toLower(allMeta);
-
-                std::string unitLower = unitStr;
-                str::toLower(unitLower);
-
-                // DEM negative signals - reject early
-                static const std::vector<std::string> demKeywords = {
-                    "dem", "dtm", "dsm", "elevation", "height"
-                };
-                static const std::vector<std::string> demUnits = {
-                    "m", "ft", "meter", "meters", "feet", "foot"
-                };
-                static const std::vector<std::string> demCrsKeywords = {
-                    "vertical", "geoid", "ellipsoid height"
-                };
-
-                for (const auto &kw : demKeywords) {
-                    if (allMeta.find(kw) != std::string::npos) {
-                        LOGD << "GDAL metadata contains DEM keyword '" << kw << "', not thermal";
-                        return false;
-                    }
-                }
-                for (const auto &u : demUnits) {
-                    if (unitLower == u) {
-                        LOGD << "Band unit '" << unitStr << "' indicates DEM, not thermal";
-                        return false;
-                    }
-                }
-                for (const auto &kw : demCrsKeywords) {
-                    if (allMeta.find(kw) != std::string::npos) {
-                        LOGD << "GDAL metadata contains vertical CRS keyword '" << kw << "', not thermal";
-                        return false;
-                    }
-                }
-
-                // Thermal positive signals
-                static const std::vector<std::string> thermalKeywords = {
-                    "thermal", "temperature", "surface_temperature",
-                    "lst", "tir", "brightness_temperature", "bt", "lwir"
-                };
-                static const std::vector<std::string> thermalUnits = {
-                    "kelvin", "celsius", "degc", "degk",
-                    "\xc2\xb0""c", "\xc2\xb0""k"  // UTF-8 for °C, °K
-                };
-
-                for (const auto &kw : thermalKeywords) {
-                    if (allMeta.find(kw) != std::string::npos) {
-                        LOGD << "GDAL metadata contains thermal keyword '" << kw << "'";
-                        return true;
-                    }
-                }
-                for (const auto &u : thermalUnits) {
-                    if (unitLower.find(u) != std::string::npos) {
-                        LOGD << "Band unit '" << unitStr << "' indicates thermal";
-                        return true;
-                    }
-                }
-                if (unitLower == "k") {
-                    LOGD << "Band unit 'K' indicates Kelvin (thermal)";
-                    return true;
-                }
-
-                // Landsat-style thermal scale/offset pattern
-                if (hasScale && hasOffset && scale > 0.001 && scale < 0.01 &&
-                    offset > 100 && offset < 200) {
-                    LOGD << "Scale/offset pattern (scale=" << scale << ", offset=" << offset
-                         << ") consistent with Landsat thermal encoding";
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
+    return isThermalByGdalMetadata(filePath);
 }
 
 // ---- Helper: read temperature data from file (R-JPEG or GeoTIFF) ----

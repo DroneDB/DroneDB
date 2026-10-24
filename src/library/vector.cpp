@@ -676,6 +676,121 @@ namespace ddb
         return deps;
     }
 
+    namespace
+    {
+
+        // The CRS of the source layers that have none, and whether the drawing is local
+        struct VectorSourceCrs
+        {
+            std::string sourceSrs = "EPSG:4326"; // layers without an SRS: EPSG:4326 for non-CAD inputs (historical behaviour)
+            bool local = false;                  // a CAD drawing without a CRS: nothing to place on a map
+            cad::CadCrs crs;
+            std::string units;
+        };
+
+        // The drawing's CRS for CAD (nothing for a local drawing), EPSG:4326 for the rest
+        VectorSourceCrs resolveSourceCrs(const std::string &input, const std::string &openPath, bool isCad,
+                                         GDALDatasetH hSrcDS)
+        {
+            VectorSourceCrs out;
+            if (isCad)
+            {
+                const auto info = cad::readDxfInfo(io::fromUtf8(openPath));
+                out.crs = cad::resolveCadCrs(io::fromUtf8(input), hSrcDS, info);
+                out.units = cad::insUnitsName(info.insUnits);
+                out.local = !out.crs.georeferenced;
+                if (!out.crs.srs.empty()) out.sourceSrs = out.crs.srs;
+                LOGD << "CAD CRS for " << input << ": source=" << out.crs.source
+                     << " label=" << out.crs.label << (out.local ? " (local)" : "");
+            }
+            return out;
+        }
+
+        // Writes the outputs into the staging folders: a GeoPackage, and the MVT pyramid (or, for a
+        // local drawing, the local.json that says it has none)
+        void stageOutputs(GDALDatasetH hSrcDS, const std::string &input, const VectorSourceCrs &source,
+                          const fs::path &stagingVec, const fs::path &stagingMvt)
+        {
+            const auto gpkgOut = io::toUtf8(stagingVec / VectorGpkgFileName);
+            if (source.local)
+            {
+                // Drawing coordinates, no SRS and no MVT pyramid: there is
+                // nothing to place on a map (the Hub shows it without a globe).
+                convertToGpkg(hSrcDS, gpkgOut, "", false);
+                json localInfo = {{"georeferenced", false}, {"units", source.units}};
+                if (source.crs.hasExtent)
+                    localInfo["extent"] = {source.crs.extent.MinX, source.crs.extent.MinY,
+                                           source.crs.extent.MaxX, source.crs.extent.MaxY};
+                std::ofstream out(stagingVec / VectorLocalFileName, std::ios::binary);
+                out << localInfo.dump();
+                if (!out)
+                    throw FSException("Cannot write " + io::toUtf8(stagingVec / VectorLocalFileName));
+            }
+            else
+            {
+                const VectorStats stats = computeStats(hSrcDS, source.sourceSrs);
+                LOGD << "Vector stats: features=" << stats.featureCount
+                     << " envelope=[" << stats.minX << "," << stats.minY << ","
+                     << stats.maxX << "," << stats.maxY << "]";
+                // Branch A: MVT first (cheaper to roll back).
+                convertToMvt(hSrcDS, input, io::toUtf8(stagingMvt), stats, source.sourceSrs);
+                // Branch B: GPKG sidecar.
+                convertToGpkg(hSrcDS, gpkgOut, source.sourceSrs, true);
+            }
+        }
+
+        // Publish: move existing artifacts (if any) to a sibling backup
+        // dir, promote the staged outputs, and on failure restore from
+        // the backup so users never observe a half-published state. A
+        // local build publishes no mvt/, so an old pyramid is retired.
+        void publishStaged(const fs::path &basePath, const fs::path &stagingDir, bool local)
+        {
+            const fs::path vecDir = basePath / VectorBuildSubfolder;
+            const fs::path mvtDir = basePath / MvtBuildSubfolder;
+            const fs::path stagingVec = stagingDir / VectorBuildSubfolder;
+            const fs::path stagingMvt = stagingDir / MvtBuildSubfolder;
+            const fs::path backupDir = basePath /
+                (VectorBackupPrefix + randomString(16));
+            const fs::path backupVec = backupDir / VectorBuildSubfolder;
+            const fs::path backupMvt = backupDir / MvtBuildSubfolder;
+            // Back up any existing directory at the publish target, even if
+            // it lacks the canonical artifact (e.g. an empty leftover from a
+            // previous aborted build): otherwise the promote-rename below
+            // would fail because the destination already exists.
+            // A GeoPackage of the previous build kept open for WFS/OGC queries would
+            // block the renames on Windows
+            RasterCache::instance().release(vecDir);
+            RasterCache::instance().release(mvtDir);
+            const bool hadVec = fs::exists(vecDir);
+            const bool hadMvt = fs::exists(mvtDir);
+            io::assureFolderExists(backupDir);
+            try
+            {
+                if (hadVec) io::rename(vecDir, backupVec);
+                if (hadMvt) io::rename(mvtDir, backupMvt);
+                io::rename(stagingVec, vecDir);
+                if (!local) io::rename(stagingMvt, mvtDir);
+            }
+            catch (...)
+            {
+                // Rollback: remove anything we already promoted, then
+                // restore the originals from the backup.
+                io::assureIsRemoved(vecDir);
+                io::assureIsRemoved(mvtDir);
+                if (hadVec && fs::exists(backupVec))
+                    io::rename(backupVec, vecDir);
+                if (hadMvt && fs::exists(backupMvt))
+                    io::rename(backupMvt, mvtDir);
+                io::assureIsRemoved(backupDir);
+                throw;
+            }
+
+            io::assureIsRemoved(stagingDir);
+            io::assureIsRemoved(backupDir);
+        }
+
+    } // anonymous namespace
+
     void buildVector(const std::string &input,
                      const std::string &baseOutputPath,
                      bool overwrite)
@@ -714,20 +829,7 @@ namespace ddb
 
         // Layers without an SRS: EPSG:4326 for non-CAD inputs (historical
         // behaviour), the drawing's CRS for CAD, nothing for a local drawing.
-        std::string sourceSrs = "EPSG:4326";
-        bool local = false;
-        cad::CadCrs crs;
-        std::string units;
-        if (isCad)
-        {
-            const auto info = cad::readDxfInfo(io::fromUtf8(openPath));
-            crs = cad::resolveCadCrs(io::fromUtf8(input), hSrcDS, info);
-            units = cad::insUnitsName(info.insUnits);
-            local = !crs.georeferenced;
-            if (!crs.srs.empty()) sourceSrs = crs.srs;
-            LOGD << "CAD CRS for " << input << ": source=" << crs.source
-                 << " label=" << crs.label << (local ? " (local)" : "");
-        }
+        const VectorSourceCrs source = resolveSourceCrs(input, openPath, isCad, hSrcDS);
 
         const fs::path vecDir = basePath / VectorBuildSubfolder;
         const fs::path mvtDir = basePath / MvtBuildSubfolder;
@@ -737,9 +839,9 @@ namespace ddb
         // the MVT tileset metadata.json, or local.json for a local drawing)
         // so we don't silently skip and produce a broken state.
         const bool vecExists = fs::exists(vecDir / VectorGpkgFileName);
-        const bool upToDate = local ? fs::exists(vecDir / VectorLocalFileName)
-                                    : fs::exists(mvtDir / MvtMetadataFileName) &&
-                                          !fs::exists(vecDir / VectorLocalFileName);
+        const bool upToDate = source.local ? fs::exists(vecDir / VectorLocalFileName)
+                                           : fs::exists(mvtDir / MvtMetadataFileName) &&
+                                                 !fs::exists(vecDir / VectorLocalFileName);
 
         if (vecExists && upToDate && !overwrite)
         {
@@ -761,75 +863,8 @@ namespace ddb
         // and the target child does not (pre-empt leftovers).
         io::assureIsRemoved(stagingMvt);
 
-        const auto gpkgOut = io::toUtf8(stagingVec / VectorGpkgFileName);
-        if (local)
-        {
-            // Drawing coordinates, no SRS and no MVT pyramid: there is
-            // nothing to place on a map (the Hub shows it without a globe).
-            convertToGpkg(hSrcDS, gpkgOut, "", false);
-            json localInfo = {{"georeferenced", false}, {"units", units}};
-            if (crs.hasExtent)
-                localInfo["extent"] = {crs.extent.MinX, crs.extent.MinY,
-                                       crs.extent.MaxX, crs.extent.MaxY};
-            std::ofstream out(stagingVec / VectorLocalFileName, std::ios::binary);
-            out << localInfo.dump();
-            if (!out)
-                throw FSException("Cannot write " + io::toUtf8(stagingVec / VectorLocalFileName));
-        }
-        else
-        {
-            const VectorStats stats = computeStats(hSrcDS, sourceSrs);
-            LOGD << "Vector stats: features=" << stats.featureCount
-                 << " envelope=[" << stats.minX << "," << stats.minY << ","
-                 << stats.maxX << "," << stats.maxY << "]";
-            // Branch A: MVT first (cheaper to roll back).
-            convertToMvt(hSrcDS, input, io::toUtf8(stagingMvt), stats, sourceSrs);
-            // Branch B: GPKG sidecar.
-            convertToGpkg(hSrcDS, gpkgOut, sourceSrs, true);
-        }
-
-        // Publish: move existing artifacts (if any) to a sibling backup
-        // dir, promote the staged outputs, and on failure restore from
-        // the backup so users never observe a half-published state. A
-        // local build publishes no mvt/, so an old pyramid is retired.
-        const fs::path backupDir = basePath /
-            (VectorBackupPrefix + randomString(16));
-        const fs::path backupVec = backupDir / VectorBuildSubfolder;
-        const fs::path backupMvt = backupDir / MvtBuildSubfolder;
-        // Back up any existing directory at the publish target, even if
-        // it lacks the canonical artifact (e.g. an empty leftover from a
-        // previous aborted build): otherwise the promote-rename below
-        // would fail because the destination already exists.
-        // A GeoPackage of the previous build kept open for WFS/OGC queries would
-        // block the renames on Windows
-        RasterCache::instance().release(vecDir);
-        RasterCache::instance().release(mvtDir);
-        const bool hadVec = fs::exists(vecDir);
-        const bool hadMvt = fs::exists(mvtDir);
-        io::assureFolderExists(backupDir);
-        try
-        {
-            if (hadVec) io::rename(vecDir, backupVec);
-            if (hadMvt) io::rename(mvtDir, backupMvt);
-            io::rename(stagingVec, vecDir);
-            if (!local) io::rename(stagingMvt, mvtDir);
-        }
-        catch (...)
-        {
-            // Rollback: remove anything we already promoted, then
-            // restore the originals from the backup.
-            io::assureIsRemoved(vecDir);
-            io::assureIsRemoved(mvtDir);
-            if (hadVec && fs::exists(backupVec))
-                io::rename(backupVec, vecDir);
-            if (hadMvt && fs::exists(backupMvt))
-                io::rename(backupMvt, mvtDir);
-            io::assureIsRemoved(backupDir);
-            throw;
-        }
-
-        io::assureIsRemoved(stagingDir);
-        io::assureIsRemoved(backupDir);
+        stageOutputs(hSrcDS, input, source, stagingVec, stagingMvt);
+        publishStaged(basePath, stagingDir, source.local);
     }
 
 } // namespace ddb
