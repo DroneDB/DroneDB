@@ -109,6 +109,105 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
     return type;
 }
 
+// The camera of an image: orientation, make and model (a thermal sensor is marked), the sensor
+// size, the focal length and the orientation of the camera; sensorSize, focal and cameraOri
+// also feed the footprint
+void readCamera(ExifParser *e, Entry &entry, SensorSize &sensorSize, Focal &focal, CameraOrientation &cameraOri)
+{
+    entry.properties["orientation"] = e->extractImageOrientation();
+    entry.properties["make"] = e->extractMake();
+    entry.properties["model"] = e->extractModel();
+    entry.properties["sensor"] = e->extractSensor();
+
+    // Detect thermal sensor
+    {
+        std::string make = entry.properties.value("make", "");
+        std::string model = entry.properties.value("model", "");
+        if (isThermalImageFromExif(make, model)) {
+            entry.properties["sensorCategory"] = "thermal";
+            LOGD << "Detected thermal sensor: " << make << " " << model;
+        }
+    }
+
+    if (e->extractSensorSize(sensorSize))
+    {
+        entry.properties["sensorWidth"] = sensorSize.width;
+        entry.properties["sensorHeight"] = sensorSize.height;
+    }
+
+    if (e->computeFocal(focal))
+    {
+        entry.properties["focalLength"] = focal.length;
+        entry.properties["focalLength35"] = focal.length35;
+    }
+
+    bool hasCameraOri = e->extractCameraOrientation(cameraOri);
+    entry.properties["cameraYaw"] = cameraOri.yaw;
+    entry.properties["cameraPitch"] = cameraOri.pitch;
+    entry.properties["cameraRoll"] = cameraOri.roll;
+    entry.properties["hasCameraOrientation"] = hasCameraOri;
+    LOGD << "Camera Orientation: " << cameraOri;
+}
+
+// What the drone says about the flight: speed, GPS accuracy, GPS direction and track
+void readFlight(ExifParser *e, Entry &entry)
+{
+    // Extract flight speed
+    FlightSpeed flightSpeed;
+    if (e->extractFlightSpeed(flightSpeed))
+    {
+        entry.properties["flightSpeed"] = flightSpeed.horizontal();
+        entry.properties["flightSpeed3D"] = flightSpeed.magnitude();
+        entry.properties["flightSpeedX"] = flightSpeed.x;
+        entry.properties["flightSpeedY"] = flightSpeed.y;
+        entry.properties["flightSpeedZ"] = flightSpeed.z;
+        LOGD << "Flight Speed: " << flightSpeed;
+    }
+
+    // Extract GPS accuracy
+    GpsAccuracy gpsAccuracy;
+    if (e->extractGpsAccuracy(gpsAccuracy))
+    {
+        if (gpsAccuracy.xyAccuracy >= 0) entry.properties["gpsXYAccuracy"] = gpsAccuracy.xyAccuracy;
+        if (gpsAccuracy.zAccuracy >= 0) entry.properties["gpsZAccuracy"] = gpsAccuracy.zAccuracy;
+        if (gpsAccuracy.dop >= 0) entry.properties["gpsDop"] = gpsAccuracy.dop;
+        LOGD << "GPS Accuracy: " << gpsAccuracy;
+    }
+
+    // Extract GPS direction and track
+    GpsDirection gpsDirection;
+    if (e->extractGpsDirection(gpsDirection))
+    {
+        if (gpsDirection.hasImgDirection)
+        {
+            entry.properties["gpsImgDirection"] = gpsDirection.imgDirection;
+            entry.properties["gpsImgDirectionRef"] = gpsDirection.imgDirectionRef;
+        }
+        if (gpsDirection.hasTrack)
+        {
+            entry.properties["gpsTrack"] = gpsDirection.track;
+            entry.properties["gpsTrackRef"] = gpsDirection.trackRef;
+        }
+        LOGD << "GPS Direction: " << gpsDirection;
+    }
+}
+
+void readPanorama(ExifParser *e, Entry &entry)
+{
+    PanoramaInfo pInfo;
+    if (e->extractPanoramaInfo(pInfo))
+    {
+        entry.properties["projectionType"] = pInfo.projectionType;
+        entry.properties["croppedWidth"] = pInfo.croppedWidth;
+        entry.properties["croppedHeight"] = pInfo.croppedHeight;
+        entry.properties["croppedX"] = pInfo.croppedX;
+        entry.properties["croppedY"] = pInfo.croppedY;
+        entry.properties["poseHeading"] = pInfo.poseHeading;
+        entry.properties["posePitch"] = pInfo.posePitch;
+        entry.properties["poseRoll"] = pInfo.poseRoll;
+    }
+}
+
 // EXIF/XMP tags: capture time, camera, orientation, GPS location and footprint
 void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &ctx)
 {
@@ -174,78 +273,8 @@ void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &
 
         if (image)
         {
-            entry.properties["orientation"] = e->extractImageOrientation();
-            entry.properties["make"] = e->extractMake();
-            entry.properties["model"] = e->extractModel();
-            entry.properties["sensor"] = e->extractSensor();
-
-            // Detect thermal sensor
-            {
-                std::string make = entry.properties.value("make", "");
-                std::string model = entry.properties.value("model", "");
-                if (isThermalImageFromExif(make, model)) {
-                    entry.properties["sensorCategory"] = "thermal";
-                    LOGD << "Detected thermal sensor: " << make << " " << model;
-                }
-            }
-
-            if (e->extractSensorSize(sensorSize))
-            {
-                entry.properties["sensorWidth"] = sensorSize.width;
-                entry.properties["sensorHeight"] = sensorSize.height;
-            }
-
-            if (e->computeFocal(focal))
-            {
-                entry.properties["focalLength"] = focal.length;
-                entry.properties["focalLength35"] = focal.length35;
-            }
-
-            bool hasCameraOri = e->extractCameraOrientation(cameraOri);
-            entry.properties["cameraYaw"] = cameraOri.yaw;
-            entry.properties["cameraPitch"] = cameraOri.pitch;
-            entry.properties["cameraRoll"] = cameraOri.roll;
-            entry.properties["hasCameraOrientation"] = hasCameraOri;
-            LOGD << "Camera Orientation: " << cameraOri;
-
-            // Extract flight speed
-            FlightSpeed flightSpeed;
-            if (e->extractFlightSpeed(flightSpeed))
-            {
-                entry.properties["flightSpeed"] = flightSpeed.horizontal();
-                entry.properties["flightSpeed3D"] = flightSpeed.magnitude();
-                entry.properties["flightSpeedX"] = flightSpeed.x;
-                entry.properties["flightSpeedY"] = flightSpeed.y;
-                entry.properties["flightSpeedZ"] = flightSpeed.z;
-                LOGD << "Flight Speed: " << flightSpeed;
-            }
-
-            // Extract GPS accuracy
-            GpsAccuracy gpsAccuracy;
-            if (e->extractGpsAccuracy(gpsAccuracy))
-            {
-                if (gpsAccuracy.xyAccuracy >= 0) entry.properties["gpsXYAccuracy"] = gpsAccuracy.xyAccuracy;
-                if (gpsAccuracy.zAccuracy >= 0) entry.properties["gpsZAccuracy"] = gpsAccuracy.zAccuracy;
-                if (gpsAccuracy.dop >= 0) entry.properties["gpsDop"] = gpsAccuracy.dop;
-                LOGD << "GPS Accuracy: " << gpsAccuracy;
-            }
-
-            // Extract GPS direction and track
-            GpsDirection gpsDirection;
-            if (e->extractGpsDirection(gpsDirection))
-            {
-                if (gpsDirection.hasImgDirection)
-                {
-                    entry.properties["gpsImgDirection"] = gpsDirection.imgDirection;
-                    entry.properties["gpsImgDirectionRef"] = gpsDirection.imgDirectionRef;
-                }
-                if (gpsDirection.hasTrack)
-                {
-                    entry.properties["gpsTrack"] = gpsDirection.track;
-                    entry.properties["gpsTrackRef"] = gpsDirection.trackRef;
-                }
-                LOGD << "GPS Direction: " << gpsDirection;
-            }
+            readCamera(e, entry, sensorSize, focal, cameraOri);
+            readFlight(e, entry);
         }
 
         // Reuse geo from context if already extracted by fingerprint
@@ -281,20 +310,7 @@ void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &
         }
 
         if (pano)
-        {
-            PanoramaInfo pInfo;
-            if (e->extractPanoramaInfo(pInfo))
-            {
-                entry.properties["projectionType"] = pInfo.projectionType;
-                entry.properties["croppedWidth"] = pInfo.croppedWidth;
-                entry.properties["croppedHeight"] = pInfo.croppedHeight;
-                entry.properties["croppedX"] = pInfo.croppedX;
-                entry.properties["croppedY"] = pInfo.croppedY;
-                entry.properties["poseHeading"] = pInfo.poseHeading;
-                entry.properties["posePitch"] = pInfo.posePitch;
-                entry.properties["poseRoll"] = pInfo.poseRoll;
-            }
-        }
+            readPanorama(e, entry);
     }
     else if (e)
     {

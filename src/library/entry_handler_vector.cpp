@@ -25,6 +25,146 @@ namespace ddb {
 
 namespace {
 
+// The name, geometry type and feature count of a layer (the layer index names an unnamed one)
+json layerSummary(OGRLayerH hLayer, int i)
+{
+    auto layerJson = json::object();
+    const char *layerName = OGR_L_GetName(hLayer);
+    layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
+    layerJson["geometryType"] = OGRGeometryTypeToName(OGR_L_GetGeomType(hLayer));
+    layerJson["featureCount"] = static_cast<int64_t>(OGR_L_GetFeatureCount(hLayer, FALSE));
+    return layerJson;
+}
+
+// A local CAD drawing (no CRS) has no footprint: nothing to place on a map. Its layer extents
+// stay in drawing coordinates.
+void describeLocalCad(GDALDatasetH hDS, const cad::CadCrs &crs, const json &cadJson, Entry &entry)
+{
+    auto layers = json::array();
+    for (int i = 0; i < GDALDatasetGetLayerCount(hDS); i++)
+    {
+        OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+        if (hLayer == nullptr) continue;
+        layers.push_back(layerSummary(hLayer, i));
+    }
+    entry.properties["vector"] = {
+        {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
+        {"layers", layers}};
+    entry.properties["vector"].update(cadJson);
+    if (crs.hasExtent)
+        entry.properties["vector"]["localExtent"] = {crs.extent.MinX, crs.extent.MinY,
+                                                     crs.extent.MaxX, crs.extent.MaxY};
+}
+
+// The extent of a layer in WGS84. The layer's own SRS (or the one of its CAD drawing) decides
+// whether the corners need a reprojection; wgs84 is made on first use.
+OGREnvelope layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGREnvelope &env, OGRSpatialReferenceH fallbackSrs,
+                               SrsPtr &wgs84)
+{
+    OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
+    if (hSrs == nullptr) hSrs = fallbackSrs; // CAD layers carry no SRS
+    OGREnvelope envWgs84 = env;
+
+    if (hSrs == nullptr)
+    {
+        LOGD << "Vector parse: layer " << i << " has no SRS, assuming WGS84";
+        return envWgs84;
+    }
+
+    // Check if reprojection is needed (skip if already WGS84).
+    const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
+    const char *authName = OSRGetAuthorityName(hSrs, nullptr);
+    bool isWgs84 = (authName && authCode &&
+                    std::string(authName) == "EPSG" &&
+                    std::string(authCode) == "4326");
+    if (isWgs84) return envWgs84;
+
+    if (!wgs84)
+    {
+        wgs84 = srsFromEpsg(4326);
+        if (!wgs84)
+        {
+            LOGD << "Vector parse: failed to import EPSG:4326";
+        }
+    }
+    if (!wgs84) return envWgs84;
+
+    const auto toWgs84 =
+        CoordsTransformer::tryCreate(*OGRSpatialReference::FromHandle(hSrs), srsOf(wgs84));
+    if (!toWgs84) return envWgs84;
+
+    // Transform all 4 corners (a single rectangle in src
+    // CRS can become a curved quadrilateral in WGS84).
+    double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
+    double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
+    if (toWgs84->tryTransform(4, xs, ys))
+    {
+        envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
+        envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
+        envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
+        envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
+    }
+    else
+    {
+        LOGD << "Vector parse: layer " << i << " transform failed";
+    }
+    return envWgs84;
+}
+
+// The layers of the dataset, and the envelope of them all in WGS84 (when any has an extent)
+struct VectorLayers
+{
+    json layers = json::array();
+    OGREnvelope totalEnv;
+    bool haveEnv = false;
+};
+
+VectorLayers describeLayers(GDALDatasetH hDS, OGRSpatialReferenceH fallbackSrs)
+{
+    VectorLayers out;
+    // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
+    SrsPtr wgs84;
+    // Convex envelope in WGS84 across all layers.
+    out.totalEnv.MinX = out.totalEnv.MinY =  std::numeric_limits<double>::max();
+    out.totalEnv.MaxX = out.totalEnv.MaxY = -std::numeric_limits<double>::max();
+
+    const int layerCount = GDALDatasetGetLayerCount(hDS);
+    for (int i = 0; i < layerCount; i++)
+    {
+        OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+        if (hLayer == nullptr) continue;
+
+        OGREnvelope env;
+        if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE)
+        {
+            LOGD << "Vector parse: layer " << i << " has no extent";
+            continue;
+        }
+
+        const OGREnvelope envWgs84 = layerEnvelopeWgs84(hLayer, i, env, fallbackSrs, wgs84);
+
+        // Per-layer metadata
+        auto layerJson = layerSummary(hLayer, i);
+        layerJson["extent"] = {envWgs84.MinX, envWgs84.MinY, envWgs84.MaxX, envWgs84.MaxY};
+        out.layers.push_back(layerJson);
+
+        // Accumulate global envelope
+        if (!out.haveEnv)
+        {
+            out.totalEnv = envWgs84;
+            out.haveEnv = true;
+        }
+        else
+        {
+            out.totalEnv.MinX = std::min(out.totalEnv.MinX, envWgs84.MinX);
+            out.totalEnv.MinY = std::min(out.totalEnv.MinY, envWgs84.MinY);
+            out.totalEnv.MaxX = std::max(out.totalEnv.MaxX, envWgs84.MaxX);
+            out.totalEnv.MaxY = std::max(out.totalEnv.MaxY, envWgs84.MaxY);
+        }
+    }
+    return out;
+}
+
 void parseVectorMetadata(const fs::path &path, Entry &entry)
 {
     // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
@@ -65,27 +205,7 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
 
             if (!crs.georeferenced)
             {
-                // Local drawing: no footprint (nothing to place on a map); the
-                // layer extents stay in drawing coordinates.
-                auto layers = json::array();
-                for (int i = 0; i < GDALDatasetGetLayerCount(hDS); i++)
-                {
-                    OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
-                    if (hLayer == nullptr) continue;
-                    const char *layerName = OGR_L_GetName(hLayer);
-                    auto layerJson = json::object();
-                    layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
-                    layerJson["geometryType"] = OGRGeometryTypeToName(OGR_L_GetGeomType(hLayer));
-                    layerJson["featureCount"] = static_cast<int64_t>(OGR_L_GetFeatureCount(hLayer, FALSE));
-                    layers.push_back(layerJson);
-                }
-                entry.properties["vector"] = {
-                    {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
-                    {"layers", layers}};
-                entry.properties["vector"].update(cadJson);
-                if (crs.hasExtent)
-                    entry.properties["vector"]["localExtent"] = {crs.extent.MinX, crs.extent.MinY,
-                                                                 crs.extent.MaxX, crs.extent.MaxY};
+                describeLocalCad(hDS, crs, cadJson, entry);
                 return;
             }
 
@@ -97,118 +217,15 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
             }
         }
 
-        // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
-        SrsPtr wgs84;
-        // Convex envelope in WGS84 across all layers.
-        OGREnvelope totalEnv;
-        totalEnv.MinX = totalEnv.MinY =  std::numeric_limits<double>::max();
-        totalEnv.MaxX = totalEnv.MaxY = -std::numeric_limits<double>::max();
-        bool haveEnv = false;
-
-        const int layerCount = GDALDatasetGetLayerCount(hDS);
-        auto layersArr = json::array();
-
-        for (int i = 0; i < layerCount; i++)
-        {
-            OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
-            if (hLayer == nullptr) continue;
-
-            OGREnvelope env;
-            if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE)
-            {
-                LOGD << "Vector parse: layer " << i << " has no extent";
-                continue;
-            }
-
-            OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
-            if (hSrs == nullptr) hSrs = cadSrs.get(); // CAD layers carry no SRS
-            OGREnvelope envWgs84 = env;
-
-            if (hSrs != nullptr)
-            {
-                // Check if reprojection is needed (skip if already WGS84).
-                const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
-                const char *authName = OSRGetAuthorityName(hSrs, nullptr);
-                bool isWgs84 = (authName && authCode &&
-                                std::string(authName) == "EPSG" &&
-                                std::string(authCode) == "4326");
-
-                if (!isWgs84)
-                {
-                    if (!wgs84)
-                    {
-                        wgs84 = srsFromEpsg(4326);
-                        if (!wgs84)
-                        {
-                            LOGD << "Vector parse: failed to import EPSG:4326";
-                        }
-                    }
-
-                    if (wgs84)
-                    {
-                        const auto toWgs84 =
-                            CoordsTransformer::tryCreate(*OGRSpatialReference::FromHandle(hSrs), srsOf(wgs84));
-                        if (toWgs84)
-                        {
-                            // Transform all 4 corners (a single rectangle in src
-                            // CRS can become a curved quadrilateral in WGS84).
-                            double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
-                            double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
-                            if (toWgs84->tryTransform(4, xs, ys))
-                            {
-                                envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
-                                envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
-                                envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
-                                envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
-                            }
-                            else
-                            {
-                                LOGD << "Vector parse: layer " << i << " transform failed";
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                LOGD << "Vector parse: layer " << i << " has no SRS, assuming WGS84";
-            }
-
-            // Per-layer metadata
-            auto layerJson = json::object();
-            const char *layerName = OGR_L_GetName(hLayer);
-            layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
-
-            OGRwkbGeometryType gType = OGR_L_GetGeomType(hLayer);
-            layerJson["geometryType"] = OGRGeometryTypeToName(gType);
-
-            GIntBig fc = OGR_L_GetFeatureCount(hLayer, FALSE);
-            layerJson["featureCount"] = static_cast<int64_t>(fc);
-            layerJson["extent"] = {envWgs84.MinX, envWgs84.MinY, envWgs84.MaxX, envWgs84.MaxY};
-
-            layersArr.push_back(layerJson);
-
-            // Accumulate global envelope
-            if (!haveEnv)
-            {
-                totalEnv = envWgs84;
-                haveEnv = true;
-            }
-            else
-            {
-                totalEnv.MinX = std::min(totalEnv.MinX, envWgs84.MinX);
-                totalEnv.MinY = std::min(totalEnv.MinY, envWgs84.MinY);
-                totalEnv.MaxX = std::max(totalEnv.MaxX, envWgs84.MaxX);
-                totalEnv.MaxY = std::max(totalEnv.MaxY, envWgs84.MaxY);
-            }
-        }
+        const VectorLayers described = describeLayers(hDS, cadSrs.get());
+        const OGREnvelope &totalEnv = described.totalEnv;
 
         entry.properties["vector"] = {
             {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
-            {"layers", layersArr}};
+            {"layers", described.layers}};
         if (!cadJson.is_null()) entry.properties["vector"].update(cadJson);
 
-        if (haveEnv)
+        if (described.haveEnv)
         {
             // Populate polygon_geom as 5-point closed ring in CCW order.
             entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);

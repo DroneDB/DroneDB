@@ -83,7 +83,7 @@ namespace ddb
         }
     }
 
-    Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y)
+    Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, const double *geotransform, double x, double y)
     {
         double dfGeoX = geotransform[0] + geotransform[1] * x + geotransform[2] * y;
         double dfGeoY = geotransform[3] + geotransform[4] * x + geotransform[5] * y;

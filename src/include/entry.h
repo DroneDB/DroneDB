@@ -187,7 +187,7 @@ namespace ddb
      */
     DDB_DLL void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash, FingerprintContext &ctx);
 
-    DDB_DLL Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
+    DDB_DLL Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, const double *geotransform, double x, double y);
     DDB_DLL void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
     DDB_DLL void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry);
 
