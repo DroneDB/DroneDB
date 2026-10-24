@@ -63,8 +63,11 @@ namespace ddb
      *
      * The index is computed and colorized by the formula engine the thumbnails and
      * the tiles use (VegetationEngine, vis_render.h), over the range [-1, 1] with
-     * its "ryg" colormap (red, yellow, green). A pixel with no value (nodata, NaN,
-     * transparent) in any band is transparent in the output.
+     * its ramp (red, yellow, green; not a colormap clients can pick). A pixel is
+     * transparent in the output when a band the index reads has no value (nodata,
+     * NaN), or when the alpha band, if the raster has one, is 0: alpha says "no
+     * data here" for every band. A gap in a band the index does not read (the blue
+     * band for NDVI) does not hide the pixel.
      *
      * @param inputPath   Path to the multi-band raster (must include the bands
      *                    referenced by the index; typical mapping: R=band 1,

@@ -52,7 +52,10 @@ struct RasterBandNodata {
 DDB_DLL RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount);
 
 // Pre-mask pixels: sets all bands to NODATA_SENTINEL where alpha==0
-// or any band matches its GDAL nodata value (NaN-safe comparison)
+// or any band matches its GDAL nodata value (NaN-safe comparison).
+// A null entry of bandPtrs is a band that was not read: it is neither inspected nor
+// written, so the caller decides which bands decide the mask (the alpha band, if it
+// is null, does not mask).
 DDB_DLL void premaskNodata(const std::vector<float*>& bandPtrs,
                            size_t pixelCount,
                            int bandCount,

@@ -120,16 +120,33 @@ namespace ddb
     }
 
     void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
-                              FormulaBuffers &buffers)
+                              FormulaBuffers &buffers, NodataMask mask)
     {
         const size_t pixels = window.outPixels();
         buffers.bands.resize(plan.bandCount);
         buffers.ptrs.resize(plan.bandCount);
 
+        // The bands to read: all of them, or those the formula reads and the alpha band
+        std::vector<bool> read(plan.bandCount, true);
+        if (mask == NodataMask::BandsRead)
+        {
+            std::fill(read.begin(), read.end(), false);
+            for (const int b : VegetationEngine::bandsRead(*plan.formula, plan.filter))
+                if (b < plan.bandCount)
+                    read[b] = true;
+            if (plan.nodata.alphaBandIdx >= 0)
+                read[plan.nodata.alphaBandIdx] = true;
+        }
+
         cancel::GdalProgress progress; // the call is canceled (DQ-15)
         GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
         for (int b = 0; b < plan.bandCount; b++)
         {
+            if (!read[b])
+            {
+                buffers.ptrs[b] = nullptr;
+                continue;
+            }
             buffers.bands[b].resize(pixels);
             buffers.ptrs[b] = buffers.bands[b].data();
             if (GDALRasterIOEx(GDALGetRasterBand(ds, b + 1), GF_Read, window.x, window.y, window.xsize, window.ysize,
@@ -141,7 +158,7 @@ namespace ddb
             }
         }
 
-        // Transparent and nodata pixels stay out of the formula
+        // Transparent and nodata pixels stay out of the formula (of the bands that were read)
         premaskNodata(buffers.ptrs, pixels, plan.bandCount, plan.nodata, NODATA_SENTINEL);
 
         buffers.result.resize(pixels);
@@ -169,12 +186,13 @@ namespace ddb
     }
 
     std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
-                                                  const RasterWindow &window, const std::string &rescale)
+                                                  const RasterWindow &window, const std::string &rescale,
+                                                  NodataMask mask)
     {
         if (plan.colormap == nullptr)
             throw InvalidArgsException("renderPlannedFormulaRgba: the plan has no colormap");
         FormulaBuffers buffers;
-        computeFormulaValues(ds, plan, window, buffers);
+        computeFormulaValues(ds, plan, window, buffers, mask);
 
         // Display range: explicit, the formula's own, or p2-p98 of the rendered values
         std::pair<float, float> range;

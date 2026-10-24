@@ -115,31 +115,42 @@ void VegetationEngine::initFormulas() {
     formulas_.push_back({"KELVIN", "Kelvin Temperature", "pixel + 273.15", "Temperature in Kelvin", 233.15, 423.15, true, "T"});
 }
 
+std::vector<char> VegetationEngine::requiredSymbols(const VegetationFormula &formula) {
+    std::vector<char> symbols;
+    const std::string &required = formula.requiredBands;
+    // Parse requiredBands token-wise so that "Re" is treated as a single RedEdge band.
+    for (std::size_t i = 0; i < required.size(); ) {
+        if (required[i] == 'R' && (i + 1) < required.size() && required[i + 1] == 'e') {
+            symbols.push_back('e');
+            i += 2;
+        } else {
+            symbols.push_back(required[i]);
+            ++i;
+        }
+    }
+    return symbols;
+}
+
+std::vector<int> VegetationEngine::bandsRead(const VegetationFormula &formula, const BandFilter &filter) {
+    std::vector<int> bands;
+    for (const char symbol : requiredSymbols(formula)) {
+        const int band = filter.get(symbol);
+        if (band >= 0) bands.push_back(band);
+    }
+    std::sort(bands.begin(), bands.end());
+    bands.erase(std::unique(bands.begin(), bands.end()), bands.end());
+    return bands;
+}
+
 std::vector<VegetationFormula> VegetationEngine::getFormulasForFilter(const BandFilter &filter) const {
     std::vector<VegetationFormula> result;
     for (const auto &f : formulas_) {
         bool compatible = true;
-        // Parse requiredBands token-wise so that "Re" is treated as a single RedEdge band.
-        for (std::size_t i = 0; i < f.requiredBands.size() && compatible; ) {
-            char c = f.requiredBands[i];
-
-            // Treat "Re" as a single RedEdge requirement.
-            if (c == 'R' && (i + 1) < f.requiredBands.size() && f.requiredBands[i + 1] == 'e') {
-                if (!filter.has('e')) {
-                    compatible = false;
-                }
-                i += 2;
-                continue;
+        for (const char symbol : requiredSymbols(f)) {
+            if (!filter.has(symbol)) {
+                compatible = false;
+                break;
             }
-
-            if (c == 'R' && !filter.has('R')) { compatible = false; }
-            else if (c == 'G' && !filter.has('G')) { compatible = false; }
-            else if (c == 'B' && !filter.has('B')) { compatible = false; }
-            else if (c == 'N' && !filter.has('N')) { compatible = false; }
-            else if (c == 'e' && !filter.has('e')) { compatible = false; }
-            else if (c == 'T' && !filter.has('T')) { compatible = false; }
-
-            ++i;
         }
         if (compatible) result.push_back(f);
     }
@@ -357,9 +368,9 @@ void VegetationEngine::applyColormap(const float *values,
     }
 }
 
-const Colormap* VegetationEngine::getColormap(const std::string &id) const {
+const Colormap* VegetationEngine::getColormap(const std::string &id, bool includeUnlisted) const {
     for (const auto &c : colormaps_) {
-        if (c.id == id) return &c;
+        if (c.id == id && (c.listed || includeUnlisted)) return &c;
     }
     return nullptr;
 }
@@ -367,6 +378,7 @@ const Colormap* VegetationEngine::getColormap(const std::string &id) const {
 json VegetationEngine::getColormapsJson() const {
     json arr = json::array();
     for (const auto &c : colormaps_) {
+        if (!c.listed) continue;
         json cj;
         cj["id"] = c.id;
         cj["name"] = c.name;
@@ -680,11 +692,13 @@ void VegetationEngine::initColormaps() {
     }
 
     // Pure red-yellow-green: the ramp of the vegetation-index map layer (renderRasterIndex),
-    // kept as it looked before that layer moved onto this engine
+    // kept as it looked before that layer moved onto this engine. Not a colormap clients pick:
+    // it is not listed (getColormapsJson) and a request cannot name it
     {
         Colormap c;
         c.id = "ryg";
         c.name = "Red-Yellow-Green (pure)";
+        c.listed = false;
         interpolateColormap(c.entries, {
             {0.0f, 255, 0, 0},
             {0.5f, 255, 255, 0},

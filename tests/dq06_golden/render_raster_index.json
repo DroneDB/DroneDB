@@ -31,16 +31,16 @@
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "0138b13dd5e7cfd7",
-  "transparent": 2432,
+  "pixels": "ca7740f1e989c9de",
+  "transparent": 2368,
   "width": 80
  },
  "NDRE_image/tiff": {
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "0138b13dd5e7cfd7",
-  "transparent": 2432,
+  "pixels": "ca7740f1e989c9de",
+  "transparent": 2368,
   "width": 80
  },
  "NDVI_image/jpeg": {
@@ -53,16 +53,16 @@
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "6932980df9e17993",
-  "transparent": 2432,
+  "pixels": "b03928dc67be6ff9",
+  "transparent": 2368,
   "width": 80
  },
  "NDVI_image/tiff": {
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "6932980df9e17993",
-  "transparent": 2432,
+  "pixels": "b03928dc67be6ff9",
+  "transparent": 2368,
   "width": 80
  },
  "NDWI_image/jpeg": {
@@ -75,16 +75,16 @@
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "2b17caf061514b29",
-  "transparent": 2432,
+  "pixels": "d207b1d31650b796",
+  "transparent": 2368,
   "width": 80
  },
  "NDWI_image/tiff": {
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "2b17caf061514b29",
-  "transparent": 2432,
+  "pixels": "d207b1d31650b796",
+  "transparent": 2368,
   "width": 80
  },
  "SAVI_image/jpeg": {
@@ -97,16 +97,16 @@
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "5260744fcd7995d3",
-  "transparent": 2432,
+  "pixels": "213ecf60d857b711",
+  "transparent": 2368,
   "width": 80
  },
  "SAVI_image/tiff": {
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "5260744fcd7995d3",
-  "transparent": 2432,
+  "pixels": "213ecf60d857b711",
+  "transparent": 2368,
   "width": 80
  },
  "fewBands": {
@@ -122,16 +122,16 @@
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "6932980df9e17993",
-  "transparent": 2432,
+  "pixels": "b03928dc67be6ff9",
+  "transparent": 2368,
   "width": 80
  },
  "ndvi_image/tiff": {
   "alpha": true,
   "bands": 4,
   "height": 80,
-  "pixels": "6932980df9e17993",
-  "transparent": 2432,
+  "pixels": "b03928dc67be6ff9",
+  "transparent": 2368,
   "width": 80
  },
  "unknown": {

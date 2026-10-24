@@ -49,6 +49,9 @@ struct Colormap {
     std::string id;
     std::string name;
     ColormapEntry entries[256];
+    // false for a ramp that belongs to one of the engine's own layers (the vegetation-index
+    // map layer): it is not in the list clients choose from and a request cannot name it
+    bool listed = true;
 };
 
 class DDB_DLL VegetationEngine {
@@ -91,11 +94,21 @@ public:
                        float vmin, float vmax,
                        float nodata) const;
 
-    // Get available colormaps
-    const std::vector<Colormap>& getColormaps() const { return colormaps_; }
-    const Colormap* getColormap(const std::string &id) const;
+    // The symbols (R, G, B, N, e for RedEdge, T) a formula reads, from its requiredBands
+    static std::vector<char> requiredSymbols(const VegetationFormula &formula);
 
-    // Get colormaps as JSON (summary with sample colors)
+    // The 0-based bands of the raster a formula reads with filter, ascending (the bands that
+    // are not mapped by the filter are left out)
+    static std::vector<int> bandsRead(const VegetationFormula &formula, const BandFilter &filter);
+
+    // The whole table of colormaps, the unlisted ones included
+    const std::vector<Colormap>& getColormaps() const { return colormaps_; }
+
+    // The colormap of a public id (null for an unknown id, and for an unlisted colormap unless
+    // includeUnlisted: the engine's own layers resolve their ramp with it)
+    const Colormap* getColormap(const std::string &id, bool includeUnlisted = false) const;
+
+    // Get the listed colormaps as JSON (summary with sample colors)
     json getColormapsJson() const;
 
     // Get formulas as JSON for a given filter

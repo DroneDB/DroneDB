@@ -37,13 +37,13 @@ void premaskNodata(const std::vector<float*>& bandPtrs,
     for (size_t i = 0; i < pixelCount; i++) {
         bool masked = false;
 
-        if (info.alphaBandIdx >= 0 && bandPtrs[info.alphaBandIdx][i] == 0.0f) {
+        if (info.alphaBandIdx >= 0 && bandPtrs[info.alphaBandIdx] && bandPtrs[info.alphaBandIdx][i] == 0.0f) {
             masked = true;
         }
 
         if (!masked) {
             for (int b = 0; b < bandCount; b++) {
-                if (b == info.alphaBandIdx) continue;
+                if (b == info.alphaBandIdx || !bandPtrs[b]) continue;
                 if (isNodata(bandPtrs[b][i], info.bands[b])) {
                     masked = true;
                     break;
@@ -53,7 +53,7 @@ void premaskNodata(const std::vector<float*>& bandPtrs,
 
         if (masked) {
             for (int b = 0; b < bandCount; b++) {
-                bandPtrs[b][i] = outputNodata;
+                if (bandPtrs[b]) bandPtrs[b][i] = outputNodata;
             }
         }
     }

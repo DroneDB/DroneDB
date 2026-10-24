@@ -67,6 +67,21 @@ namespace ddb
     DDB_DLL FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
                                     const std::string &colormapId, bool withColormap);
 
+    /// Which bands decide that a pixel has no value, when a formula is computed
+    enum class NodataMask
+    {
+        /// A pixel with no data (nodata, NaN) in ANY band of the raster, or transparent in the alpha
+        /// band, is left out. The rule of the thumbnails, the tiles and the formula renders: the
+        /// same pixels are blank whichever formula is shown.
+        AnyBand,
+        /// Only the bands the formula reads (and the alpha band, which says "no data here" for every
+        /// band) decide. A pixel whose only gap is in a band the formula does not read is computed,
+        /// and the bands the formula does not read are not even read. The rule of the
+        /// vegetation-index map layer. Not for the thermal passthroughs (CELSIUS, KELVIN), which read
+        /// band 0 whatever the band filter says.
+        BandsRead
+    };
+
     /// The buffers a formula computation reuses from window to window
     struct FormulaBuffers
     {
@@ -77,9 +92,10 @@ namespace ddb
 
     /// Reads window of every band as float, masks the transparent and nodata pixels and applies
     /// the formula: buffers.result holds window.outPixels() values, NODATA_SENTINEL where a pixel
-    /// has none. The read stops with the call that is canceled (DQ-15).
+    /// has none, the pixels that mask being those of `mask`. With BandsRead the bands that are not
+    /// read have a null entry in buffers.ptrs. The read stops with the call that is canceled (DQ-15).
     DDB_DLL void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
-                                      FormulaBuffers &buffers);
+                                      FormulaBuffers &buffers, NodataMask mask = NodataMask::AnyBand);
 
     /// A computed value that is a number to render: neither the nodata sentinel nor NaN
     inline bool isFormulaValue(float v) { return v != NODATA_SENTINEL && !std::isnan(v); }
@@ -95,9 +111,11 @@ namespace ddb
 
     /// Renders the planned formula (the plan has a colormap) over window of ds: RGBA interleaved,
     /// outPixels() * 4 bytes, nodata transparent. The display range is the explicit "min,max"
-    /// rescale, else the range of the formula, else the p2-p98 of the computed values.
+    /// rescale, else the range of the formula, else the p2-p98 of the computed values. `mask` is
+    /// the nodata rule of computeFormulaValues.
     DDB_DLL std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
-                                                          const RasterWindow &window, const std::string &rescale);
+                                                          const RasterWindow &window, const std::string &rescale,
+                                                          NodataMask mask = NodataMask::AnyBand);
 
     /// Renders visParams.formula (a vegetation index) over window of ds with its
     /// colormap: RGBA interleaved, outPixels() * 4 bytes, nodata transparent.

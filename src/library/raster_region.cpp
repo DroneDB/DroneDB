@@ -396,7 +396,9 @@ namespace ddb
     // The arithmetic, the nodata handling and the colormap lookup are those of the shared
     // formula engine (VegetationEngine, vis_render.h): the thumbnails, the tiles and this layer
     // render a vegetation index through one implementation. What is the layer's own is the
-    // choice of the formulas, the fixed band mapping and the colormap.
+    // choice of the formulas, the fixed band mapping, the colormap and the nodata rule: a pixel
+    // is left out when a band its index reads has no value (NodataMask::BandsRead), as the layer
+    // has always done.
     // ---------------------------------------------------------------------
     namespace
     {
@@ -408,7 +410,8 @@ namespace ddb
         constexpr const char *kIndexBandMapping = "RGBReN";
         constexpr int kIndexBands = 5;
 
-        // The ramp the layer has always used (red, yellow, green over [-1, 1]), in the engine's table
+        // The ramp the layer has always used (red, yellow, green over [-1, 1]), in the engine's
+        // table. It is not a colormap clients pick: the engine does not list it.
         constexpr const char *kIndexColormap = "ryg";
 
         const char *resolveIndexFormula(const std::string &n)
@@ -485,11 +488,11 @@ namespace ddb
         // instead of being colorized as if they were valid samples) and colorizes the values
         // over the range of the formula.
         const size_t npx = static_cast<size_t>(width) * height;
-        const FormulaPlan plan = planFormula(hWarp, formulaId,
-                                             VegetationEngine::parseFilter(kIndexBandMapping, kIndexBands),
-                                             kIndexColormap, true);
+        FormulaPlan plan = planFormula(hWarp, formulaId,
+                                       VegetationEngine::parseFilter(kIndexBandMapping, kIndexBands), "", false);
+        plan.colormap = VegetationEngine::instance().getColormap(kIndexColormap, true);
         const RasterWindow window{0, 0, width, height, width, height};
-        std::vector<uint8_t> rgba = renderPlannedFormulaRgba(hWarp, plan, window, "");
+        std::vector<uint8_t> rgba = renderPlannedFormulaRgba(hWarp, plan, window, "", NodataMask::BandsRead);
         warp.reset();
         vsiTif.reset();
 
