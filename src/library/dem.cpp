@@ -4,6 +4,7 @@
 #include "dem.h"
 
 #include "exceptions.h"
+#include "mathutil.h"
 
 namespace ddb
 {
@@ -54,6 +55,27 @@ namespace ddb
                                           : "Cannot create raster -> WGS84 coordinate transformation");
             return t;
         }
+    }
+
+    std::vector<float> DemContext::readElevations(int x, int y, int w, int h, int bufferW, int bufferH) const
+    {
+        std::vector<float> samples(static_cast<size_t>(bufferW) * bufferH);
+        if (GDALRasterIO(band, GF_Read, x, y, w, h, samples.data(), bufferW, bufferH, GDT_Float32, 0, 0) != CE_None)
+            throw AppException("Cannot read raster data");
+        return samples;
+    }
+
+    PixelSize DemContext::pixelSizeMeters(double latitude) const
+    {
+        PixelSize size{std::fabs(gt[1]), std::fabs(gt[5])};
+        if (isGeographic || !srs)
+        {
+            const double mPerDeg = 111320.0; // good-enough WGS84 approximation
+            size.x = std::fabs(gt[1]) * mPerDeg * std::cos(latitude * ddb::kDegToRad);
+            size.y = std::fabs(gt[5]) * mPerDeg;
+            if (size.x < 1e-6) size.x = mPerDeg * std::fabs(gt[1]);
+        }
+        return size;
     }
 
     std::unique_ptr<CoordsTransformer> DemContext::wgs84ToDem() const
