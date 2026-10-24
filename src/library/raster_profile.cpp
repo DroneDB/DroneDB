@@ -212,6 +212,75 @@ public:
     }
 };
 
+// The valid values of the samples of a profile
+struct ProfileStats {
+    double min = std::numeric_limits<double>::max();
+    double max = std::numeric_limits<double>::lowest();
+    double sum = 0.0;
+    int count = 0;
+
+    void add(double value) {
+        min = std::min(min, value);
+        max = std::max(max, value);
+        sum += value;
+        count++;
+    }
+};
+
+// The `samples` equispaced points of the path along the line, each with its distance, its lon/lat and
+// its value (null where the raster has none); the finite values go into stats
+json sampleProfile(const OGRLineString &line, const ProfilePath &path, const ProfileSampler &sampler, int samples,
+                   ProfileStats &stats) {
+    const int nVertices = line.getNumPoints();
+    const std::vector<double> &mapX = path.mapX;
+    const std::vector<double> &mapY = path.mapY;
+    const std::vector<double> &segLenMeters = path.segLenMeters;
+
+    json samplesArr = json::array();
+    for (int s = 0; s < samples; s++) {
+        const double t = (samples == 1) ? 0.0
+                                        : static_cast<double>(s) / (samples - 1);
+        const double targetDist = t * path.totalLengthMeters;
+
+        // Locate containing segment.
+        int segIdx = nVertices - 2;
+        double acc = 0.0;
+        for (int i = 0; i < nVertices - 1; i++) {
+            if (acc + segLenMeters[i] >= targetDist) {
+                segIdx = i;
+                break;
+            }
+            acc += segLenMeters[i];
+        }
+
+        double frac = (segLenMeters[segIdx] > 0)
+                          ? (targetDist - acc) / segLenMeters[segIdx]
+                          : 0.0;
+        frac = std::clamp(frac, 0.0, 1.0);
+
+        // Interpolate position in map coords and lon/lat for the sample.
+        const double smx = mapX[segIdx] + frac * (mapX[segIdx + 1] - mapX[segIdx]);
+        const double smy = mapY[segIdx] + frac * (mapY[segIdx + 1] - mapY[segIdx]);
+        const double lon = line.getX(segIdx) +
+                           frac * (line.getX(segIdx + 1) - line.getX(segIdx));
+        const double lat = line.getY(segIdx) +
+                           frac * (line.getY(segIdx + 1) - line.getY(segIdx));
+
+        json sampleObj;
+        sampleObj["distance"] = targetDist;
+        sampleObj["lon"] = lon;
+        sampleObj["lat"] = lat;
+
+        const std::optional<double> value = sampler.valueAt(smx, smy);
+        sampleObj["value"] = value ? json(*value) : json(nullptr);
+        samplesArr.push_back(sampleObj);
+
+        if (value && std::isfinite(*value))
+            stats.add(*value);
+    }
+    return samplesArr;
+}
+
 } // anonymous namespace
 
 std::string getRasterProfileJson(const std::string &filePath,
@@ -224,7 +293,6 @@ std::string getRasterProfileJson(const std::string &filePath,
     // --- Parse GeoJSON LineString (expected WGS84 lon/lat) ---
     const OGRGeometryUniquePtr geom = parseProfileLine(geoJsonLineString);
     const OGRLineString *line = geom->toLineString();
-    const int nVertices = line->getNumPoints();
 
     // --- Open raster and inspect metadata ---
     const DemContext dem = openDem(filePath);
@@ -247,77 +315,18 @@ std::string getRasterProfileJson(const std::string &filePath,
     if (unit.empty() && isThermal) unit = "\xC2\xB0\x43"; // UTF-8 "°C"
 
     const ProfilePath path = buildPath(dem, *line);
-    const std::vector<double> &mapX = path.mapX;
-    const std::vector<double> &mapY = path.mapY;
-    const std::vector<double> &segLenMeters = path.segLenMeters;
-    const double totalLengthMeters = path.totalLengthMeters;
 
     // --- Generate equispaced samples ---
-    json samplesArr = json::array();
-    double vMin = std::numeric_limits<double>::max();
-    double vMax = std::numeric_limits<double>::lowest();
-    double vSum = 0.0;
-    int vCount = 0;
-
-    for (int s = 0; s < samples; s++) {
-        const double t = (samples == 1) ? 0.0
-                                        : static_cast<double>(s) / (samples - 1);
-        const double targetDist = t * totalLengthMeters;
-
-        // Locate containing segment.
-        int segIdx = nVertices - 2;
-        double acc = 0.0;
-        for (int i = 0; i < nVertices - 1; i++) {
-            if (acc + segLenMeters[i] >= targetDist) {
-                segIdx = i;
-                break;
-            }
-            acc += segLenMeters[i];
-        }
-
-        double frac = (segLenMeters[segIdx] > 0)
-                          ? (targetDist - acc) / segLenMeters[segIdx]
-                          : 0.0;
-        frac = std::clamp(frac, 0.0, 1.0);
-
-        // Interpolate position in map coords and lon/lat for the sample.
-        const double smx = mapX[segIdx] + frac * (mapX[segIdx + 1] - mapX[segIdx]);
-        const double smy = mapY[segIdx] + frac * (mapY[segIdx + 1] - mapY[segIdx]);
-        const double lon = line->getX(segIdx) +
-                           frac * (line->getX(segIdx + 1) - line->getX(segIdx));
-        const double lat = line->getY(segIdx) +
-                           frac * (line->getY(segIdx + 1) - line->getY(segIdx));
-
-        json sampleObj;
-        sampleObj["distance"] = targetDist;
-        sampleObj["lon"] = lon;
-        sampleObj["lat"] = lat;
-
-        const std::optional<double> value = sampler.valueAt(smx, smy);
-        if (!value) {
-            sampleObj["value"] = nullptr;
-            samplesArr.push_back(sampleObj);
-            continue;
-        }
-
-        sampleObj["value"] = *value;
-        samplesArr.push_back(sampleObj);
-
-        if (std::isfinite(*value)) {
-            vMin = std::min(vMin, *value);
-            vMax = std::max(vMax, *value);
-            vSum += *value;
-            vCount++;
-        }
-    }
+    ProfileStats stats;
+    const json samplesArr = sampleProfile(*line, path, sampler, samples, stats);
 
     json result;
     result["samples"] = samplesArr;
-    result["totalLength"] = totalLengthMeters;
-    if (vCount > 0) {
-        result["min"] = vMin;
-        result["max"] = vMax;
-        result["mean"] = vSum / vCount;
+    result["totalLength"] = path.totalLengthMeters;
+    if (stats.count > 0) {
+        result["min"] = stats.min;
+        result["max"] = stats.max;
+        result["mean"] = stats.sum / stats.count;
     } else {
         result["min"] = nullptr;
         result["max"] = nullptr;
@@ -325,7 +334,7 @@ std::string getRasterProfileJson(const std::string &filePath,
     }
     result["unit"] = unit;
     result["sampleCount"] = samples;
-    result["validCount"] = vCount;
+    result["validCount"] = stats.count;
     result["isThermal"] = isThermal;
     return result.dump();
 }

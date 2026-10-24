@@ -512,6 +512,51 @@ namespace ddb
             return gpkg;
         }
 
+        // The dynamic MAXZOOM of the MVT: the zoom the feature count over the area of the source calls
+        // for (logged)
+        int logMvtMaxZoom(const VectorStats &stats)
+        {
+            double areaDeg2 = 0.0;
+            if (stats.haveEnv)
+            {
+                areaDeg2 = std::max(0.0, stats.maxX - stats.minX) *
+                           std::max(0.0, stats.maxY - stats.minY);
+            }
+            const int maxZoom = computeMvtMaxZoom(stats.featureCount, areaDeg2);
+            LOGD << "MVT MAXZOOM=" << maxZoom
+                 << " (areaDeg2=" << areaDeg2
+                 << ", features=" << stats.featureCount << ")";
+            return maxZoom;
+        }
+
+        // The ogr2ogr arguments of the MVT directory: Web Mercator, the zoom range and tile limits,
+        // and the source SRS when no layer has one
+        std::vector<std::string> mvtTranslateArgs(const std::string &maxZoomArg, bool needsSrs,
+                                                  const std::string &sourceSrs)
+        {
+            // NOTE: -dsco takes a single KEY=VALUE token.
+            // Valid MVT dsco keys: FORMAT, MINZOOM, MAXZOOM, EXTENT, BUFFER,
+            // COMPRESS, MAX_SIZE, MAX_FEATURES, TILE_EXTENSION, CONF, etc.
+            std::vector<std::string> argStore = {
+                "-f",      "MVT",
+                "-t_srs",  "EPSG:3857",
+                "-dsco",   "FORMAT=DIRECTORY",
+                "-dsco",   "MINZOOM=0",
+                "-dsco",   maxZoomArg,
+                "-dsco",   "EXTENT=4096",
+                "-dsco",   "BUFFER=80",
+                "-dsco",   "MAX_SIZE=500000",
+                "-dsco",   "MAX_FEATURES=200000",
+                "-dsco",   "COMPRESS=YES",
+                "-mapFieldType", "DateTime=String",
+                "-skipfailures"};
+            if (needsSrs) {
+                argStore.push_back("-s_srs");
+                argStore.push_back(sourceSrs);
+            }
+            return argStore;
+        }
+
         // Convert input to MVT directory, reprojected to EPSG:3857.
         // Returns the dynamic MAXZOOM used.
         int convertToMvt(GDALDatasetH hSrcDS, const std::string &srcPath,
@@ -523,17 +568,8 @@ namespace ddb
             if (GDALGetDriverByName("MVT") == nullptr)
                 throw AppException("MVT driver not available in this GDAL build");
 
-            double areaDeg2 = 0.0;
-            if (stats.haveEnv)
-            {
-                areaDeg2 = std::max(0.0, stats.maxX - stats.minX) *
-                           std::max(0.0, stats.maxY - stats.minY);
-            }
-            const int maxZoom = computeMvtMaxZoom(stats.featureCount, areaDeg2);
+            const int maxZoom = logMvtMaxZoom(stats);
             const std::string maxZoomArg = "MAXZOOM=" + std::to_string(maxZoom);
-            LOGD << "MVT MAXZOOM=" << maxZoom
-                 << " (areaDeg2=" << areaDeg2
-                 << ", features=" << stats.featureCount << ")";
 
             // If the MVT writer would reject a layer name or a geometry, copy
             // the layers into an in-memory GPKG with sanitized, unique names
@@ -563,26 +599,7 @@ namespace ddb
 
             const bool needsSrs = allLayersMissSrs(hTranslateSrc);
 
-            // NOTE: -dsco takes a single KEY=VALUE token.
-            // Valid MVT dsco keys: FORMAT, MINZOOM, MAXZOOM, EXTENT, BUFFER,
-            // COMPRESS, MAX_SIZE, MAX_FEATURES, TILE_EXTENSION, CONF, etc.
-            std::vector<std::string> argStore = {
-                "-f",      "MVT",
-                "-t_srs",  "EPSG:3857",
-                "-dsco",   "FORMAT=DIRECTORY",
-                "-dsco",   "MINZOOM=0",
-                "-dsco",   maxZoomArg,
-                "-dsco",   "EXTENT=4096",
-                "-dsco",   "BUFFER=80",
-                "-dsco",   "MAX_SIZE=500000",
-                "-dsco",   "MAX_FEATURES=200000",
-                "-dsco",   "COMPRESS=YES",
-                "-mapFieldType", "DateTime=String",
-                "-skipfailures"};
-            if (needsSrs) {
-                argStore.push_back("-s_srs");
-                argStore.push_back(sourceSrs);
-            }
+            const std::vector<std::string> argStore = mvtTranslateArgs(maxZoomArg, needsSrs, sourceSrs);
             CPLStringList argv = cslFromStrings(argStore);
             GdalOptionsPtr<GDALVectorTranslateOptions> opts(
                 GDALVectorTranslateOptionsNew(argv.List(), nullptr));

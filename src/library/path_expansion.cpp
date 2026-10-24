@@ -212,6 +212,42 @@ namespace ddb
         {
             return p.find_first_of("*?[") != std::string::npos;
         }
+
+        // The paths a glob pattern matches. `**` triggers recursive globbing; everything else is
+        // single-level. A pattern the glob library rejects matches nothing (logged).
+        std::vector<fs::path> globMatches(const std::string &pattern)
+        {
+            const bool recursive = pattern.find("**") != std::string::npos;
+            std::vector<fs::path> matches;
+            try
+            {
+                matches = recursive ? glob::rglob(pattern)
+                                    : glob::glob(pattern);
+
+                // p-ranav's `**` requires at least one directory segment,
+                // so `**/<sub>` would skip files at the cwd. To match the
+                // common shell expectation that `**` matches "zero or more
+                // directories", also run the non-recursive variant with
+                // the leading `**/` stripped and merge the results.
+                if (recursive && pattern.starts_with("**/"))
+                {
+                    const std::string topLevel = pattern.substr(3);
+                    if (!topLevel.empty())
+                    {
+                        auto extra = glob::glob(topLevel);
+                        matches.insert(matches.end(),
+                                       std::make_move_iterator(extra.begin()),
+                                       std::make_move_iterator(extra.end()));
+                    }
+                }
+            }
+            catch (const std::exception &e)
+            {
+                LOGD << "Glob error for pattern '" << pattern
+                     << "': " << e.what();
+            }
+            return matches;
+        }
     } // namespace
 
     std::vector<std::string> expandGlobPatterns(
@@ -236,37 +272,7 @@ namespace ddb
 
             if (isGlobPattern(pattern))
             {
-                // `**` triggers recursive globbing; everything else is single-level.
-                const bool recursive =
-                    pattern.find("**") != std::string::npos;
-                std::vector<fs::path> matches;
-                try
-                {
-                    matches = recursive ? glob::rglob(pattern)
-                                        : glob::glob(pattern);
-
-                    // p-ranav's `**` requires at least one directory segment,
-                    // so `**/<sub>` would skip files at the cwd. To match the
-                    // common shell expectation that `**` matches "zero or more
-                    // directories", also run the non-recursive variant with
-                    // the leading `**/` stripped and merge the results.
-                    if (recursive && pattern.starts_with("**/"))
-                    {
-                        const std::string topLevel = pattern.substr(3);
-                        if (!topLevel.empty())
-                        {
-                            auto extra = glob::glob(topLevel);
-                            matches.insert(matches.end(),
-                                           std::make_move_iterator(extra.begin()),
-                                           std::make_move_iterator(extra.end()));
-                        }
-                    }
-                }
-                catch (const std::exception &e)
-                {
-                    LOGD << "Glob error for pattern '" << pattern
-                         << "': " << e.what();
-                }
+                const std::vector<fs::path> matches = globMatches(pattern);
 
                 size_t patternMatches = 0;
                 for (auto &m : matches)

@@ -214,6 +214,27 @@ namespace ddb
 
         CadSource::~CadSource() = default;
 
+        // A group of the GEODATA object: its code says which field of info (or of the definition: the
+        // type of the first group 70, the XML of the groups 3 and 301) the value is
+        void readGeoDataValue(DxfInfo &info, int code, const std::string &value, int &geoType, std::string &geoXml)
+        {
+            const auto number = [&value]() { return std::atof(str::trimCopy(value).c_str()); };
+            switch (code)
+            {
+            case 70: if (geoType < 0) geoType = std::atoi(str::trimCopy(value).c_str()); break;
+            case 90: info.geoDataVersion = std::atoi(str::trimCopy(value).c_str()); break;
+            case 3: case 301: geoXml += decodeCaret(value); break;
+            case 10: info.geoDesignX = number(); break;
+            case 20: info.geoDesignY = number(); break;
+            case 11: info.geoReferenceX = number(); break;
+            case 21: info.geoReferenceY = number(); break;
+            case 12: info.geoNorthX = number(); break;
+            case 22: info.geoNorthY = number(); break;
+            case 40: info.geoUnitScale = number(); break;
+            default: break;
+            }
+        }
+
         DxfInfo readDxfInfo(const fs::path &dxf)
         {
             DxfInfo info;
@@ -291,23 +312,7 @@ namespace ddb
                     }
                 }
                 else if (inGeoData)
-                {
-                    const auto number = [&value]() { return std::atof(str::trimCopy(value).c_str()); };
-                    switch (code)
-                    {
-                    case 70: if (geoType < 0) geoType = std::atoi(str::trimCopy(value).c_str()); break;
-                    case 90: info.geoDataVersion = std::atoi(str::trimCopy(value).c_str()); break;
-                    case 3: case 301: geoXml += decodeCaret(value); break;
-                    case 10: info.geoDesignX = number(); break;
-                    case 20: info.geoDesignY = number(); break;
-                    case 11: info.geoReferenceX = number(); break;
-                    case 21: info.geoReferenceY = number(); break;
-                    case 12: info.geoNorthX = number(); break;
-                    case 22: info.geoNorthY = number(); break;
-                    case 40: info.geoUnitScale = number(); break;
-                    default: break;
-                    }
-                }
+                    readGeoDataValue(info, code, value, geoType, geoXml);
             }
 
             if (geoType >= 0 || !geoXml.empty())

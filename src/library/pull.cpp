@@ -13,6 +13,39 @@
 
 namespace ddb {
 
+namespace {
+
+// Downloads into `folder` the files the delta adds that the dataset does not have yet: not the
+// directories, and not the files whose content is in the index or in the files that go away
+void downloadMissingFiles(RegistryClient& client, const TagComponents& tagInfo, const Delta& delta,
+                          Database* db, const fs::path& folder, std::ostream& out) {
+    auto localMap = computeDeltaLocals(delta, db, io::toUtf8(folder));
+
+    const auto filesToDownload =
+        boolinq::from(delta.adds)
+            .where([&localMap](const AddAction& add) {
+                return !add.isDirectory() && localMap.find(add.hash) == localMap.end();
+            })
+            .select([](const AddAction& add) { return add.path; })
+            .toStdVector();
+
+    // Download all the missing files
+    client.downloadFiles(tagInfo.organization, tagInfo.dataset, filesToDownload, io::toUtf8(folder), out);
+}
+
+void reportConflicts(std::vector<Conflict>& conflicts, std::ostream& out) {
+    out << "Found conflicts, but don't worry! Make a copy of the conflicting entries and use "
+           "--keep-theirs or --keep-ours to finish the pull:"
+        << std::endl
+        << std::endl;
+
+    for (auto& c : conflicts) {
+        out << "C\t" << c.path << " (" << c.description() << ")" << std::endl;
+    }
+}
+
+}  // namespace
+
 void pullDataset(RegistryClient& client, const std::string& path, const MergeStrategy mergeStrategy, std::ostream& out) {
     auto db = open(path, true);
     TagManager tagManager(db.get());
@@ -58,26 +91,8 @@ void pullDataset(RegistryClient& client, const std::string& path, const MergeStr
     const auto tempNewFolder = tempDdbFolder / std::to_string(time(nullptr));
 
     // Let's download only if we have anything to download
-    if (!delta.adds.empty()) {
-
-        auto localMap = computeDeltaLocals(delta, db.get(), io::toUtf8(tempNewFolder));
-
-        const auto filesToDownload =
-            boolinq::from(delta.adds)
-                .where([&localMap](const AddAction& add) {
-                    return !add.isDirectory() && localMap.find(add.hash) == localMap.end();
-                })
-                .select([](const AddAction& add) { return add.path; })
-                .toStdVector();
-
-        // Download all the missing files
-        client.downloadFiles(tagInfo.organization,
-                            tagInfo.dataset,
-                            filesToDownload,
-                            io::toUtf8(tempNewFolder),
-                            out);
-
-    }
+    if (!delta.adds.empty())
+        downloadMissingFiles(client, tagInfo, delta, db.get(), tempNewFolder, out);
 
     // TODO: speedup: we should be able to check for conflicts
     // before we download the files
@@ -94,14 +109,7 @@ void pullDataset(RegistryClient& client, const std::string& path, const MergeStr
         // No errors? Update stamp
         sm.setLastStamp(tagInfo.registryUrl, remoteStamp);
     } else {
-        out << "Found conflicts, but don't worry! Make a copy of the conflicting entries and use "
-               "--keep-theirs or --keep-ours to finish the pull:"
-            << std::endl
-            << std::endl;
-
-        for (auto& c : conflicts) {
-            out << "C\t" << c.path << " (" << c.description() << ")" << std::endl;
-        }
+        reportConflicts(conflicts, out);
     }
 
     db->close();
