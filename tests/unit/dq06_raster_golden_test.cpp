@@ -112,6 +112,19 @@ namespace
         return planes;
     }
 
+    // The declared nodata value of every band, if it has one
+    std::vector<std::optional<double>> nodataOf(GDALDataset &ds)
+    {
+        std::vector<std::optional<double>> nodata;
+        for (int b = 1; b <= ds.GetRasterCount(); b++)
+        {
+            int has = 0;
+            const double value = ds.GetRasterBand(b)->GetNoDataValue(&has);
+            nodata.push_back(has ? std::optional<double>(value) : std::nullopt);
+        }
+        return nodata;
+    }
+
     bool hasFloatBand(GDALDataset &ds)
     {
         for (int b = 1; b <= ds.GetRasterCount(); b++)
@@ -173,7 +186,7 @@ namespace
             if (hasFloatBand(*ds))
             {
                 out["pixelsFile"] = name;
-                dq06::expectPixelsNear(name, ds->GetRasterXSize(), ds->GetRasterYSize(), pixelPlanes(*ds));
+                dq06::expectPixelsNear(name, ds->GetRasterXSize(), ds->GetRasterYSize(), pixelPlanes(*ds), nodataOf(*ds));
             }
             else
                 out["pixels"] = hash;

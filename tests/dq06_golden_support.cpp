@@ -9,6 +9,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <vector>
 
@@ -211,6 +212,16 @@ namespace dq06
             return f;
         }
 
+        // The nodata value of a band as the float32 the golden holds; a NaN nodata is any NaN
+        bool isNodata(double value, const std::optional<double> &nodata)
+        {
+            if (!nodata)
+                return false;
+            if (std::isnan(*nodata))
+                return std::isnan(value);
+            return value == static_cast<double>(static_cast<float>(*nodata));
+        }
+
         // The float32 values, the first byte of every value first, then the second ... (the high
         // bytes of smooth data repeat, so it deflates well), after a header of band count, width
         // and height
@@ -265,8 +276,11 @@ namespace dq06
         }
     }
 
-    void expectPixelsNear(const std::string &name, int width, int height, const std::vector<std::vector<double>> &bands)
+    void expectPixelsNear(const std::string &name, int width, int height, const std::vector<std::vector<double>> &bands,
+                          const std::vector<std::optional<double>> &nodata)
     {
+        ASSERT_EQ(nodata.size(), bands.size()) << name << ": a nodata entry per band";
+
         std::vector<std::vector<float>> actual;
         for (const auto &band : bands)
             actual.emplace_back(band.begin(), band.end());
@@ -292,13 +306,18 @@ namespace dq06
 
         size_t different = 0;
         std::ostringstream first;
+        first.precision(9);
         for (size_t b = 0; b < actual.size(); b++)
         {
             for (size_t i = 0; i < actual[b].size(); i++)
             {
                 const double a = actual[b][i], g = golden[b][i];
-                const bool same = (std::isnan(a) && std::isnan(g)) ||
-                                  (a == g || std::fabs(a - g) <= std::max(1e-5 * std::fabs(g), 1e-6));
+                // Nodata is a state, not a value: exact, and both or neither
+                const bool aNodata = isNodata(a, nodata[b]), gNodata = isNodata(g, nodata[b]);
+                const bool same = (aNodata || gNodata)
+                                      ? (aNodata && gNodata)
+                                      : ((std::isnan(a) && std::isnan(g)) ||
+                                         (a == g || std::fabs(a - g) <= std::max(1e-5 * std::fabs(g), 1e-6)));
                 if (same)
                     continue;
                 if (++different <= 5)

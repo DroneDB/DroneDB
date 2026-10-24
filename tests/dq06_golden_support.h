@@ -17,6 +17,7 @@
 //   DDB_UPDATE_DQ06_GOLDEN=1     rewrites the goldens from the actual outputs
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -48,8 +49,11 @@ namespace dq06
     // file pixels/<name>.bin (float32, byte-shuffled and deflated). EVERY pixel is compared: a
     // pixel differs when |actual - golden| > max(1e-5 * |golden|, 1e-6), a NaN only equals a NaN.
     // That passes the last-bit noise of another libm or instruction set and fails any real change
-    // of a pixel. DDB_UPDATE_DQ06_GOLDEN=1 rewrites the file.
-    void expectPixelsNear(const std::string &name, int width, int height, const std::vector<std::vector<double>> &bands);
+    // of a pixel. A pixel that is the nodata value of its band (`nodata`, one entry per band; a
+    // NaN nodata is a NaN pixel) is exact: it must be nodata in both, or the pixel differs.
+    // DDB_UPDATE_DQ06_GOLDEN=1 rewrites the file.
+    void expectPixelsNear(const std::string &name, int width, int height, const std::vector<std::vector<double>> &bands,
+                          const std::vector<std::optional<double>> &nodata);
 
     // 64-bit FNV-1a of a byte range, as 16 hex digits
     std::string fnv1a(const void *data, size_t size);
