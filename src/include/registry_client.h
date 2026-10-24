@@ -69,7 +69,7 @@ class RegistryClient {
     HttpResponse retried(const std::function<HttpResponse()> &send) const;
 
 public:
-    // Throws URLException for an URL that is not http or https; "https://" is assumed when the
+    // Throws InvalidArgsException for an URL that is not http or https; "https://" is assumed when the
     // URL has no scheme, and an empty URL is the default Registry
     DDB_DLL explicit RegistryClient(const std::string &registryUrl = DEFAULT_REGISTRY, bool verifySsl = true,
                                     const RegistryDeps &dependencies = {});

@@ -28,6 +28,59 @@ namespace ddb
         }
     }
 
+    std::string RegistryUtils::normalizeUrl(const std::string &url, bool useInsecureRegistry, bool keepPath)
+    {
+        auto text = url;
+        str::trim(text);
+        if (text.empty())
+            text = DEFAULT_REGISTRY;
+
+        const auto invalid = [&url](const std::string &why) {
+            return InvalidArgsException("Invalid registry URL '" + url + "': " + why);
+        };
+
+        std::string scheme = useInsecureRegistry ? "http" : "https";
+        const auto separator = text.find("://");
+        if (separator != std::string::npos)
+        {
+            scheme = text.substr(0, separator);
+            str::toLower(scheme);
+            text = text.substr(separator + 3);
+        }
+
+        if (scheme != "http" && scheme != "https")
+            throw invalid("only http and https are supported");
+
+        homer6::Url parsed;
+        try
+        {
+            parsed.fromString(scheme + "://" + text);
+        }
+        catch (const std::exception &e)
+        {
+            throw invalid(e.what());
+        }
+
+        if (parsed.getHost().empty())
+            throw invalid("it has no host");
+
+        std::string result = parsed.getScheme() + "://" + parsed.getHost();
+
+        if ((parsed.getScheme() == "http" && parsed.getPort() != 80) ||
+            (parsed.getScheme() == "https" && parsed.getPort() != 443))
+            result += ":" + std::to_string(parsed.getPort());
+
+        if (keepPath)
+        {
+            auto path = parsed.getPath();
+            while (!path.empty() && path.back() == '/')
+                path.pop_back();
+            result += path;
+        }
+
+        return result;
+    }
+
     TagComponents RegistryUtils::parseTag(const std::string &tag,
                                           bool useInsecureRegistry)
     {
@@ -62,23 +115,8 @@ namespace ddb
         }
         t = t.substr(0, t.length() - res.organization.length() - 1);
 
-        if (t.empty() || useDefaultRegistry)
-        {
-            // Use default registry URL
-            res.registryUrl =
-                std::string(useInsecureRegistry ? "http://" : "https://") +
-                DEFAULT_REGISTRY;
-        }
-        else
-        {
-            // TODO: should we validate the URL more thoroughly?
-            const bool hasProto = t.starts_with("http://") || t.starts_with("https://");
-            if (hasProto)
-                res.registryUrl = t;
-            else
-                res.registryUrl =
-                    (useInsecureRegistry ? "http://" : "https://") + t;
-        }
+        // The server part of the tag, or the default registry when it has none
+        const std::string server = (t.empty() || useDefaultRegistry) ? std::string() : t;
 
         // Check that we haven't parsed the server part into the
         // organization name
@@ -93,15 +131,8 @@ namespace ddb
         validateTagComponent(res.organization, "organization", tag);
         validateTagComponent(res.dataset, "dataset", tag);
 
-        const homer6::Url url(res.registryUrl);
-
-        // Get rid of path
-        res.registryUrl = url.getScheme() + "://" + url.getHost();
-
-        // Add port if needed
-        if ((url.getScheme() == "http" && url.getPort() != 80) ||
-            (url.getScheme() == "https" && url.getPort() != 443))
-            res.registryUrl += ":" + std::to_string(url.getPort());
+        // Without the path, and only with a scheme the client speaks
+        res.registryUrl = normalizeUrl(server, useInsecureRegistry);
 
         return res;
     }

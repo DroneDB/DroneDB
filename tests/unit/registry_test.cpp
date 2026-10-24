@@ -158,6 +158,32 @@ namespace
             InvalidArgsException);
     }
 
+    TEST(parseTag, TheServerIsReadLikeTheClientReadsIt)
+    {
+        EXPECT_STREQ(RegistryUtils::parseTag("http://test:8080/myorg/myds").registryUrl.c_str(), "http://test:8080");
+        EXPECT_STREQ(RegistryUtils::parseTag("https://test:443/some/path/myorg/myds").registryUrl.c_str(), "https://test");
+        EXPECT_STREQ(RegistryUtils::parseTag("http://test:443/myorg/myds").registryUrl.c_str(), "http://test:443");
+
+        // a scheme the client does not speak was "https://ftp://test"
+        for (const char *tag : {"ftp://test/myorg/myds", "file://test/myorg/myds", "ssh://test:22/myorg/myds"})
+            EXPECT_THROW(RegistryUtils::parseTag(tag), InvalidArgsException) << tag;
+    }
+
+    TEST(normalizeUrl, OneSpellingForTheClientAndTheTag)
+    {
+        EXPECT_EQ(RegistryUtils::normalizeUrl(""), "https://" DEFAULT_REGISTRY);
+        EXPECT_EQ(RegistryUtils::normalizeUrl("", true), "http://" DEFAULT_REGISTRY);
+        EXPECT_EQ(RegistryUtils::normalizeUrl("host:3000"), "https://host:3000");
+        EXPECT_EQ(RegistryUtils::normalizeUrl("host", true), "http://host");
+        EXPECT_EQ(RegistryUtils::normalizeUrl("https://host/a/b/", false, false), "https://host");
+        EXPECT_EQ(RegistryUtils::normalizeUrl("https://host/a/b/", false, true), "https://host/a/b");
+        EXPECT_EQ(RegistryUtils::normalizeUrl("HTTPS://host"), "https://host");
+        // an explicit scheme wins over the insecure flag
+        EXPECT_EQ(RegistryUtils::normalizeUrl("https://host", true), "https://host");
+        EXPECT_THROW(RegistryUtils::normalizeUrl("ftp://host"), InvalidArgsException);
+        EXPECT_THROW(RegistryUtils::normalizeUrl("mailto://host"), InvalidArgsException);
+    }
+
     TEST(parseTag, ValidNames)
     {
         // Valid: starts with lowercase letter

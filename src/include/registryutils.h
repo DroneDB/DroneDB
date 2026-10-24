@@ -26,6 +26,15 @@ namespace ddb
     class RegistryUtils
     {
     public:
+        /// The URL of a Registry in its one spelling, "scheme://host[:port]": the port only when it
+        /// is not the one of the scheme, and the path (without a trailing slash) with `keepPath`.
+        /// A URL without a scheme gets https, or http with useInsecureRegistry; an empty one is
+        /// the default Registry. Throws an InvalidArgsException for a scheme other than http or
+        /// https ("ftp://x" is not "https://ftp://x"), for a text that is not a URL and for one
+        /// without a host. The client and the tag parser both read their URL through it.
+        DDB_DLL static std::string normalizeUrl(const std::string &url, bool useInsecureRegistry = false,
+                                                bool keepPath = false);
+
         DDB_DLL static TagComponents parseTag(const std::string &tag, bool useInsecureRegistry = false);
         DDB_DLL static RegistryClient createFromTag(const std::string &tag, bool useInsecureRegistry = false, bool sslVerify = true, const RegistryDeps &deps = {});
 

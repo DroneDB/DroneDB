@@ -78,6 +78,36 @@ namespace
         EXPECT_EQ(RegistryClient("", true, f.net.deps()).getUrl(), std::string("https://") + DEFAULT_REGISTRY);
     }
 
+    // "ftp://x" has a scheme, so it never was "no scheme": it was sent as https://ftp://x
+    TEST(Dq11RegistryClientUrl, OnlyHttpAndHttpsAreAccepted)
+    {
+        ClientFixture f(TEST_NAME);
+        for (const char *bad : {"ftp://registry.test", "file:///etc/passwd", "ssh://registry.test", "ws://registry.test",
+                                "javascript://registry.test", "https://", "http:///x", "://registry.test"})
+            EXPECT_THROW(RegistryClient(bad, true, f.net.deps()), InvalidArgsException) << bad;
+
+        try
+        {
+            RegistryClient("ftp://registry.test", true, f.net.deps());
+            FAIL();
+        }
+        catch (const InvalidArgsException &e)
+        {
+            EXPECT_STREQ(e.what(), "Invalid registry URL 'ftp://registry.test': only http and https are supported");
+        }
+    }
+
+    TEST(Dq11RegistryClientUrl, TheSchemeIsReadInAnyCaseAndTheBasePathIsKept)
+    {
+        ClientFixture f(TEST_NAME);
+        EXPECT_EQ(RegistryClient("HTTP://Registry.test:8080/api/", true, f.net.deps()).getUrl("/x"),
+                  "http://Registry.test:8080/api/x");
+        EXPECT_EQ(RegistryClient("  https://registry.test/  ", true, f.net.deps()).getUrl("/x"), "https://registry.test/x");
+        // a port is the default of its own scheme only
+        EXPECT_EQ(RegistryClient("http://registry.test:443", true, f.net.deps()).getUrl(), "http://registry.test:443");
+        EXPECT_EQ(RegistryClient("https://registry.test:80", true, f.net.deps()).getUrl(), "https://registry.test:80");
+    }
+
     // ---------------------------------------------------------------------------- login
 
     TEST(Dq11RegistryClientLogin, SendsTheFormKeepsTheTokenAndSavesTheCredentials)

@@ -11,9 +11,6 @@
 #include "exceptions.h"
 #include "registryutils.h"
 #include "userprofile.h"
-#include "../../vendor/url/Url.h"
-
-using homer6::Url;
 
 namespace ddb {
 
@@ -46,28 +43,8 @@ RetryDecision retryDecisionOf(const HttpResponse &res) {
 
 RegistryClient::RegistryClient(const std::string &registryUrl, bool verifySsl, const RegistryDeps &dependencies)
     : sslVerify(verifySsl), deps(dependencies) {
-    std::string urlStr = registryUrl;
-
-    if (urlStr.empty())
-        urlStr = std::string(DEFAULT_REGISTRY);
-
-    Url u;
-
-    // Always append https if no protocol is specified
-    if (!urlStr.starts_with("https://") && !urlStr.starts_with("http://")) {
-        u.fromString("https://" + urlStr);
-    } else {
-        u.fromString(urlStr);
-    }
-
-    // Validate and set URL
-    if (u.getScheme() != "https" && u.getScheme() != "http") {
-        throw URLException("Registry URL can only be http/https");
-    }
-
-    const std::string port =
-        u.getPort() != 80 && u.getPort() != 443 ? ":" + std::to_string(u.getPort()) : "";
-    this->url = u.getScheme() + "://" + u.getHost() + port + u.getPath();
+    // http or https only (anything else is refused), https when no scheme is given
+    this->url = RegistryUtils::normalizeUrl(registryUrl, false, true);
 }
 
 std::string RegistryClient::getUrl(const std::string &path) const {
