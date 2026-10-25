@@ -55,11 +55,14 @@ namespace cmd
             return EXIT_FAILURE;
         }
 
-        // A file that cannot be written is reported and the next one is edited
-        const auto report = [](const std::vector<ddb::ExifWriteFailure> &failures)
+        // A file that cannot be written is reported and the next one is edited; the command
+        // then fails, so a script notices that not every file holds the new values
+        bool anyFailed = false;
+        const auto report = [&anyFailed](const std::vector<ddb::ExifWriteFailure> &failures)
         {
             for (const auto &failure : failures)
                 std::cerr << "Cannot write metadata to " << failure.file << ": " << failure.message << std::endl;
+            if (!failures.empty()) anyFailed = true;
         };
 
         if (opts.count("gps-alt"))
@@ -82,7 +85,7 @@ namespace cmd
             auto gps = opts["gps"].as<std::vector<double>>();
             report(exifEditor.SetGPS(gps[0], gps[1], gps[2]));
         }
-        return EXIT_SUCCESS;
+        return anyFailed ? EXIT_FAILURE : EXIT_SUCCESS;
     }
 
 }

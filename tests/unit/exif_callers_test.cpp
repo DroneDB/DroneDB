@@ -259,7 +259,9 @@ namespace
             const fs::path image = root / ("img" + std::to_string(i) + ".jpg");
             writeJpeg(image, 16 + static_cast<int>(i), 16);
             if (i % 2 == 0)
-                ASSERT_TRUE(ExifEditor(io::toUtf8(image)).SetGPS(46.0 + i * 0.001, 11.0, 194.0).empty());
+            {
+                ASSERT_TRUE(ExifEditor(io::toUtf8(image)).SetGPS(46.0 + static_cast<double>(i) * 0.001, 11.0, 194.0).empty());
+            }
             paths.push_back(image.string());
         }
 
@@ -784,12 +786,12 @@ namespace
         const auto run = runSetExif({"--gps", "46.5,-11.25,-10.5", io::toUtf8(root / "first.jpg"),
                                      io::toUtf8(root / "second.jpg"), io::toUtf8(root / "third.jpg")});
 
-        // The library prints nothing: the command does, once for the file, and goes on
-        // (stderr holds the log of the test run too)
+        // The library prints nothing: the command does, once for the file, goes on, and then
+        // fails (stderr holds the log of the test run too)
         const std::string failed = "Cannot write metadata to " + io::toUtf8(root / "first.jpg") + ": disk is full\n";
         EXPECT_NE(run.err.find(failed), std::string::npos) << run.err;
         EXPECT_EQ(run.err.find("Cannot write metadata"), run.err.rfind("Cannot write metadata")) << run.err;
-        EXPECT_EQ(run.code, EXIT_SUCCESS);
+        EXPECT_EQ(run.code, EXIT_FAILURE);
         ASSERT_EQ(reader.requests.size(), 3u);
         EXPECT_EQ(reader.requests[0].first, "first.jpg");
         EXPECT_EQ(reader.requests[1].first, "second.jpg");
@@ -804,6 +806,44 @@ namespace
                                                {"Exif.GPSInfo.GPSLongitudeRef", "W"}};
         for (const auto &request : reader.requests)
             EXPECT_EQ(request.second, expected) << request.first;
+    }
+
+    // A failed file fails the command only once every option has been applied to every file;
+    // with every write succeeding the same command succeeds
+    TEST(ExifSetExif, aFailedWriteFailsTheCommandAfterEveryFileIsWritten)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto root = ta.getFolder("ds");
+        for (const char *name : {"first.jpg", "second.jpg", "third.jpg"})
+            fileWriteAllText(root / name, "x");
+        const std::vector<std::string> args = {"--gps-alt", "12", "--gps-lat", "45.5", io::toUtf8(root / "first.jpg"),
+                                               io::toUtf8(root / "second.jpg"), io::toUtf8(root / "third.jpg")};
+
+        ScriptedWriter reader;
+        reader.failing = {"second.jpg"};
+        {
+            exif::ScopedMetadataReader scope(reader);
+            const auto run = runSetExif(args);
+            EXPECT_EQ(run.code, EXIT_FAILURE) << run.err;
+            const std::string failed = "Cannot write metadata to " + io::toUtf8(root / "second.jpg") + ": disk is full\n";
+            const size_t first = run.err.find(failed);
+            ASSERT_NE(first, std::string::npos) << run.err;
+            // Once for the altitude, once for the latitude
+            EXPECT_NE(run.err.find(failed, first + failed.size()), std::string::npos) << run.err;
+            for (const char *written : {"first.jpg", "third.jpg"})
+                EXPECT_EQ(run.err.find("Cannot write metadata to " + io::toUtf8(root / written)), std::string::npos)
+                    << run.err;
+        }
+        const std::vector<std::string> order = {"first.jpg", "second.jpg", "third.jpg"};
+        ASSERT_EQ(reader.requests.size(), 6u);
+        for (size_t i = 0; i < reader.requests.size(); ++i)
+            EXPECT_EQ(reader.requests[i].first, order[i % 3]) << i;
+
+        ScriptedWriter healthy;
+        exif::ScopedMetadataReader scope(healthy);
+        const auto run = runSetExif(args);
+        EXPECT_EQ(run.code, EXIT_SUCCESS) << run.err;
+        EXPECT_EQ(healthy.requests.size(), 6u);
     }
 
     TEST(ExifSetExif, theEditorReturnsTheFailuresAndNeverPrints)

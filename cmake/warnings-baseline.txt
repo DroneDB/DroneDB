@@ -7,7 +7,7 @@ apps/crash_handlers.cpp -Wunused-parameter 4
 src/include/basicgeometry.h -Wnon-virtual-dtor 3
 src/include/basicgeometry.h -Wshadow 5
 src/include/delta.h -Wshadow 5
-src/include/exif.h -Wshadow 19
+src/include/exif.h -Wshadow 18
 src/include/geo.h -Wreorder 3
 src/include/geo.h -Wshadow 6
 src/include/metamanager.h -Wshadow 1
