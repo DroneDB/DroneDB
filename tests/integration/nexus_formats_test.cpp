@@ -8,6 +8,7 @@
 // written: the formats the textures come in, the polygons of a PLY, an OBJ with one-dimensional
 // texture coordinates, and the failures that must leave no file behind.
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -307,5 +308,161 @@ namespace
         std::ofstream(ta.getPath("bad.obj")) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 two 99999\nf -77 0 3\n";
         EXPECT_THROW(build(ta.getPath("bad.obj"), outDir / "bad.nxs"), AppException);
         expectNothingLeftBehind(outDir);
+    }
+
+    TEST(NexusFormats, coincidentTrianglesFailWithTooSmallToDivideAndLeaveNoFile)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path outDir = ta.getPath("out");
+        fs::create_directories(outDir);
+        {
+            std::ofstream f(ta.getPath("same.obj"));
+            f << "v 0 0 0\nv 1 0 0\nv 0 1 0\n";
+            for (int i = 0; i < 100000; i++)
+                f << "f 1 2 3\n";
+        }
+        const auto start = std::chrono::steady_clock::now();
+        try
+        {
+            build(ta.getPath("same.obj"), outDir / "same.nxs");
+            FAIL() << "the build should have failed";
+        }
+        catch (const AppException &e)
+        {
+            EXPECT_NE(std::string(e.what()).find("too small to divide"), std::string::npos) << e.what();
+        }
+        const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        EXPECT_LT(seconds, 10.0);
+        expectNothingLeftBehind(outDir);
+        for (const std::string &n : filesIn(outDir))
+            EXPECT_EQ(n.find("nexus_cache"), std::string::npos) << n;
+    }
+
+    // A 24-bit BMP, written byte by byte: rows padded to four bytes and stored bottom-up
+    void writeBmp(const fs::path &file, int width, int height)
+    {
+        const int stride = (width * 3 + 3) / 4 * 4;
+        const uint32_t dataSize = static_cast<uint32_t>(stride) * static_cast<uint32_t>(height);
+        std::vector<unsigned char> b(54 + dataSize, 0);
+        auto put32 = [&b](size_t at, uint32_t v) {
+            for (int i = 0; i < 4; i++)
+                b[at + i] = static_cast<unsigned char>((v >> (8 * i)) & 0xff);
+        };
+        b[0] = 'B';
+        b[1] = 'M';
+        put32(2, 54 + dataSize);
+        put32(10, 54);
+        put32(14, 40);
+        put32(18, static_cast<uint32_t>(width));
+        put32(22, static_cast<uint32_t>(height));
+        b[26] = 1;
+        b[28] = 24;
+        put32(34, dataSize);
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                const size_t at = 54 + static_cast<size_t>(y) * stride + static_cast<size_t>(x) * 3;
+                b[at] = static_cast<unsigned char>(x & 0xff);
+                b[at + 1] = static_cast<unsigned char>(y * 30);
+                b[at + 2] = static_cast<unsigned char>((x >> 8) * 20);
+            }
+        std::ofstream f(file, std::ios::binary);
+        f.write(reinterpret_cast<const char *>(b.data()), static_cast<std::streamsize>(b.size()));
+    }
+
+    TEST(NexusFormats, aTextureThatCannotBePackedBuildsWithoutTextures)
+    {
+        TestArea ta(TEST_NAME, true);
+        writeBmp(ta.getPath("wide.bmp"), 20000, 8);
+        writeTexturedModel(ta.getPath("."), "wide.bmp", "vt 0 0\nvt 0.99 0\nvt 0.99 0.99\nvt 0 0.99\n");
+        const fs::path out = ta.getPath("model.nxs");
+        // The warning "textures could not be packed" goes to the stderr of ddb-nexus, which libddb
+        // does not surface when the build succeeds: only the outcome is asserted here
+        ASSERT_NO_THROW(build(ta.getPath("model.obj"), out));
+        const NxsHeader h = readHeader(io::toUtf8(out));
+        expectNxsMagic(h);
+        EXPECT_EQ(h.nface, 2u);
+        EXPECT_EQ(h.nTextures, 0u);
+    }
+
+    // A binary little-endian PLY of the same square as two triangles; the face list counts with
+    // `countType` and indexes with `indexType`, each one of uchar, ushort, int, uint
+    template <typename T> void putLe(std::string &s, T v)
+    {
+        for (size_t i = 0; i < sizeof(T); i++)
+            s.push_back(static_cast<char>((static_cast<uint64_t>(v) >> (8 * i)) & 0xff));
+    }
+
+    template <typename Count, typename Index>
+    void writeBinaryPly(const fs::path &file, const char *countType, const char *indexType)
+    {
+        std::string s = std::string("ply\nformat binary_little_endian 1.0\nelement vertex 4\n"
+                                    "property float x\nproperty float y\nproperty float z\n"
+                                    "element face 2\nproperty list ") +
+                        countType + " " + indexType + " vertex_indices\nend_header\n";
+        const float xyz[4][3] = {{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}};
+        for (const auto &v : xyz)
+            for (float c : v)
+            {
+                uint32_t bits;
+                std::memcpy(&bits, &c, 4);
+                putLe(s, bits);
+            }
+        const int faces[2][3] = {{0, 1, 2}, {0, 2, 3}};
+        for (const auto &f : faces)
+        {
+            putLe(s, static_cast<Count>(3));
+            for (int i : f)
+                putLe(s, static_cast<Index>(i));
+        }
+        std::ofstream o(file, std::ios::binary);
+        o.write(s.data(), static_cast<std::streamsize>(s.size()));
+    }
+
+    TEST(NexusFormats, aPlyFaceListWithAnyCountAndIndexTypeBuildsTheSameModel)
+    {
+        TestArea ta(TEST_NAME, true);
+        writeBinaryPly<uint8_t, int32_t>(ta.getPath("uchar_int.ply"), "uchar", "int");
+        writeBinaryPly<int32_t, int32_t>(ta.getPath("int_int.ply"), "int", "int");
+        writeBinaryPly<uint16_t, uint32_t>(ta.getPath("ushort_uint.ply"), "ushort", "uint");
+
+        ASSERT_NO_THROW(build(ta.getPath("uchar_int.ply"), ta.getPath("uchar_int.nxs")));
+        const NxsHeader reference = readHeader(io::toUtf8(ta.getPath("uchar_int.nxs")));
+        expectNxsMagic(reference);
+        EXPECT_EQ(reference.nface, 2u);
+        EXPECT_EQ(reference.nvert, 4u);
+
+        for (const char *name : {"int_int", "ushort_uint"})
+        {
+            ASSERT_NO_THROW(build(ta.getPath(std::string(name) + ".ply"), ta.getPath(std::string(name) + ".nxs"))) << name;
+            const NxsHeader h = readHeader(io::toUtf8(ta.getPath(std::string(name) + ".nxs")));
+            expectNxsMagic(h);
+            EXPECT_EQ(h.nface, reference.nface) << name;
+            EXPECT_EQ(h.nvert, reference.nvert) << name;
+        }
+    }
+
+    TEST(NexusFormats, aPlyWithAVeryLongTextureFileCommentDoesNotCrash)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path outDir = ta.getPath("out");
+        fs::create_directories(outDir);
+        {
+            std::ofstream f(ta.getPath("long.ply"));
+            f << "ply\nformat ascii 1.0\ncomment TextureFile " << std::string(480, 'a') << ".png\n"
+              << "element vertex 4\nproperty float x\nproperty float y\nproperty float z\n"
+              << "element face 2\nproperty list uchar int vertex_indices\nend_header\n"
+              << "0 0 0\n1 0 0\n1 1 0\n0 1 0\n3 0 1 2\n3 0 2 3\n";
+        }
+        try
+        {
+            build(ta.getPath("long.ply"), outDir / "long.nxs");
+        }
+        catch (const AppException &e)
+        {
+            const std::string m = e.what();
+            for (const char *bad : {"signal", "crash", "Segmentation", "SIGSEGV", "SIGABRT"})
+                EXPECT_EQ(m.find(bad), std::string::npos) << m;
+        }
     }
 } // namespace
