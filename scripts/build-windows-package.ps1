@@ -270,6 +270,21 @@ foreach ($line in Get-Content (Join-Path $PSScriptRoot "helper-licences.txt")) {
     Write-Host "  ✓ $name" -ForegroundColor Green
 }
 
+# Licence notices of the vcpkg libraries in the binaries and DLLs (GDAL, PROJ, GEOS, Exiv2, the image
+# codecs, zlib ...), in third-party/; the Debian package runs the same collector
+Write-Host ""
+Write-Host "Collecting the vcpkg licence notices..." -ForegroundColor Cyan
+$python = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $python) {
+    Write-Error "Python is needed to collect the vcpkg licence notices (scripts/collect-vcpkg-notices.py)"
+    exit 1
+}
+& $python.Source (Join-Path $PSScriptRoot "collect-vcpkg-notices.py") --installed (Join-Path $BuildDir "vcpkg_installed") --output (Join-Path $stagingDir "third-party")
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Collecting the vcpkg licence notices failed ($LASTEXITCODE)"
+    exit 1
+}
+
 # Copy directories (zoneinfo, gdal)
 Write-Host ""
 Write-Host "Copying directories..." -ForegroundColor Cyan

@@ -147,6 +147,13 @@ while read -r licence_name _ licence_source; do
   cp "$1" "debian/helper-licences/$licence_name"
 done < scripts/helper-licences.txt
 
+# Licence notices of the vcpkg libraries linked into the binaries (GDAL, PROJ, GEOS, Exiv2, the image
+# codecs, zlib ...), for /usr/share/doc/ddb/third-party; the Windows package runs the same collector
+echo "Collecting the vcpkg licence notices..."
+rm -rf debian/third-party
+python3 scripts/collect-vcpkg-notices.py --installed build/vcpkg_installed --triplet "$VCPKG_HOST_TRIPLET" \
+  --output debian/third-party
+
 # Create rules file that skips the build step
 echo "Creating rules file..."
 cat > debian/rules << EOF
@@ -180,11 +187,11 @@ override_dh_strip:
 override_dh_dwz:
 	dh_dwz -XObj2Tiles -Xlibktx.so
 
-# The license texts of the bundled tools ship as they are, next to the other notices:
-# dh_compress would gzip those over 4 KB (dwg2dxf's GPL text), and the package checks
-# (and readers) look for them by name.
+# The license texts of the bundled tools and the notices in third-party/ ship as they are:
+# dh_compress would gzip those over 4 KB (dwg2dxf's GPL text, the index of third-party/),
+# and the package checks (and readers) look for them by name.
 override_dh_compress:
-	dh_compress -X.LICENSE
+	dh_compress -X.LICENSE -Xthird-party/
 
 override_dh_auto_install:
 	# Create directory structure for installed files
@@ -213,6 +220,10 @@ override_dh_auto_install:
 
 	# Their licence texts and those of the code inside them, next to the other notices
 	cp \$(CURDIR)/debian/helper-licences/* debian/ddb/usr/share/doc/ddb/
+
+	# The notices of every vcpkg library in the binaries (scripts/collect-vcpkg-notices.py)
+	@test -f \$(CURDIR)/debian/third-party/index.txt || { echo "ERROR: debian/third-party (vcpkg licence notices) is missing"; exit 1; }
+	cp -r \$(CURDIR)/debian/third-party debian/ddb/usr/share/doc/ddb/third-party
 
 	# Optional: copy untwine COPC accelerator if it was built (vendor/untwine).
 	# Installed alongside ddb so that runtime discovery

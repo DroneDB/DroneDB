@@ -14,9 +14,11 @@ static library linkage) into `libddb`, `ddbcmd` and the helper executables
 below; the vcpkg libraries that ship as shared libraries in the Debian
 package are PDAL (`libpdalcpp` and its plugins). On Windows
 they are DLLs in the ZIP archive. The licenses of those libraries apply
-to the redistributed binaries; refer to the upstream projects for the
-exact terms. The list below is not exhaustive - it focuses on components
-that ship as separate binaries inside our distribution archives.
+to the redistributed binaries, and both packages ship the notice of
+every one of them (see
+[vcpkg-managed libraries](#vcpkg-managed-libraries) below). The sections
+below focus on components that ship as separate binaries inside our
+distribution archives.
 
 Two GPL-licensed code bases are **not** part of `libddb` or `ddbcmd`:
 Exiv2 (image metadata) lives in the separate `metadata-util` executable, and
@@ -231,9 +233,11 @@ Windows ZIP archive).
 - **Source**: https://exiv2.org/ and https://github.com/DroneDB/metadata-util
 - **Distributed copy**: the `metadata-util` / `metadata-util.exe` binary (Exiv2
   and its vcpkg dependencies linked statically on Linux, `exiv2.dll`
-  and the other DLLs next to it on Windows), with the licence texts of
-  `metadata-util` and Exiv2 as `metadata-util.LICENSE` and `Exiv2.LICENSE` in
-  `/usr/share/doc/ddb` (Debian package) or the root of the ZIP archive.
+  and the other DLLs next to it on Windows), with the licence text of
+  `metadata-util` as `metadata-util.LICENSE` in `/usr/share/doc/ddb`
+  (Debian package) or the root of the ZIP archive, and that of Exiv2 as
+  `exiv2.LICENSE` in the `third-party` folder there, with the notices of
+  the other vcpkg libraries.
 
 ### Why GPL is compatible with MPL-licensed DroneDB
 
@@ -323,12 +327,13 @@ for it alone: neither `libddb` nor `ddbcmd` links or loads it.
   CI checks listed above also fail a build in which `ddb-nexus` or
   `libnxs` contains or loads Qt again.
 - **Distributed copy**: the `ddb-nexus` / `ddb-nexus.exe` binary, with
-  `ddb-nexus.LICENSE`, `Nexus.LICENSE`, `vcglib.LICENSE`,
-  `corto.LICENSE`, `libjpeg-turbo.LICENSE`, `libpng.LICENSE`,
-  `libtiff.LICENSE` and `libwebp.LICENSE` in `/usr/share/doc/ddb` (Debian
-  package) or the root of the ZIP archive. All of the GPL code is under
-  GPL version 3 or compatible terms; the image codec libraries are
-  permissive and their notices ship with the binary.
+  `ddb-nexus.LICENSE`, `Nexus.LICENSE`, `vcglib.LICENSE` and
+  `corto.LICENSE` in `/usr/share/doc/ddb` (Debian package) or the root of
+  the ZIP archive, and `libjpeg-turbo.LICENSE`, `libpng.LICENSE`,
+  `tiff.LICENSE`, `libwebp.LICENSE` and `stb.LICENSE` in the
+  `third-party` folder there. All of the GPL code is under GPL version 3
+  or compatible terms; the image codec libraries are permissive and their
+  notices ship with the binary.
 
 ### Why GPL is compatible with MPL-licensed DroneDB
 
@@ -359,16 +364,28 @@ omit `ddb-nexus` and `libnxs.so` / `nxs.dll`.
 
 ---
 
-## vcpkg-managed runtime libraries
+## vcpkg-managed libraries
 
-The Windows ZIP and the Debian package include several shared
-libraries pulled in by vcpkg (notably `pdalcpp`, `gdal`, `proj`,
-`libsqlite3`, `libcurl`, ...). Each of those libraries is
-distributed under its own license (typically MIT, BSD, Apache 2.0,
-LGPL, or X11). The relevant license files can be found inside
-`build/vcpkg_installed/<triplet>/share/<port>/copyright` after a
-build, and the upstream license texts are available in the vcpkg
-ports tree at https://github.com/microsoft/vcpkg.
+The libraries vcpkg builds (GDAL, PROJ, GEOS, PDAL, SQLite, libcurl,
+OpenSSL, Exiv2, expat, zlib, brotli and the others of
+[`vcpkg.json`](vcpkg.json) with their dependencies) are linked
+statically into `libddb`, `ddbcmd` and the helper executables on Linux,
+except PDAL (`libpdalcpp` and its plugins), and ship as DLLs in the
+Windows ZIP. Each is distributed under its own license (typically MIT,
+BSD, Apache 2.0, zlib, LGPL; Exiv2 is GPL, see above).
+
+Both packages ship the notice of every vcpkg library that ends up in
+them: `/usr/share/doc/ddb/third-party` in the Debian package and the
+`third-party` folder of the Windows ZIP hold one `<port>.LICENSE` per
+vcpkg port (the port's `share/<port>/copyright` file) and `index.txt`,
+which lists the ports with their versions and the licenses vcpkg
+records for them. [`scripts/collect-vcpkg-notices.py`](scripts/collect-vcpkg-notices.py)
+fills the folder from the build's vcpkg tree, leaving out only the
+ports that are never linked into a shipped binary (vcpkg's build
+helpers, `pkgconf`, `pdal-dimbuilder` and the `gtest` test framework),
+and [`scripts/check-helper-tools.py`](scripts/check-helper-tools.py)
+fails the package build when the folder is missing, empty or lacks a
+notice it lists.
 
 GDAL (MIT) is built from the overlay port in
 [`vcpkg-overlays/gdal`](vcpkg-overlays/gdal): the upstream vcpkg port

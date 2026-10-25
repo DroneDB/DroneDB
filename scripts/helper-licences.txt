@@ -1,22 +1,18 @@
-# Licence texts that ship with the helper executables (metadata-util, ddb-nexus), one per line:
+# Licence texts of the helper executables (metadata-util, ddb-nexus) and of the code built into
+# them from this repository's submodules, one per line:
 #
 #   <file name in the package> | <source path, relative to the repository root>
 #
-# A '*' in a path matches the vcpkg triplet folder of the build. The Debian package puts the files
-# in /usr/share/doc/ddb and the Windows package in the root of the zip. Both packaging scripts and
-# scripts/check-helper-tools.py read this list, so a licence is added in one place. Every file name
-# contains ".LICENSE", which the Debian build leaves uncompressed.
+# The Debian package puts the files in /usr/share/doc/ddb and the Windows package in the root of
+# the zip. Both packaging scripts and scripts/check-helper-tools.py read this list, so a licence is
+# added in one place. Every file name contains ".LICENSE", which the Debian build leaves
+# uncompressed.
 #
-# The image codec libraries are linked into ddb-nexus (textures) and their BSD-style licences
-# require the notice to travel with binary distributions. stb is not listed: it is offered under
-# MIT or the public domain, and a public domain choice carries no notice.
+# The vcpkg libraries inside the helpers (Exiv2 in metadata-util, the image codecs ddb-nexus reads
+# and writes textures with) are not listed: scripts/collect-vcpkg-notices.py ships the notice of
+# every vcpkg port in the package, theirs included, in the third-party folder next to these.
 metadata-util.LICENSE | vendor/metadata-util/LICENSE
-Exiv2.LICENSE | build/vcpkg_installed/*/share/exiv2/copyright
 ddb-nexus.LICENSE | vendor/libnexus/LICENSE
 Nexus.LICENSE | vendor/libnexus/vendor/nexus/src/LICENSE
 vcglib.LICENSE | vendor/libnexus/vendor/vcglib/LICENSE.txt
 corto.LICENSE | vendor/libnexus/vendor/nexus/src/corto/LICENSE.txt
-libjpeg-turbo.LICENSE | build/vcpkg_installed/*/share/libjpeg-turbo/copyright
-libpng.LICENSE | build/vcpkg_installed/*/share/libpng/copyright
-libtiff.LICENSE | build/vcpkg_installed/*/share/tiff/copyright
-libwebp.LICENSE | build/vcpkg_installed/*/share/libwebp/copyright
