@@ -6,13 +6,37 @@ software that may be redistributed alongside DroneDB binaries (Windows
 ZIP archive, Debian package, Docker image) and the licenses that apply
 to those components.
 
-DroneDB **dynamically links** against several open-source libraries
-provided through [vcpkg](https://github.com/microsoft/vcpkg) at build
-time (GDAL, PROJ, PDAL, SpatiaLite, Exiv2, libcurl, ...). The licenses
-of those libraries apply to the redistributed binaries; refer to the
-upstream projects for the exact terms. The list below is not
-exhaustive - it focuses on components that ship as separate binaries
-inside our distribution archives.
+DroneDB links against several open-source libraries provided through
+[vcpkg](https://github.com/microsoft/vcpkg) at build time (GDAL, PROJ,
+PDAL, SpatiaLite, libcurl, ...). On Linux they are linked **statically**
+(the `x64-linux-release` triplet in [`vcpkg-triplets`](vcpkg-triplets) sets
+static library linkage) into `libddb`, `ddbcmd` and the helper executables
+below; the vcpkg libraries that ship as shared libraries in the Debian
+package are PDAL (`libpdalcpp` and its plugins). On Windows
+they are DLLs in the ZIP archive. The licenses of those libraries apply
+to the redistributed binaries; refer to the upstream projects for the
+exact terms. The list below is not exhaustive - it focuses on components
+that ship as separate binaries inside our distribution archives.
+
+Two GPL-licensed code bases are **not** part of `libddb` or `ddbcmd`:
+Exiv2 (image metadata) lives in the separate `metadata-util` executable, and
+Nexus with vcglib and corto (3D mesh streaming) in the separate
+`ddb-nexus` executable. DroneDB runs both as child processes. The Linux
+and Windows CI builds check this on the files they produce, each as far
+as its platform's tools allow:
+
+- On Linux, [`scripts/check-gpl-linkage.py`](scripts/check-gpl-linkage.py)
+  reads every symbol defined in `libddb.so` and `ddbcmd` (none may come
+  from Exiv2, Nexus, vcglib or corto) and the shared libraries they load
+  (neither may load `libexiv2` or `libnxs`).
+- On Windows, [`scripts/check-gpl-linkage.ps1`](scripts/check-gpl-linkage.ps1)
+  reads only the DLLs `ddb.dll` and `ddbcmd.exe` import
+  (`dumpbin /dependents`): neither may load `exiv2.dll` or `nxs.dll`. It
+  does not look at symbols, so code compiled into them is not seen there.
+
+Both also check that `ddb-nexus` and its Nexus library (`libnxs.so`,
+`nxs.dll`) do not use Qt: on Linux by symbols and loaded libraries, on
+Windows by the DLLs they import.
 
 ---
 
@@ -184,13 +208,154 @@ the archive.
 
 ---
 
-## libnexus / Nexus
+## Exiv2 in `metadata-util` (image metadata helper)
 
-The `libnxs.so` / `nxs.dll` library shipped with DroneDB is a fork of
-[cnr-isti-vclab/nexus](https://github.com/cnr-isti-vclab/nexus)
-(maintained at [DroneDB/libnexus](https://github.com/DroneDB/libnexus)),
-distributed under the **GNU General Public License v3.0** (or later).
-See `vendor/libnexus/LICENSE.txt` for the full text.
+DroneDB reads and writes EXIF, XMP and the other image metadata through
+[Exiv2](https://exiv2.org/), which is linked into the separate
+`metadata-util` / `metadata-util.exe` executable and nowhere else. The executable
+is DroneDB's own program, kept in its own repository
+([DroneDB/metadata-util](https://github.com/DroneDB/metadata-util), git submodule
+[`vendor/metadata-util`](vendor/metadata-util)); it is required, and is installed
+next to `ddb` (`/usr/bin` in the Debian package, the root folder of the
+Windows ZIP archive).
+
+- **License of Exiv2**: GNU General Public License, version 2 or later
+  (GPL-2.0-or-later). The vcpkg port builds the upstream release archive
+  with a few port patches.
+- **License of `metadata-util`**: GNU General Public License, version 2 or
+  later (GPL-2.0-or-later), the text is in
+  [`vendor/metadata-util/LICENSE`](vendor/metadata-util/LICENSE). The protocol
+  document `vendor/metadata-util/PROTOCOL.md` is released under CC0-1.0, so
+  anyone can write a client or a replacement without taking over any GPL
+  code.
+- **Source**: https://exiv2.org/ and https://github.com/DroneDB/metadata-util
+- **Distributed copy**: the `metadata-util` / `metadata-util.exe` binary (Exiv2
+  and its vcpkg dependencies linked statically on Linux, `exiv2.dll`
+  and the other DLLs next to it on Windows), with the licence texts of
+  `metadata-util` and Exiv2 as `metadata-util.LICENSE` and `Exiv2.LICENSE` in
+  `/usr/share/doc/ddb` (Debian package) or the root of the ZIP archive.
+
+### Why GPL is compatible with MPL-licensed DroneDB
+
+`libddb` starts `metadata-util` exclusively as a **separate child process**
+and talks to it over its standard input and output with the documented
+JSON-lines protocol ([`vendor/metadata-util/PROTOCOL.md`](vendor/metadata-util/PROTOCOL.md):
+a request line per file, a response line with the tags), which is the
+whole boundary between the two programs. The client side is DroneDB's
+own MPL-licensed code:
+[`src/library/exif_helper_pool.cpp`](src/library/exif_helper_pool.cpp)
+starts and reuses the `metadata-util` processes,
+[`src/library/exif_protocol.cpp`](src/library/exif_protocol.cpp) writes
+the requests and decodes the responses, and
+[`src/include/exif_metadata.h`](src/include/exif_metadata.h) with
+[`src/library/exif_metadata.cpp`](src/library/exif_metadata.cpp) holds
+the tag model and the reader interface the rest of `libddb` goes
+through. Exiv2 is never linked
+(statically or dynamically) into `ddbcmd`, `libddb`, or any other
+DroneDB-licensed binary, which the CI checks listed above enforce. Per
+the [GPL FAQ on aggregation](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation),
+pipes and command lines are how separate programs normally communicate,
+and the exchange is plain data, not shared internal structures; the GPL
+terms therefore apply to `metadata-util` itself, not to the rest of DroneDB.
+
+### Obtaining the corresponding source
+
+The `metadata-util` source code is the `vendor/metadata-util` submodule of the
+corresponding git tag of this repository, and is publicly available in
+the `DroneDB/metadata-util` repository. Every DroneDB release attaches the
+exact Exiv2 source archive that vcpkg built into `metadata-util`
+(`exiv2-<version>.tar.gz`), the vcpkg port files with the patches vcpkg
+applies to it (`vcpkg-ports-for-gpl-sources.tar.gz`) and a `SOURCES.txt`
+that names the origin and SHA512 of each archive, to the same GitHub
+release. [`scripts/fetch-vcpkg-gpl-sources.sh`](scripts/fetch-vcpkg-gpl-sources.sh)
+collects them from the vcpkg port files of the tag.
+
+### Optionality
+
+`metadata-util` is **required**: without it DroneDB cannot read image
+metadata, so indexing and building stop with an error that names the
+missing tool and the `DDB_METADATA_UTIL_PATH` environment variable (which
+overrides where DroneDB looks for it). Distributors who cannot
+redistribute GPL code can provide their own executable that speaks the
+CC0-licensed protocol and point `DDB_METADATA_UTIL_PATH` at it.
+
+---
+
+## `ddb-nexus` (Nexus 3D mesh streaming helper)
+
+DroneDB builds the progressive Nexus format (`.nxz`) for 3D models with
+the separate `ddb-nexus` / `ddb-nexus.exe` executable, built from
+[DroneDB/libnexus](https://github.com/DroneDB/libnexus) (git submodule
+[`vendor/libnexus`](vendor/libnexus)), a fork of
+[cnr-isti-vclab/nexus](https://github.com/cnr-isti-vclab/nexus). It
+loads the `libnxs.so` / `nxs.dll` library of the same fork, which ships
+for it alone: neither `libddb` nor `ddbcmd` links or loads it.
+
+- **License of `ddb-nexus` and the libnexus wrapper**: GNU General
+  Public License, version 3 (GPL-3.0). The wrapper is DroneDB's own code
+  (Digipa), relicensed from AGPL-3.0 so that it matches the code it is
+  combined with; the text is in [`vendor/libnexus/LICENSE`](vendor/libnexus/LICENSE).
+- **Nexus**: GNU General Public License, Visual Computing Lab,
+  ISTI - CNR (`vendor/libnexus/vendor/nexus/src/LICENSE` is version 3; the
+  source headers say version 2 or later).
+- **vcglib**: GNU General Public License, Visual Computing Lab,
+  ISTI - CNR (`vendor/libnexus/vendor/vcglib/LICENSE.txt` is version 3; the
+  source headers say version 2 or later).
+- **corto** (mesh compression): Visual Computing Lab, ISTI - CNR
+  (`vendor/libnexus/vendor/nexus/src/corto/LICENSE.txt` is the MIT
+  license; the headers of the library sources built into `ddb-nexus` say
+  GNU Lesser General Public License, version 3 or later, and its README
+  says the C++ code is under the GPL). Either reading is compatible with
+  the GPL-3.0 of the executable.
+- **Image codec libraries** (texture decoding and encoding), from the
+  vcpkg ports of the same names, with permissive licences:
+  [libjpeg-turbo](https://libjpeg-turbo.org/) (IJG License and
+  3-clause BSD License), [libpng](http://www.libpng.org/pub/png/libpng.html)
+  (PNG Reference Library License version 2),
+  [libtiff](https://libtiff.gitlab.io/libtiff/) (libtiff licence, an
+  MIT-style licence) and [libwebp](https://github.com/webmproject/libwebp)
+  (3-clause BSD License), together with
+  [stb](https://github.com/nothings/stb) (MIT or public domain, at your
+  choice; no notice is required). `ddb-nexus` uses no GUI
+  toolkit: it needs no Qt, X11, OpenGL or D-Bus library. On Linux the
+  codecs are linked statically into `libnxs.so`, which ships only for
+  `ddb-nexus`; on Windows their DLLs ship next to `ddb-nexus.exe`. The
+  CI checks listed above also fail a build in which `ddb-nexus` or
+  `libnxs` contains or loads Qt again.
+- **Distributed copy**: the `ddb-nexus` / `ddb-nexus.exe` binary, with
+  `ddb-nexus.LICENSE`, `Nexus.LICENSE`, `vcglib.LICENSE`,
+  `corto.LICENSE`, `libjpeg-turbo.LICENSE`, `libpng.LICENSE`,
+  `libtiff.LICENSE` and `libwebp.LICENSE` in `/usr/share/doc/ddb` (Debian
+  package) or the root of the ZIP archive. All of the GPL code is under
+  GPL version 3 or compatible terms; the image codec libraries are
+  permissive and their notices ship with the binary.
+
+### Why GPL is compatible with MPL-licensed DroneDB
+
+`libddb` starts `ddb-nexus` exclusively as a **separate subprocess**
+through [`src/library/nexus_runner.cpp`](src/library/nexus_runner.cpp) (an input model, an
+output path, the exit status and a message on failure); Nexus, vcglib
+and corto are never linked (statically or dynamically) into
+`ddbcmd`, `libddb`, or any other DroneDB-licensed binary, which the CI
+checks listed above enforce. Per the
+[GPL FAQ on aggregation](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation)
+this constitutes "mere aggregation" of independent programs, and the GPL
+terms therefore apply only to the `ddb-nexus` executable.
+
+### Obtaining the corresponding source
+
+The `ddb-nexus` source code (the wrapper, Nexus, vcglib and corto) is
+the `vendor/libnexus` submodule of the corresponding git tag of this
+repository, publicly available at the repository linked above. The image codec
+libraries are permissive and need no source offer.
+
+### Optionality
+
+`ddb-nexus` is needed only for Nexus output: when it is missing, a build
+that produces Nexus fails with a message that names the tool and the
+`DDB_NEXUS_PATH` environment variable (which overrides where DroneDB
+looks for it), and every other build type is unaffected. Distributors who prefer not to redistribute this code may
+omit `ddb-nexus` and `libnxs.so` / `nxs.dll`.
 
 ---
 
@@ -198,7 +363,7 @@ See `vendor/libnexus/LICENSE.txt` for the full text.
 
 The Windows ZIP and the Debian package include several shared
 libraries pulled in by vcpkg (notably `pdalcpp`, `gdal`, `proj`,
-`libsqlite3`, `libcurl`, `dbus`, ...). Each of those libraries is
+`libsqlite3`, `libcurl`, ...). Each of those libraries is
 distributed under its own license (typically MIT, BSD, Apache 2.0,
 LGPL, or X11). The relevant license files can be found inside
 `build/vcpkg_installed/<triplet>/share/<port>/copyright` after a

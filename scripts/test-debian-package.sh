@@ -61,10 +61,20 @@ if [ ! -f "$TEMP_DIR/usr/lib/libddb.so" ]; then
     exit 1
 fi
 
+# libnxs.so is loaded by ddb-nexus only (its RUNPATH reaches /usr/lib from /usr/bin); libddb
+# does not link it
 if [ ! -f "$TEMP_DIR/usr/lib/libnxs.so" ]; then
-    echo "Error: libnxs.so not found in package!"
+    echo "Error: libnxs.so not found in package! ddb-nexus cannot start without it."
     exit 1
 fi
+
+# The helper executables libddb starts as child processes (image metadata, Nexus builds): both must
+# be in /usr/bin, run, report the package version (a pre-release suffix "~git<commit>" of the Debian
+# version is not part of the DroneDB version the tools print) and come with their licence texts.
+echo "Checking the helper tools and their licences..."
+PACKAGE_VERSION="$(dpkg-deb -f "$DEB_FILE" Version)"
+python3 "$(dirname "$0")/check-helper-tools.py" --bin-dir "$TEMP_DIR/usr/bin" \
+    --licence-dir "$TEMP_DIR/usr/share/doc/ddb" --version "${PACKAGE_VERSION%%~*}"
 
 # Check for required data files
 echo "Checking for required data files..."

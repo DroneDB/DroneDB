@@ -58,7 +58,7 @@ Homepage: https://github.com/DroneDB/DroneDB
 
 Package: ddb
 Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}, libgl1, libx11-6, libxcb1, libxcb-glx0, libx11-xcb1, libegl1, libxcb-icccm4, libxcb-image0, libxcb-shm0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-render0, libxcb-shape0, libxcb-sync1, libxcb-xfixes0, libxcb-xinerama0, libxcb-xkb1, libxcb-xinput0, libxkbcommon-x11-0, libxkbcommon0
+Depends: \${shlibs:Depends}, \${misc:Depends}
 Description: Effortless aerial data management and sharing
  DroneDB is a toolset for effortlessly managing and sharing aerial datasets.
  It can extract metadata from aerial images such as GPS location, altitude,
@@ -130,6 +130,23 @@ ddb (${DDB_VERSION}) unstable; urgency=medium
  -- DroneDB Team <support@dronedb.app>  $(date -R)
 EOF
 
+# Licence texts of the helper tools (metadata-util, ddb-nexus), collected in debian/helper-licences for
+# the rules file; scripts/helper-licences.txt lists them, the Windows package reads the same list
+echo "Collecting the helper licence texts..."
+rm -rf debian/helper-licences
+mkdir -p debian/helper-licences
+while read -r licence_name _ licence_source; do
+  case "$licence_name" in ''|'#'*) continue ;; esac
+  # The source path may hold a '*' for the vcpkg triplet folder: expand it unquoted
+  # shellcheck disable=SC2086
+  set -- $licence_source
+  if [ ! -f "$1" ]; then
+    echo "ERROR: licence text $licence_source for $licence_name not found (submodules checked out? build finished?)"
+    exit 1
+  fi
+  cp "$1" "debian/helper-licences/$licence_name"
+done < scripts/helper-licences.txt
+
 # Create rules file that skips the build step
 echo "Creating rules file..."
 cat > debian/rules << EOF
@@ -179,7 +196,23 @@ override_dh_auto_install:
 	# Copy binary and libs from build directory directly
 	cp \$(CURDIR)/build/ddbcmd debian/ddb/usr/bin/ddb
 	cp \$(CURDIR)/build/libddb.so debian/ddb/usr/lib/
+	# libnxs.so is only loaded by ddb-nexus (its RUNPATH reaches ../lib from /usr/bin, i.e. /usr/lib);
+	# libddb and ddb do not link it
 	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
+
+	# Required: the helper tools libddb starts as child processes. metadata-util reads (and writes)
+	# image metadata with Exiv2, ddb-nexus builds Nexus multiresolution models; both are GPL, which
+	# is why they are separate executables and not part of libddb. Installed in /usr/bin so
+	# the runtime discovery (exe folder, then PATH, which is how Registry finds them) needs no
+	# configuration. The package is broken without them: image indexing and Nexus builds stop.
+	@test -f \$(CURDIR)/build/metadata-util || { echo "ERROR: build/metadata-util not found (built by the metadata-util target)"; exit 1; }
+	@test -f \$(CURDIR)/build/ddb-nexus || { echo "ERROR: build/ddb-nexus not found (built by the ddb-nexus target)"; exit 1; }
+	cp \$(CURDIR)/build/metadata-util debian/ddb/usr/bin/metadata-util
+	cp \$(CURDIR)/build/ddb-nexus debian/ddb/usr/bin/ddb-nexus
+	chmod +x debian/ddb/usr/bin/metadata-util debian/ddb/usr/bin/ddb-nexus
+
+	# Their licence texts and those of the code inside them, next to the other notices
+	cp \$(CURDIR)/debian/helper-licences/* debian/ddb/usr/share/doc/ddb/
 
 	# Optional: copy untwine COPC accelerator if it was built (vendor/untwine).
 	# Installed alongside ddb so that runtime discovery
@@ -243,11 +276,9 @@ override_dh_auto_install:
 	\$(eval PDAL_CPP_SO := \$(firstword \$(wildcard \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.[0-9]*)))
 	@test -n "\$(PDAL_CPP_SO)" || { echo "ERROR: libpdalcpp.so.* not found in vcpkg_installed"; exit 1; }
 	cp \$(PDAL_CPP_SO) debian/ddb/usr/lib/
-	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libdbus-1.so.3 debian/ddb/usr/lib/
 
 	# Create necessary symbolic links for libraries
 	ln -sf \$(notdir \$(PDAL_CPP_SO)) debian/ddb/usr/lib/libpdalcpp.so
-	ln -sf libdbus-1.so.3 debian/ddb/usr/lib/libdbus-1.so
 
 	# Copy PDAL plugins if needed (wildcard SOVERSION to survive PDAL ABI bumps)
 	mkdir -p debian/ddb/usr/lib/pdal/plugins

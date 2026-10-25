@@ -240,6 +240,13 @@ jobs:
           if nm -D --defined-only build/libddb.so | grep -E ' (dwg_|dxf_)[a-z_]+$' | grep -q .; then
             echo "::error::libddb.so exports LibreDWG symbols"; exit 1
           fi
+      - name: Verify no GPL code is linked into libddb or ddbcmd, and no Qt into ddb-nexus
+        # Exiv2 (GPL) lives in metadata-util and Nexus/vcglib/corto in ddb-nexus, both run as child
+        # processes. Looks at every symbol (the version script hides the exports of linked-in code
+        # from nm -D) and at the NEEDED entries of the shipped files. ddb-nexus and libnxs are held
+        # to the same check for Qt (and the X11/GL/dbus libraries it loaded): they decode textures
+        # with image codec libraries only.
+        run: python3 scripts/check-gpl-linkage.py build
       - name: Verify Spark RAD format pin
         run: |
           echo "Checking vendor/spark/rust/spark-lib/src/rad.rs against the reviewed pin..."
@@ -281,7 +288,7 @@ jobs:
           mkdir -p build/dist build/package
 
           # Verify required files exist in build directory
-          for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt gdal/gdalvrt.xsd; do
+          for file in ddbcmd libddb.so metadata-util ddb-nexus libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt gdal/gdalvrt.xsd; do
             if [ ! -f "build/$file" ]; then
               echo "Error: Required file $file not found in build directory!"
               exit 1
@@ -384,7 +391,7 @@ jobs:
           # the build-tree plugins even when the package ships a broken
           # layout. In a clean container the only candidate is /usr/lib,
           # exactly as in the Registry containers.
-          echo "Running E57 package smoke test in clean ubuntu:24.04..."
+          echo "Running the package smoke test (E57, GPS JPEG, helper tools) in clean ubuntu:24.04..."
           docker run --rm \
             -v "$GITHUB_WORKSPACE/build/package:/pkg:ro" \
             -e TEST_DATA_SHA \
@@ -394,12 +401,24 @@ jobs:
               apt-get install -y -qq /pkg/ddb_*.deb curl ca-certificates >/dev/null
               mkdir -p /tmp/e57smoke && cd /tmp/e57smoke
               ddb --version
+              # The helper tools libddb starts, as installed: libnxs.so (ddb-nexus) must resolve
+              # from /usr/lib alone
+              metadata-util --version
+              ddb-nexus --version
               curl -fsSL --retry 3 -o a4.e57 https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/point-clouds/A4.e57
               ddb init . > /dev/null
               ddb add a4.e57
               ddb list | grep -q "a4\.e57"
               ddb info a4.e57 --format json | grep -qE "\"pointCount\":[1-9]"
               echo "  ✓ packaged ddb indexed an E57 file in a clean Ubuntu 24.04"
+              # A JPEG with GPS is a GeoImage only if ddb found metadata-util and read its EXIF through it
+              mkdir -p /tmp/geosmoke && cd /tmp/geosmoke
+              curl -fsSL --retry 3 -o gps.jpg https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/images/DJI_0018.JPG
+              ddb init . > /dev/null
+              ddb add gps.jpg
+              ddb info gps.jpg --format text | grep -q "^Type: GeoImage"
+              ddb list --format json | grep -qE "\"type\":3[,}]"
+              echo "  ✓ packaged ddb indexed a GPS JPEG as GeoImage through the packaged metadata-util"
               if [ -x /usr/bin/dwg2dxf ]; then
                 mkdir -p /tmp/dwgsmoke && cd /tmp/dwgsmoke
                 base=https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/vector/autocad
@@ -413,7 +432,7 @@ jobs:
                 echo "  ✓ packaged ddb built a DWG with the packaged dwg2dxf in a clean Ubuntu 24.04"
               fi
             ' || {
-              echo "  ✗ E57 package smoke test failed - the installed package cannot index E57 (PDAL plugins?)."
+              echo "  ✗ Package smoke test failed - the installed package cannot index E57 (PDAL plugins?) or a GPS JPEG (metadata-util?), or its helper tools do not start."
               exit 1
             }
       - name: Upload Distribution Files
@@ -424,12 +443,32 @@ jobs:
             build/package/*.deb
           retention-days: 90
 
-  # Every release asset (the .deb, the Windows zip, the LibreDWG source, ddb.h, ddb_export.h, ddb_version.h, ddb.symbols and
-  # SHA256SUMS) goes to the release only after the build jobs passed: they upload artifacts only,
+  # The source vcpkg downloads while it builds Exiv2 (linked into metadata-util) is not in the tag,
+  # and the GPL asks for it with the binaries. Read from the vcpkg port files of the tag, checked
+  # against its SHA512.
+  collect_gpl_sources:
+    name: Collect Exiv2 Corresponding Source
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the vcpkg submodule (port files only, no build)
+        run: git submodule update --init --depth 1 vcpkg
+      - name: Download and verify the sources
+        run: ./scripts/fetch-vcpkg-gpl-sources.sh vcpkg gpl-sources
+      - name: Upload sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpl-sources
+          path: gpl-sources
+          retention-days: 90
+
+  # Every release asset (the .deb, the Windows zip, the LibreDWG source, the Exiv2 source, ddb.h, ddb_export.h,
+  # ddb_version.h, ddb.symbols and SHA256SUMS) goes to the release only after the build jobs passed: they upload artifacts only,
   # this job is the one that writes to the release.
   release_assets:
     name: Upload Release Assets
-    needs: [build_ubuntu, build_windows, build_libredwg]
+    needs: [build_ubuntu, build_windows, build_libredwg, collect_gpl_sources]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     steps:
@@ -448,6 +487,11 @@ jobs:
         with:
           name: libredwg
           path: ${{ runner.temp }}/libredwg-out
+      - name: Get the Exiv2 source
+        uses: actions/download-artifact@v4
+        with:
+          name: gpl-sources
+          path: ${{ runner.temp }}/gpl-sources
       - name: Checkout (ddb.h and the symbol manifest of the tag)
         uses: actions/checkout@v4
       - name: Collect the ABI files and write SHA256SUMS
@@ -465,7 +509,8 @@ jobs:
           mkdir -p "$abi"
           cp src/include/ddb.h src/include/ddb_export.h src/include/ddb.symbols "$abi/"
           cmake -DDDB_SOURCE_DIR="$PWD" -DDDB_OUTPUT="$abi/ddb_version.h" -P cmake/GenerateVersionHeader.cmake
-          assets=("${RUNNER_TEMP}"/libredwg-out/source/* "${RUNNER_TEMP}"/ddb-windows/*.zip
+          assets=("${RUNNER_TEMP}"/libredwg-out/source/* "${RUNNER_TEMP}"/gpl-sources/*
+                  "${RUNNER_TEMP}"/ddb-windows/*.zip
                   "${RUNNER_TEMP}"/ddb-package/*.deb "$abi/ddb.h" "$abi/ddb_export.h" "$abi/ddb_version.h"
                   "$abi/ddb.symbols")
           for f in "${assets[@]}"; do
@@ -481,6 +526,16 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ runner.temp }}/libredwg-out/source/*
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+      - name: Attach Exiv2 Corresponding Source to Release
+        # GPL-2.0 section 3 (Exiv2 in metadata-util): the exact archive vcpkg built, with the
+        # patches it applies. The tag holds the sources of DroneDB and the helper tools, not this.
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ runner.temp }}/gpl-sources/*
           file_glob: true
           tag: ${{ github.ref }}
           overwrite: true
@@ -554,7 +609,7 @@ jobs:
           retry_wait_seconds: 30
           command: |
             # Release with -g -O1 (assertions on, no NDEBUG): the CI triplet is release-only, and any other config selects
-            # link interfaces or imported locations the static Qt/vcpkg targets do not provide
+            # link interfaces or imported locations the static vcpkg targets do not provide
             cmake -S . -B build-asan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-g -O1" "-DCMAKE_C_FLAGS_RELEASE=-g -O1" -DDDB_ENABLE_ASAN=ON -DDDB_ENABLE_UBSAN=ON
       - name: Build ddb_unit_tests and ddbcmd
         run: cmake --build build-asan --target ddb_unit_tests ddbcmd -j$(nproc)
@@ -712,6 +767,12 @@ jobs:
         # Visual Studio environment is needed for dumpbin) are exactly the manifest, as on Linux
         run: python scripts/check-abi.py exports --library build/ddb.dll
         shell: pwsh
+      - name: Verify no GPL code is linked into ddb.dll or ddbcmd.exe, and no Qt into ddb-nexus.exe
+        # Exiv2 (GPL) lives in metadata-util.exe and Nexus/vcglib/corto in ddb-nexus.exe, both run as
+        # child processes: dumpbin /dependents of ddb.dll and ddbcmd.exe must not list exiv2.dll,
+        # nxs.dll or Qt5*.dll, and that of ddb-nexus.exe and nxs.dll no Qt5*/Qt6* DLL
+        run: .\scripts\check-gpl-linkage.ps1 -BuildDir build
+        shell: pwsh
       - name: Build Untwine COPC accelerator
         # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),
         # but MUST succeed on release tags so the zip ships with untwine.exe.
@@ -850,6 +911,32 @@ jobs:
           $zipFile = Get-ChildItem build/dist/*.zip | Select-Object -First 1
           if ($zipFile) {
             Expand-Archive $zipFile.FullName -DestinationPath $zipCheckDir -Force
+
+            # The helper executables libddb starts (image metadata, Nexus builds) run from the zip
+            # with only the zip folder and System32 on PATH, so a DLL the zip does not ship fails
+            # here; they must report the package version and the zip must hold their licence texts.
+            # Then a GPS JPEG must index as GeoImage, which needs ddbcmd.exe to find metadata-util.exe.
+            $python = (Get-Command python).Source
+            $savedPath = $env:PATH
+            $env:PATH = "$zipCheckDir;$env:SystemRoot\System32"
+            try {
+              & $python scripts/check-helper-tools.py --bin-dir $zipCheckDir --licence-dir $zipCheckDir --version $version
+              if ($LASTEXITCODE -ne 0) { throw "the helper tools in the zip failed the package check ($LASTEXITCODE)" }
+              $geoSmoke = Join-Path $env:RUNNER_TEMP 'geoimage-smoke'
+              if (Test-Path $geoSmoke) { Remove-Item -Recurse -Force $geoSmoke }
+              New-Item -ItemType Directory -Force -Path $geoSmoke | Out-Null
+              Invoke-WebRequest "https://raw.githubusercontent.com/DroneDB/test_data/$env:TEST_DATA_SHA/images/DJI_0018.JPG" -OutFile (Join-Path $geoSmoke 'gps.jpg')
+              Push-Location $geoSmoke
+              $ddb = Join-Path $zipCheckDir 'ddbcmd.exe'
+              & $ddb init . | Out-Null
+              & $ddb add gps.jpg | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "ddbcmd add of a GPS JPEG failed ($LASTEXITCODE)" }
+              if (-not (& $ddb info gps.jpg --format text | Select-String -Pattern '^Type: GeoImage')) { throw "the GPS JPEG was not indexed as GeoImage" }
+              Pop-Location
+              Write-Host '  ✓ metadata-util.exe and ddb-nexus.exe run from the zip at the package version; ddbcmd.exe indexed a GPS JPEG as GeoImage'
+            } finally {
+              $env:PATH = $savedPath
+            }
             if (Test-Path (Join-Path $zipCheckDir 'untwine.exe')) {
               Write-Host '  ✓ untwine.exe present in zip (COPC accelerator enabled)'
             } else {

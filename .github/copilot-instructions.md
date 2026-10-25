@@ -42,12 +42,16 @@ DroneDB is a free, open-source aerial data management platform built in C++. Its
 - Cross-platform CMake configuration
 - Shipped/tested platforms: Windows and Linux (some APPLE code paths exist in CMake, but no macOS release)
 - Automatic dependency resolution for GDAL, PROJ, PDAL, etc.
-- Derived-product generation depends on **external out-of-process binaries** discovered at runtime (override with `DDB_OBJ2TILES_PATH`, `DDB_UNTWINE_PATH`, `DDB_BUILDLOD_PATH`): Obj2Tiles (downloaded by `scripts/download-obj2tiles.{sh,ps1}`, version pinned in `scripts/obj2tiles-version`), untwine (built from `vendor/untwine`), build-lod (Rust, from `vendor/spark`). Missing tools degrade gracefully with `DDBERR_BUILDDEPMISSING`
+- Derived-product generation depends on **external out-of-process binaries** discovered at runtime (override with `DDB_OBJ2TILES_PATH`, `DDB_UNTWINE_PATH`, `DDB_BUILDLOD_PATH`, `DDB_METADATA_UTIL_PATH`, `DDB_NEXUS_PATH`): Obj2Tiles (downloaded by `scripts/download-obj2tiles.{sh,ps1}`, version pinned in `scripts/obj2tiles-version`), untwine (built from `vendor/untwine`), build-lod (Rust, from `vendor/spark`). Missing tools degrade gracefully with `DDBERR_BUILDDEPMISSING`
 - To build on Windows use `full-build-win.ps1` script and to build on Linux use `full-build-linux.sh` script (skip the cmake part if the build directory already exists)
 
 #### 4. **3D Mesh Streaming (`vendor/libnexus/`)**
-- Dependency-free writer for the Nexus progressive 3D-mesh format (upstream cnr-isti-vclab/nexus), built as `libnxs` (guarded by `NO_NEXUS`)
-- `ddb nxs` produces `.nxs` files for streamed mesh/pointcloud viewing
+- Writer for the Nexus progressive 3D-mesh format (upstream cnr-isti-vclab/nexus) in the separate **`ddb-nexus`** executable (GPL-3.0, with Nexus, vcglib and corto); it loads `libnxs` and is run as a child process, so no GPL code is linked into `libddb` or `ddbcmd` (guarded by `NO_NEXUS`)
+- `ddb nxs` produces `.nxz` files for streamed mesh/pointcloud viewing, by running `ddb-nexus`
+
+#### 5. **Image Metadata (`vendor/metadata-util/`)**
+- EXIF/XMP are read and written by the separate **`metadata-util`** executable (Exiv2, GPL-2.0-or-later; own repository, submodule), which `libddb` runs as a long-lived child process speaking the JSON-lines protocol in `vendor/metadata-util/PROTOCOL.md`. `libddb` and `ddbcmd` do not link Exiv2 (`scripts/check-gpl-linkage.py` fails CI if they do)
+- A missing `metadata-util` stops the operation with an error naming `DDB_METADATA_UTIL_PATH`
 
 ### Key Dependencies
 - **GDAL**: Raster and vector data I/O
@@ -55,7 +59,7 @@ DroneDB is a free, open-source aerial data management platform built in C++. Its
 - **Untwine**: COPC format for efficient streaming
 - **PROJ**: Coordinate system transformations
 - **SpatiaLite**: Spatial database operations
-- **Exiv2**: Image metadata extraction
+- **Exiv2**: Image metadata extraction, only inside the `metadata-util` helper executable
 - **nlohmann/json**: JSON processing
 - **cpr**: HTTP client for registry operations
 

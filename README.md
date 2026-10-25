@@ -361,7 +361,9 @@ Distribution archives (Windows ZIP, Debian package, Docker image) may include
 third-party components under different licenses - most notably the optional
 [Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0), the
 [Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles) 3D Tiles converter (AGPL-3.0)
-with its bundled libktx (Apache-2.0), libnexus mesh streaming (GPL-3.0+), the
+with its bundled libktx (Apache-2.0), the `metadata-util` image metadata helper (Exiv2,
+GPL-2.0-or-later), the `ddb-nexus` mesh streaming helper (GPL-3.0, with Nexus, vcglib
+and corto), both run as separate processes and not linked into DroneDB, the
 statically linked [SPZ](https://github.com/nianticlabs/spz) Gaussian Splat compression
 library (MIT), and the vcpkg-managed runtime libraries.
 See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details and

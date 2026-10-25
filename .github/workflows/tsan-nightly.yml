@@ -55,7 +55,7 @@ jobs:
           retry_wait_seconds: 30
           command: |
             # Release with -g -O1 (assertions on, no NDEBUG): the CI triplet is release-only, and any other config selects
-            # link interfaces or imported locations the static Qt/vcpkg targets do not provide
+            # link interfaces or imported locations the static vcpkg targets do not provide
             cmake -S . -B build-tsan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-g -O1" "-DCMAKE_C_FLAGS_RELEASE=-g -O1" -DDDB_ENABLE_TSAN=ON
       - name: Build the test binaries
         # The library objects are compiled once for both binaries (src/CMakeLists.txt)

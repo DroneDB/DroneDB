@@ -97,9 +97,14 @@ Write-Host "  ✓ Staging directory: $stagingDir" -ForegroundColor Green
 Write-Host "  ✓ Output directory: $OutputDir" -ForegroundColor Green
 
 # Define required files for verification
+# metadata-util.exe and ddb-nexus.exe are the helper executables libddb starts as child processes
+# (image metadata with Exiv2, Nexus builds). nxs.dll is loaded by ddb-nexus.exe only, libddb itself
+# does not import it; the zip check that runs both helpers proves the DLLs of metadata-util.exe are there
 $requiredFiles = @(
     "ddbcmd.exe",
     "ddb.dll",
+    "metadata-util.exe",
+    "ddb-nexus.exe",
     "nxs.dll",
     "proj.db",
     "timezone21.bin",
@@ -133,6 +138,14 @@ Write-Host "Copying executable..." -ForegroundColor Cyan
 $exePath = Join-Path $BuildDir "ddbcmd.exe"
 Copy-Item $exePath $stagingDir -Force
 Write-Host "  ✓ ddbcmd.exe" -ForegroundColor Green
+
+# The helper executables sit next to ddbcmd.exe, where libddb looks for them first; Registry puts
+# this folder on PATH. Their DLLs (exiv2.dll, nxs.dll and the libraries they load) are copied with
+# all the others below.
+foreach ($helper in @("metadata-util.exe", "ddb-nexus.exe")) {
+    Copy-Item (Join-Path $BuildDir $helper) $stagingDir -Force
+    Write-Host "  ✓ $helper" -ForegroundColor Green
+}
 
 # Copy all DLL files
 Write-Host ""
@@ -239,12 +252,30 @@ foreach ($lic in $licenseFiles) {
     }
 }
 
-# Copy directories (zoneinfo, plugins, gdal)
+# Licence texts of the helper executables and of the code inside them (GPL-2.0-or-later Exiv2 in
+# metadata-util, GPL-3.0 ddb-nexus with Nexus, vcglib and corto): the list is shared with the
+# Debian package. "<name> | <path>" per line; a '*' in the path matches the vcpkg triplet folder.
+Write-Host ""
+Write-Host "Copying helper licence texts..." -ForegroundColor Cyan
+$repoRoot = Split-Path $PSScriptRoot -Parent
+foreach ($line in Get-Content (Join-Path $PSScriptRoot "helper-licences.txt")) {
+    if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith("#")) { continue }
+    $name, $source = $line -split '\s*\|\s*', 2
+    $match = Get-Item -Path (Join-Path $repoRoot $source.Trim()) -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $match) {
+        Write-Error "Licence text '$source' for $name not found (submodules checked out? build finished?)"
+        exit 1
+    }
+    Copy-Item $match.FullName (Join-Path $stagingDir $name) -Force
+    Write-Host "  ✓ $name" -ForegroundColor Green
+}
+
+# Copy directories (zoneinfo, gdal)
 Write-Host ""
 Write-Host "Copying directories..." -ForegroundColor Cyan
 # gdal: GDAL's data files, found next to the library (process_init.cpp setupGdalData); the build
 # stages them (cmake/StageGdalData.cmake)
-$directories = @("zoneinfo", "plugins", "gdal")
+$directories = @("zoneinfo", "gdal")
 $copiedDirs = 0
 foreach ($dir in $directories) {
     $sourcePath = Join-Path $BuildDir $dir

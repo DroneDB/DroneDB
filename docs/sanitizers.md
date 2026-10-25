@@ -15,8 +15,9 @@ GCC and Clang support all four. MSVC supports `DDB_ENABLE_ASAN` only.
 
 Every target compiled in this tree is instrumented: the library objects (`ddb_core`, `ddb_capi`)
 and so `ddb`, `ddbcmd`, both test binaries (`ddb_unit_tests`, `ddbtest`) and their helpers, and the
-vendored code built here (spz, lazperf, zonedetect, libnexus with nexus/corto/vcglib).
-The vcpkg dependencies (GDAL, PDAL, PROJ, SQLite, Qt and the rest) are prebuilt and stay
+vendored code built here (spz, lazperf, zonedetect, and the `metadata-util` and `ddb-nexus` helper
+executables with Nexus, corto and vcglib, which the test targets build next to the test binaries).
+The vcpkg dependencies (GDAL, PDAL, PROJ, SQLite and the rest) are prebuilt and stay
 uninstrumented.
 
 ## Building
