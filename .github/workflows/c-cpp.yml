@@ -159,10 +159,13 @@ jobs:
         # An install that failed or was cancelled (a newer push supersedes a cold build) keeps
         # the ports built so far under a partial key, which the next run restores first.
         if: always() && steps.configure.outcome != 'skipped' && steps.vcpkg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: ./.github/actions/vcpkg-binary-cache-save
         with:
           path: ${{ steps.vcpkg-cache.outputs.path }}
-          key: ${{ steps.configure.outcome == 'success' && steps.vcpkg-cache.outputs.key || steps.vcpkg-cache.outputs.partial-key }}
+          key: ${{ steps.vcpkg-cache.outputs.key }}
+          partial-key: ${{ steps.vcpkg-cache.outputs.partial-key }}
+          complete: ${{ steps.configure.outcome == 'success' }}
+          installed: build/vcpkg_installed
       - name: Build C++ lib/program and tests
         # build.log feeds the warning ratchet below. ccache replays a cached compile's warnings, and
         # build/ is fresh on every run, so the log holds the warnings of every translation unit.
@@ -745,10 +748,13 @@ jobs:
         # An install that failed or was cancelled (a newer push supersedes a cold build) keeps
         # the ports built so far under a partial key, which the next run restores first.
         if: always() && steps.configure.outcome != 'skipped' && steps.vcpkg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: ./.github/actions/vcpkg-binary-cache-save
         with:
           path: ${{ steps.vcpkg-cache.outputs.path }}
-          key: ${{ steps.configure.outcome == 'success' && steps.vcpkg-cache.outputs.key || steps.vcpkg-cache.outputs.partial-key }}
+          key: ${{ steps.vcpkg-cache.outputs.key }}
+          partial-key: ${{ steps.vcpkg-cache.outputs.partial-key }}
+          complete: ${{ steps.configure.outcome == 'success' }}
+          installed: build/vcpkg_installed
       - name: Build C++ lib/program and tests
         uses: nick-fields/retry@v3
         with:

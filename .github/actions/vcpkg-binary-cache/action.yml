@@ -1,9 +1,8 @@
 name: vcpkg binary cache
 description: >
   Restore the vcpkg binary cache (built port archives) and point vcpkg at it.
-  Pair it with actions/cache/save right after the step that runs vcpkg install,
-  when `cache-hit` is not 'true': `key` when the install succeeded, `partial-key`
-  when it failed or was cancelled part way.
+  Pair it with ./.github/actions/vcpkg-binary-cache-save right after the step that
+  runs vcpkg install, when `cache-hit` is not 'true'.
 
 outputs:
   path:
@@ -29,10 +28,11 @@ runs:
         # Forward slashes: vcpkg reads VCPKG_BINARY_SOURCES the same way on Windows and Linux.
         dir="${GITHUB_WORKSPACE//\\//}/vcpkg-bincache"
         mkdir -p "$dir"
-        # The vcpkg submodule commit pins the port versions and the vcpkg tool.
+        # The vcpkg submodule commit pins the port versions and the vcpkg tool. The prune script
+        # decides which archives a saved cache keeps, so a change to it starts a new key.
         vcpkg_rev=$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD:vcpkg)
         echo "path=$dir" >> "$GITHUB_OUTPUT"
-        echo "key=vcpkg-bin-${RUNNER_OS}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg-triplets/**', 'vcpkg-overlays/**') }}-${vcpkg_rev}" >> "$GITHUB_OUTPUT"
+        echo "key=vcpkg-bin-${RUNNER_OS}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg-triplets/**', 'vcpkg-overlays/**', 'scripts/prune-vcpkg-bincache.py') }}-${vcpkg_rev}" >> "$GITHUB_OUTPUT"
         echo "prefix=vcpkg-bin-${RUNNER_OS}-" >> "$GITHUB_OUTPUT"
         echo "VCPKG_BINARY_SOURCES=clear;files,$dir,readwrite" >> "$GITHUB_ENV"
     - name: Restore vcpkg binary cache
