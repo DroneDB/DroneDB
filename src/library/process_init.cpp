@@ -12,7 +12,6 @@
 #include <optional>
 #include <string>
 
-#include <exiv2/exiv2.hpp>
 #include <sqlite3.h>
 
 #ifdef WIN32
@@ -22,6 +21,7 @@
 #include "build_budget.h"
 #include "databasepool.h"
 #include "ddb.h"
+#include "exif_metadata.h"
 #include "gdal_raii.h"
 #include "hash.h"
 #include "log_forwarding.h"
@@ -49,22 +49,6 @@ static constexpr const char* GdalDataMarker = "gdalvrt.xsd";
 
 // Thread-safe initialization using std::once_flag
 static std::once_flag initialization_flag;
-
-// Exiv2's XMP toolkit must be initialized before threads parse images (indexing runs on
-// several threads); the lock serializes the namespaces it registers while decoding.
-static void initializeXmp() {
-    static std::mutex xmpMutex;
-    const auto lockUnlock = [](void* data, bool lock) {
-        auto* mutex = static_cast<std::mutex*>(data);
-        if (lock)
-            mutex->lock();
-        else
-            mutex->unlock();
-    };
-    if (!Exiv2::XmpParser::initialize(lockUnlock, &xmpMutex)) {
-        LOGW << "Cannot initialize the XMP toolkit";
-    }
-}
 
 // The folder libddb's data lookup (getDataPath: DDB_DATA, the folder of the executable, the working
 // directory, the folder of the library, /usr/share/ddb, ...) finds a data file it ships in: the
@@ -280,16 +264,6 @@ namespace ddb
             // Registry, tests) whose runtimes own SIGSEGV/SIGFPE/SIGTERM. The ddb CLI installs
             // its own in apps/crash_handlers.cpp.
 
-            initializeXmp();
-
-            // Register custom XMP namespaces for thermal sensor metadata
-            try {
-                Exiv2::XmpProperties::registerNs("http://ns.flir.com/xmp/1.0/", "FLIR");
-                LOGD << "Registered FLIR XMP namespace";
-            } catch (const Exiv2::Error &e) {
-                LOGD << "FLIR XMP namespace already registered or error: " << e.what();
-            }
-
             diagnostics::printVersions();
         });
     }
@@ -298,7 +272,10 @@ namespace ddb
     {
         const size_t connections = DatabasePool::instance().shutdown();
         const size_t rasters = RasterCache::instance().clear();
-        LOGD << "Closed " << connections << " pooled index connections and " << rasters << " cached rasters";
+        // The metadata helper processes (metadata-util): input closed, then killed after 2 s if they stay
+        const size_t helpers = exif::closeMetadataHelpers();
+        LOGD << "Closed " << connections << " pooled index connections, " << rasters << " cached rasters and "
+             << helpers << " metadata helpers";
     }
 
     void finalizeProcess()

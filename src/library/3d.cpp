@@ -20,6 +20,7 @@
 #include "json.h"
 #include "logger.h"
 #include "mio.h"
+#include "nexus_runner.h"
 #include "obj2tiles_runner.h"
 #include "plyconv.h"
 
@@ -660,21 +661,11 @@ void recoverTilesSwap(const fs::path& outDir, const fs::path& oldDir) {
     }
 }
 
-// Perform the actual nexus build
+// Perform the actual nexus build: ddb-nexus, a program of its own, so that neither Nexus nor
+// VCGLib is loaded into this process
 void performNexusBuild(const std::string& inputFile, const std::string& outputFile) {
 #ifndef NO_NEXUS
-    LOGD << "Building nexus file " << outputFile << " from " << inputFile;
-
-    char errorMsg[2048] = {0};
-    auto err = nexusBuild(inputFile.c_str(), outputFile.c_str(), errorMsg, sizeof(errorMsg));
-
-    if (err == NXSERR_EXCEPTION) {
-        std::string errorMessage = "Could not build nexus file for " + inputFile;
-        if (errorMsg[0] != '\0') {
-            errorMessage += ": " + std::string(errorMsg);
-        }
-        throw AppException(errorMessage);
-    }
+    nexus::runNexusBuild(io::fromUtf8(inputFile), io::fromUtf8(outputFile));
 #else
     throw AppException("This version of ddb does not have the ability to generate Nexus files");
 #endif

@@ -24,4 +24,6 @@ add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
 # the packages ship ddbcmd and libddb from the same folder.
 ddb_embed_library(${PROJECT_NAME}cmd)
 target_link_libraries(${PROJECT_NAME}cmd PRIVATE cxxopts::cxxopts ddb_warnings)
-add_dependencies(${PROJECT_NAME}cmd ${PROJECT_NAME})
+# ddb nxs runs ddb-nexus (vendor/libnexus) and the commands that read or write image metadata run
+# metadata-util (vendor/metadata-util), both found next to the executable: built with the CLI
+add_dependencies(${PROJECT_NAME}cmd ${PROJECT_NAME} ddb-nexus metadata-util)

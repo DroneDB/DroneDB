@@ -186,7 +186,7 @@ namespace ddb
      * @param rootDirectory root directory from which to compute relative path
      * @param entry reference to output Entry object
      * @param withHash whether to compute the hash of the file (slow)
-     * @param ctx reference to FingerprintContext for caching Exiv2 data between fingerprint and parseEntry
+     * @param ctx reference to FingerprintContext for caching the parsed EXIF/XMP data between fingerprint and parseEntry
      */
     void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash, FingerprintContext &ctx);
 
@@ -199,9 +199,9 @@ namespace ddb
     EntryType fingerprint(const fs::path &path);
 
     /** Identify whether a file is an Image, GeoImage, Georaster or something else
-     * and populate the FingerprintContext with Exiv2 data for reuse.
+     * and populate the FingerprintContext with the parsed EXIF/XMP data for reuse.
      * @param path path to file
-     * @param ctx reference to FingerprintContext that will be populated with Exiv2 data
+     * @param ctx reference to FingerprintContext that will be populated with the parsed EXIF/XMP data
      */
     EntryType fingerprint(const fs::path &path, FingerprintContext &ctx);
 

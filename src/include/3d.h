@@ -9,9 +9,6 @@
 #include <string>
 #include "entry_types.h"
 #include "fs.h"
-#ifndef NO_NEXUS
-#include <nxs.h>
-#endif
 #include <vector>
 #include "obj2tiles_runner.h"
 

@@ -19,7 +19,7 @@ endif()
 
 # Build tree layout: everything users and tests run, and everything packaging copies, is in the
 # build root (ddbcmd, libddb, libnxs, ddbtest and its helpers, the data files and, on Windows,
-# the DLLs and Qt plugins). Targets are built there directly instead of being copied after the
+# the DLLs). Targets are built there directly instead of being copied after the
 # build, so build/Makefile and build/CTestTestfile.cmake stay the top-level ones. The generator
 # expression stops multi-config generators (Visual Studio) from appending a per-config
 # subdirectory. Set before add_subdirectory(vendor) so it also covers libnexus's nxs.

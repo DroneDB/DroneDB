@@ -12,7 +12,6 @@
 #include "mio.h"
 
 #include <optional>
-#include <exiv2/exiv2.hpp>
 #include <gdal_priv.h>
 #include <cpl_conv.h>
 #include <ogr_spatialref.h>
@@ -102,24 +101,21 @@ static std::optional<size_t> findFlirMagic(const std::vector<uint8_t> &data) {
 // The dimensions of the raw thermal image: from the FLIR XMP, else the largest of the common
 // thermal camera resolutions that fits in the data after the FLIR header (remainingData bytes)
 static void findRawDimensions(const std::string &filePath, size_t remainingData, FlirSegmentInfo &info) {
-    // Try to extract width/height from XMP/EXIF first
-    try {
-        auto exivImage = openExivImage(io::fromUtf8(filePath));
-        if (exivImage.get()) {
-            exivImage->readMetadata();
-            ExifParser parser(exivImage.get());
-
+    // Try to extract width/height from XMP/EXIF first. A reader that cannot work (no metadata-util)
+    // is not a problem of this file and propagates.
+    if (const auto parser = readExifParser(io::fromUtf8(filePath))) {
+        try {
             // FLIR stores raw dimensions in XMP
-            auto rawWidthIt = parser.findXmpKey({"Xmp.FLIR.RawThermalImageWidth"});
-            auto rawHeightIt = parser.findXmpKey({"Xmp.FLIR.RawThermalImageHeight"});
+            auto rawWidthIt = parser->findXmpKey({"Xmp.FLIR.RawThermalImageWidth"});
+            auto rawHeightIt = parser->findXmpKey({"Xmp.FLIR.RawThermalImageHeight"});
 
-            if (rawWidthIt != parser.xmpEnd() && rawHeightIt != parser.xmpEnd()) {
+            if (rawWidthIt && rawHeightIt) {
                 info.rawWidth = rawWidthIt->toInt64();
                 info.rawHeight = rawHeightIt->toInt64();
             }
+        } catch (const std::exception &e) {
+            LOGD << "Could not read FLIR XMP dimensions: " << e.what();
         }
-    } catch (const std::exception &e) {
-        LOGD << "Could not read FLIR XMP dimensions: " << e.what();
     }
 
     // If dimensions not found from XMP, try common sizes
@@ -279,16 +275,16 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
 ThermalCalibration extractThermalCalibration(const std::string &filePath) {
     ThermalCalibration cal;
 
-    try {
-        auto exivImage = openExivImage(io::fromUtf8(filePath));
-        if (!exivImage.get()) return cal;
-        exivImage->readMetadata();
-        ExifParser parser(exivImage.get());
+    // A reader that cannot work (no metadata-util) is not a problem of this file and propagates
+    const auto parserPtr = readExifParser(io::fromUtf8(filePath));
+    if (!parserPtr) return cal;
+    ExifParser &parser = *parserPtr;
 
+    try {
         // Try FLIR XMP namespace first
         auto getXmpDouble = [&](const std::initializer_list<std::string> &keys, double defaultVal) -> double {
             auto it = parser.findXmpKey(keys);
-            if (it != parser.xmpEnd()) {
+            if (it) {
                 try {
                     return std::stod(it->toString());
                 } catch (const std::invalid_argument &) {
@@ -321,7 +317,7 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
 
         // Check if we found any FLIR-specific data
         auto flirCheck = parser.findXmpKey({"Xmp.FLIR.PlanckR1", "Xmp.FLIR.Emissivity"});
-        if (flirCheck != parser.xmpEnd()) {
+        if (flirCheck) {
             cal.valid = true;
             LOGD << "Found FLIR XMP calibration data";
             return cal;
@@ -339,7 +335,7 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
 
         auto djiCheck = parser.findXmpKey({"Xmp.drone-dji.ThermalObjectEmissivity",
                                            "Xmp.drone-dji.ThermalMeasureMode"});
-        if (djiCheck != parser.xmpEnd()) {
+        if (djiCheck) {
             cal.valid = true;
             LOGD << "Found DJI thermal XMP calibration data";
             return cal;
@@ -353,8 +349,6 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
             LOGD << "Using default thermal calibration for " << make << " " << model;
         }
 
-    } catch (const Exiv2::Error &e) {
-        LOGD << "Exiv2 error reading thermal calibration: " << e.what();
     } catch (const std::exception &e) {
         LOGD << "Error reading thermal calibration: " << e.what();
     }
@@ -429,28 +423,26 @@ namespace {
 
 // Methods 1-3: the EXIF make and model, the FLIR XMP namespace, the DJI thermal tags
 bool hasThermalExifOrXmp(const std::string &filePath) {
+    // A reader that cannot work (no metadata-util) is not a problem of this file and propagates
+    const auto parser = readExifParser(io::fromUtf8(filePath));
+    if (!parser) return false;
+
     try {
-        auto exivImage = openExivImage(io::fromUtf8(filePath));
-        if (exivImage.get()) {
-            exivImage->readMetadata();
-            ExifParser parser(exivImage.get());
+        std::string make = parser->extractMake();
+        std::string model = parser->extractModel();
 
-            std::string make = parser.extractMake();
-            std::string model = parser.extractModel();
+        if (isThermalImageFromExif(make, model)) return true;
 
-            if (isThermalImageFromExif(make, model)) return true;
+        // Method 2: Check for FLIR XMP namespace
+        auto flirIt = parser->findXmpKey({"Xmp.FLIR.PlanckR1",
+                                          "Xmp.FLIR.Emissivity",
+                                          "Xmp.FLIR.ThermalMeasureMode"});
+        if (flirIt) return true;
 
-            // Method 2: Check for FLIR XMP namespace
-            auto flirIt = parser.findXmpKey({"Xmp.FLIR.PlanckR1",
-                                             "Xmp.FLIR.Emissivity",
-                                             "Xmp.FLIR.ThermalMeasureMode"});
-            if (flirIt != parser.xmpEnd()) return true;
-
-            // Method 3: Check for DJI thermal tags
-            auto djiIt = parser.findXmpKey({"Xmp.drone-dji.ThermalMeasureMode",
-                                            "Xmp.drone-dji.ThermalObjectEmissivity"});
-            if (djiIt != parser.xmpEnd()) return true;
-        }
+        // Method 3: Check for DJI thermal tags
+        auto djiIt = parser->findXmpKey({"Xmp.drone-dji.ThermalMeasureMode",
+                                         "Xmp.drone-dji.ThermalObjectEmissivity"});
+        if (djiIt) return true;
     } catch (const std::exception &e) {
         LOGD << "isThermalImage: EXIF/XMP probing failed: " << e.what();
     }

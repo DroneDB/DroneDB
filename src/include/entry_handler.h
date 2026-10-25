@@ -148,6 +148,12 @@ class EntryHandler {
     // The type of a file with one of extensions(). May read the file (and fill ctx) to refine
     // it; the default is type().
     virtual EntryType detect(const fs::path& /*path*/, FingerprintContext& /*ctx*/) const { return type_; }
+    // Starts the reads of the file that detect() makes of every file with this extension, and
+    // leaves them in ctx for detect() to take, so they run while the caller works on the file
+    // (parseEntry hashes it meanwhile). Only reads detect() makes whatever the file holds: a
+    // file is never read more often, nor read when it would not have been. The default starts
+    // none.
+    virtual void prefetch(const fs::path& /*path*/, FingerprintContext& /*ctx*/) const {}
 
     // ---- Metadata (parseEntry)
 

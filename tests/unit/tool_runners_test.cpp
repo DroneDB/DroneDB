@@ -19,6 +19,7 @@
 #include "fs.h"
 #include "gtest/gtest.h"
 #include "mio.h"
+#include "nexus_runner.h"
 #include "obj2tiles_runner.h"
 #include "parallel.h"
 #include "process_runner.h"
@@ -235,7 +236,8 @@ TEST(ToolLocator, theRunnersFindTheirToolThroughIt) {
              {"DDB_OBJ2TILES_PATH", [] { return obj2tiles::findObj2TilesBinary(true); }},
              {"DDB_UNTWINE_PATH", [] { return untwine::findUntwineBinary(true); }},
              {"DDB_BUILDLOD_PATH", [] { return buildlod::findBuildLodBinary(true); }},
-             {"DDB_DWG2DXF_PATH", [] { return cad::findDwg2DxfBinary(true); }}}) {
+             {"DDB_DWG2DXF_PATH", [] { return cad::findDwg2DxfBinary(true); }},
+             {"DDB_NEXUS_PATH", [] { return nexus::findNexusBinary(true); }}}) {
         EnvVarGuard guard(var, io::toUtf8(tool));
         EXPECT_EQ(find(), tool) << var;
         setEnv(var, io::toUtf8(ta.getPath("missing")));
@@ -417,6 +419,132 @@ TEST(Obj2TilesRunner, aCanceledChildPropagatesAndReleasesItsCpuTokens) {
     const auto before = parallel::cpuTokensInUse();
     EXPECT_THROW(f.run(), CanceledException);
     EXPECT_EQ(parallel::cpuTokensInUse(), before);
+}
+
+// ------------------------------------------------------------------------ ddb-nexus
+
+struct NexusFixture {
+    TestArea ta;
+    fs::path tool;
+    fs::path input;
+    fs::path output;
+    FakeProcessRunner fake;
+
+    explicit NexusFixture(const std::string &name)
+        : ta(name, true),
+          tool(fakeTool(ta, "bin/ddb-nexus")),
+          input(ta.getPath("model.obj")),
+          output(ta.getPath("out/model.nxz")) {
+        touch(input);
+        // the tool writes its output unless a test replaces this
+        fake.effect = [this](const FakeProcessRunner::Call &) { touch(output, "nxz"); };
+    }
+
+    void run() { nexus::runNexusBuild(input, output, tool, fake); }
+
+    std::string failureMessage() {
+        try {
+            run();
+        } catch (const AppException &e) {
+            return e.what();
+        }
+        ADD_FAILURE() << "the build should have failed";
+        return {};
+    }
+};
+
+TEST(NexusRunner, runsTheToolOnTheInputAndTheOutput) {
+    NexusFixture f("runner_nexus");
+    f.run();
+    ASSERT_EQ(f.fake.calls.size(), 1u);
+    EXPECT_EQ(f.fake.calls[0].binary, f.tool);
+    EXPECT_TRUE(hasArgs(f.fake.calls[0].args, {io::toUtf8(f.input), io::toUtf8(f.output)}));
+    EXPECT_TRUE(fs::exists(f.output));
+}
+
+TEST(NexusRunner, anExitCodeIsAFailureWithTheLastOutput) {
+    NexusFixture f("runner_nexus_exit");
+    // the reason comes last, after more than the 2000 bytes the message keeps
+    f.fake.result = FakeProcessRunner::exited(
+        1, "first line of the progress\n" + std::string(3000, '.') + "\nddb-nexus: could not build the model");
+    f.fake.effect = nullptr;
+    const std::string message = f.failureMessage();
+    EXPECT_EQ(message.rfind("Could not build nexus file for " + io::toUtf8(f.input) + ": ", 0), 0u) << message;
+    EXPECT_NE(message.find("ddb-nexus exited with code 1: "), std::string::npos) << message;
+    EXPECT_NE(message.find("ddb-nexus: could not build the model"), std::string::npos) << message;
+    EXPECT_EQ(message.find("first line of the progress"), std::string::npos) << "only the tail";
+    EXPECT_LT(message.size(), 2400u);
+}
+
+TEST(NexusRunner, aSignalIsAFailureThatNamesIt) {
+    NexusFixture f("runner_nexus_signal");
+    process::Result killed;
+    killed.started = true;
+    killed.termSignal = 11;
+    killed.outputTail = "QFSFileEngine::map: error";
+    f.fake.result = killed;
+    f.fake.effect = nullptr;
+    const std::string message = f.failureMessage();
+    EXPECT_NE(message.find("killed by signal 11"), std::string::npos) << message;
+    EXPECT_NE(message.find("QFSFileEngine::map: error"), std::string::npos) << message;
+}
+
+TEST(NexusRunner, aTimeoutAndAToolThatCannotStartAreFailures) {
+    NexusFixture f("runner_nexus_timeout");
+    f.fake.effect = nullptr;
+    f.fake.result = FakeProcessRunner::timedOutAfterIdle();
+    EXPECT_NE(f.failureMessage().find("killed after 3600 s without output"), std::string::npos);
+
+    process::Result notStarted;
+    notStarted.errorMessage = "Permission denied";
+    f.fake.result = notStarted;
+    EXPECT_NE(f.failureMessage().find("failed to start: Permission denied"), std::string::npos);
+}
+
+TEST(NexusRunner, successWithoutTheOutputFileIsAFailure) {
+    NexusFixture f("runner_nexus_nooutput");
+    f.fake.effect = nullptr;
+    f.fake.result = FakeProcessRunner::exited(0, "ddb-nexus: building");
+    const std::string message = f.failureMessage();
+    EXPECT_NE(message.find("wrote no output file " + io::toUtf8(f.output)), std::string::npos) << message;
+    EXPECT_NE(message.find("ddb-nexus: building"), std::string::npos) << message;
+
+    // an empty file is no output either
+    f.fake.effect = [&](const FakeProcessRunner::Call &) { touch(f.output, ""); };
+    EXPECT_NE(f.failureMessage().find("wrote no output file"), std::string::npos);
+}
+
+TEST(NexusRunner, aMissingToolNamesItAndTheVariableAndStartsNothing) {
+    NexusFixture f("runner_nexus_missing");
+    f.tool = f.ta.getPath("missing/ddb-nexus");
+    const std::string message = f.failureMessage();
+    EXPECT_NE(message.find("ddb-nexus"), std::string::npos) << message;
+    EXPECT_NE(message.find("DDB_NEXUS_PATH"), std::string::npos) << message;
+    EXPECT_TRUE(f.fake.calls.empty());
+}
+
+TEST(NexusRunner, aMissingToolIsLookedUpThroughTheVariable) {
+    NexusFixture f("runner_nexus_variable");
+    EnvVarGuard guard("DDB_NEXUS_PATH", io::toUtf8(f.ta.getPath("missing/ddb-nexus")));
+    nexus::findNexusBinary(true);
+    try {
+        nexus::runNexusBuild(f.input, f.output, {}, f.fake);
+        FAIL() << "a missing tool throws";
+    } catch (const AppException &e) {
+        EXPECT_NE(std::string(e.what()).find("DDB_NEXUS_PATH"), std::string::npos) << e.what();
+    }
+    EXPECT_TRUE(f.fake.calls.empty());
+
+    setEnv("DDB_NEXUS_PATH", io::toUtf8(f.tool));
+    nexus::runNexusBuild(f.input, f.output, {}, f.fake);
+    ASSERT_EQ(f.fake.calls.size(), 1u);
+    EXPECT_EQ(f.fake.calls[0].binary, f.tool);
+}
+
+TEST(NexusRunner, aCanceledChildPropagates) {
+    NexusFixture f("runner_nexus_cancel");
+    f.fake.effect = [](const FakeProcessRunner::Call &) { throw CanceledException("canceled"); };
+    EXPECT_THROW(f.run(), CanceledException);
 }
 
 // ------------------------------------------------------------------------ Untwine

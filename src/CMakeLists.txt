@@ -26,7 +26,6 @@ list(REMOVE_ITEM DDB_CORE_SOURCES ${DDB_CAPI_SOURCES})
 # Find and link dependencies from vcpkg
 find_package(Threads REQUIRED)
 find_package(CCTZ CONFIG REQUIRED)
-find_package(exiv2 CONFIG REQUIRED)
 find_package(GDAL CONFIG REQUIRED)
 find_package(PDAL CONFIG REQUIRED)
 find_package(PROJ CONFIG REQUIRED)
@@ -51,7 +50,6 @@ find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h" REQUIRED)
 set(COMMON_LIBS
     pdalcpp
     Threads::Threads
-    Exiv2::exiv2lib
     GDAL::GDAL
     PROJ::proj
     ${GEOTIFF_LIBRARIES}
@@ -62,7 +60,6 @@ set(COMMON_LIBS
     OpenSSL::Crypto
     unofficial::sqlite3::sqlite3
     spatialite::spatialite
-    nxs
     assimp::assimp
     KTX::ktx
     tinyobjloader::tinyobjloader
@@ -104,10 +101,6 @@ target_link_libraries(ddb_headers INTERFACE ddb_c_api)
 add_library(ddb_static_api INTERFACE)
 target_link_libraries(ddb_static_api INTERFACE ddb_headers)
 target_compile_definitions(ddb_static_api INTERFACE DDB_STATIC_DEFINE)
-# vendor/libnexus is public because 3d.h includes <nxs.h> (installed to include/ by libnexus)
-target_include_directories(ddb_headers SYSTEM INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/libnexus>
-)
 target_link_libraries(ddb_headers INTERFACE cctz::cctz)
 # plog's char is UTF-8 everywhere (mio.h, "Path encoding"). Without it MSVC builds read every
 # narrow log string in the ANSI code page. One value for every target: plog's types depend on
@@ -120,12 +113,8 @@ if(NOT WIN32)
     target_compile_definitions(ddb_headers INTERFACE PLOG_LOCAL)
 endif()
 
-# nxs is link-only here: Qt5::Gui, reached through nxs, adds its static-plugin import sources
-# (INTERFACE_SOURCES) to every target that links it, and the object libraries would each compile
-# their own copy into libddb
-list(TRANSFORM COMMON_LIBS REPLACE "^nxs$" "$<LINK_ONLY:nxs>" OUTPUT_VARIABLE DDB_CORE_LIBS)
 add_library(ddb_core_usage INTERFACE)
-target_link_libraries(ddb_core_usage INTERFACE ${DDB_CORE_LIBS} boolinq ddb_headers)
+target_link_libraries(ddb_core_usage INTERFACE ${COMMON_LIBS} boolinq ddb_headers)
 
 # Library sources only: glob.hpp (path_expansion.cpp), and <prefix>/include/pdal because PDAL's own
 # headers include their siblings without the pdal/ prefix (ColorinterpFilter.hpp includes
@@ -159,7 +148,6 @@ function(ddb_add_library_objects name)
     # the binary does not reach. MSVC does it by default (/Gy, /OPT:REF in a Release link).
     target_compile_options(${name} PRIVATE
         $<$<AND:$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>,$<NOT:$<PLATFORM_ID:Darwin>>>:-ffunction-sections -fdata-sections>)
-    add_dependencies(${name} nxs)
 endfunction()
 
 # ddb_gc_sections(<target>): the linker drops the sections nothing refers to (the library is built
@@ -226,6 +214,12 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq ddb_headers PUBLIC ddb_c_api)
 ddb_gc_sections(${PROJECT_NAME})
 
+# Nexus files are written by ddb-nexus, a program of its own (vendor/libnexus, GPL-3.0), and
+# image metadata is read and written by metadata-util (vendor/metadata-util, GPL-2.0-or-later): libddb
+# starts them (nexus_runner.h, exif_helper_pool.h) and links none of their code. They are built
+# next to libddb, which is where the tool locator looks for them.
+add_dependencies(${PROJECT_NAME} ddb-nexus metadata-util)
+
 # ddb_embed_library(<target>): <target> contains the library instead of loading libddb: the
 # objects of ddb_core and ddb_capi, the libraries they need and DDB_STATIC_DEFINE (ddb_static_api).
 # This is how the CLI and the test binaries reach the C++ code, which libddb does not export.
@@ -249,10 +243,9 @@ add_custom_target(
 
 message(STATUS "Build target 'update_sensor_data' is ready.")
 
-# Runtime files next to libddb: ddb, nxs, ddbcmd and the test binaries are all built in
-# DDB_RUNTIME_DIR (root CMakeLists.txt), so getDataPath() finds these files whether it looks next
-# to the library or next to the executable. On Windows, libnexus's own post-build step copies
-# the Qt plugins (WebP textures) next to nxs.dll, i.e. to DDB_RUNTIME_DIR/plugins.
+# Runtime files next to libddb: ddb, ddb-nexus (with libnxs), ddbcmd and the test binaries are all
+# built in DDB_RUNTIME_DIR (root CMakeLists.txt), so getDataPath() finds these files whether it
+# looks next to the library or next to the executable.
 
 # ddb_stage_runtime_dlls(<target>): on Windows, copy the DLLs <target> links to DDB_RUNTIME_DIR
 # after it is built (TARGET_RUNTIME_DLLS: direct dependencies only).
@@ -305,7 +298,7 @@ function(ddb_stage_runtime_files target)
         ddb_stage_runtime_dlls(${target})
 
         # Copy ALL DLLs from vcpkg bin directories to ensure transitive dependencies are included
-        # TARGET_RUNTIME_DLLS only copies direct dependencies, not transitive ones like Qt5's harfbuzz, pcre2, etc.
+        # TARGET_RUNTIME_DLLS only copies direct dependencies, not transitive ones like pcre2, etc.
         set(VCPKG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin")
         set(VCPKG_DEBUG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/bin")
 

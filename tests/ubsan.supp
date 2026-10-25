@@ -4,7 +4,8 @@
 # src/, apps/ or tests/ is a bug to fix, not to list here. Each entry says what it is and why
 # it is not ours.
 
-# corto (vendor/libnexus/vendor/nexus/src/corto), the nexus mesh codec used by buildNexus():
+# corto (vendor/libnexus/vendor/nexus/src/corto), the nexus mesh codec of ddb-nexus (the program
+# buildNexus() runs):
 # - it reads and writes integers through casted byte pointers at unaligned offsets of its
 #   stream buffers (cstream.h OutStream::write<T>/InStream::read<T>): the intended behaviour
 #   on x86-64 and ARM64;

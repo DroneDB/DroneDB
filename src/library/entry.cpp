@@ -1,7 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include <exiv2/exiv2.hpp>
 #include <cmath>
 #include "dbops.h"
 #include "json.h"
@@ -73,8 +72,22 @@ namespace ddb
         }
         else
         {
+            // A read prefetch() started and detection did not take (hashing failed, the file
+            // went away) ends with this call, so it holds no helper in a context the caller
+            // keeps
+            struct DropUntakenRead
+            {
+                FingerprintContext &ctx;
+                ~DropUntakenRead() { ctx.pendingRead = exif::PendingRead(); }
+            } dropUntakenRead{ctx};
+
             if (entry.hash == "" && withHash)
+            {
+                // The reads detection makes of the file run while it is hashed
+                if (const EntryHandler *handler = findEntryHandlerByExtension(path))
+                    handler->prefetch(path, ctx);
                 entry.hash = Hash::fileSHA256(io::toUtf8(path));
+            }
 
             entry.size = p.getSize();
             entry.type = fingerprint(p.get(), ctx);
@@ -313,9 +326,8 @@ namespace ddb
 
     EntryType fingerprint(const fs::path &path, FingerprintContext &ctx)
     {
-        ctx.populated = false;
+        ctx.metadataRead = false;
         ctx.hasGeo = false;
-        ctx.exivImage.reset();
         ctx.parser.reset();
 
         if (const EntryHandler *handler = findEntryHandlerByExtension(path))

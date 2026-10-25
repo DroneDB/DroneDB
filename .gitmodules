@@ -16,3 +16,6 @@
 [submodule "vendor/spark"]
 	path = vendor/spark
 	url = https://github.com/sparkjsdev/spark.git
+[submodule "vendor/metadata-util"]
+	path = vendor/metadata-util
+	url = https://github.com/DroneDB/metadata-util.git

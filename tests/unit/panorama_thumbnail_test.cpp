@@ -80,7 +80,7 @@ namespace
         const std::string folderUtf8 = io::toUtf8(folder);
         const std::string pano = io::toUtf8(folder / "pano.jpg");
         const std::string geopano = io::toUtf8(folder / "geopano.jpg");
-        ExifEditor(geopano).SetGPS(46.0667, 11.1167, 194.0);
+        ASSERT_TRUE(ExifEditor(geopano).SetGPS(46.0667, 11.1167, 194.0).empty());
 
         char *out = nullptr;
         ASSERT_DDB_OK(DDBInit(folderUtf8.c_str(), &out));

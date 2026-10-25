@@ -417,7 +417,7 @@ const json* findPath(const json& entries, const std::string& path) {
 // .NET or another library, may change the process locale after DDBRegisterProcess): every
 // path goes through io::fromUtf8 / io::toUtf8 (mio.h, "Path encoding"), never the ANSI code
 // page of Windows. Covers the index (init, add, list, get), GDAL (GeoTIFF, COG build, thumbnail),
-// Exiv2 (EXIF write and read of a JPEG), the build lock and delta/apply.
+// the metadata helper (EXIF write and read of a JPEG), the build lock and delta/apply.
 TEST(Utf8Paths, datasetUnderANonAsciiFolderWithTheCLocale) {
     TestArea ta(TEST_NAME, true);
     const std::string folderName = "ddb_citt\xC3\xA0_\xC3\xBC";  // "ddb_città_ü"
@@ -431,7 +431,7 @@ TEST(Utf8Paths, datasetUnderANonAsciiFolderWithTheCLocale) {
     spec.width = spec.height = 64;
     spec.value = [](int band, int x, int y) { return 20.0 + band * 30.0 + x + y; };
     testutils::createGeoRaster(folder / io::fromUtf8(rasterName), spec);
-    // Twice as wide as high, with a GPS position: a GeoPanorama only when Exiv2 reads the file
+    // Twice as wide as high, with a GPS position: a GeoPanorama only when the file is read through the metadata helper
     writeJpeg(folder / io::fromUtf8(imageName), 64, 16);
     const std::string folderUtf8 = io::toUtf8(folder);
     const std::string fileUtf8 = io::toUtf8(folder / io::fromUtf8(fileName));
@@ -441,7 +441,7 @@ TEST(Utf8Paths, datasetUnderANonAsciiFolderWithTheCLocale) {
     const LocaleGuard locale;
     ASSERT_NE(std::setlocale(LC_ALL, "C"), nullptr);
 
-    ExifEditor(imageUtf8).SetGPS(46.0667, 11.1167, 194.0);
+    ASSERT_TRUE(ExifEditor(imageUtf8).SetGPS(46.0667, 11.1167, 194.0).empty());
 
     char* out = nullptr;
     ASSERT_DDB_OK(DDBInit(folderUtf8.c_str(), &out));

@@ -4,10 +4,14 @@
 # code to our own allocation is a bug to fix, not to list here. Each entry says why it is not
 # ours and why it is bounded.
 
-# Exiv2 keeps custom XMP namespaces (DDBRegisterProcess registers FLIR once per process) in a
-# static registry whose destructor does not free the copied strings; only
-# XmpProperties::unregisterNs() does. libddb runs inside host processes, so it cannot tear
-# Exiv2 down at exit while host threads may still read metadata. 2 allocations, once.
+# Exiv2 keeps custom XMP namespaces (metadata-util registers FLIR once per process) in a static
+# registry whose destructor does not free the copied strings; only
+# XmpProperties::unregisterNs() does. 2 allocations, once per helper process. The leak is in the
+# metadata-util helper program, not in libddb: the helper is built with the same sanitizers and
+# inherits LSAN_OPTIONS (this file) from the test that starts it. A leak found in a helper does
+# not fail the test that ran it: the helper exits non-zero (LeakSanitizer's 23) when the pool
+# closes it, and libddb logs that as a WARNING with the exit status and the end of the helper's
+# stderr.
 leak:Exiv2::XmpProperties::registerNs
 
 # corto (vendor/libnexus/vendor/nexus/src/corto, upstream cnr-isti-vclab/corto): when a nexus

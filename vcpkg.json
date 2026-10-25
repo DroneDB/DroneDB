@@ -28,6 +28,9 @@
     "gtest",
     "laszip",
     "libgeotiff",
+    "libjpeg-turbo",
+    "libpng",
+    "libwebp",
     "openssl",
     "libspatialite",
     {
@@ -54,14 +57,8 @@
         "tiff"
       ]
     },
-    {
-      "name": "qt5",
-      "default-features": false,
-      "features": [
-        "imageformats"
-      ]
-    },
     "sqlite3",
+    "tiff",
     "zlib",
     "zstd",
     "assimp",

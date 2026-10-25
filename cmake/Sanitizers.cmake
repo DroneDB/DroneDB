@@ -12,12 +12,11 @@
 # code is instrumented on purpose:
 #   * spz, lazperf and zonedetect are linked into libddb, so their memory is libddb's memory,
 #     and they decode untrusted input (.spz, LAZ, timezone data);
-#   * nxs and libddb pass heap objects (std::vector, std::string) to each other; ASan's
-#     container-overflow checks and TSan's happens-before tracking need both sides
-#     instrumented, otherwise accesses made by the uninstrumented side are invisible
-#     (missed races) or look unsynchronised (false reports);
+#   * libnexus is not part of libddb: ddb-nexus runs as a child process of the Nexus build, so the
+#     sanitizer runtime of the child checks the Nexus code there (and the environment, with its
+#     suppression files, is inherited from the test);
 #   * the cost is nil: we compile these sources anyway.
-# vcpkg dependencies (GDAL, PDAL, PROJ, SQLite, Qt, ...) are prebuilt with the triplet's flags
+# vcpkg dependencies (GDAL, PDAL, PROJ, SQLite, ...) are prebuilt with the triplet's flags
 # and stay uninstrumented. ASan/UBSan still check the calls into them; TSan may report races
 # whose frames are all inside them: tests/tsan.supp suppresses those by third-party symbol only.
 #

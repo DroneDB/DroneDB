@@ -4,12 +4,15 @@
 #ifndef EXIF_H
 #define EXIF_H
 
-#include <exiv2/exiv2.hpp>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <ostream>
 #include <stdio.h>
 #include <cmath>
+#include <string>
+#include <utility>
+#include "exif_metadata.h"
 #include "fs.h"
 #include "sensor_data.h"
 
@@ -141,22 +144,29 @@ namespace ddb
         return os;
     }
 
+    // Reads the EXIF and XMP tags of an image that the reader of the process (exif_metadata.h)
+    // returned. The extractors answer from these tags only: where a tag is missing they give a
+    // default, and where a tag has fewer components than the value needs they throw
+    // std::out_of_range (a GPS latitude with two numbers).
     class ExifParser
     {
-        Exiv2::Image *image;
-        Exiv2::ExifData exifData;
-        Exiv2::XmpData xmpData;
+        // Keeps the metadata alive when the parser owns it; null when the caller keeps it
+        std::shared_ptr<const exif::ImageMetadata> owned;
+        const exif::ImageMetadata *metadata;
 
     public:
-        ExifParser(Exiv2::Image *image) : image(image), exifData(image->exifData()), xmpData(image->xmpData()) {};
+        // The metadata must outlive the parser
+        explicit ExifParser(const exif::ImageMetadata &data) : metadata(&data) {}
+        ExifParser(const exif::ImageMetadata &&) = delete;
+        // The parser shares the ownership of the metadata
+        explicit ExifParser(std::shared_ptr<const exif::ImageMetadata> data) : owned(std::move(data)), metadata(owned.get()) {}
 
-        Exiv2::ExifData::const_iterator findExifKey(const std::string &key);
-        Exiv2::ExifData::const_iterator findExifKey(const std::initializer_list<std::string> &keys);
-        Exiv2::XmpData::const_iterator findXmpKey(const std::string &key);
-        Exiv2::XmpData::const_iterator findXmpKey(const std::initializer_list<std::string> &keys);
-
-        Exiv2::ExifData::const_iterator exifEnd() const { return exifData.end(); }
-        Exiv2::XmpData::const_iterator xmpEnd() const { return xmpData.end(); }
+        // The first tag found, in the order of the keys; nullptr when none exists (a key that is
+        // not a valid XMP key is not found)
+        const exif::Tag *findExifKey(const std::string &key);
+        const exif::Tag *findExifKey(const std::initializer_list<std::string> &keys);
+        const exif::Tag *findXmpKey(const std::string &key);
+        const exif::Tag *findXmpKey(const std::initializer_list<std::string> &keys);
 
         ImageSize extractImageSize();
         ImageSize extractVideoSize();
@@ -169,11 +179,11 @@ namespace ddb
 
         bool extractGeo(GeoLocation &geo);
         bool extractRelAltitude(double &relAltitude);
-        inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
-        inline double evalFrac(const Exiv2::Rational &rational);
+        inline double geoToDecimal(const exif::Tag *geoTag, const exif::Tag *geoRefTag);
+        inline double evalFrac(const exif::Rational &rational);
 
-        double parseSubSec(const Exiv2::ExifData::const_iterator &subsec);
-        bool parseOffsetTime(const Exiv2::ExifData::const_iterator &offset, int &offsetSeconds);
+        double parseSubSec(const exif::Tag *subsec);
+        bool parseOffsetTime(const exif::Tag *offset, int &offsetSeconds);
 
         double extractCaptureTime();
         int extractImageOrientation();
@@ -199,18 +209,24 @@ namespace ddb
     };
 
     /**
-     * @brief Context for caching Exiv2 image and parser to avoid duplicate file reads.
+     * @brief Context for caching the parsed metadata of an image between fingerprint and parseEntry.
      *
-     * This struct allows fingerprint() and parseEntry() to share the same Exiv2::Image
-     * and ExifParser instance, eliminating the need to open and read the file twice.
+     * fingerprint() and parseEntry() share the outcome of the metadata read, so the file is read
+     * once: the ExifParser that owns the metadata, or the answer that the file has none.
      */
     struct FingerprintContext
     {
-        std::unique_ptr<Exiv2::Image> exivImage;
+        // Null when the file has no metadata the reader can give, or when it was not read
         std::unique_ptr<ExifParser> parser;
         GeoLocation geo;
         bool hasGeo = false;
-        bool populated = false;
+        // The reader was asked for the metadata of the file, whatever it answered: parsing the
+        // entry takes parser as it is instead of asking again
+        bool metadataRead = false;
+        // The read of the file that parseEntry started before hashing it
+        // (EntryHandler::prefetch), so the reader works while the file is hashed: detection
+        // takes its result instead of reading. Empty outside parseEntry.
+        exif::PendingRead pendingRead;
 
         FingerprintContext() = default;
 
@@ -221,14 +237,14 @@ namespace ddb
         FingerprintContext &operator=(FingerprintContext &&) = default;
     };
 
-    // Exiv2::ImageFactory::open of a file. Exiv2 0.28 opens a file name with fopen, which on
-    // Windows reads it in the ANSI code page (or the CRT locale): there a non-ASCII name is
-    // read into memory first (mio.h, "Path encoding"). Throws Exiv2::Error like the factory.
-    Exiv2::Image::UniquePtr openExivImage(const fs::path &path);
-
-    // image.writeMetadata() for an image of openExivImage(path): an image read into memory
-    // is written back to path
-    void writeExivMetadata(Exiv2::Image &image, const fs::path &path);
+    // Reads the metadata of a file with the reader of the process and returns a parser that owns
+    // it. nullptr, with a DEBUG log, when the file has no metadata the reader can give (it is not
+    // an image, it cannot be opened, its metadata is damaged): callers treat that as an image
+    // without EXIF. Throws what the reader throws when the reader itself cannot work
+    // (MetadataHelperException, IndexException).
+    std::unique_ptr<ExifParser> readExifParser(const fs::path &path);
+    // The same, of the result of a read of `path` that was already started (it is taken)
+    std::unique_ptr<ExifParser> readExifParser(const fs::path &path, exif::PendingRead &pending);
 
 }
 

@@ -786,16 +786,15 @@ TEST(multispectral, mergePreservesGpsFromExif) {
     double srcAlt = 120.5;
     for (const auto &p : inputs) {
         ExifEditor editor(p);
-        editor.SetGPS(srcLat, srcLon, srcAlt);
+        ASSERT_TRUE(editor.SetGPS(srcLat, srcLon, srcAlt).empty());
     }
 
     // Verify GPS was written to sources
     {
-        auto img = Exiv2::ImageFactory::open(inputs[0]);
-        img->readMetadata();
-        ExifParser parser(img.get());
+        const auto parser = readExifParser(inputs[0]);
+        ASSERT_NE(parser, nullptr);
         GeoLocation geo;
-        ASSERT_TRUE(parser.extractGeo(geo));
+        ASSERT_TRUE(parser->extractGeo(geo));
         EXPECT_NEAR(geo.latitude, srcLat, 0.001);
     }
 
@@ -805,11 +804,10 @@ TEST(multispectral, mergePreservesGpsFromExif) {
     EXPECT_TRUE(fs::exists(outputPath));
 
     // Verify GPS is preserved in output
-    auto outImg = Exiv2::ImageFactory::open(outputPath.string());
-    outImg->readMetadata();
-    ExifParser outParser(outImg.get());
+    const auto outParser = readExifParser(outputPath);
+    ASSERT_NE(outParser, nullptr);
     GeoLocation outGeo;
-    ASSERT_TRUE(outParser.extractGeo(outGeo));
+    ASSERT_TRUE(outParser->extractGeo(outGeo));
     EXPECT_NEAR(outGeo.latitude, srcLat, 0.001);
     EXPECT_NEAR(outGeo.longitude, srcLon, 0.001);
     EXPECT_NEAR(outGeo.altitude, srcAlt, 1.0);
@@ -830,10 +828,9 @@ TEST(multispectral, mergePreservesGpsWithRealData) {
     // Read GPS from first source
     GeoLocation srcGeo;
     {
-        auto img = Exiv2::ImageFactory::open(inputs[0]);
-        img->readMetadata();
-        ExifParser parser(img.get());
-        ASSERT_TRUE(parser.extractGeo(srcGeo));
+        const auto parser = readExifParser(inputs[0]);
+        ASSERT_NE(parser, nullptr);
+        ASSERT_TRUE(parser->extractGeo(srcGeo));
         EXPECT_NEAR(srcGeo.latitude, 50.98, 0.01);
         EXPECT_NEAR(srcGeo.longitude, 21.43, 0.01);
     }
@@ -850,11 +847,10 @@ TEST(multispectral, mergePreservesGpsWithRealData) {
     GDALClose(hOut);
 
     // Verify GPS is preserved
-    auto outImg = Exiv2::ImageFactory::open(outputPath.string());
-    outImg->readMetadata();
-    ExifParser outParser(outImg.get());
+    const auto outParser = readExifParser(outputPath);
+    ASSERT_NE(outParser, nullptr);
     GeoLocation outGeo;
-    ASSERT_TRUE(outParser.extractGeo(outGeo));
+    ASSERT_TRUE(outParser->extractGeo(outGeo));
     EXPECT_NEAR(outGeo.latitude, srcGeo.latitude, 0.001);
     EXPECT_NEAR(outGeo.longitude, srcGeo.longitude, 0.001);
     EXPECT_NEAR(outGeo.altitude, srcGeo.altitude, 1.0);

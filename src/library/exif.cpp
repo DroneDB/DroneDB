@@ -11,51 +11,41 @@
 #include "mio.h"
 
 #include <algorithm>
-#include <fstream>
 #include <optional>
 
 namespace ddb
 {
 
-    Exiv2::ExifData::const_iterator ExifParser::findExifKey(const std::string &key)
+    const exif::Tag *ExifParser::findExifKey(const std::string &key)
     {
-        return findExifKey({key});
+        return metadata->findExif(key);
     }
 
-    // Find the first available key, or exifData::end() if none exist
-    Exiv2::ExifData::const_iterator ExifParser::findExifKey(const std::initializer_list<std::string> &keys)
+    // Find the first available key, or nullptr if none exist
+    const exif::Tag *ExifParser::findExifKey(const std::initializer_list<std::string> &keys)
     {
         for (auto &k : keys)
         {
-            auto it = exifData.findKey(Exiv2::ExifKey(k));
-            if (it != exifData.end())
-                return it;
+            if (const auto *tag = metadata->findExif(k))
+                return tag;
         }
-        return exifData.end();
+        return nullptr;
     }
 
-    Exiv2::XmpData::const_iterator ExifParser::findXmpKey(const std::string &key)
+    const exif::Tag *ExifParser::findXmpKey(const std::string &key)
     {
-        return findXmpKey({key});
+        return metadata->findXmp(key);
     }
 
-    // Find the first available key, or xmpData::end() if none exist
-    Exiv2::XmpData::const_iterator ExifParser::findXmpKey(const std::initializer_list<std::string> &keys)
+    // Find the first available key, or nullptr if none exist
+    const exif::Tag *ExifParser::findXmpKey(const std::initializer_list<std::string> &keys)
     {
         for (auto &k : keys)
         {
-            try
-            {
-                auto it = xmpData.findKey(Exiv2::XmpKey(k));
-                if (it != xmpData.end())
-                    return it;
-            }
-            catch (Exiv2::Error &)
-            {
-                // Do nothing
-            }
+            if (const auto *tag = metadata->findXmp(k))
+                return tag;
         }
-        return xmpData.end();
+        return nullptr;
     }
 
     ImageSize ExifParser::extractImageSize()
@@ -63,18 +53,18 @@ namespace ddb
         //    auto imgWidth = findExifKey({"Exif.Photo.PixelXDimension", "Exif.Image.ImageWidth"});
         //    auto imgHeight = findExifKey({"Exif.Photo.PixelYDimension", "Exif.Image.ImageLength"});
 
-        //    if (imgWidth != exifData.end() && imgHeight != exifData.end()) {
+        //    if (imgWidth && imgHeight) {
         //        return ImageSize(static_cast<int>(imgWidth->toInt64()), static_cast<int>(imgHeight->toInt64()));
         //    }
 
-        return ImageSize(image->pixelWidth(), image->pixelHeight());
+        return ImageSize(metadata->width(), metadata->height());
     }
 
     ImageSize ExifParser::extractVideoSize()
     {
         auto xmpWidth = findXmpKey({"Xmp.video.Width"});
         auto xmpHeight = findXmpKey({"Xmp.video.Height"});
-        if (xmpWidth != xmpData.end() && xmpHeight != xmpData.end())
+        if (xmpWidth && xmpHeight)
         {
             try
             {
@@ -122,7 +112,7 @@ namespace ddb
     {
         auto k = findExifKey({"Exif.Photo.LensMake", "Exif.Image.Make"});
 
-        if (k != exifData.end())
+        if (k)
         {
             return k->toString();
         }
@@ -136,7 +126,7 @@ namespace ddb
     {
         auto k = findExifKey({"Exif.Image.Model", "Exif.Photo.LensModel"});
 
-        if (k != exifData.end())
+        if (k)
         {
             return k->toString();
         }
@@ -181,12 +171,12 @@ namespace ddb
             auto focal35 = findExifKey("Exif.Photo.FocalLengthIn35mmFilm");
             auto focal = findExifKey("Exif.Photo.FocalLength");
 
-            if (focal35 != exifData.end() && focal35->toFloat() > 0)
+            if (focal35 && focal35->toFloat() > 0)
             {
                 f.length35 = static_cast<double>(focal35->toFloat());
                 f.length = (f.length35 / 36.0) * sensorWidth;
             }
-            else if (focal != exifData.end() && focal->toFloat() > 0)
+            else if (focal && focal->toFloat() > 0)
             {
                 f.length = static_cast<double>(focal->toFloat());
                 f.length35 = (36.0 * f.length) / sensorWidth;
@@ -205,7 +195,7 @@ namespace ddb
         auto fXRes = findExifKey("Exif.Photo.FocalPlaneXResolution");
         auto fYRes = findExifKey("Exif.Photo.FocalPlaneYResolution");
 
-        if (fUnit != exifData.end() && fXRes != exifData.end() && fYRes != exifData.end())
+        if (fUnit && fXRes && fYRes)
         {
             long resolutionUnit = fUnit->toInt64();
             double mmPerUnit = getMmPerUnit(resolutionUnit);
@@ -340,26 +330,26 @@ namespace ddb
         auto longitude = findExifKey({"Exif.GPSInfo.GPSLongitude"});
         auto longitudeRef = findExifKey({"Exif.GPSInfo.GPSLongitudeRef"});
 
-        if (latitude == exifData.end() || longitude == exifData.end())
+        if (!latitude || !longitude)
             return false;
 
         geo.latitude = geoToDecimal(latitude, latitudeRef);
         geo.longitude = geoToDecimal(longitude, longitudeRef);
 
         auto altitude = findExifKey({"Exif.GPSInfo.GPSAltitude"});
-        if (altitude != exifData.end())
+        if (altitude)
         {
             geo.altitude = evalFrac(altitude->toRational());
 
             auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
-            if (altitudeRef != exifData.end())
+            if (altitudeRef)
             {
                 geo.altitude *= altitudeRef->toInt64() == 1 ? -1 : 1;
             }
         }
 
         auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
-        if (xmpAltitude != xmpData.end())
+        if (xmpAltitude)
         {
             geo.altitude = static_cast<double>(xmpAltitude->toFloat());
         }
@@ -368,12 +358,12 @@ namespace ddb
         // certain models (e.g. Mavic Air) do not have sufficient
         // precision in the EXIF coordinates
         auto xmpLatitude = findXmpKey({"Xmp.drone-dji.Latitude"});
-        if (xmpLatitude != xmpData.end())
+        if (xmpLatitude)
         {
             geo.latitude = xmpLatitude->toFloat();
         }
         auto xmpLongitude = findXmpKey({"Xmp.drone-dji.Longitude"});
-        if (xmpLongitude != xmpData.end())
+        if (xmpLongitude)
         {
             geo.longitude = xmpLongitude->toFloat();
         }
@@ -386,14 +376,14 @@ namespace ddb
     {
         auto xmpLat = findXmpKey({"Xmp.drone-dji.Latitude"});
         auto xmpLon = findXmpKey({"Xmp.drone-dji.Longitude"});
-        if (xmpLat == xmpData.end() || xmpLon == xmpData.end())
+        if (!xmpLat || !xmpLon)
             return false;
 
         geo.latitude = static_cast<double>(xmpLat->toFloat());
         geo.longitude = static_cast<double>(xmpLon->toFloat());
 
         auto xmpAlt = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
-        if (xmpAlt != xmpData.end())
+        if (xmpAlt)
             geo.altitude = static_cast<double>(xmpAlt->toFloat());
 
         return true;
@@ -406,7 +396,7 @@ namespace ddb
             return true;
 
         auto gpsCoordinates = findXmpKey({"Xmp.video.GPSCoordinates"});
-        if (gpsCoordinates != xmpData.end())
+        if (gpsCoordinates)
             return parseVideoGpsCoordinates(gpsCoordinates->toString(), geo);
 
         return false;
@@ -416,7 +406,7 @@ namespace ddb
     {
         // Some drones have a value for relative altitude
         auto k = findXmpKey("Xmp.drone-dji.RelativeAltitude");
-        if (k != xmpData.end())
+        if (k)
         {
             relAltitude = static_cast<double>(k->toFloat());
             return true;
@@ -435,14 +425,14 @@ namespace ddb
     }
 
     // Converts a geotag location to decimal degrees
-    inline double ExifParser::geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag)
+    inline double ExifParser::geoToDecimal(const exif::Tag *geoTag, const exif::Tag *geoRefTag)
     {
-        if (geoTag == exifData.end())
+        if (!geoTag)
             return 0.0;
 
         // N/S, W/E
         double sign = 1.0;
-        if (geoRefTag != exifData.end())
+        if (geoRefTag)
         {
             std::string ref = geoRefTag->toString();
             str::toUpper(ref);
@@ -462,7 +452,7 @@ namespace ddb
     }
 
     // Evaluates a rational
-    double ExifParser::evalFrac(const Exiv2::Rational &rational)
+    double ExifParser::evalFrac(const exif::Rational &rational)
     {
         if (rational.second == 0)
             return 0.0;
@@ -470,9 +460,9 @@ namespace ddb
     }
 
     // Helper: parse SubSecTime string into milliseconds
-    double ExifParser::parseSubSec(const Exiv2::ExifData::const_iterator &subsec)
+    double ExifParser::parseSubSec(const exif::Tag *subsec)
     {
-        if (subsec == exifData.end() || subsec->count() == 0)
+        if (!subsec || subsec->count() == 0)
             return 0.0;
 
         double ss = static_cast<double>(subsec->toInt64());
@@ -494,9 +484,9 @@ namespace ddb
     }
 
     // Helper: parse OffsetTime string (e.g. "+02:00", "-05:30") into a UTC offset in seconds
-    bool ExifParser::parseOffsetTime(const Exiv2::ExifData::const_iterator &offset, int &offsetSeconds)
+    bool ExifParser::parseOffsetTime(const exif::Tag *offset, int &offsetSeconds)
     {
-        if (offset == exifData.end())
+        if (!offset)
             return false;
 
         std::string s = offset->toString();
@@ -551,7 +541,7 @@ namespace ddb
     std::optional<double> ExifParser::captureTimeFromXmpVideo()
     {
         auto xmpDate = findXmpKey({"Xmp.video.DateUTC", "Xmp.video.MediaCreateDate"});
-        if (xmpDate == xmpData.end())
+        if (!xmpDate)
             return std::nullopt;
 
         try
@@ -581,7 +571,7 @@ namespace ddb
     {
         auto datestamp = findExifKey("Exif.GPSInfo.GPSDateStamp");
         auto timestamp = findExifKey("Exif.GPSInfo.GPSTimeStamp");
-        if (datestamp == exifData.end() || timestamp == exifData.end())
+        if (!datestamp || !timestamp)
             return std::nullopt;
 
         int year, month, day;
@@ -616,7 +606,7 @@ namespace ddb
         for (const auto &t : dateTimeTriples)
         {
             auto time = findExifKey(t.dateTimeKey);
-            if (time == exifData.end())
+            if (!time)
                 continue;
 
             auto offset = findExifKey(t.offsetKey);
@@ -652,7 +642,7 @@ namespace ddb
         for (const auto &t : dateTimeTriples)
         {
             auto time = findExifKey(t.dateTimeKey);
-            if (time == exifData.end())
+            if (!time)
                 continue;
 
             const auto local = parseExifDateTime(time->toString());
@@ -706,7 +696,7 @@ namespace ddb
     int ExifParser::extractImageOrientation()
     {
         auto k = findExifKey({"Exif.Image.Orientation"});
-        if (k != exifData.end())
+        if (k)
         {
             return static_cast<int>(k->toInt64());
         }
@@ -720,7 +710,7 @@ namespace ddb
         auto yk = findXmpKey({"Xmp.drone-dji.GimbalYawDegree", "Xmp.drone-dji.FlightYawDegree", "Xmp.Camera.Yaw"});
         auto rk = findXmpKey({"Xmp.drone-dji.GimbalRollDegree", "Xmp.Camera.Roll"});
 
-        if (pk == xmpData.end() || yk == xmpData.end() || rk == xmpData.end())
+        if (!pk || !yk || !rk)
         {
             cameraOri.pitch = -90;
             cameraOri.yaw = 0;
@@ -748,7 +738,7 @@ namespace ddb
         auto yk = findXmpKey({"Xmp.drone-dji.FlightYSpeed"});
         auto zk = findXmpKey({"Xmp.drone-dji.FlightZSpeed"});
 
-        if (xk != xmpData.end() && yk != xmpData.end() && zk != xmpData.end())
+        if (xk && yk && zk)
         {
             speed.x = static_cast<double>(xk->toFloat());
             speed.y = static_cast<double>(yk->toFloat());
@@ -758,13 +748,13 @@ namespace ddb
 
         // Priority 2: EXIF standard GPS speed (scalar only)
         auto gpsSpeed = findExifKey("Exif.GPSInfo.GPSSpeed");
-        if (gpsSpeed != exifData.end())
+        if (gpsSpeed)
         {
             double speedVal = evalFrac(gpsSpeed->toRational());
 
             auto gpsSpeedRef = findExifKey("Exif.GPSInfo.GPSSpeedRef");
             std::string ref = "K"; // Default: km/h
-            if (gpsSpeedRef != exifData.end())
+            if (gpsSpeedRef)
                 ref = gpsSpeedRef->toString();
 
             // Convert to m/s
@@ -796,12 +786,12 @@ namespace ddb
         auto xyAcc = findXmpKey({"Xmp.Camera.GPSXYAccuracy"});
         auto zAcc = findXmpKey({"Xmp.Camera.GPSZAccuracy"});
 
-        if (xyAcc != xmpData.end())
+        if (xyAcc)
         {
             accuracy.xyAccuracy = static_cast<double>(xyAcc->toFloat());
             found = true;
         }
-        if (zAcc != xmpData.end())
+        if (zAcc)
         {
             accuracy.zAccuracy = static_cast<double>(zAcc->toFloat());
             found = true;
@@ -814,14 +804,14 @@ namespace ddb
         auto rtkLat = findXmpKey({"Xmp.drone-dji.RtkStdLat"});
         auto rtkHgt = findXmpKey({"Xmp.drone-dji.RtkStdHgt"});
 
-        if (rtkLon != xmpData.end() && rtkLat != xmpData.end())
+        if (rtkLon && rtkLat)
         {
             double lon = static_cast<double>(rtkLon->toFloat());
             double lat = static_cast<double>(rtkLat->toFloat());
             accuracy.xyAccuracy = std::sqrt(lon * lon + lat * lat);
             found = true;
         }
-        if (rtkHgt != xmpData.end())
+        if (rtkHgt)
         {
             accuracy.zAccuracy = static_cast<double>(rtkHgt->toFloat());
             found = true;
@@ -831,14 +821,14 @@ namespace ddb
 
         // Priority 3: EXIF standard tags
         auto hPosError = findExifKey("Exif.GPSInfo.GPSHPositioningError");
-        if (hPosError != exifData.end())
+        if (hPosError)
         {
             accuracy.xyAccuracy = evalFrac(hPosError->toRational());
             found = true;
         }
 
         auto gpsDop = findExifKey("Exif.GPSInfo.GPSDOP");
-        if (gpsDop != exifData.end())
+        if (gpsDop)
         {
             accuracy.dop = evalFrac(gpsDop->toRational());
             found = true;
@@ -850,28 +840,28 @@ namespace ddb
     bool ExifParser::extractGpsDirection(GpsDirection &direction)
     {
         auto imgDir = findExifKey("Exif.GPSInfo.GPSImgDirection");
-        if (imgDir != exifData.end())
+        if (imgDir)
         {
             direction.imgDirection = evalFrac(imgDir->toRational());
 
             // Check reference: T = true north (default), M = magnetic north
             auto imgDirRef = findExifKey("Exif.GPSInfo.GPSImgDirectionRef");
             direction.imgDirectionRef = "T";
-            if (imgDirRef != exifData.end())
+            if (imgDirRef)
                 direction.imgDirectionRef = imgDirRef->toString();
 
             direction.hasImgDirection = true;
         }
 
         auto track = findExifKey("Exif.GPSInfo.GPSTrack");
-        if (track != exifData.end())
+        if (track)
         {
             direction.track = evalFrac(track->toRational());
 
             // Check reference: T = true north (default), M = magnetic north
             auto trackRef = findExifKey("Exif.GPSInfo.GPSTrackRef");
             direction.trackRef = "T";
-            if (trackRef != exifData.end())
+            if (trackRef)
                 direction.trackRef = trackRef->toString();
 
             direction.hasTrack = true;
@@ -903,22 +893,22 @@ namespace ddb
         auto posePitch = findXmpKey({"Xmp.GPano.PosePitchDegrees"});
         auto poseRoll = findXmpKey({"Xmp.GPano.PoseRollDegrees"});
 
-        if (projectionType != xmpData.end())
+        if (projectionType)
             info.projectionType = projectionType->toString();
-        if (croppedWidth != xmpData.end() && croppedHeight != xmpData.end())
+        if (croppedWidth && croppedHeight)
         {
             info.croppedWidth = croppedWidth->toInt64();
             info.croppedHeight = croppedHeight->toInt64();
         }
-        if (croppedX != xmpData.end())
+        if (croppedX)
             info.croppedX = croppedX->toInt64();
-        if (croppedY != xmpData.end())
+        if (croppedY)
             info.croppedY = croppedY->toInt64();
-        if (poseHeading != xmpData.end())
+        if (poseHeading)
             info.poseHeading = poseHeading->toFloat();
-        if (posePitch != xmpData.end())
+        if (posePitch)
             info.posePitch = posePitch->toFloat();
-        if (poseRoll != xmpData.end())
+        if (poseRoll)
             info.poseRoll = poseRoll->toFloat();
 
         return true;
@@ -926,12 +916,12 @@ namespace ddb
 
     bool ExifParser::hasExif()
     {
-        return !exifData.empty();
+        return metadata->hasExif();
     }
 
     bool ExifParser::hasXmp()
     {
-        return !xmpData.empty();
+        return metadata->hasXmp();
     }
 
     bool ExifParser::hasTags()
@@ -939,43 +929,27 @@ namespace ddb
         return this->hasExif() || this->hasXmp();
     }
 
-    Exiv2::Image::UniquePtr openExivImage(const fs::path &path)
+    namespace
     {
-#ifdef _WIN32
-        const std::string utf8 = io::toUtf8(path);
-        if (!std::all_of(utf8.begin(), utf8.end(), [](unsigned char c) { return c < 0x80; }))
+        std::unique_ptr<ExifParser> parserOf(const fs::path &path, exif::ReadResult result)
         {
-            const std::vector<uint8_t> data = io::readAllBytes(path);
-            auto memory = std::make_unique<Exiv2::MemIo>();
-            memory->write(data.data(), data.size());
-            // Like the path overload (the one used for an ASCII path and on every other
-            // platform): data of no known image type is an Exiv2::Error, which the callers
-            // handle, where the BasicIo overload returns nullptr
-            auto image = Exiv2::ImageFactory::open(std::move(memory));
-            if (!image)
-                throw Exiv2::Error(Exiv2::ErrorCode::kerFileContainsUnknownImageType, utf8);
-            return image;
+            if (!result.metadata)
+            {
+                LOGD << "Cannot read EXIF data: " << io::toUtf8(path) << (result.message.empty() ? "" : " (" + result.message + ")");
+                return nullptr;
+            }
+            return std::make_unique<ExifParser>(std::make_shared<const exif::ImageMetadata>(std::move(*result.metadata)));
         }
-        return Exiv2::ImageFactory::open(utf8);
-#else
-        return Exiv2::ImageFactory::open(path.native());
-#endif
+    } // namespace
+
+    std::unique_ptr<ExifParser> readExifParser(const fs::path &path)
+    {
+        return parserOf(path, exif::metadataReader().read(path));
     }
 
-    void writeExivMetadata(Exiv2::Image &image, const fs::path &path)
+    std::unique_ptr<ExifParser> readExifParser(const fs::path &path, exif::PendingRead &pending)
     {
-        image.writeMetadata();
-#ifdef _WIN32
-        if (auto *memory = dynamic_cast<Exiv2::MemIo *>(&image.io()))
-        {
-            std::ofstream out(path, std::ios::binary | std::ios::trunc);
-            out.write(reinterpret_cast<const char *>(memory->mmap()), static_cast<std::streamsize>(memory->size()));
-            if (!out)
-                throw FSException("Cannot write " + io::toUtf8(path));
-        }
-#else
-        (void)path;
-#endif
+        return parserOf(path, pending.get());
     }
 
 }

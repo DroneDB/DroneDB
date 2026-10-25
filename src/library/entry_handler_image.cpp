@@ -5,7 +5,6 @@
 // Image, GeoImage, Panorama, GeoPanorama, Video and GeoVideo entries: photos and videos read
 // through their EXIF/XMP tags. The Image handler also detects GeoRaster TIFFs.
 
-#include <exiv2/exiv2.hpp>
 #include <memory>
 
 #include "entry.h"
@@ -18,6 +17,29 @@ namespace ddb {
 
 namespace {
 
+// The extensions of the family, by what detection does with them
+bool isTiff(const io::Path &p)
+{
+    return p.checkExtension({"tif", "tiff"});
+}
+
+bool isOtherImage(const io::Path &p)
+{
+    return p.checkExtension({"jpg", "jpeg", "dng", "png", "gif", "webp"});
+}
+
+bool isVideo(const io::Path &p)
+{
+    return p.checkExtension({"mp4", "mov", "webm", "m4v", "avi", "mkv"});
+}
+
+// Detection reads the metadata of every such file, whatever it holds. Not of every TIFF: GDAL
+// looks at a TIFF first, and one with a projection is a GeoRaster, whose metadata is not read.
+bool detectionAlwaysReadsMetadata(const io::Path &p)
+{
+    return isOtherImage(p) || isVideo(p);
+}
+
 // The image family is told apart by reading the file: a TIFF with a projection is a
 // GeoRaster, an image twice as wide as high a Panorama, EXIF/XMP GPS tags make it Geo*.
 EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
@@ -25,11 +47,8 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
     EntryType type = EntryType::Generic;
     io::Path p(path);
 
-    bool jpg = p.checkExtension({"jpg", "jpeg"});
-    bool dng = p.checkExtension({"dng"});
-    bool tif = p.checkExtension({"tif", "tiff"});
-    bool nongeoImage = p.checkExtension({"png", "gif", "webp"});
-    bool video = p.checkExtension({"mp4", "mov", "webm", "m4v", "avi", "mkv"});
+    bool tif = isTiff(p);
+    bool video = isVideo(p);
 
     bool georaster = false;
 
@@ -50,29 +69,27 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
         }
     }
 
-    bool image = (jpg || tif || dng || nongeoImage) && !georaster;
+    bool image = (tif || isOtherImage(p)) && !georaster;
 
     if (image || video)
     {
         // A normal image or video by default (refined later)
         type = image ? EntryType::Image : EntryType::Video;
 
-        try
+        // A file the reader has no metadata for (not an image, damaged metadata) stays a plain
+        // image or video, without EXIF. The read prefetch() started, when there is one.
+        ctx.parser = ctx.pendingRead.valid() ? readExifParser(path, ctx.pendingRead) : readExifParser(path);
+        ctx.metadataRead = true;
+
+        if (ctx.parser)
         {
-            ctx.exivImage = openExivImage(path);
-            if (!ctx.exivImage.get())
-                throw IndexException("Cannot open " + io::toUtf8(path));
-
-            ctx.exivImage->readMetadata();
-            ctx.parser = std::make_unique<ExifParser>(ctx.exivImage.get());
-            ctx.populated = true;
-
             if (type == EntryType::Image)
             {
-                // Panorama? Exiv2 reports 0x0 when the dimensions are unknown
+                // Panorama? The reader reports 0x0 when the dimensions are unknown
                 // (EXIF-less or truncated files): never divide by the height.
-                const auto w = static_cast<uint64_t>(ctx.exivImage->pixelWidth());
-                const auto h = static_cast<uint64_t>(ctx.exivImage->pixelHeight());
+                const auto size = ctx.parser->extractImageSize();
+                const auto w = static_cast<uint64_t>(size.width);
+                const auto h = static_cast<uint64_t>(size.height);
                 if (h > 0 && w >= 2 * h)
                     type = EntryType::Panorama;
             }
@@ -94,11 +111,6 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
                     // Not a georeferenced image, just a plain image
                 }
             }
-        }
-        catch (Exiv2::Error &)
-        {
-            LOGD << "Cannot read EXIF data: " << io::toUtf8(path);
-            ctx.populated = false;
         }
     }
     else if (georaster)
@@ -211,43 +223,28 @@ void readPanorama(ExifParser *e, Entry &entry)
 // The EXIF/XMP parser of an image, with what keeps it alive
 struct ImageParser
 {
-    std::unique_ptr<Exiv2::Image> image; // destroyed after the parser that reads it
-    std::unique_ptr<ExifParser> owned;   // null when the parser belongs to the fingerprint context
-    ExifParser *parser = nullptr;        // null when the file cannot be read
+    std::unique_ptr<ExifParser> owned; // null when the parser belongs to the fingerprint context
+    ExifParser *parser = nullptr;      // null when the file has no metadata
 };
 
-// The parser of the fingerprint context if it has one (populated by fingerprint), else one that
-// opens the file
+// The parser of the fingerprint context when the fingerprint read the file (null when the file
+// has no metadata: asking again would get the same answer), else one that reads the file
 ImageParser openImageParser(const fs::path &path, FingerprintContext &ctx)
 {
     ImageParser result;
-    if (ctx.populated && ctx.parser)
+    if (ctx.metadataRead)
     {
         result.parser = ctx.parser.get();
         return result;
     }
 
-    // Fallback: open file if context not populated
-    try
-    {
-        result.image = openExivImage(path);
-        if (!result.image.get())
-            throw IndexException("Cannot open " + io::toUtf8(path));
-
-        result.image->readMetadata();
-        result.owned = std::make_unique<ExifParser>(result.image.get());
-        result.parser = result.owned.get();
-    }
-    catch (Exiv2::Error &)
-    {
-        LOGD << "Cannot read EXIF data: " << io::toUtf8(path);
-        result.parser = nullptr;
-    }
+    // Fallback: the entry is parsed without the fingerprint having read the file
+    result.owned = readExifParser(path);
+    result.parser = result.owned.get();
     return result;
 }
 
-// The dimensions, even without EXIF tags, since pixelWidth()/pixelHeight() read from the file
-// structure. Video dimensions still require XMP metadata (Xmp.video.Width/Height);
+// The dimensions, even without EXIF tags, since the reader takes them from the file structure. Video dimensions still require XMP metadata (Xmp.video.Width/Height);
 // metadata-independent video probing is not currently supported.
 void readDimensions(ExifParser *e, bool image, bool video, Entry &entry)
 {
@@ -294,7 +291,7 @@ void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &
         // Reuse geo from context if already extracted by fingerprint
         GeoLocation geo;
         bool hasGeo = false;
-        if (ctx.populated && ctx.hasGeo)
+        if (ctx.hasGeo)
         {
             geo = ctx.geo;
             hasGeo = true;
@@ -346,6 +343,13 @@ class ImageEntryHandler : public EntryHandler {
 
     EntryType detect(const fs::path& path, FingerprintContext& ctx) const override {
         return detectImageFamily(path, ctx);
+    }
+
+    void prefetch(const fs::path& path, FingerprintContext& ctx) const override {
+        // A read left from another file goes first: it may hold the last helper
+        ctx.pendingRead = exif::PendingRead();
+        if (detectionAlwaysReadsMetadata(io::Path(path)))
+            ctx.pendingRead = exif::metadataReader().begin(path);
     }
 
     void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& ctx) const override {

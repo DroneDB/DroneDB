@@ -74,21 +74,15 @@ struct SourceGps {
 
 SourceGps readSourceGps(const std::string &path) {
     SourceGps gps;
-    try {
-        auto exivImage = openExivImage(io::fromUtf8(path));
-        if (exivImage.get()) {
-            exivImage->readMetadata();
-            ExifParser parser(exivImage.get());
-            gps.present = parser.extractGeo(gps.location);
-            if (gps.present) {
-                LOGD << "Read GPS from " << path
-                     << ": lat=" << gps.location.latitude
-                     << " lon=" << gps.location.longitude
-                     << " alt=" << gps.location.altitude;
-            }
+    // A file with no metadata the reader can give has no position
+    if (const auto parser = readExifParser(io::fromUtf8(path))) {
+        gps.present = parser->extractGeo(gps.location);
+        if (gps.present) {
+            LOGD << "Read GPS from " << path
+                 << ": lat=" << gps.location.latitude
+                 << " lon=" << gps.location.longitude
+                 << " alt=" << gps.location.altitude;
         }
-    } catch (const Exiv2::Error &e) {
-        LOGD << "Could not read EXIF GPS from " << path << ": " << e.what();
     }
     return gps;
 }
@@ -222,32 +216,31 @@ struct CameraGeometry {
 // gives the pixel pitch); what cannot be read stays 0
 CameraGeometry readCameraGeometry(const std::string &path, int rasterWidth) {
     CameraGeometry camera;
+
+    // A reader that cannot work (no metadata-util) is not a problem of this file and propagates
+    const auto parser = readExifParser(io::fromUtf8(path));
+    if (!parser) return camera;
+
     try {
-        auto exivImg = openExivImage(io::fromUtf8(path));
-        if (exivImg.get()) {
-            exivImg->readMetadata();
-            ExifParser p(exivImg.get());
+        auto flIt = parser->findXmpKey("Xmp.Camera.PerspectiveFocalLength");
+        if (flIt) {
+            try { camera.focalLength = std::stod(flIt->toString()); }
+            catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
+            catch (const std::out_of_range &) { /* out of range, ignore */ }
+        }
+        if (camera.focalLength <= 0) {
+            Focal f;
+            if (parser->computeFocal(f)) camera.focalLength = f.length;
+        }
 
-            auto flIt = p.findXmpKey("Xmp.Camera.PerspectiveFocalLength");
-            if (flIt != p.xmpEnd()) {
-                try { camera.focalLength = std::stod(flIt->toString()); }
-                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
-                catch (const std::out_of_range &) { /* out of range, ignore */ }
-            }
-            if (camera.focalLength <= 0) {
-                Focal f;
-                if (p.computeFocal(f)) camera.focalLength = f.length;
-            }
+        SensorSize ss;
+        if (parser->extractSensorSize(ss) && rasterWidth > 0) {
+            camera.pixelPitch = ss.width / rasterWidth;
+        }
 
-            SensorSize ss;
-            if (p.extractSensorSize(ss) && rasterWidth > 0) {
-                camera.pixelPitch = ss.width / rasterWidth;
-            }
-
-            CameraOrientation cameraOri;
-            if (p.extractCameraOrientation(cameraOri)) {
-                camera.yawDeg = cameraOri.yaw;
-            }
+        CameraOrientation cameraOri;
+        if (parser->extractCameraOrientation(cameraOri)) {
+            camera.yawDeg = cameraOri.yaw;
         }
     } catch (const std::exception &e) {
         LOGD << "GPS correction: failed to read EXIF for shift: " << e.what();
@@ -390,12 +383,18 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     // A no-op when the shift path already closed them
     merged.close();
 
-    // Write GPS coordinates from source to merged output
+    // Write GPS coordinates from source to merged output. A reader that cannot work (no metadata-util)
+    // propagates; a file that cannot be written does not fail the merge.
     if (srcGps.present) {
         try {
             ExifEditor editor(outputPath);
-            editor.SetGPS(srcGps.location.latitude, srcGps.location.longitude, srcGps.location.altitude);
-            LOGD << "GPS coordinates written to merged output: " << outputPath;
+            const auto failures = editor.SetGPS(srcGps.location.latitude, srcGps.location.longitude, srcGps.location.altitude);
+            if (failures.empty())
+                LOGD << "GPS coordinates written to merged output: " << outputPath;
+            else
+                LOGD << "Could not write GPS to " << outputPath << ": " << failures.front().message;
+        } catch (const MetadataHelperException &) {
+            throw;
         } catch (const std::exception &e) {
             LOGD << "Could not write GPS to " << outputPath << ": " << e.what();
         }

@@ -2,7 +2,12 @@
 # never be installed in host processes that load libddb (DDB-11 B6).
 add_subdirectory("url")
 add_subdirectory("base64")
+# libnexus is built for its ddb-nexus program (GPL-3.0), which libddb runs as a child process;
+# nothing of it is linked into libddb or the CLI
 add_subdirectory("libnexus")
+# metadata-util (GPL-2.0-or-later, Exiv2) is a separate program too: libddb sends it requests over
+# a pipe (exif_helper_pool.h) and links none of its code. It takes APP_VERSION from here.
+add_subdirectory("metadata-util")
 
 # SPZ - native Gaussian Splat (.spz) encoder/decoder (nianticlabs/spz, MIT).
 #
@@ -62,4 +67,4 @@ set(SRC_LIST
 )
 
 # Third-party headers do not count as our warnings (cmake/Warnings.cmake)
-ddb_system_includes(nxs nexus vcglib corto spz lazperf)
+ddb_system_includes(spz lazperf)

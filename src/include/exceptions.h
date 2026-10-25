@@ -97,6 +97,13 @@ namespace ddb
     {
         using AppException::AppException;
     };
+    // The program that reads image metadata (metadata-util) cannot be used: it is missing, does not
+    // start or speaks another protocol version. Not a problem of the file being indexed, so it
+    // is not an item error of ddb add (addErrorCode): the batch stops.
+    class MetadataHelperException : public AppException
+    {
+        using AppException::AppException;
+    };
     class NetException : public AppException
     {
         using AppException::AppException;

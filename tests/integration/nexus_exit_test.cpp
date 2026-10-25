@@ -2,43 +2,133 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// A host that runs the Nexus build on a worker thread (Registry: a Hangfire job) crashed with
-// SIGSEGV when the process ended, after the build had succeeded: libnexus kept its
-// QCoreApplication in a static that exit() destroyed on another thread than the one that created
-// it. The ddb CLI builds on its main thread and never saw it. The probe
-// (tests/helpers/nexus_probe.cpp) is its own process, because the crash is in exit().
+// Nexus files are written by ddb-nexus, a program of its own, so the Nexus code never lives in
+// a host process. Running it in-process once crashed hosts: one that ran the build on a worker
+// thread (Registry: a Hangfire job) died with SIGSEGV when the process ended, because the
+// application object the Nexus code created was destroyed by exit() on another thread than the
+// one that created it. These tests check what replaces it: the build from a worker thread
+// works, nothing of Nexus is loaded into the process, and a tool that is missing or fails is an
+// AppException that says why.
 
+#include <fstream>
+#include <string>
+#include <thread>
+
+#include "3d.h"
+#include "exceptions.h"
 #include "fs.h"
 #include "gtest/gtest.h"
+#include "helpers/process_test_utils.h"
 #include "mio.h"
-#include "process_runner.h"
+#include "nexus_runner.h"
 #include "test.h"
 #include "testarea.h"
+#include "tool_locator.h"
+#include "utils.h"
 
 namespace
 {
     using namespace ddb;
 
-    process::Result runProbe(const std::string &mode, const std::string &testName)
+    // A single triangle: the smallest model the build accepts
+    fs::path writeModel(TestArea &ta)
     {
-        const fs::path probe = io::getExeFolderPath() / DDB_NEXUS_PROBE_NAME;
-        EXPECT_TRUE(fs::exists(probe)) << probe;
-        TestArea ta(testName, true);
-        return process::run(probe, {mode, io::toUtf8(ta.getFolder())});
+        const fs::path obj = ta.getPath("model.obj");
+        std::ofstream(obj) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        return obj;
     }
 
-    // The control: the build and the process exit on the main thread
-    TEST(NexusExit, buildOnMainThread)
+    // buildNexus with the tool the variable names (a fake: ddbtest_child), looked up again
+    std::string buildWithTool(TestArea &ta, const fs::path &tool)
     {
-        const process::Result r = runProbe("main", TEST_NAME);
-        EXPECT_TRUE(r.success()) << r.describe() << "\n" << r.outputTail;
+        EnvVarGuard toolPath("DDB_NEXUS_PATH", io::toUtf8(tool));
+        nexus::findNexusBinary(true);
+        std::string message;
+        try
+        {
+            buildNexus(io::toUtf8(writeModel(ta)), io::toUtf8(ta.getPath("model.nxz")), true);
+            ADD_FAILURE() << "the build should have failed";
+        }
+        catch (const AppException &e)
+        {
+            message = e.what();
+        }
+        return message;
     }
 
-    // The process must end cleanly after the build ran on a thread that is gone
-    TEST(NexusExit, buildOnWorkerThreadThenExit)
+    bool processHasLoaded(const std::string &name)
     {
-        const process::Result r = runProbe("thread", TEST_NAME);
-        EXPECT_EQ(r.termSignal, 0) << r.describe() << "\n" << r.outputTail;
-        EXPECT_TRUE(r.success()) << r.describe() << "\n" << r.outputTail;
+        std::ifstream maps("/proc/self/maps");
+        for (std::string line; std::getline(maps, line);)
+            if (line.find(name) != std::string::npos)
+                return true;
+        return false;
+    }
+
+    void expectBuilt(const std::string &nxz)
+    {
+        std::error_code ec;
+        EXPECT_TRUE(fs::is_regular_file(io::fromUtf8(nxz), ec)) << nxz;
+        EXPECT_GT(fs::file_size(io::fromUtf8(nxz), ec), 0u) << nxz;
+    }
+
+    // The control: the build on the calling thread
+    TEST(NexusProcess, buildOnTheMainThread)
+    {
+        TestArea ta(TEST_NAME, true);
+        expectBuilt(buildNexus(io::toUtf8(writeModel(ta)), io::toUtf8(ta.getPath("model.nxz")), true));
+    }
+
+    // The thread that built is gone when the process ends: nothing it created is left to be
+    // destroyed on another thread
+    TEST(NexusProcess, buildOnAWorkerThreadThatThenEnds)
+    {
+        TestArea ta(TEST_NAME, true);
+        const std::string model = io::toUtf8(writeModel(ta));
+        const std::string nxz = io::toUtf8(ta.getPath("model.nxz"));
+        std::string built;
+        std::thread([&] { built = buildNexus(model, nxz, true); }).join();
+        expectBuilt(built);
+    }
+
+    TEST(NexusProcess, theBuildLoadsNoNexusCodeIntoThisProcess)
+    {
+#ifndef __linux__
+        GTEST_SKIP() << "reads /proc/self/maps";
+#else
+        TestArea ta(TEST_NAME, true);
+        expectBuilt(buildNexus(io::toUtf8(writeModel(ta)), io::toUtf8(ta.getPath("model.nxz")), true));
+        EXPECT_FALSE(processHasLoaded("libnxs"));
+#endif
+    }
+
+    TEST(NexusProcess, aMissingToolNamesItAndTheVariable)
+    {
+        TestArea ta(TEST_NAME, true);
+        const std::string message = buildWithTool(ta, ta.getPath("missing/ddb-nexus"));
+        EXPECT_NE(message.find("ddb-nexus"), std::string::npos) << message;
+        EXPECT_NE(message.find("DDB_NEXUS_PATH"), std::string::npos) << message;
+        EXPECT_FALSE(fs::exists(ta.getPath("model.nxz")));
+        nexus::findNexusBinary(true);
+    }
+
+    TEST(NexusProcess, aToolThatFailsIsReportedWithItsStatusAndItsLastOutput)
+    {
+        TestArea ta(TEST_NAME, true);
+        EnvVarGuard mode("DDB_TEST_CHILD_MODE", "fail");
+        const std::string message = buildWithTool(ta, testChildPath());
+        EXPECT_NE(message.find("ddb-nexus exited with code 1"), std::string::npos) << message;
+        EXPECT_NE(message.find("boom: the tool rejected its input"), std::string::npos) << message;
+        EXPECT_FALSE(fs::exists(ta.getPath("model.nxz")));
+        nexus::findNexusBinary(true);
+    }
+
+    TEST(NexusProcess, aToolThatWritesNothingIsAFailure)
+    {
+        TestArea ta(TEST_NAME, true);
+        EnvVarGuard mode("DDB_TEST_CHILD_MODE", "no-output");
+        const std::string message = buildWithTool(ta, testChildPath());
+        EXPECT_NE(message.find("wrote no output file"), std::string::npos) << message;
+        nexus::findNexusBinary(true);
     }
 } // namespace

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -179,6 +180,136 @@ namespace ddb
         // Command line for logging, quoted as the child will see it on Windows.
         std::string formatCommandLine(const fs::path &binary,
                                       const std::vector<std::string> &args);
+
+        struct SessionOptions
+        {
+            // Per-child environment overrides, as Options::envOverrides.
+            std::vector<std::pair<std::string, std::string>> envOverrides;
+
+            // Capacity in bytes of the ring buffer behind Session::stderrTail() (minimum 1).
+            size_t stderrCapacity = kDefaultOutputCapacity;
+
+            // Optional: called with each complete line the child writes to stderr (without the
+            // terminator; '\n' and '\r' both end a line, empty lines are skipped). It runs on the
+            // thread that is using the session, inside write(), readLine() or wait(); an
+            // exception it throws is swallowed.
+            std::function<void(const std::string &)> onStderrLine;
+        };
+
+        class SessionImpl;
+
+        // A long-lived child with a two-way channel: lines go to its stdin, lines come back on
+        // its stdout, and its stderr is a separate stream that is drained while the session is
+        // used (so a chatty child never blocks on a full pipe) and kept as a bounded tail for
+        // diagnostics. Meant for helper processes that serve many requests (JSON lines).
+        //
+        // The child is started like run() starts one: argv vector without a shell, the parent's
+        // environment plus envOverrides, no inherited descriptor/handle but its own stdin,
+        // stdout and stderr. Every pipe end the parent keeps is close-on-exec (POSIX) or not
+        // inheritable (Windows), so one session's child never holds another session's end open
+        // (a sibling holding a stdin would keep a helper from ever seeing EOF).
+        //
+        // Differences from run():
+        //   - no PR_SET_PDEATHSIG: it fires when the *thread* that spawned the child exits, and
+        //     hosts such as the Registry spawn from pool threads that come and go. A session
+        //     child is expected to exit when its stdin reaches EOF (closeStdin(), or the host
+        //     dying); on Windows it also runs in a kill-on-close Job Object held by the session;
+        //   - the host's signal dispositions are never touched and SIGPIPE need not be ignored:
+        //     writing to a child that is gone returns WriteStatus::Closed instead of raising it;
+        //   - no timeouts of its own: the caller passes a deadline to each blocking operation.
+        //
+        // A Session is used by one thread at a time (it may move between threads); distinct
+        // sessions are independent. It never throws CanceledException and never looks at the
+        // cancellation (cancellation.h): a caller that wants cancellation waits in slices
+        // shorter than the work it covers and checks cancel::isCanceled() between them, then
+        // kill()s the session. The destructor kills a child that is still running and reaps it.
+        class Session
+        {
+          public:
+            using Clock = std::chrono::steady_clock;
+
+            enum class ReadStatus
+            {
+                Line,    // a complete line was read
+                Eof,     // the child closed its stdout; line holds the unterminated rest, if any
+                Timeout, // the deadline passed first; nothing is lost, the next call goes on
+                TooLong  // the line is longer than the limit; the session should be discarded
+            };
+
+            struct ReadResult
+            {
+                ReadStatus status = ReadStatus::Eof;
+                std::string line; // without '\n' (and the '\r' before it)
+            };
+
+            enum class WriteStatus
+            {
+                Ok,
+                Closed, // stdin is closed or the child is gone
+                Timeout // the child did not read in time; part of the data may have been written
+            };
+
+            // How the child ended (valid once finished()).
+            struct ExitStatus
+            {
+                bool exited = false; // terminated normally (exitCode valid); false when killed
+                int exitCode = -1;
+                int termSignal = 0;  // POSIX: signal that terminated the child (0 = none)
+            };
+
+            Session();
+            ~Session();
+            Session(Session &&) noexcept;
+            Session &operator=(Session &&) noexcept;
+            Session(const Session &) = delete;
+            Session &operator=(const Session &) = delete;
+
+            // Starts binary (an explicit path; no PATH search) with args (argv[1..]); argv[0] is
+            // io::toUtf8(binary). False: startError() says why (missing file, not executable, no
+            // resources...). A session starts once.
+            bool start(const fs::path &binary,
+                       const std::vector<std::string> &args,
+                       const SessionOptions &options = SessionOptions());
+            const std::string &startError() const { return startError_; }
+            bool started() const { return impl_ != nullptr; }
+
+            // Sends bytes (writeLine adds the '\n') to the child's stdin, waiting for room until
+            // the deadline. Closed also after closeStdin().
+            WriteStatus write(const std::string &bytes, Clock::time_point deadline = Clock::time_point::max());
+            WriteStatus writeLine(const std::string &line, Clock::time_point deadline = Clock::time_point::max());
+
+            // The next line of the child's stdout, waiting for it until the deadline (already
+            // passed: only what is buffered or readable right now). At most maxBytes of line are
+            // accepted, so a runaway child cannot take the host's memory; bytes after the line
+            // stay buffered for the next call (answers to pipelined requests arrive in order).
+            ReadResult readLine(Clock::time_point deadline, size_t maxBytes);
+
+            // Closes the child's stdin: a helper that serves until EOF then exits. Idempotent.
+            void closeStdin();
+
+            // Waits until the child has exited (and been reaped) or the deadline passes; true when
+            // it has. The child's stdout is not read: a child blocked writing to a full stdout
+            // never exits, so read its answers first.
+            bool wait(Clock::time_point deadline);
+
+            // Kills the child (with its process group / job) and reaps it. No-op when it has been
+            // reaped.
+            void kill();
+
+            bool finished() const;           // the child has been reaped
+            ExitStatus exitStatus() const;
+            std::string describeExit() const; // "exited with code 3", "killed by signal 9 (Killed)"...
+
+            // The child's process id (0 before a successful start); stays valid after it exits.
+            unsigned long pid() const;
+
+            // The last stderrCapacity bytes the child wrote to stderr.
+            std::string stderrTail() const;
+
+          private:
+            std::unique_ptr<SessionImpl> impl_;
+            std::string startError_;
+        };
 
     } // namespace process
 

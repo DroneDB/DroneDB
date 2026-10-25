@@ -52,7 +52,7 @@ struct BandData {
 // The text of an XMP key, when the image has it
 std::optional<std::string> xmpText(ExifParser &parser, const char *key) {
     const auto it = parser.findXmpKey(key);
-    if (it == parser.xmpEnd()) return std::nullopt;
+    if (!it) return std::nullopt;
     return it->toString();
 }
 
@@ -78,9 +78,7 @@ void derivePixelPitch(ExifParser &parser, BandData &band, size_t index) {
     auto fXRes = parser.findExifKey("Exif.Photo.FocalPlaneXResolution");
     auto fYRes = parser.findExifKey("Exif.Photo.FocalPlaneYResolution");
 
-    if (fUnit != parser.exifEnd() &&
-        fXRes != parser.exifEnd() &&
-        fYRes != parser.exifEnd()) {
+    if (fUnit && fXRes && fYRes) {
         long unit = fUnit->toInt64();
         double rx = fXRes->toFloat();
         double ry = fYRes->toFloat();
@@ -165,75 +163,71 @@ void logIgnoredTags(ExifParser &parser, const std::string &bandName) {
 // Reads the EXIF/XMP of one band into band and info; a band whose metadata cannot be read keeps
 // its defaults
 void readBand(const std::string &path, size_t index, BandData &band, BandAlignmentInfo &info) {
-    try {
-        auto exivImage = openExivImage(io::fromUtf8(path));
-        if (!exivImage.get()) return;
-        exivImage->readMetadata();
-        ExifParser parser(exivImage.get());
+    // A file with no metadata the reader can give keeps the defaults
+    const auto parserPtr = readExifParser(io::fromUtf8(path));
+    if (!parserPtr) return;
+    ExifParser &parser = *parserPtr;
 
-        auto imgSize = parser.extractImageSize();
-        band.imageWidth = imgSize.width;
-        band.imageHeight = imgSize.height;
-        info.imageWidth = imgSize.width;
-        info.imageHeight = imgSize.height;
+    auto imgSize = parser.extractImageSize();
+    band.imageWidth = imgSize.width;
+    band.imageHeight = imgSize.height;
+    info.imageWidth = imgSize.width;
+    info.imageHeight = imgSize.height;
 
-        // Read BandName
-        if (const auto name = xmpText(parser, "Xmp.Camera.BandName")) {
-            band.bandName = *name;
-            info.bandName = band.bandName;
-        }
-
-        // Read CentralWavelength
-        if (const auto text = xmpText(parser, "Xmp.Camera.CentralWavelength")) {
-            if (const auto wavelength = parseInt(*text)) band.centralWavelength = *wavelength;
-            info.centralWavelength = band.centralWavelength;
-        }
-
-        // Detect thermal band
-        if (band.bandName == "LWIR" || band.centralWavelength > 7000) {
-            info.isThermal = true;
-        }
-
-        // Read RigCameraIndex
-        if (const auto text = xmpText(parser, "Xmp.Camera.RigCameraIndex")) {
-            if (const auto rig = parseInt(*text)) band.rigCameraIndex = *rig;
-        }
-
-        // Read PrincipalPoint (mm)
-        if (const auto text = xmpText(parser, "Xmp.Camera.PrincipalPoint")) {
-            if (parsePrincipalPoint(*text, band.ppMmX, band.ppMmY)) {
-                band.hasPP = true;
-            }
-        }
-
-        // Read PerspectiveFocalLength (mm)
-        if (const auto text = xmpText(parser, "Xmp.Camera.PerspectiveFocalLength")) {
-            if (const auto focal = parseDouble(*text)) band.focalLengthMm = *focal;
-        }
-
-        // Read DJI RelativeOpticalCenter
-        const auto rocX = xmpText(parser, "Xmp.drone-dji.RelativeOpticalCenterX");
-        const auto rocY = xmpText(parser, "Xmp.drone-dji.RelativeOpticalCenterY");
-        if (rocX && rocY) {
-            const auto x = parseDouble(*rocX);
-            const auto y = x ? parseDouble(*rocY) : std::nullopt;
-            if (x && y) {
-                band.relOptCenterX = *x;
-                band.relOptCenterY = *y;
-                band.hasRelOptCenter = true;
-            }
-        }
-
-        derivePixelPitch(parser, band, index);
-
-        // Do not mark detected here; detection status is set later
-        // when a shift source is actually selected and shifts computed.
-        // info.detected stays false (default) until then.
-
-        logIgnoredTags(parser, info.bandName);
-    } catch (const Exiv2::Error &e) {
-        LOGD << "Could not read EXIF/XMP from " << path << ": " << e.what();
+    // Read BandName
+    if (const auto name = xmpText(parser, "Xmp.Camera.BandName")) {
+        band.bandName = *name;
+        info.bandName = band.bandName;
     }
+
+    // Read CentralWavelength
+    if (const auto text = xmpText(parser, "Xmp.Camera.CentralWavelength")) {
+        if (const auto wavelength = parseInt(*text)) band.centralWavelength = *wavelength;
+        info.centralWavelength = band.centralWavelength;
+    }
+
+    // Detect thermal band
+    if (band.bandName == "LWIR" || band.centralWavelength > 7000) {
+        info.isThermal = true;
+    }
+
+    // Read RigCameraIndex
+    if (const auto text = xmpText(parser, "Xmp.Camera.RigCameraIndex")) {
+        if (const auto rig = parseInt(*text)) band.rigCameraIndex = *rig;
+    }
+
+    // Read PrincipalPoint (mm)
+    if (const auto text = xmpText(parser, "Xmp.Camera.PrincipalPoint")) {
+        if (parsePrincipalPoint(*text, band.ppMmX, band.ppMmY)) {
+            band.hasPP = true;
+        }
+    }
+
+    // Read PerspectiveFocalLength (mm)
+    if (const auto text = xmpText(parser, "Xmp.Camera.PerspectiveFocalLength")) {
+        if (const auto focal = parseDouble(*text)) band.focalLengthMm = *focal;
+    }
+
+    // Read DJI RelativeOpticalCenter
+    const auto rocX = xmpText(parser, "Xmp.drone-dji.RelativeOpticalCenterX");
+    const auto rocY = xmpText(parser, "Xmp.drone-dji.RelativeOpticalCenterY");
+    if (rocX && rocY) {
+        const auto x = parseDouble(*rocX);
+        const auto y = x ? parseDouble(*rocY) : std::nullopt;
+        if (x && y) {
+            band.relOptCenterX = *x;
+            band.relOptCenterY = *y;
+            band.hasRelOptCenter = true;
+        }
+    }
+
+    derivePixelPitch(parser, band, index);
+
+    // Do not mark detected here; detection status is set later
+    // when a shift source is actually selected and shifts computed.
+    // info.detected stays false (default) until then.
+
+    logIgnoredTags(parser, info.bandName);
 }
 
 // The reference band the others are aligned to: Green when there is one

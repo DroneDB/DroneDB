@@ -11,6 +11,17 @@
 
 #include <cstdlib>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <vector>
+#endif
+
 namespace ddb
 {
     namespace io
@@ -46,12 +57,31 @@ namespace ddb
             return toUtf8(fs::path(wide));
         }
 
+        // The process environment block (GetEnvironmentVariableW), not the CRT's copy that
+        // _wgetenv reads: a host that is not C++ (the .NET Registry sets the PATH its tools are
+        // found on with SetEnvironmentVariable) changes only the block, whereas _putenv_s
+        // changes both, so this sees every change.
         std::optional<std::string> getEnvUtf8(const char *name)
         {
-            const wchar_t *value = _wgetenv(toWide(name).c_str());
-            if (value == nullptr)
-                return std::nullopt;
-            return fromWide(value);
+            const std::wstring wideName = toWide(name);
+            std::vector<wchar_t> value(256);
+            for (;;)
+            {
+                SetLastError(ERROR_SUCCESS);
+                const DWORD length = GetEnvironmentVariableW(wideName.c_str(), value.data(),
+                                                             static_cast<DWORD>(value.size()));
+                if (length == 0)
+                {
+                    // 0 is an empty value or an unset variable
+                    if (GetLastError() == ERROR_ENVVAR_NOT_FOUND)
+                        return std::nullopt;
+                    return std::string();
+                }
+                if (length < value.size())
+                    return fromWide(std::wstring_view(value.data(), length));
+                // Too small: length is the size needed, terminator included
+                value.resize(length);
+            }
         }
 #else
         fs::path fromUtf8(std::string_view utf8)

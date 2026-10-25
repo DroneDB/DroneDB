@@ -8,7 +8,6 @@ if(BUILD_TESTING)
     find_package(PDAL CONFIG REQUIRED)
     find_package(tinyobjloader CONFIG REQUIRED)
     find_package(OpenSSL REQUIRED)
-    find_package(exiv2 CONFIG REQUIRED)
     find_package(Threads REQUIRED)
     find_package(plog CONFIG REQUIRED)
     find_package(cxxopts CONFIG REQUIRED)
@@ -22,11 +21,13 @@ if(BUILD_TESTING)
     #
     #   ddb_unit_tests  tests/unit/: self-contained tests. A test file belongs here when none of
     #                   its tests downloads anything (TestFS or downloadTestAsset with a URL),
-    #                   calls a network service (DSM elevation), runs an external tool
-    #                   (Obj2Tiles, untwine, dwg2dxf, build-lod; the fake tools a test writes
-    #                   itself, e.g. ddbtest_child, are fine), reads CAD assets or builds a 3D
-    #                   model (Nexus/3D Tiles: libnexus and Obj2Tiles). Whole files are
-    #                   classified, so a file with one such test is an integration file.
+    #                   calls a network service (DSM elevation), runs an external tool that
+    #                   is not built in this tree (Obj2Tiles, untwine, dwg2dxf, build-lod; the
+    #                   fake tools a test writes itself and the helper programs built with the
+    #                   tests, ddbtest_child, metadata-util and ddb-nexus, are fine), reads CAD assets
+    #                   or builds a 3D model (Nexus/3D Tiles: ddb-nexus and Obj2Tiles). Whole
+    #                   files are classified, so a file with one such test is an integration
+    #                   file.
     #                   main.cpp initializes the process through the core
     #                   (ddb::registerProcess); ddb_capi is there for the unit tests of the C
     #                   API functions (DDBGet, DDBList, DDBCalculateVolume, ...); the CLI's
@@ -51,6 +52,12 @@ if(BUILD_TESTING)
     target_link_libraries(ddbtest_child PRIVATE plog::plog Threads::Threads ddb_warnings)
     target_include_directories(ddbtest_child PRIVATE "${PROJECT_SOURCE_DIR}/src/include")
 
+    # A metadata-util stand-in for the metadata pool tests: speaks the protocol of vendor/metadata-util/PROTOCOL.md
+    # and fails the way each request asks (the name of the file says how). A compiled program, so
+    # the tests run on every platform.
+    add_executable(ddbtest_fake_exif helpers/fake_exif_helper.cpp)
+    target_link_libraries(ddbtest_fake_exif PRIVATE ddb_warnings)
+
     # Host-process stand-in: checks that DDBRegisterProcess leaves the
     # host's signal handlers alone. Separate process: libddb initializes once per process.
     add_executable(ddbtest_signal_probe helpers/signal_probe.cpp)
@@ -71,12 +78,6 @@ if(BUILD_TESTING)
     add_executable(ddbtest_shared_probe helpers/shared_probe.cpp)
     target_link_libraries(ddbtest_shared_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
 
-    # Nexus exit probe: the Nexus build on a worker thread, then exit() (the NexusExit tests run it
-    # as a process of its own: the crash it looks for happens while the process exits).
-    add_executable(ddbtest_nexus_probe helpers/nexus_probe.cpp)
-    target_link_libraries(ddbtest_nexus_probe PRIVATE $<LINK_ONLY:nxs> GDAL::GDAL ddb_warnings)
-    target_include_directories(ddbtest_nexus_probe PRIVATE "${PROJECT_SOURCE_DIR}/vendor/libnexus")
-
     # Shared test code. It compiles against the library headers only (ddb_headers): each test
     # binary supplies the library itself. testfs.cpp uses cpr, raster_test_utils.cpp GDAL,
     # utils.cpp boolinq (header-only INTERFACE target, src/CMakeLists.txt).
@@ -88,7 +89,7 @@ if(BUILD_TESTING)
         DDB_SIGNAL_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_signal_probe>"
         DDB_CONFIG_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_config_probe>"
         DDB_LOG_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_log_probe>"
-        DDB_NEXUS_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_nexus_probe>")
+        DDB_FAKE_EXIF_NAME="$<TARGET_FILE_NAME:ddbtest_fake_exif>")
     target_link_libraries(ddb_test_support PUBLIC ddb_static_api GTest::gtest cpr::cpr GDAL::GDAL boolinq
         PRIVATE ddb_warnings)
     if(WIN32)
@@ -126,9 +127,10 @@ if(BUILD_TESTING)
     # rewritten there with DDB_UPDATE_GOLDEN=1 (see golden_support.h)
     set_source_files_properties(golden_support.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
-    # The initIndex race test, the process teardown test, the GDAL data test and the test area test run their own binary as child processes
+    # The initIndex race test, the process teardown test, the GDAL data test, the test area test and the
+    # metadata helper test (a host that is killed) run their own binary as child processes
     set_source_files_properties(unit/init_index_template_test.cpp unit/process_finalize_test.cpp unit/data_dirs_test.cpp
-        unit/testarea_isolation_test.cpp PROPERTIES
+        unit/testarea_isolation_test.cpp unit/exif_metadata_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_UNIT_TESTS_NAME="$<TARGET_FILE_NAME:ddb_unit_tests>")
 
     include(GoogleTest)
@@ -151,8 +153,11 @@ if(BUILD_TESTING)
         target_include_directories(${name} BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
         ddb_embed_library(${name})
         target_link_libraries(${name} PRIVATE ${T_LINK} ddb_test_support ddb_warnings)
+        # ddb-nexus (vendor/libnexus) and metadata-util (vendor/metadata-util) are built next to the test
+        # binary, where the tool locator looks: the tests that build a Nexus file or read the
+        # metadata of an image run them
         add_dependencies(${name} ddbtest_child ddbtest_signal_probe ddbtest_config_probe ddbtest_log_probe
-            ddbtest_nexus_probe ddbtest_shared_probe)
+            ddbtest_shared_probe ddbtest_fake_exif ddb-nexus metadata-util)
 
         gtest_discover_tests(${name}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
