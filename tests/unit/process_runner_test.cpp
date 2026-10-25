@@ -143,7 +143,13 @@ TEST(processRunner, exitCodePropagated) {
 // The output pipe reaches EOF a moment before the exiting child can be reaped: run() must then
 // wake on the exit itself, not on the next tick of a coarse poll that would add tens of
 // milliseconds to every short tool call. The median keeps a loaded machine from failing it.
+// Sanitizer builds skip it: there the start of the instrumented child alone takes ~30 ms. So
+// does Windows, where run() waits on the process handle and creating a process alone takes
+// about 50 ms.
 TEST(processRunner, shortChildReturnsPromptly) {
+    SKIP_ON_WINDOWS();
+    if (std::getenv("DDB_SKIP_TIMING_TESTS") != nullptr)
+        GTEST_SKIP() << "timing test disabled";
     constexpr int kRuns = 50;
     std::vector<double> ms;
     ms.reserve(kRuns);
