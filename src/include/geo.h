@@ -4,6 +4,7 @@
 #ifndef GEO_H
 #define GEO_H
 
+#include <cmath>
 #include <iostream>
 #include "mathutil.h"
 
@@ -34,8 +35,8 @@ namespace ddb
             double px = this->x;
             double py = this->y;
             double radians = ddb::deg2rad(degrees);
-            x = cos(radians) * (px - center.x) - sin(radians) * (py - center.y) + center.x;
-            y = sin(radians) * (px - center.x) + cos(radians) * (py - center.y) + center.y;
+            x = std::cos(radians) * (px - center.x) - std::sin(radians) * (py - center.y) + center.x;
+            y = std::sin(radians) * (px - center.x) + std::cos(radians) * (py - center.y) + center.y;
         }
 
         void transform(double *affine)
