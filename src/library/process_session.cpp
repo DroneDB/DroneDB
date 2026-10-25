@@ -26,9 +26,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#ifdef __linux__
-#include <sys/syscall.h>
-#endif
 #endif
 
 namespace ddb
@@ -318,11 +315,8 @@ namespace ddb
                     stdin_ = std::move(stdinPair[0]);
                     stdout_ = std::move(outPipe[0]);
                     stderr_ = std::move(errPipe[0]);
-#if defined(__linux__) && defined(SYS_pidfd_open)
-                    // Lets wait() sleep until the exit instead of polling for it; without it
-                    // (an older kernel) wait() polls every few milliseconds.
-                    pidfd_.reset(static_cast<int>(::syscall(SYS_pidfd_open, pid_, 0)));
-#endif
+                    // Lets wait() sleep until the exit instead of polling for it
+                    exit_.watch(pid_);
                     buf_.resize(kReadChunk);
                     return true;
                 }
@@ -370,12 +364,10 @@ namespace ddb
                         if (tryReap()) return true;
                         pollfd pfds[2];
                         nfds_t count = 0;
-                        if (pidfd_) pfds[count++] = {pidfd_.get(), POLLIN, 0};
+                        if (exit_.fd() >= 0) pfds[count++] = {exit_.fd(), POLLIN, 0};
                         const nfds_t stderrSlot = count;
                         if (stderr_) pfds[count++] = {stderr_.get(), POLLIN, 0};
-                        long long ms = msUntil(deadline);
-                        if (!pidfd_) ms = std::min(ms, kExitPollMs);
-                        const int pr = ::poll(pfds, count, static_cast<int>(ms));
+                        const int pr = ::poll(pfds, count, static_cast<int>(exit_.slice(msUntil(deadline))));
                         if (pr > 0 && stderrSlot < count && pfds[stderrSlot].revents != 0) pumpStderr();
                         if (Clock::now() >= deadline) return tryReap();
                     }
@@ -482,7 +474,8 @@ namespace ddb
                     drainStderr();
                 }
 
-                UniqueFd stdin_, stdout_, stderr_, pidfd_;
+                UniqueFd stdin_, stdout_, stderr_;
+                ExitWatch exit_;
                 std::vector<char> buf_;
                 pid_t pid_ = -1;
             };

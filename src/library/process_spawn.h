@@ -42,7 +42,8 @@ namespace ddb
             // A line longer than this is delivered in pieces to onOutputLine.
             constexpr size_t kMaxLineLength = 64 * 1024;
 
-            // Poll interval for the child's exit once every monitored pipe is closed.
+            // Longest sleep between two looks at the child's exit while every monitored pipe is
+            // closed: the cancellation and the limits are checked at least this often.
             constexpr long long kExitPollMs = 50;
 
             // Bounded buffer keeping only the most recent `capacity` bytes. Trimming
@@ -149,6 +150,31 @@ namespace ddb
 
             // waitpid with EINTR retry. Returns false on unexpected failure.
             bool waitChild(pid_t pid, int &status);
+
+            // Lets a waiter sleep until a child exits instead of polling for it. On Linux a pidfd
+            // becomes readable when the child exits, so a poll() that includes fd() wakes at that
+            // moment. Without one (another system, or a kernel without pidfd_open) fd() is -1
+            // and slice() bounds each wait, starting at a millisecond and doubling up to
+            // kExitPollMs, so a child about to exit is still noticed at once and one that runs
+            // on costs a wake-up every kExitPollMs.
+            class ExitWatch
+            {
+              public:
+                // Starts watching `pid`, a child of this process that has not been reaped (its
+                // pid cannot have been reused).
+                void watch(pid_t pid);
+
+                // The descriptor to poll for POLLIN, or -1.
+                int fd() const { return pidfd_.get(); }
+
+                // How long the next wait may last, given the caller's own bound `ms`: `ms` with
+                // a pidfd, the current fallback interval (at most `ms`) without.
+                long long slice(long long ms);
+
+              private:
+                UniqueFd pidfd_;
+                long long fallbackMs_ = 1;
+            };
 
             // The parent's environment with the overrides applied (the parent's own is never
             // modified).

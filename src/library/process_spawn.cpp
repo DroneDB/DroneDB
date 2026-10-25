@@ -329,6 +329,27 @@ namespace ddb
                 }
             }
 
+            void ExitWatch::watch(pid_t pid)
+            {
+                fallbackMs_ = 1;
+#if defined(__linux__) && defined(SYS_pidfd_open)
+                // The descriptor is close-on-exec. ENOSYS (before Linux 5.3) or a full
+                // descriptor table leaves the bounded fallback poll in charge.
+                pidfd_.reset(static_cast<int>(::syscall(SYS_pidfd_open, pid, 0)));
+#else
+                (void)pid;
+                pidfd_.reset();
+#endif
+            }
+
+            long long ExitWatch::slice(long long ms)
+            {
+                if (pidfd_) return ms;
+                const long long slice = std::min(ms, fallbackMs_);
+                fallbackMs_ = std::min(fallbackMs_ * 2, kExitPollMs);
+                return slice;
+            }
+
             std::vector<std::string> childEnvironment(const std::vector<std::pair<std::string, std::string>> &overrides)
             {
                 std::vector<std::string> envStrings;

@@ -5,9 +5,11 @@
 // Shared lifecycle tests use a portable child; shell/descriptor tests remain
 // platform-specific, and tests that inspect /proc are Linux-only.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <set>
 #include <sstream>
@@ -136,6 +138,26 @@ TEST(processRunner, exitCodePropagated) {
 
     const auto ok = process::run(testChildPath(), {"exit", "0"});
     EXPECT_TRUE(ok.success());
+}
+
+// The output pipe reaches EOF a moment before the exiting child can be reaped: run() must then
+// wake on the exit itself, not on the next tick of a coarse poll that would add tens of
+// milliseconds to every short tool call. The median keeps a loaded machine from failing it.
+TEST(processRunner, shortChildReturnsPromptly) {
+    constexpr int kRuns = 50;
+    std::vector<double> ms;
+    ms.reserve(kRuns);
+    for (int i = 0; i < kRuns; ++i) {
+        const auto start = std::chrono::steady_clock::now();
+        const auto r = process::run(testChildPath(), {"exit", "0"});
+        ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+        ASSERT_TRUE(r.success()) << r.describe();
+    }
+    std::sort(ms.begin(), ms.end());
+    const double median = ms[kRuns / 2];
+    std::cout << "process::run of a short child: median " << median << " ms, min " << ms.front()
+              << " ms, max " << ms.back() << " ms over " << kRuns << " runs" << std::endl;
+    EXPECT_LT(median, 25.0);
 }
 
 TEST(processRunner, stdoutAndStderrMerged) {

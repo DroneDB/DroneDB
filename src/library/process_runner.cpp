@@ -345,8 +345,12 @@ namespace ddb
                 // (e.g. it closed stdout/stderr itself): keep enforcing the idle
                 // timeout, measured from the last activity, and the cancellation instead
                 // of blocking in waitpid() forever. Nothing can count as activity any more.
+                // The pipes usually reach EOF a moment before the exiting child can be
+                // reaped, so the wait wakes on the exit itself (ExitWatch), not on a tick.
                 void awaitExit()
                 {
+                    ExitWatch exit;
+                    exit.watch(pid_);
                     for (;;)
                     {
                         siginfo_t si;
@@ -372,7 +376,8 @@ namespace ddb
                             }
                             pollMs = std::min<long long>(remaining, kExitPollMs);
                         }
-                        ::poll(nullptr, 0, static_cast<int>(pollMs));
+                        pollfd pfd{exit.fd(), POLLIN, 0};
+                        ::poll(&pfd, pfd.fd >= 0 ? 1 : 0, static_cast<int>(exit.slice(pollMs)));
                     }
                 }
 
