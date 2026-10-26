@@ -5,8 +5,9 @@
 // ddb-nexus has no GUI toolkit behind it: it reads the textures of a model with image libraries
 // of its own and the faces of a PLY with a parser of its own. These tests build small models
 // made inside the test, one texture file format at a time, and read the header of what was
-// written: the formats the textures come in, the polygons of a PLY, an OBJ with one-dimensional
-// texture coordinates, and the failures that must leave no file behind.
+// written: the formats the textures come in (the node textures written are WebP whatever they
+// were), the polygons of a PLY, an OBJ with one-dimensional texture coordinates, and the
+// failures that must leave no file behind.
 
 #include <chrono>
 #include <cstdint>
@@ -22,6 +23,7 @@
 #include "gdal_inc.h"
 #include "gtest/gtest.h"
 #include "mio.h"
+#include "nexus_file_support.h"
 #include "test.h"
 #include "testarea.h"
 
@@ -29,54 +31,13 @@ namespace
 {
     using namespace ddb;
 
-    // The part of the Nexus header these tests read: the magic, the sizes and the texture table
-    struct NxsHeader
-    {
-        char magic[4];
-        uint64_t nvert;
-        uint64_t nface;
-        uint32_t nNodes;
-        uint32_t nPatches;
-        uint32_t nTextures;
-    };
+    using testutils::NexusFile;
+    using testutils::readNexusFile;
 
-    NxsHeader readHeader(const std::string &path)
-    {
-        std::ifstream in(io::fromUtf8(path), std::ios::binary);
-        std::vector<char> b(88);
-        in.read(b.data(), static_cast<std::streamsize>(b.size()));
-        EXPECT_EQ(in.gcount(), 88) << path;
-        NxsHeader h{};
-        std::memcpy(h.magic, b.data(), 4);
-        std::memcpy(&h.nvert, b.data() + 8, 8);
-        std::memcpy(&h.nface, b.data() + 16, 8);
-        std::memcpy(&h.nNodes, b.data() + 60, 4);
-        std::memcpy(&h.nPatches, b.data() + 64, 4);
-        std::memcpy(&h.nTextures, b.data() + 68, 4);
-        return h;
-    }
-
-    // The first texture of the file is a JPEG, whatever format the model's texture came in
-    void expectFirstTextureIsJpeg(const std::string &path, const NxsHeader &h)
-    {
-        std::ifstream in(io::fromUtf8(path), std::ios::binary);
-        uint32_t offset = 0;
-        in.seekg(88 + static_cast<std::streamoff>(h.nNodes) * 44 + static_cast<std::streamoff>(h.nPatches) * 12);
-        in.read(reinterpret_cast<char *>(&offset), 4);
-        in.seekg(static_cast<std::streamoff>(offset) * 256);
-        unsigned char soi[2] = {0, 0};
-        in.read(reinterpret_cast<char *>(soi), 2);
-        EXPECT_TRUE(in.good());
-        EXPECT_EQ(soi[0], 0xff);
-        EXPECT_EQ(soi[1], 0xd8);
-    }
-
-    void expectNxsMagic(const NxsHeader &h)
+    void expectNxsMagic(const NexusFile &h)
     {
         // 'N' 'x' 's' ' ' in a little-endian word
-        uint32_t word;
-        std::memcpy(&word, h.magic, 4);
-        EXPECT_EQ(word, 0x4e787320u);
+        EXPECT_EQ(h.magic, 0x4e787320u);
     }
 
     // A 16x16 picture with a gradient, as the bands the format being written takes
@@ -179,12 +140,13 @@ namespace
         const fs::path out = ta.getPath("model.nxs");
         ASSERT_NO_THROW(build(ta.getPath("model.obj"), out));
 
-        const NxsHeader h = readHeader(io::toUtf8(out));
+        const NexusFile h = readNexusFile(out);
         expectNxsMagic(h);
         EXPECT_EQ(h.nface, 2u);
         EXPECT_EQ(h.nvert, 4u);
         ASSERT_GE(h.nTextures, 1u) << "no texture in the file";
-        expectFirstTextureIsJpeg(io::toUtf8(out), h);
+        ASSERT_FALSE(h.textures.empty());
+        EXPECT_TRUE(testutils::isWebp(h.textures.front()));
     }
 
     INSTANTIATE_TEST_SUITE_P(Formats, NexusTextureFormat,
@@ -205,7 +167,7 @@ namespace
         std::ofstream(ta.getPath("model.obj")) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
         const fs::path out = ta.getPath("model.nxs");
         ASSERT_NO_THROW(build(ta.getPath("model.obj"), out));
-        const NxsHeader h = readHeader(io::toUtf8(out));
+        const NexusFile h = readNexusFile(out);
         expectNxsMagic(h);
         EXPECT_EQ(h.nface, 1u);
         EXPECT_EQ(h.nTextures, 0u);
@@ -219,7 +181,7 @@ namespace
         writeTexturedModel(ta.getPath("."), "texture.png", "vt 0\nvt 1\nvt 1\nvt 0\n");
         const fs::path out = ta.getPath("model.nxs");
         ASSERT_NO_THROW(build(ta.getPath("model.obj"), out));
-        const NxsHeader h = readHeader(io::toUtf8(out));
+        const NexusFile h = readNexusFile(out);
         expectNxsMagic(h);
         EXPECT_EQ(h.nface, 2u);
     }
@@ -242,8 +204,8 @@ namespace
 
         ASSERT_NO_THROW(build(ta.getPath("quad.ply"), ta.getPath("quad.nxs")));
         ASSERT_NO_THROW(build(ta.getPath("tris.ply"), ta.getPath("tris.nxs")));
-        const NxsHeader quad = readHeader(io::toUtf8(ta.getPath("quad.nxs")));
-        const NxsHeader tris = readHeader(io::toUtf8(ta.getPath("tris.nxs")));
+        const NexusFile quad = readNexusFile(ta.getPath("quad.nxs"));
+        const NexusFile tris = readNexusFile(ta.getPath("tris.nxs"));
         expectNxsMagic(quad);
         EXPECT_EQ(quad.nface, 2u);
         EXPECT_EQ(quad.nface, tris.nface);
@@ -379,7 +341,7 @@ namespace
         // The warning "textures could not be packed" goes to the stderr of ddb-nexus, which libddb
         // does not surface when the build succeeds: only the outcome is asserted here
         ASSERT_NO_THROW(build(ta.getPath("model.obj"), out));
-        const NxsHeader h = readHeader(io::toUtf8(out));
+        const NexusFile h = readNexusFile(out);
         expectNxsMagic(h);
         EXPECT_EQ(h.nface, 2u);
         EXPECT_EQ(h.nTextures, 0u);
@@ -427,7 +389,7 @@ namespace
         writeBinaryPly<uint16_t, uint32_t>(ta.getPath("ushort_uint.ply"), "ushort", "uint");
 
         ASSERT_NO_THROW(build(ta.getPath("uchar_int.ply"), ta.getPath("uchar_int.nxs")));
-        const NxsHeader reference = readHeader(io::toUtf8(ta.getPath("uchar_int.nxs")));
+        const NexusFile reference = readNexusFile(ta.getPath("uchar_int.nxs"));
         expectNxsMagic(reference);
         EXPECT_EQ(reference.nface, 2u);
         EXPECT_EQ(reference.nvert, 4u);
@@ -435,7 +397,7 @@ namespace
         for (const char *name : {"int_int", "ushort_uint"})
         {
             ASSERT_NO_THROW(build(ta.getPath(std::string(name) + ".ply"), ta.getPath(std::string(name) + ".nxs"))) << name;
-            const NxsHeader h = readHeader(io::toUtf8(ta.getPath(std::string(name) + ".nxs")));
+            const NexusFile h = readNexusFile(ta.getPath(std::string(name) + ".nxs"));
             expectNxsMagic(h);
             EXPECT_EQ(h.nface, reference.nface) << name;
             EXPECT_EQ(h.nvert, reference.nvert) << name;
