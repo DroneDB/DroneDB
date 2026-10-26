@@ -57,6 +57,12 @@ RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount) {
         info.bands[b] = readBandNodata(hBand);
     }
 
+    // A mask kept for the whole dataset; a nodata mask is the nodata compare already
+    if (info.alphaBandIdx < 0 && bandCount > 0) {
+        const int flags = GDALGetMaskFlags(GDALGetRasterBand(hDataset, 1));
+        info.datasetMask = (flags & GMF_PER_DATASET) != 0 && (flags & GMF_NODATA) == 0;
+    }
+
     return info;
 }
 
@@ -64,11 +70,12 @@ void premaskNodata(const std::vector<float*>& bandPtrs,
                    size_t pixelCount,
                    int bandCount,
                    const RasterBandNodata& info,
-                   float outputNodata) {
+                   float outputNodata,
+                   const uint8_t* datasetMask) {
     for (size_t i = 0; i < pixelCount; i++) {
-        bool masked = false;
+        bool masked = datasetMask != nullptr && datasetMask[i] == 0;
 
-        if (info.alphaBandIdx >= 0 && bandPtrs[info.alphaBandIdx] && bandPtrs[info.alphaBandIdx][i] == 0.0f) {
+        if (!masked && info.alphaBandIdx >= 0 && bandPtrs[info.alphaBandIdx] && bandPtrs[info.alphaBandIdx][i] == 0.0f) {
             masked = true;
         }
 

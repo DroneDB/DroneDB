@@ -57,7 +57,7 @@ namespace ddb
         const VegetationFormula *formula = nullptr;
         BandFilter filter;
         const Colormap *colormap = nullptr; // null when the plan was made without one
-        RasterBandNodata nodata;            // per band, and the alpha band
+        RasterBandNodata nodata;            // per band, and the alpha band or the dataset mask
         int bandCount = 0;
     };
 
@@ -77,12 +77,12 @@ namespace ddb
     enum class NodataMask
     {
         /// A pixel with no data (nodata, NaN) in ANY band of the raster, or transparent in the alpha
-        /// band, is left out. The rule of the thumbnails, the tiles and the formula renders: the
-        /// same pixels are blank whichever formula is shown.
+        /// band or the dataset mask, is left out. The rule of the thumbnails, the tiles and the
+        /// formula renders: the same pixels are blank whichever formula is shown.
         AnyBand,
-        /// Only the bands the formula reads (and the alpha band, which says "no data here" for every
-        /// band) decide. A pixel whose only gap is in a band the formula does not read is computed,
-        /// and the bands the formula does not read are not even read. The rule of the
+        /// Only the bands the formula reads (and the alpha band or the dataset mask, which say "no
+        /// data here" for every band) decide. A pixel whose only gap is in a band the formula does
+        /// not read is computed, and the bands the formula does not read are not even read. The rule of the
         /// vegetation-index map layer. Not for the thermal passthroughs (CELSIUS, KELVIN), which read
         /// band 0 whatever the band filter says.
         BandsRead
@@ -94,6 +94,7 @@ namespace ddb
         std::vector<std::vector<float>> bands; // one per band
         std::vector<float *> ptrs;
         std::vector<float> result;
+        std::vector<uint8_t> mask; // the window of the dataset mask, when the raster has one
     };
 
     /// Reads window of every band as float, masks the transparent and nodata pixels and applies

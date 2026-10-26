@@ -4,6 +4,7 @@
 #ifndef RASTER_UTILS_H
 #define RASTER_UTILS_H
 
+#include <cstdint>
 #include <vector>
 #include <cmath>
 #include "gdal_inc.h"
@@ -49,9 +50,13 @@ inline bool isNodata(double v, const BandNodata& nd) {
 struct RasterBandNodata {
     int alphaBandIdx = -1;
     std::vector<BandNodata> bands;  // one per band, in band order
+    // No alpha band, but GDAL keeps one mask for every band (an internal TIFF mask, a .msk
+    // sidecar): a pixel the mask says 0 has no data, as with alpha 0. JPEG-compressed COGs
+    // carry their transparency this way, over pixels that read 0 in every band.
+    bool datasetMask = false;
 };
 
-// Detect alpha band and nodata values for each band of a GDAL dataset
+// Detect the alpha band, the dataset mask and the nodata values of each band of a GDAL dataset
 RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount);
 
 // The value of an alpha band that is opaque, derived from the band's data. GDAL assumes the
@@ -63,8 +68,9 @@ RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount);
 // maximum of its type (1 for floating-point types).
 double alphaOpaqueValue(GDALRasterBandH alphaBand);
 
-// Pre-mask pixels: sets all bands to NODATA_SENTINEL where alpha==0
-// or any band matches its GDAL nodata value (NaN-safe comparison).
+// Pre-mask pixels: sets all bands to NODATA_SENTINEL where alpha==0, where datasetMask
+// (the window of the dataset mask, when RasterBandNodata::datasetMask; null otherwise) is 0,
+// or where any band matches its GDAL nodata value (NaN-safe comparison).
 // A null entry of bandPtrs is a band that was not read: it is neither inspected nor
 // written, so the caller decides which bands decide the mask (the alpha band, if it
 // is null, does not mask).
@@ -72,7 +78,8 @@ void premaskNodata(const std::vector<float*>& bandPtrs,
                    size_t pixelCount,
                    int bandCount,
                    const RasterBandNodata& info,
-                   float outputNodata = NODATA_SENTINEL);
+                   float outputNodata = NODATA_SENTINEL,
+                   const uint8_t* datasetMask = nullptr);
 
 }  // namespace ddb
 

@@ -305,6 +305,77 @@ namespace
         EXPECT_EQ(buffers.result[2], kNoData);
     }
 
+    // A raster whose transparency is a GDAL dataset mask (an internal TIFF mask, as JPEG-compressed COGs
+    // carry it) and not an alpha band or a nodata value: the pixels the mask says 0 are left out of the
+    // formula, under both rules of the engine and in the render. They read 0 in every band, which EXG
+    // (2G - (R + B)) turns into the value 0 and not into nodata, as a ratio would
+    TEST_F(VegetationFormulas, theRasterPipelineLeavesOutThePixelsOfTheDatasetMask)
+    {
+        TestArea ta(TEST_NAME, true);
+        // Four pixels in a row, R G B: black outside the mask, a value, black inside it, a value
+        const std::vector<std::vector<double>> planes = {{0, 10, 0, 40}, {0, 50, 0, 30}, {0, 20, 0, 10}};
+        const std::vector<uint8_t> maskValues = {0, 255, 255, 255};
+        testutils::GeoRasterSpec spec;
+        spec.width = 4;
+        spec.height = 1;
+        spec.bands = 3;
+        spec.type = GDT_Byte;
+        spec.value = [&](int band, int x, int) { return planes[band - 1][x]; };
+
+        const fs::path masked = testutils::createGeoRaster(ta.getPath("masked.tif"), spec);
+        {
+            std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(masked.string().c_str(), GA_Update)));
+            ASSERT_NE(ds, nullptr);
+            ASSERT_EQ(ds->CreateMaskBand(GMF_PER_DATASET), CE_None);
+            std::vector<uint8_t> values = maskValues;
+            ASSERT_EQ(ds->GetRasterBand(1)->GetMaskBand()->RasterIO(GF_Write, 0, 0, 4, 1, values.data(), 4, 1, GDT_Byte, 0, 0),
+                      CE_None);
+        }
+        const fs::path unmasked = testutils::createGeoRaster(ta.getPath("unmasked.tif"), spec);
+
+        const RasterWindow window{0, 0, 4, 1, 4, 1};
+        const auto open = [](const fs::path &path) {
+            return std::unique_ptr<GDALDataset>(static_cast<GDALDataset *>(GDALOpen(path.string().c_str(), GA_ReadOnly)));
+        };
+
+        const auto maskedDs = open(masked);
+        ASSERT_NE(maskedDs, nullptr);
+        GDALDatasetH handle = GDALDataset::ToHandle(maskedDs.get());
+        const RasterBandNodata nodata = detectBandNodata(handle, 3);
+        EXPECT_TRUE(nodata.datasetMask);
+        EXPECT_EQ(nodata.alphaBandIdx, -1);
+        for (const NodataMask mask : {NodataMask::AnyBand, NodataMask::BandsRead})
+        {
+            const FormulaPlan plan = planFormula(handle, "EXG", VegetationEngine::parseFilter("RGB", 3), "", false);
+            FormulaBuffers buffers;
+            computeFormulaValues(handle, plan, window, buffers, mask);
+            ASSERT_EQ(buffers.result.size(), 4u);
+            EXPECT_EQ(buffers.result[0], kNoData);
+            EXPECT_NEAR(buffers.result[1], 70.0f, kTolerance); // 100 - 30
+            EXPECT_NEAR(buffers.result[2], 0.0f, kTolerance);  // black inside the mask is a value
+            EXPECT_NEAR(buffers.result[3], 10.0f, kTolerance); // 60 - 50
+        }
+        ThumbVisParams vis;
+        vis.formula = "EXG";
+        vis.bandFilter = "RGB";
+        vis.rescale = "0,70";
+        const auto rgba = renderFormulaRgba(handle, masked.string(), window, vis);
+        ASSERT_EQ(rgba.size(), 16u);
+        EXPECT_EQ(rgba[3], 0);
+        for (size_t i = 1; i < 4; i++)
+            EXPECT_EQ(rgba[i * 4 + 3], 255) << "pixel " << i;
+
+        // Without a mask, every pixel is valid: black is the value 0
+        const auto unmaskedDs = open(unmasked);
+        ASSERT_NE(unmaskedDs, nullptr);
+        GDALDatasetH plain = GDALDataset::ToHandle(unmaskedDs.get());
+        EXPECT_FALSE(detectBandNodata(plain, 3).datasetMask);
+        const FormulaPlan plan = planFormula(plain, "EXG", VegetationEngine::parseFilter("RGB", 3), "", false);
+        FormulaBuffers buffers;
+        computeFormulaValues(plain, plan, window, buffers);
+        EXPECT_NEAR(buffers.result[0], 0.0f, kTolerance);
+    }
+
     // The formulas a raster is offered: the bands the filter maps and the data it can take. The formulas that
     // add constants to the band values (SAVI, OSAVI, EVI) are for reflectance, so for floating-point data only
     TEST_F(VegetationFormulas, theListOfFormulasFollowsTheBandsAndTheTypeOfTheData)

@@ -165,6 +165,15 @@ namespace ddb
 
         cancel::GdalProgress progress; // the call is canceled
         GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
+        // Reads the window of a band into out, as type
+        const auto readWindow = [&](GDALRasterBandH band, void *out, GDALDataType type, const std::string &what) {
+            if (GDALRasterIOEx(band, GF_Read, window.x, window.y, window.xsize, window.ysize, out, window.outWidth,
+                               window.outHeight, type, 0, 0, &extra) != CE_None)
+            {
+                cancel::throwIfCanceled();
+                throw GDALException("Cannot read " + what);
+            }
+        };
         for (int b = 0; b < plan.bandCount; b++)
         {
             if (!read[b])
@@ -174,17 +183,20 @@ namespace ddb
             }
             buffers.bands[b].resize(pixels);
             buffers.ptrs[b] = buffers.bands[b].data();
-            if (GDALRasterIOEx(GDALGetRasterBand(ds, b + 1), GF_Read, window.x, window.y, window.xsize, window.ysize,
-                               buffers.ptrs[b], window.outWidth, window.outHeight, GDT_Float32, 0, 0, &extra) !=
-                CE_None)
-            {
-                cancel::throwIfCanceled();
-                throw GDALException("Cannot read band " + std::to_string(b + 1));
-            }
+            readWindow(GDALGetRasterBand(ds, b + 1), buffers.ptrs[b], GDT_Float32, "band " + std::to_string(b + 1));
+        }
+
+        // The dataset mask, when the raster keeps its transparency there instead of in an alpha band
+        const uint8_t *datasetMask = nullptr;
+        if (plan.nodata.datasetMask)
+        {
+            buffers.mask.resize(pixels);
+            readWindow(GDALGetMaskBand(GDALGetRasterBand(ds, 1)), buffers.mask.data(), GDT_Byte, "the dataset mask");
+            datasetMask = buffers.mask.data();
         }
 
         // Transparent and nodata pixels stay out of the formula (of the bands that were read)
-        premaskNodata(buffers.ptrs, pixels, plan.bandCount, plan.nodata, NODATA_SENTINEL);
+        premaskNodata(buffers.ptrs, pixels, plan.bandCount, plan.nodata, NODATA_SENTINEL, datasetMask);
 
         buffers.result.resize(pixels);
         VegetationEngine::instance().applyFormula(*plan.formula, plan.filter, buffers.ptrs, buffers.result.data(),
