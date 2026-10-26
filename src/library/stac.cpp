@@ -73,6 +73,7 @@ namespace ddb
         // Images
         if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
         if (ext == ".tif" || ext == ".tiff") return "image/tiff";
+        if (ext == ".jp2") return "image/jp2";
         if (ext == ".png") return "image/png";
         if (ext == ".webp") return "image/webp";
         if (ext == ".gif") return "image/gif";

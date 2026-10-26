@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // GeoRaster entries: georeferenced rasters, built into a Cloud Optimized GeoTIFF. The
-// Image handler detects them (a TIFF with a projection), entry_handler_image.cpp.
+// Image handler detects them (a TIFF or JPEG 2000 with a projection), entry_handler_image.cpp.
 
 #include <memory>
 

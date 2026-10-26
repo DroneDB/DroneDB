@@ -173,6 +173,48 @@ namespace ddb
             return true;
         }
 
+        // The layers to build when only some of them hold a feature: their names. An empty
+        // layer (a GPX without waypoints, a KML folder without placemarks) is not built: it
+        // would only show as an empty collection. Empty (build every layer, as ogr2ogr does by
+        // default) when every layer or no layer holds a feature, or when two layers share a
+        // name, since ogr2ogr finds a named layer by its name. Each layer is left reset.
+        std::vector<std::string> layersWithFeatures(GDALDatasetH hDS)
+        {
+            std::vector<std::string> names;
+            std::set<std::string> seen;
+            bool anyEmpty = false;
+            const int n = GDALDatasetGetLayerCount(hDS);
+            for (int i = 0; i < n; i++)
+            {
+                OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+                if (!hLayer) continue;
+                const std::string name = OGR_L_GetName(hLayer);
+                if (!seen.insert(name).second)
+                    return {};
+                OGR_L_ResetReading(hLayer);
+                OGRFeatureH hFeature = OGR_L_GetNextFeature(hLayer);
+                OGR_L_ResetReading(hLayer);
+                if (!hFeature)
+                {
+                    anyEmpty = true;
+                    continue;
+                }
+                OGR_F_Destroy(hFeature);
+                names.push_back(name);
+            }
+            if (!anyEmpty)
+                return {};
+            return names;
+        }
+
+        // Limits a translation to the layers that hold features. ogr2ogr reads layer names
+        // from the trailing positional arguments, so this goes after every option.
+        void appendLayersWithFeatures(std::vector<std::string> &argStore, GDALDatasetH hDS)
+        {
+            const auto names = layersWithFeatures(hDS);
+            argStore.insert(argStore.end(), names.begin(), names.end());
+        }
+
         void checkDependencies(const std::string &input)
         {
             const auto deps = getVectorDependencies(input);
@@ -213,8 +255,8 @@ namespace ddb
                                   "-lco", "GEOMETRY_NAME=geom",
                                   "-lco", "FID=fid",
                                   "-nlt", "PROMOTE_TO_MULTI",
-                                  // KML/KMZ have DateTime fields that several drivers warn on;
-                                  // map to String for maximum compatibility.
+                                  // KML/KMZ and GPX (time) have DateTime fields that several
+                                  // drivers warn on; map to String for maximum compatibility.
                                   "-mapFieldType", "DateTime=String",
                                   "-skipfailures"})
                 argStore.push_back(a);
@@ -222,6 +264,7 @@ namespace ddb
                 argStore.push_back("-s_srs");
                 argStore.push_back(sourceSrs);
             }
+            appendLayersWithFeatures(argStore, hSrcDS);
             CPLStringList argv = cslFromStrings(argStore);
             GdalOptionsPtr<GDALVectorTranslateOptions> opts(
                 GDALVectorTranslateOptionsNew(argv.List(), nullptr));
@@ -599,7 +642,8 @@ namespace ddb
 
             const bool needsSrs = allLayersMissSrs(hTranslateSrc);
 
-            const std::vector<std::string> argStore = mvtTranslateArgs(maxZoomArg, needsSrs, sourceSrs);
+            std::vector<std::string> argStore = mvtTranslateArgs(maxZoomArg, needsSrs, sourceSrs);
+            appendLayersWithFeatures(argStore, hTranslateSrc);
             CPLStringList argv = cslFromStrings(argStore);
             GdalOptionsPtr<GDALVectorTranslateOptions> opts(
                 GDALVectorTranslateOptionsNew(argv.List(), nullptr));

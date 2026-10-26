@@ -12,6 +12,10 @@ namespace ddb {
 // Returns true if the file is already optimized and doesn't need rebuild
 bool isOptimizedCog(const std::string& inputPath);
 
+// True for a raster driver that decodes on threads of its own (JPEG 2000). It sizes them from
+// GDAL_NUM_THREADS as the reading thread sees it, and uses every CPU when that is unset.
+bool decodesWithOwnThreads(const std::string& driverName);
+
 }
 
 #endif  // COG_UTILS_H

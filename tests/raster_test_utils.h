@@ -36,6 +36,10 @@ namespace testutils
     /// Writes a GeoTIFF with spec's georeference and pixel values (bands 1-based)
     fs::path createGeoRaster(const fs::path &path, const GeoRasterSpec &spec);
 
+    /// Writes a lossless JPEG 2000 with spec's pixel values, and its georeference in GeoJP2 and
+    /// GMLJP2 boxes unless georeferenced is false
+    fs::path createGeoJp2(const fs::path &path, const GeoRasterSpec &spec, bool georeferenced = true);
+
     /// The region of a raster the tests render: bbox is [minX, minY, maxX, maxY] in srs
     inline ddb::RegionRequest regionRequest(const std::string &path, const double bbox[4], const std::string &srs,
                                             int width, int height, const std::string &format)

@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 #include "dbops.h"
 #include "stac.h"
+#include "raster_test_utils.h"
 #include "ddb.h"
 #include "test.h"
 #include "testarea.h"
@@ -563,6 +564,22 @@ namespace
                                                   {.datetimeStart = "1970-01-01T00:00:00Z", .datetimeEnd = "2099-01-01T02:00:00+02:00"});
         EXPECT_EQ(fcUtc["numberMatched"], fcOff["numberMatched"])
             << "Equivalent datetime with timezone offset should give the same result";
+    }
+
+    // The data asset of a JPEG 2000 GeoRaster has the JPEG 2000 media type
+    TEST(StacJpeg2000, itemAssetOfAJpeg2000IsImageJp2)
+    {
+        TestArea ta(TEST_NAME, true);
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 32;
+        testutils::createGeoJp2(ta.getFolder() / "ortho.jp2", spec);
+        ddb::initIndex(ta.getFolder().string());
+        auto db = ddb::open(ta.getFolder().string(), true);
+        ddb::addToIndex(db.get(), {(ta.getFolder() / "ortho.jp2").string()});
+
+        auto j = generateStac(ta.getFolder().string(), "ortho.jp2");
+        ASSERT_TRUE(j["assets"].contains("ortho.jp2")) << j.dump();
+        EXPECT_EQ(j["assets"]["ortho.jp2"]["type"], "image/jp2");
     }
 
 } // namespace

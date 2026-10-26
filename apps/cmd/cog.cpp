@@ -18,7 +18,7 @@ namespace cmd
     .custom_help("cog cog.tif input.tif");
     cmd::addOutputOption(opts, "Output Cloud Optimized GeoTIFF");
     opts.add_options()
-    ("i,input", "Input GeoTIFF to process", cxxopts::value<std::string>());
+    ("i,input", "Input georeferenced raster (GeoTIFF, JPEG 2000, ...) to process", cxxopts::value<std::string>());
 
         // clang-format on
         opts.parse_positional({"output", "input"});
@@ -26,7 +26,7 @@ namespace cmd
 
     std::string Cog::description()
     {
-        return "Build a Cloud Optimized GeoTIFF from an existing GeoTIFF.";
+        return "Build a Cloud Optimized GeoTIFF from a georeferenced raster (GeoTIFF, JPEG 2000, ...).";
     }
 
     int Cog::run(cxxopts::ParseResult &opts)

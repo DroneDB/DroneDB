@@ -39,20 +39,20 @@ namespace ddb
 
     // Copies the input when it is an optimized COG already (true, with its stats sidecar written).
     // False when it needs the rebuild, or when the copy failed for another reason than a full disk.
-    static bool copyOptimizedCog(const std::string &inputGTiff, const std::string &outputCog)
+    static bool copyOptimizedCog(const std::string &input, const std::string &outputCog)
     {
-        if (!isOptimizedCog(inputGTiff))
+        if (!isOptimizedCog(input))
             return false;
 
-        LOGD << "Input file " << inputGTiff << " is already an optimized COG, copying instead of rebuilding";
+        LOGD << "Input file " << input << " is already an optimized COG, copying instead of rebuilding";
 
         // Simply copy the file instead of rebuilding
         try {
             // The filesystem wrapper carries the actual write error code.
             // A full disk must escape the fallback and preserve pending work.
-            io::copy(io::fromUtf8(inputGTiff), io::fromUtf8(outputCog));
+            io::copy(io::fromUtf8(input), io::fromUtf8(outputCog));
 
-            LOGD << "Successfully copied optimized COG from " << inputGTiff << " to " << outputCog;
+            LOGD << "Successfully copied optimized COG from " << input << " to " << outputCog;
             generateCogStats(outputCog);
             return true;
         } catch (const FSException& e) {
@@ -182,16 +182,20 @@ namespace ddb
     }
 
     // The arguments of the GDALWarp that writes the COG: Web Mercator, GoogleMapsCompatible tiles,
-    // the threads and warp memory of the budget, transparency and compression of the source
+    // the threads and warp memory of the budget, transparency and compression of the source.
+    // -multi reads the source on a GDAL worker thread, which does not see a thread-local option:
+    // left out when the reads must stay on this thread (multiThreadedIo false).
     static CPLStringList cogWarpArgs(GDALDatasetH hSrcDataset, GDALRasterBandH hSrcBand1,
-                                     const BuildResourceBudget &budget, const std::string &numThreads)
+                                     const BuildResourceBudget &budget, const std::string &numThreads,
+                                     bool multiThreadedIo)
     {
         CPLStringList targs;
         targs.AddString("-of");
         targs.AddString("COG");
         targs.AddString("-t_srs");
         targs.AddString("EPSG:3857");
-        targs.AddString("-multi");
+        if (multiThreadedIo)
+            targs.AddString("-multi");
         targs.AddString("-wo");
         targs.AddString(numThreads.c_str());
         targs.AddString("-co");
@@ -216,31 +220,17 @@ namespace ddb
         return targs;
     }
 
-    void buildCog(const std::string &inputGTiff, const std::string &outputCog, const BuildOptions &options)
+    void buildCog(const std::string &input, const std::string &outputCog, const BuildOptions &options)
     {
+        // A JPEG 2000 decodes on threads of its own, one per CPU unless GDAL_NUM_THREADS says
+        // otherwise, and starts them when it is opened. It is never a COG: no open before the
+        // budget below is in place.
+        const GDALDriverH sourceDriver = GDALIdentifyDriver(input.c_str(), nullptr);
+        const bool ownDecodeThreads = sourceDriver && decodesWithOwnThreads(GDALGetDriverShortName(sourceDriver));
+
         // Check if input is already an optimized COG
-        if (copyOptimizedCog(inputGTiff, outputCog))
+        if (!ownDecodeThreads && copyOptimizedCog(input, outputCog))
             return;
-
-        // Normal rebuild process for files that need optimization
-        LOGD << "Building COG from " << inputGTiff << " (requires optimization)";
-
-        // Owned: the budget, the option list and GDALWarpAppOptionsNew below can throw
-        auto srcDataset = adoptDataset(GDALOpen(inputGTiff.c_str(), GA_ReadOnly));
-
-        if (!srcDataset)
-            throw GDALException("Cannot open " + inputGTiff + " for reading");
-        GDALDatasetH hSrcDataset = datasetHandle(srcDataset);
-
-        // Check that the source has a valid CRS
-        const char* srcProjRef = GDALGetProjectionRef(hSrcDataset);
-        if (!srcProjRef || strlen(srcProjRef) == 0)
-            throw GDALException("Cannot build COG: input file has no coordinate reference system: " + inputGTiff);
-
-        // Detect and preserve nodata from source
-        GDALRasterBandH hSrcBand1 = GDALGetRasterBand(hSrcDataset, 1);
-        if (!hSrcBand1)
-            throw GDALException("Cannot read band 1 from " + inputGTiff);
 
         // Threads, warp memory and block cache come from one budget so
         // that several builds running in one process stay within known bounds;
@@ -249,9 +239,37 @@ namespace ddb
         const BuildResourceBudget budget = BuildResourceBudget::fromConfig(options);
         const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
         const std::string numThreads = parallel::gdalNumThreads(cpu);
-        LOGD << "COG warp and compression of " << inputGTiff << ": " << numThreads;
 
-        CPLStringList targs = cogWarpArgs(hSrcDataset, hSrcBand1, budget, numThreads);
+        // A decoder with threads of its own gets the threads of the build, scoped to this thread
+        // before the source is opened, and its reads stay on this thread (no -multi) so they see
+        // that option
+        std::optional<ScopedThreadConfigOption> decodeThreadsGuard;
+        if (ownDecodeThreads)
+            decodeThreadsGuard.emplace("GDAL_NUM_THREADS", std::to_string(cpu.threads()).c_str());
+
+        // Normal rebuild process for files that need optimization
+        LOGD << "Building COG from " << input << " (requires optimization)";
+
+        // Owned: the option list and GDALWarpAppOptionsNew below can throw
+        auto srcDataset = adoptDataset(GDALOpen(input.c_str(), GA_ReadOnly));
+
+        if (!srcDataset)
+            throw GDALException("Cannot open " + input + " for reading");
+        GDALDatasetH hSrcDataset = datasetHandle(srcDataset);
+
+        // Check that the source has a valid CRS
+        const char* srcProjRef = GDALGetProjectionRef(hSrcDataset);
+        if (!srcProjRef || strlen(srcProjRef) == 0)
+            throw GDALException("Cannot build COG: input file has no coordinate reference system: " + input);
+
+        // Detect and preserve nodata from source
+        GDALRasterBandH hSrcBand1 = GDALGetRasterBand(hSrcDataset, 1);
+        if (!hSrcBand1)
+            throw GDALException("Cannot read band 1 from " + input);
+
+        LOGD << "COG warp and compression of " << input << ": " << numThreads;
+
+        CPLStringList targs = cogWarpArgs(hSrcDataset, hSrcBand1, budget, numThreads, !ownDecodeThreads);
 
         // Scope GDAL's temporary directory (CPL_TMPDIR) to the output's own folder (the
         // per-build temp folder when called from the build pipeline). The COG driver

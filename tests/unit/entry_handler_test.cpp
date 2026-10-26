@@ -344,9 +344,9 @@ TEST(entryHandler, ExtensionsArePinned) {
         {EntryType::GaussianSplat, {"spz", "splat", "ksplat"}},
         {EntryType::Model, {"obj", "ply", "gltf", "glb"}},
         {EntryType::Tiles3D, {"3tz"}},
-        {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"}},
-        {EntryType::Image, {"jpg", "jpeg", "dng", "tif", "tiff", "png", "gif", "webp", "mp4", "mov", "webm", "m4v", "avi",
-                 "mkv"}}};
+        {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx"}},
+        {EntryType::Image, {"jpg", "jpeg", "dng", "tif", "tiff", "jp2", "j2k", "png", "gif", "webp", "mp4", "mov", "webm",
+                 "m4v", "avi", "mkv"}}};
     for (const auto t : AllBuiltinTypes) {
         const auto it = expected.find(t);
         EXPECT_EQ(entryHandler(t).extensions(), it != expected.end() ? it->second : std::vector<std::string>{})
@@ -371,6 +371,7 @@ TEST(entryHandler, FingerprintByExtension) {
     EXPECT_EQ(fingerprint(file("city.3tz")), EntryType::Tiles3D);
     EXPECT_EQ(fingerprint(file("roads.shp")), EntryType::Vector);
     EXPECT_EQ(fingerprint(file("roads.dbf")), EntryType::Generic);
+    EXPECT_EQ(fingerprint(file("flight.GPX")), EntryType::Vector);
     EXPECT_EQ(fingerprint(file("splat.ksplat")), EntryType::GaussianSplat);
     EXPECT_EQ(fingerprint(file("noext")), EntryType::Generic);
     // Unreadable content: the Image handler falls back to Image, a broken .ply to Generic

@@ -67,6 +67,31 @@ namespace testutils
         return path;
     }
 
+    fs::path createGeoJp2(const fs::path &path, const GeoRasterSpec &spec, bool georeferenced)
+    {
+        const fs::path source = path.string() + ".source.tif";
+        createGeoRaster(source, spec);
+        GDALDatasetH src = GDALOpen(ddb::io::toUtf8(source).c_str(), GA_ReadOnly);
+        if (src == nullptr)
+            throw std::runtime_error("Cannot open " + ddb::io::toUtf8(source));
+        char **opts = CSLSetNameValue(nullptr, "REVERSIBLE", "YES");
+        opts = CSLSetNameValue(opts, "QUALITY", "100");
+        if (!georeferenced)
+        {
+            opts = CSLSetNameValue(opts, "GeoJP2", "NO");
+            opts = CSLSetNameValue(opts, "GMLJP2", "NO");
+        }
+        GDALDatasetH out = GDALCreateCopy(GDALGetDriverByName("JP2OpenJPEG"), ddb::io::toUtf8(path).c_str(), src,
+                                          FALSE, opts, nullptr, nullptr);
+        CSLDestroy(opts);
+        GDALClose(src);
+        fs::remove(source);
+        if (out == nullptr)
+            throw std::runtime_error("Cannot create " + ddb::io::toUtf8(path));
+        GDALClose(out);
+        return path;
+    }
+
     DecodedImage decodeImage(const uint8_t *data, size_t size)
     {
         const std::string vsi = "/vsimem/test-decode-" + ddb::randomString(16);

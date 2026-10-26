@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Vector entries: GeoJSON, Shapefile, GeoPackage, KML, FlatGeobuf, CAD drawings (DXF/DWG), ...
+// Vector entries: GeoJSON, Shapefile, GeoPackage, KML, GPX, FlatGeobuf, CAD drawings (DXF/DWG), ...
 // built into a GeoPackage copy plus an MVT pyramid (or the drawing-coordinate metadata of a CAD
 // drawing without CRS).
 
@@ -32,7 +32,11 @@ json layerSummary(OGRLayerH hLayer, int i)
     const char *layerName = OGR_L_GetName(hLayer);
     layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
     layerJson["geometryType"] = OGRGeometryTypeToName(OGR_L_GetGeomType(hLayer));
-    layerJson["featureCount"] = static_cast<int64_t>(OGR_L_GetFeatureCount(hLayer, FALSE));
+    // A driver without a fast count (GPX) answers -1: count the features then
+    GIntBig count = OGR_L_GetFeatureCount(hLayer, FALSE);
+    if (count < 0)
+        count = OGR_L_GetFeatureCount(hLayer, TRUE);
+    layerJson["featureCount"] = static_cast<int64_t>(count);
     return layerJson;
 }
 
@@ -251,7 +255,7 @@ class VectorEntryHandler : public EntryHandler {
     VectorEntryHandler() : EntryHandler(EntryType::Vector, "Vector") {}
 
     std::vector<std::string> extensions() const override {
-        return {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"};
+        return {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx"};
     }
 
     void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& /*ctx*/) const override {

@@ -331,6 +331,41 @@ namespace
         EXPECT_EQ(reader.reads.load(), 1u);
     }
 
+    // A JPEG 2000 is told apart as a TIFF is: GDAL looks at it first, one with a projection is a
+    // GeoRaster (no metadata read) and one without is an Image
+    TEST(ExifIndex, aJpeg2000WithAProjectionIsAGeoRasterAndOneWithoutIsAnImage)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto root = ta.getFolder("ds");
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 32;
+        testutils::createGeoJp2(root / "ortho.jp2", spec);
+        testutils::createGeoJp2(root / "scan.j2k", spec, false);
+
+        CountingReader reader;
+        exif::ScopedMetadataReader scope(reader);
+
+        initIndex(root.string());
+        auto db = ddb::open(root.string(), true);
+        AddOptions options;
+        options.stopOnError = false;
+        AddResult result;
+        addToIndexEx(db.get(), {(root / "ortho.jp2").string()}, options, result);
+
+        EXPECT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front().message);
+        const auto entries = byPath(result);
+        const Entry &ortho = entries.at("ortho.jp2");
+        EXPECT_EQ(ortho.type, EntryType::GeoRaster);
+        EXPECT_FALSE(ortho.polygon_geom.empty());
+        EXPECT_EQ(ortho.properties.value("width", 0), 32);
+        EXPECT_EQ(reader.reads.load(), 0u);
+
+        AddResult second;
+        addToIndexEx(db.get(), {(root / "scan.j2k").string()}, options, second);
+        EXPECT_TRUE(second.errors.empty()) << (second.errors.empty() ? "" : second.errors.front().message);
+        EXPECT_EQ(byPath(second).at("scan.j2k").type, EntryType::Image);
+    }
+
     // ------------------------------------------------------------------ reads that run while a file is hashed
 
     // A reader that records, per file, what it was asked: "begin" (a read started), "get" (its

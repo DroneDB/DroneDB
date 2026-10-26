@@ -14,7 +14,7 @@ namespace ddb {
 
 // Builds the cloud optimized GeoTIFF `outputCog` from a raster. The warp and the compression use
 // the threads of one build: DDB_BUILD_THREADS, lowered to options.threads.
-void buildCog(const std::string& inputGTiff, const std::string& outputCog, const BuildOptions& options = {});
+void buildCog(const std::string& input, const std::string& outputCog, const BuildOptions& options = {});
 void generateCogStats(const std::string& cogPath);
 
 }

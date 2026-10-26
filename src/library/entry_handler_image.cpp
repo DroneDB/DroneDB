@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // Image, GeoImage, Panorama, GeoPanorama, Video and GeoVideo entries: photos and videos read
-// through their EXIF/XMP tags. The Image handler also detects GeoRaster TIFFs.
+// through their EXIF/XMP tags. The Image handler also detects GeoRasters (TIFF, JPEG 2000).
 
 #include <memory>
 
@@ -17,10 +17,11 @@ namespace ddb {
 
 namespace {
 
-// The extensions of the family, by what detection does with them
-bool isTiff(const io::Path &p)
+// The extensions of the family, by what detection does with them. The rasters GDAL opens
+// first: one with a projection is a GeoRaster.
+bool isGdalRaster(const io::Path &p)
 {
-    return p.checkExtension({"tif", "tiff"});
+    return p.checkExtension({"tif", "tiff", "jp2", "j2k"});
 }
 
 bool isOtherImage(const io::Path &p)
@@ -33,26 +34,27 @@ bool isVideo(const io::Path &p)
     return p.checkExtension({"mp4", "mov", "webm", "m4v", "avi", "mkv"});
 }
 
-// Detection reads the metadata of every such file, whatever it holds. Not of every TIFF: GDAL
-// looks at a TIFF first, and one with a projection is a GeoRaster, whose metadata is not read.
+// Detection reads the metadata of every such file, whatever it holds. Not of every TIFF or
+// JPEG 2000: GDAL looks at them first, and one with a projection is a GeoRaster, whose
+// metadata is not read.
 bool detectionAlwaysReadsMetadata(const io::Path &p)
 {
     return isOtherImage(p) || isVideo(p);
 }
 
-// The image family is told apart by reading the file: a TIFF with a projection is a
-// GeoRaster, an image twice as wide as high a Panorama, EXIF/XMP GPS tags make it Geo*.
+// The image family is told apart by reading the file: a TIFF or JPEG 2000 with a projection
+// is a GeoRaster, an image twice as wide as high a Panorama, EXIF/XMP GPS tags make it Geo*.
 EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
 {
     EntryType type = EntryType::Generic;
     io::Path p(path);
 
-    bool tif = isTiff(p);
+    bool gdalRaster = isGdalRaster(p);
     bool video = isVideo(p);
 
     bool georaster = false;
 
-    if (tif)
+    if (gdalRaster)
     {
         const auto dataset = adoptDataset(GDALOpen(io::toUtf8(path).c_str(), GA_ReadOnly));
         if (dataset)
@@ -69,7 +71,7 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
         }
     }
 
-    bool image = (tif || isOtherImage(p)) && !georaster;
+    bool image = (gdalRaster || isOtherImage(p)) && !georaster;
 
     if (image || video)
     {
@@ -333,11 +335,12 @@ class ImageEntryHandler : public EntryHandler {
   public:
     ImageEntryHandler(EntryType type, std::string name) : EntryHandler(type, std::move(name)) {}
 
-    // The Image handler claims every extension of the family (GeoRaster TIFFs included)
+    // The Image handler claims every extension of the family (GeoRaster TIFFs and JPEG 2000s
+    // included)
     std::vector<std::string> extensions() const override {
         if (type() != EntryType::Image)
             return {};
-        return {"jpg", "jpeg", "dng", "tif", "tiff", "png", "gif", "webp",
+        return {"jpg", "jpeg", "dng", "tif", "tiff", "jp2", "j2k", "png", "gif", "webp",
                 "mp4", "mov", "webm", "m4v", "avi", "mkv"};
     }
 

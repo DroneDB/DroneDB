@@ -24,7 +24,9 @@ namespace ddb
      * rebuilt so callers always observe a consistent pair.
      * Throws on failure; partial outputs are cleaned up.
      *
-     * Multi-layer sources (GPKG, KMZ) preserve all layers in BOTH outputs.
+     * Multi-layer sources (GPKG, KMZ, GPX) keep every layer that holds a
+     * feature in BOTH outputs; empty layers are left out (all of them are
+     * kept when every layer is empty).
      * Source SRS is reprojected to EPSG:4326 (GPKG) / EPSG:3857 (MVT).
      *
      * CAD drawings (.dxf, .dwg): a DWG is converted with LibreDWG dwg2dxf

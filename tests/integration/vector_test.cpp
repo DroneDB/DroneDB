@@ -6,12 +6,15 @@
 #include "testarea.h"
 #include "testfs.h"
 #include "vector.h"
+#include "entry.h"
+#include "json.h"
 #include "mio.h"
 #include "ddb.h"
 #include "logger.h"
 #include "gdal_inc.h"
 #include "gdal_failure_counter.h"
 
+#include <fstream>
 #include <memory>
 #include <algorithm>
 #include <cctype>
@@ -256,6 +259,11 @@ namespace
         EXPECT_NE(GDALGetDriverByName("LIBKML"), nullptr);
     }
 
+    TEST(testVector, verifyGPXDriver)
+    {
+        EXPECT_NE(GDALGetDriverByName("GPX"), nullptr);
+    }
+
     TEST(testVector, verifyMVTDriver)
     {
         // Required for the rewritten buildVector pipeline
@@ -473,5 +481,137 @@ namespace
             EXPECT_EQ(seen[name], (Types{wkbPolygon})) << name;
         EXPECT_EQ(seen["multicurve"], (Types{wkbLineString}));
         EXPECT_EQ(seen["collection"], (Types{wkbPoint, wkbPolygon}));
+    }
+
+    // ---- Empty layers -----------------------------------------------------------------------
+
+    // The names of the layers of a vector file, in order
+    std::vector<std::string> layerNames(const fs::path &path)
+    {
+        std::vector<std::string> names;
+        GDALDatasetH ds = GDALOpenEx(path.string().c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
+        if (!ds) return names;
+        for (int i = 0; i < GDALDatasetGetLayerCount(ds); i++)
+            names.emplace_back(OGR_L_GetName(GDALDatasetGetLayer(ds, i)));
+        GDALClose(ds);
+        return names;
+    }
+
+    // The layers the MVT pyramid declares (vector_layers of its metadata.json)
+    std::set<std::string> mvtLayerNames(const fs::path &mvtDir)
+    {
+        std::ifstream in(mvtDir / "metadata.json");
+        const auto metadata = json::parse(in);
+        const auto tileJson = json::parse(metadata.at("json").get<std::string>());
+        std::set<std::string> names;
+        for (const auto &layer : tileJson.at("vector_layers"))
+            names.insert(layer.at("id").get<std::string>());
+        return names;
+    }
+
+    // A GPKG with one WGS84 point layer per (name, feature count)
+    void writePointLayers(const fs::path &path, const std::vector<std::pair<std::string, int>> &layers)
+    {
+        GDALDriver *gpkg = GetGDALDriverManager()->GetDriverByName("GPKG");
+        ASSERT_NE(gpkg, nullptr);
+        std::unique_ptr<GDALDataset> ds(gpkg->Create(path.string().c_str(), 0, 0, 0, GDT_Unknown, nullptr));
+        ASSERT_NE(ds, nullptr);
+        OGRSpatialReference wgs84;
+        wgs84.importFromEPSG(4326);
+        wgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        for (const auto &[name, count] : layers)
+        {
+            OGRLayer *layer = ds->CreateLayer(name.c_str(), &wgs84, wkbPoint, nullptr);
+            ASSERT_NE(layer, nullptr);
+            for (int i = 0; i < count; i++)
+            {
+                OGRFeature feature(layer->GetLayerDefn());
+                feature.SetGeometry(std::make_unique<OGRPoint>(9.18 + i * 0.001, 45.46).get());
+                ASSERT_EQ(layer->CreateFeature(&feature), OGRERR_NONE);
+            }
+        }
+    }
+
+    // A layer without features is left out of both outputs: it would only show as an empty
+    // collection (WFS, OGC API) and could be the default layer of the GeoPackage
+    TEST(testVector, emptyLayersAreNotBuilt)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto src = ta.getPath("layers.gpkg");
+        writePointLayers(src, {{"empty", 0}, {"poles", 3}, {"nothing", 0}});
+        const auto out = ta.getPath("build");
+
+        buildVector(src.string(), out.string());
+
+        VerifyVectorBuild(out, 1);
+        EXPECT_EQ(layerNames(out / "vec" / "source.gpkg"), (std::vector<std::string>{"poles"}));
+        EXPECT_EQ(mvtLayerNames(out / "mvt"), (std::set<std::string>{"poles"}));
+    }
+
+    // With no feature anywhere there is nothing to choose from: every layer is built, as before
+    TEST(testVector, aSourceWithOnlyEmptyLayersBuildsThemAll)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto src = ta.getPath("layers.gpkg");
+        writePointLayers(src, {{"first", 0}, {"second", 0}});
+        const auto out = ta.getPath("build");
+
+        buildVector(src.string(), out.string());
+
+        EXPECT_EQ(layerNames(out / "vec" / "source.gpkg"), (std::vector<std::string>{"first", "second"}));
+    }
+
+    // ---- GPX --------------------------------------------------------------------------------
+
+    // A flight log: one track of three points, no waypoints and no routes
+    const char *const kFlightGpx = R"(<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="ddb tests" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Flight 1</name>
+    <trkseg>
+      <trkpt lat="45.4600" lon="9.1800"><ele>120.5</ele><time>2026-10-26T10:00:00Z</time></trkpt>
+      <trkpt lat="45.4610" lon="9.1815"><ele>121.0</ele><time>2026-10-26T10:00:05Z</time></trkpt>
+      <trkpt lat="45.4620" lon="9.1830"><ele>122.5</ele><time>2026-10-26T10:00:10Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>
+)";
+
+    // GDAL reads a GPX as five layers; the build keeps the two that hold the track
+    TEST(testVector, gpxBuildsTheLayersThatHoldItsTrack)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto src = ta.getPath("flight.gpx");
+        std::ofstream(src) << kFlightGpx;
+        ASSERT_EQ(layerNames(src).size(), 5u);
+        const auto out = ta.getPath("build");
+
+        GdalFailureCounter failures;
+        ASSERT_NO_THROW(buildVector(src.string(), out.string()));
+        EXPECT_EQ(failures.value(), 0) << "GDAL reported failures while building";
+
+        VerifyVectorBuild(out, 2);
+        EXPECT_EQ(layerNames(out / "vec" / "source.gpkg"), (std::vector<std::string>{"tracks", "track_points"}));
+        EXPECT_EQ(mvtLayerNames(out / "mvt"), (std::set<std::string>{"tracks", "track_points"}));
+    }
+
+    // The entry of a GPX: a Vector with the footprint of its track and the real feature count of
+    // each layer (the GPX driver has no fast count: it answers -1 unless asked to count)
+    TEST(testVector, gpxEntryCountsItsFeatures)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto src = ta.getPath("flight.gpx");
+        std::ofstream(src) << kFlightGpx;
+
+        Entry entry;
+        parseEntry(src, ta.getFolder(), entry, false);
+
+        EXPECT_EQ(entry.type, EntryType::Vector);
+        EXPECT_FALSE(entry.polygon_geom.empty());
+        std::map<std::string, int64_t> counts;
+        for (const auto &layer : entry.properties.at("vector").at("layers"))
+            counts[layer.at("name").get<std::string>()] = layer.at("featureCount").get<int64_t>();
+        EXPECT_EQ(counts, (std::map<std::string, int64_t>{{"tracks", 1}, {"track_points", 3}}))
+            << entry.properties.dump();
     }
 }

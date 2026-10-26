@@ -8,6 +8,11 @@
 
 namespace ddb
 {
+    bool decodesWithOwnThreads(const std::string &driverName)
+    {
+        return driverName == "JP2OpenJPEG";
+    }
+
     bool isOptimizedCog(const std::string &inputPath)
     {
         const auto dataset = adoptDataset(GDALOpen(inputPath.c_str(), GA_ReadOnly));
