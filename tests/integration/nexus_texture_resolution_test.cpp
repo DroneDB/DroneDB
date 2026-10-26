@@ -162,18 +162,88 @@ namespace
         EXPECT_LT(c.inner, c.leaves) << "the coarser levels hold " << c.inner << " texels";
     }
 
-    // Each coarser level has half the triangles and half the texels of the one below: cut by
-    // triangles alone, a coarser node would get the texels of many leaves, more than its texture
-    // can hold
-    TEST(NexusTextureResolution, theCoarserLevelsKeepHalfTheTexelsOfTheLevelBelow)
+    // The coarser levels hold a third of the texels of the leaves: the levels that only make a
+    // texture finer than its triangles coarser halve its side, as mipmaps do, and the simplified
+    // levels above them keep the texels of their triangles. Cut by triangles alone, a coarser
+    // node would get the texels of many leaves, more than its texture holds; with levels that
+    // halve the texels instead of the side, the coarser levels would hold as many as the leaves.
+    TEST(NexusTextureResolution, theCoarserLevelsHoldAThirdOfTheTexelsOfTheLeaves)
     {
         TestArea ta(TEST_NAME, true);
         const int side = 4096;
         const NexusFile n = testutils::readNexusFile(buildGrid(ta, 72, side, detail));
         const TexelCount c = countTexels(n);
         EXPECT_GE(c.leaves, 0.9 * side * side) << "the leaves hold " << c.leaves << " texels";
-        EXPECT_GE(c.inner, 0.45 * c.leaves) << "the coarser levels hold " << c.inner << " texels";
+        EXPECT_GE(c.inner, 0.2 * c.leaves) << "the coarser levels hold " << c.inner << " texels";
+        EXPECT_LE(c.inner, 0.45 * c.leaves) << "the coarser levels hold " << c.inner << " texels";
         EXPECT_LE(c.largestSide, maxNodeTextureSide);
+    }
+
+    // The texels of a node texture that no triangle draws are one flat color, past a margin of a
+    // few texels along the triangles: they hold whatever the model's texture had around the
+    // triangles, and cost bytes. One triangle over the lower left half of a detailed texture
+    // keeps the detail there and nothing in the upper right half (rows run from v = 1 down).
+    TEST(NexusTextureResolution, theTexelsNoTriangleDrawsAreBlank)
+    {
+        TestArea ta(TEST_NAME, true);
+        writeTexture(ta.getPath("texture.tif"), 256, detail);
+        std::ofstream(ta.getPath("half.obj")) << "mtllib half.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\n"
+                                               << "vt 0 0\nvt 1 0\nvt 0 1\nusemtl m\nf 1/1 2/2 3/3\n";
+        std::ofstream(ta.getPath("half.mtl")) << "newmtl m\nKd 1 1 1\nmap_Kd texture.tif\n";
+        const fs::path out = ta.getPath("half.nxs");
+        ASSERT_NO_THROW(buildNexus(io::toUtf8(ta.getPath("half.obj")), io::toUtf8(out), true));
+        const NexusFile n = testutils::readNexusFile(out);
+        ASSERT_FALSE(n.textures.empty());
+        const testutils::DecodedImage img = testutils::decodeImage(n.textures.front());
+        ASSERT_GE(img.width, 64);
+        ASSERT_GE(img.height, 64);
+
+        auto deviation = [&img](bool drawnHalf) {
+            double sum = 0, squares = 0, count = 0;
+            for (int y = 0; y < img.height; y++)
+                for (int x = 0; x < img.width; x++)
+                {
+                    const double u = (x + 0.5) / img.width, v = 1.0 - (y + 0.5) / img.height;
+                    if (drawnHalf ? u + v > 0.85 : u + v < 1.15)
+                        continue;
+                    const double p = img.bands[0][size_t(y) * size_t(img.width) + size_t(x)];
+                    sum += p;
+                    squares += p * p;
+                    count++;
+                }
+            const double mean = sum / count;
+            return std::sqrt(std::max(0.0, squares / count - mean * mean));
+        };
+        EXPECT_LT(deviation(false), 2.0) << "the half no triangle draws is not blank";
+        EXPECT_GT(deviation(true), 20.0) << "the half the triangle draws lost its detail";
+    }
+
+    // The node textures are encoded on several threads and written in the order of the nodes:
+    // each node gets its own texture. Over a texture whose red grows with u and green with v,
+    // the mean color of each node's texture tells where the node lies on the grid.
+    TEST(NexusTextureResolution, eachNodeHasTheTextureOfItsPlace)
+    {
+        TestArea ta(TEST_NAME, true);
+        const int cells = 72, side = 2048;
+        // bands count from 1, and texture rows run from v = 1 at the top
+        const NexusFile n = testutils::readNexusFile(buildGrid(ta, cells, side, [side](int band, int x, int y) {
+            return band == 1 ? 255.0 * x / side : band == 2 ? 255.0 * (side - 1 - y) / side : 128.0;
+        }));
+        ASSERT_GT(n.textures.size(), 4u);
+        for (size_t node = 0; node < n.nodeTexture.size(); node++)
+        {
+            const testutils::DecodedImage img = testutils::decodeImage(n.textures[size_t(n.nodeTexture[node])]);
+            double red = 0, green = 0;
+            for (size_t i = 0; i < img.bands[0].size(); i++)
+            {
+                red += img.bands[0][i];
+                green += img.bands[1][i];
+            }
+            red /= double(img.bands[0].size());
+            green /= double(img.bands[1].size());
+            EXPECT_NEAR(red, 255.0 * n.center[node][0] / cells, 30.0) << "node " << node;
+            EXPECT_NEAR(green, 255.0 * n.center[node][1] / cells, 30.0) << "node " << node;
+        }
     }
 
     // The texture of a coarser level is the average of the one below: a checkerboard of single
@@ -199,8 +269,9 @@ namespace
                 sum += v;
                 squares += double(v) * v;
             }
-            const double mean = sum / red.size();
-            const double deviation = std::sqrt(std::max(0.0, squares / red.size() - mean * mean));
+            const double count = double(red.size());
+            const double mean = sum / count;
+            const double deviation = std::sqrt(std::max(0.0, squares / count - mean * mean));
             EXPECT_NEAR(mean, 127.5, 20.0) << "node " << node;
             EXPECT_LT(deviation, 60.0) << "node " << node;
         }

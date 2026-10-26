@@ -65,6 +65,8 @@ namespace testutils
                 leaf = leaf && readAt<uint32_t>(b, patches + patchSize * p) == sink;
             f.leaf.push_back(leaf);
             f.error.push_back(readAt<float>(b, nodes + nodeSize * n + 8));
+            f.center.push_back({readAt<float>(b, nodes + nodeSize * n + 20), readAt<float>(b, nodes + nodeSize * n + 24),
+                                readAt<float>(b, nodes + nodeSize * n + 28)});
             f.nodeTexture.push_back(f.nTextures > 0 ? int(readAt<uint32_t>(b, patches + patchSize * first + 8)) : -1);
         }
         return f;

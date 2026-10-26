@@ -4,6 +4,7 @@
 #ifndef NEXUS_FILE_SUPPORT_H
 #define NEXUS_FILE_SUPPORT_H
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -26,6 +27,7 @@ namespace testutils
         std::vector<int> nodeTexture;               // the texture of each node but the sink
         std::vector<bool> leaf;                     // nodes whose patches all point to the sink
         std::vector<float> error;                   // the error of each node but the sink
+        std::vector<std::array<float, 3>> center;   // the center of the bounding sphere of each node but the sink
     };
 
     /// Reads the file; a test failure, and what could be read, when it is too short
