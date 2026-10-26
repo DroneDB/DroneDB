@@ -7,9 +7,11 @@
 #include <system_error>
 #include <vector>
 
+#include "build_budget.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "parallel.h"
 #include "tool_locator.h"
 #include "tool_runner_result.h"
 
@@ -49,7 +51,11 @@ namespace ddb
                 fail(input, std::string("ddb-nexus not found; set ") + kNexusEnv +
                                 " or install ddb-nexus next to ddb");
 
-            const std::vector<std::string> args = {io::toUtf8(input), io::toUtf8(output)};
+            // The threads of one build (DDB_BUILD_THREADS, as for the raster builds) that the CPU
+            // pool has free: the child keeps that many busy, and the tokens are held until it ends
+            const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(BuildResourceBudget::fromConfig().threads));
+            const std::vector<std::string> args = {"--threads", std::to_string(cpu.threads()), io::toUtf8(input),
+                                                   io::toUtf8(output)};
             LOGD << "Spawning ddb-nexus: " << process::formatCommandLine(bin, args);
 
             const process::Result res = runner.run(bin, args, process::Options());

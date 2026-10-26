@@ -21,6 +21,7 @@
 #include "helpers/process_test_utils.h"
 #include "mio.h"
 #include "nexus_runner.h"
+#include "process_runner.h"
 #include "test.h"
 #include "testarea.h"
 #include "tool_locator.h"
@@ -100,6 +101,30 @@ namespace
         expectBuilt(buildNexus(io::toUtf8(writeModel(ta)), io::toUtf8(ta.getPath("model.nxz")), true));
         EXPECT_FALSE(processHasLoaded("libnxs"));
 #endif
+    }
+
+    // ddb-nexus keeps at most --threads N threads busy: a count it cannot use is a usage error
+    // (exit 64) that names the option, and a count of 1 builds the model
+    TEST(NexusProcess, theToolTakesAThreadCountOfOneOrMore)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path tool = nexus::findNexusBinary(true);
+        ASSERT_TRUE(tools::isExecutableFile(tool)) << io::toUtf8(tool);
+        const std::string model = io::toUtf8(writeModel(ta));
+        const std::string out = io::toUtf8(ta.getPath("model.nxz"));
+        const auto &runner = process::systemProcessRunner();
+
+        for (const char *bad : {"0", "-1", "two", "99999"})
+        {
+            const process::Result r = runner.run(tool, {"--threads", bad, model, out}, process::Options());
+            EXPECT_EQ(r.exitCode, 64) << bad;
+            EXPECT_NE(r.outputTail.find("--threads"), std::string::npos) << r.outputTail;
+            EXPECT_FALSE(fs::exists(ta.getPath("model.nxz"))) << bad;
+        }
+
+        const process::Result r = runner.run(tool, {"--threads", "1", model, out}, process::Options());
+        EXPECT_EQ(r.exitCode, 0) << r.outputTail;
+        expectBuilt(out);
     }
 
     TEST(NexusProcess, aMissingToolNamesItAndTheVariable)

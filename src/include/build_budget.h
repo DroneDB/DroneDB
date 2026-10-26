@@ -9,11 +9,12 @@
 
 namespace ddb {
 
-// Resources one raster build may use. Read in one place from the config
+// Resources one build may use. Read in one place from the config
 // options below (environment variables or CPLSetConfigOption):
-//   DDB_COG_CACHE_MB    GDAL block cache while the build runs (default 1024)
+//   DDB_COG_CACHE_MB    GDAL block cache while a raster build runs (default 1024)
 //   DDB_WARP_MEMORY_MB  GDALWarp working memory, -wm (default 512)
-//   DDB_BUILD_THREADS   GDAL threads wanted; 0 = all cores (default min(8, cores)).
+//   DDB_BUILD_THREADS   threads one build wants: GDAL's for a raster build, ddb-nexus's for a
+//                       Nexus build; 0 = all cores (default min(8, cores)).
 //                       The CPU token pool (parallel.h) decides how many run.
 struct BuildResourceBudget {
     int64_t cacheBytes;

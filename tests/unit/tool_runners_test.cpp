@@ -478,11 +478,50 @@ struct NexusFixture {
 
 TEST(NexusRunner, runsTheToolOnTheInputAndTheOutput) {
     NexusFixture f("runner_nexus");
+    const ScopedProcessConfig pool(R"({"cpuPoolSize": 16})");
+    EnvVarGuard threads("DDB_BUILD_THREADS", "1");
     f.run();
     ASSERT_EQ(f.fake.calls.size(), 1u);
     EXPECT_EQ(f.fake.calls[0].binary, f.tool);
-    EXPECT_TRUE(hasArgs(f.fake.calls[0].args, {io::toUtf8(f.input), io::toUtf8(f.output)}));
+    EXPECT_TRUE(hasArgs(f.fake.calls[0].args, {"--threads", "1", io::toUtf8(f.input), io::toUtf8(f.output)}));
     EXPECT_TRUE(fs::exists(f.output));
+}
+
+// The tool keeps busy the threads one build may use (DDB_BUILD_THREADS), as many as the CPU pool
+// has free, and their tokens are held while it runs: a Nexus build counts against the same
+// budget as the raster builds and the other tools, so concurrent builds cannot take every core
+TEST(NexusRunner, theToolGetsTheThreadsOfABuildThatThePoolHasFree) {
+    NexusFixture f("runner_nexus_threads");
+    EnvVarGuard threads("DDB_BUILD_THREADS", "3");
+    auto threadsArg = [&f]() {
+        const auto &args = f.fake.calls.back().args;
+        const auto it = std::find(args.begin(), args.end(), "--threads");
+        return it != args.end() && it + 1 != args.end() ? *(it + 1) : std::string();
+    };
+    const auto before = parallel::cpuTokensInUse();
+    size_t heldWhileRunning = 0;
+    f.fake.effect = [&](const FakeProcessRunner::Call &) {
+        heldWhileRunning = parallel::cpuTokensInUse() - before;
+        touch(f.output, "nxz");
+    };
+
+    {
+        const ScopedProcessConfig pool(R"({"cpuPoolSize": 16})");
+        f.run();
+        EXPECT_EQ(threadsArg(), "3");
+        EXPECT_EQ(heldWhileRunning, 2u) << "the calling thread waits: the child gets it and 2 tokens";
+        EXPECT_EQ(parallel::cpuTokensInUse(), before);
+    }
+    {
+        const ScopedProcessConfig pool(R"({"cpuPoolSize": 1})");
+        f.run();
+        EXPECT_EQ(threadsArg(), "2");
+    }
+    {
+        const ScopedProcessConfig pool(R"({"cpuPoolSize": 0})");
+        f.run();
+        EXPECT_EQ(threadsArg(), "1");
+    }
 }
 
 TEST(NexusRunner, anExitCodeIsAFailureWithTheLastOutput) {
@@ -564,10 +603,12 @@ TEST(NexusRunner, aMissingToolIsLookedUpThroughTheVariable) {
     EXPECT_EQ(f.fake.calls[0].binary, f.tool);
 }
 
-TEST(NexusRunner, aCanceledChildPropagates) {
+TEST(NexusRunner, aCanceledChildPropagatesAndReleasesItsCpuTokens) {
     NexusFixture f("runner_nexus_cancel");
     f.fake.effect = [](const FakeProcessRunner::Call &) { throw CanceledException("canceled"); };
+    const auto before = parallel::cpuTokensInUse();
     EXPECT_THROW(f.run(), CanceledException);
+    EXPECT_EQ(parallel::cpuTokensInUse(), before);
 }
 
 // ------------------------------------------------------------------------ Untwine

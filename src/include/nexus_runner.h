@@ -21,8 +21,10 @@ namespace ddb
         fs::path findNexusBinary(bool forceRefresh = false);
 
         // Builds the Nexus file `output` (.nxs or .nxz) from the model `input` by running
-        // `ddb-nexus <input> <output>` as a child process: no Nexus or VCGLib code is loaded
-        // into the calling process. The binary is findNexusBinary() unless `binary` is non-empty.
+        // `ddb-nexus --threads N <input> <output>` as a child process: no Nexus or VCGLib code is
+        // loaded into the calling process. N is what the CPU pool (parallel.h) has free of the
+        // threads one build wants (DDB_BUILD_THREADS, build_budget.h), at least 1; the tokens are
+        // held while the child runs. The binary is findNexusBinary() unless `binary` is non-empty.
         //
         // @throws AppException when the tool is not found (the message names ddb-nexus and
         //         DDB_NEXUS_PATH), cannot start, is killed, exits with a non-zero code, or exits
