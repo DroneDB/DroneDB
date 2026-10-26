@@ -14,11 +14,8 @@ namespace ddb
     {
 
         // Locates the ddb-nexus executable, the separate GPL-3.0 program that writes Nexus files
-        // (vendor/libnexus), with the discovery order of the other external tools:
-        //   1. DDB_NEXUS_PATH env var (authoritative when non-empty)
-        //   2. Folder of the current executable (next to ddbcmd/ddbtest/libddb)
-        //   3. <exe_folder>/../bin (cmake --install layout)
-        //   4. Directories on the system PATH (how a host such as the Registry finds it)
+        // (vendor/libnexus), with tools::findTool (see tool_locator.h for the search order);
+        // DDB_NEXUS_PATH, when non-empty, is authoritative.
         // Returns an empty path when no usable binary is found. The result is cached for the
         // lifetime of the process; pass forceRefresh=true to bypass the cache.
         fs::path findNexusBinary(bool forceRefresh = false);

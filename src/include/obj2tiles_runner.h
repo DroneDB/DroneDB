@@ -40,11 +40,8 @@ namespace ddb
             std::string splitStrategy;     // --split-strategy (since v1.4.0; "VertexMedian"/"VertexBaricenter"/"AbsoluteCenter", empty = Obj2Tiles default)
         };
 
-        // Locates the Obj2Tiles executable using the following discovery order:
-        //   1. DDB_OBJ2TILES_PATH env var (authoritative when non-empty)
-        //   2. Folder of the current executable (bundled next to ddbcmd/ddbtest)
-        //   3. <exe_folder>/../bin (cmake --install layout)
-        //   4. Directories on the system PATH
+        // Locates the Obj2Tiles executable with tools::findTool (see tool_locator.h for the
+        // search order); DDB_OBJ2TILES_PATH, when non-empty, is authoritative.
         // Returns an empty path if no usable binary is found. The result is cached
         // for the lifetime of the process; pass forceRefresh=true to bypass the cache.
         fs::path findObj2TilesBinary(bool forceRefresh = false);

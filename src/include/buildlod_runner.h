@@ -16,12 +16,9 @@ namespace ddb
     namespace buildlod
     {
 
-        // Locates the build-lod executable (Spark's RAD level-of-detail producer) using the
-        // same discovery order as the Untwine accelerator:
-        //   1. DDB_BUILDLOD_PATH env var (authoritative when non-empty)
-        //   2. Folder of the current executable (bundled next to ddbcmd/ddbtest by packaging)
-        //   3. <exe_folder>/../bin (cmake --install layout)
-        //   4. Directories on the system PATH
+        // Locates the build-lod executable (Spark's RAD level-of-detail producer) with
+        // tools::findTool (see tool_locator.h for the search order); DDB_BUILDLOD_PATH, when
+        // non-empty, is authoritative.
         // Returns an empty path when no usable binary is found. The result is cached for the
         // lifetime of the process; pass forceRefresh=true to bypass the cache.
         fs::path findBuildLodBinary(bool forceRefresh = false);

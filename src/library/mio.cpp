@@ -27,6 +27,7 @@
 #include <io.h>  // _wopen, _close, _wunlink, _get_osfhandle
 #include <windows.h>
 #else
+#include <dlfcn.h>     // dladdr
 #include <sys/file.h>  // flock
 #include <unistd.h>    // close, unlink, readlink
 #endif
@@ -342,6 +343,46 @@ namespace ddb
 #endif
         }
 
+        namespace
+        {
+            // Any object of this module: its address tells which file the module was loaded from
+            const char kModuleAnchor = 0;
+        }
+
+        fs::path getLibraryFolderPath()
+        {
+#ifdef _WIN32
+            HMODULE module = nullptr;
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCWSTR>(&kModuleAnchor), &module) == 0)
+            {
+                LOGD << "GetModuleHandleExW failed, error = " << GetLastError();
+                return {};
+            }
+
+            wchar_t path[MAX_PATH] = {0};
+            if (GetModuleFileNameW(module, path, MAX_PATH) == 0)
+            {
+                LOGD << "GetModuleFileNameW failed, error = " << GetLastError();
+                return {};
+            }
+            return fs::path(path).parent_path();
+#else
+            Dl_info info{};
+            if (dladdr(&kModuleAnchor, &info) == 0 || info.dli_fname == nullptr || *info.dli_fname == '\0')
+                return {};
+
+            // The loader reports the name it was given, which can be relative or a symlink
+            // (a libddb.so linked into /usr/local/lib from a build folder): the tools are
+            // next to the file itself
+            const fs::path loaded = fromUtf8(info.dli_fname);
+            std::error_code ec;
+            const fs::path resolved = fs::canonical(loaded, ec);
+            return (ec ? fs::absolute(loaded, ec) : resolved).parent_path();
+#endif
+        }
+
         fs::path getDataPath(const fs::path &p)
         {
             // Attempt to find a path within the places we would
@@ -370,33 +411,12 @@ namespace ddb
                 return cwd / p;
             }
 
-#ifdef WIN32
-            // Check same location as DLL
-            wchar_t dllPath[MAX_PATH];
-            HMODULE hm = NULL;
-
-            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                   (LPCWSTR)&getDataPath, &hm) == 0)
+            if (const fs::path libDir = getLibraryFolderPath(); !libDir.empty() && fs::exists(libDir / p))
             {
-                int ret = GetLastError();
-                LOGD << "GetModuleHandle failed, error = " << ret;
-                return "";
+                return libDir / p;
             }
 
-            if (GetModuleFileNameW(hm, dllPath, MAX_PATH) == 0)
-            {
-                int ret = GetLastError();
-                LOGD << "GetModuleFileName failed, error = " << ret;
-                return "";
-            }
-
-            fs::path dllDir = (fs::path(dllPath)).parent_path();
-            if (fs::exists(dllDir / p))
-            {
-                return dllDir / p;
-            }
-#else
+#ifndef _WIN32
             // On *nix, check /usr/share /usr/local/share folders
             fs::path usrLocalShare = fs::path("/usr/local/share/ddb");
             if (fs::exists(usrLocalShare / p))

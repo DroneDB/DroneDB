@@ -228,6 +228,29 @@ TEST(ToolLocator, theNamedToolIsFoundOnThePath) {
     EXPECT_TRUE(tools::findTool("ddbtest-no-such-tool", nullptr, true).empty());
 }
 
+// A host that loads libddb (the Registry runs as dotnet or its own apphost) has the tools
+// next to libddb, not next to its executable
+TEST(ToolLocator, theFoldersOfTheExecutableAndOfLibddbAreSearchedInOrder) {
+    const fs::path exe = fs::path("hostroot") / "app";
+    const fs::path lib = fs::path("ddbroot") / "lib";
+    EXPECT_EQ(tools::searchFolders(exe, lib),
+              (std::vector<fs::path>{exe, fs::path("hostroot") / "bin", lib, fs::path("ddbroot") / "bin"}));
+}
+
+TEST(ToolLocator, aStaticallyLinkedProgramSearchesItsFolderOnce) {
+    const fs::path exe = fs::path("root") / "bin";
+    EXPECT_EQ(tools::searchFolders(exe, exe), (std::vector<fs::path>{exe}));
+    EXPECT_EQ(tools::searchFolders(exe, {}), (std::vector<fs::path>{exe}));
+    EXPECT_TRUE(tools::searchFolders({}, {}).empty());
+}
+
+TEST(ToolLocator, theLibraryFolderIsTheFolderOfTheFileThatHoldsDroneDB) {
+    // ddbtest links DroneDB statically: the code is in the executable itself
+    const fs::path libDir = io::getLibraryFolderPath();
+    ASSERT_FALSE(libDir.empty());
+    EXPECT_TRUE(fs::equivalent(libDir, io::getExeFolderPath())) << io::toUtf8(libDir);
+}
+
 TEST(ToolLocator, theRunnersFindTheirToolThroughIt) {
     TestArea ta("runner_locator_runners", true);
     const fs::path tool = fakeTool(ta, "bin/tool");

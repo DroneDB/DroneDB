@@ -133,6 +133,13 @@ namespace ddb
         bool isNetworkPath(const std::string &path);
 
         fs::path getExeFolderPath();
+
+        // Folder of the file that holds the DroneDB code: libddb's folder when a host loads it
+        // as a shared library (the Registry, the .NET and Python bindings), the executable's
+        // folder when DroneDB is linked statically. Symlinks are resolved. Empty when the
+        // platform cannot tell.
+        fs::path getLibraryFolderPath();
+
         fs::path getDataPath(const fs::path &p);
         fs::path getCwd();
         fs::path assureFolderExists(const fs::path &d);

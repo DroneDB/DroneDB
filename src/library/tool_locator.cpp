@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "tool_locator.h"
 
+#include <algorithm>
 #include <map>
 #include <mutex>
 #include "logger.h"
@@ -68,26 +69,17 @@ namespace ddb
                     return {};
                 }
 
-                const fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty())
-                {
-                    if (const auto c = exeDir / io::fromUtf8(fileName); isExecutableFile(c))
+                for (const fs::path &dir : searchFolders(io::getExeFolderPath(), io::getLibraryFolderPath()))
+                    if (const auto c = dir / io::fromUtf8(fileName); isExecutableFile(c))
                     {
-                        LOGD << fileName << " found next to the executable at " << io::toUtf8(c);
+                        LOGD << fileName << " found at " << io::toUtf8(c);
                         return c;
                     }
-                    if (exeDir.has_parent_path())
-                        if (const auto c = exeDir.parent_path() / "bin" / io::fromUtf8(fileName); isExecutableFile(c))
-                        {
-                            LOGD << fileName << " found in the install prefix at " << io::toUtf8(c);
-                            return c;
-                        }
-                }
 
                 const fs::path onPath = searchOnPath(fileName);
                 if (onPath.empty())
                     LOGD << fileName << " not found in " << (envVar ? envVar : "an override variable")
-                         << ", the exe folder, the install prefix or the PATH";
+                         << ", the folders of the executable and of libddb or the PATH";
                 else
                     LOGD << fileName << " found on the PATH at " << io::toUtf8(onPath);
                 return onPath;
@@ -98,6 +90,22 @@ namespace ddb
             // question, whatever an earlier lookup answered
             std::map<std::string, fs::path> g_cache;
         } // namespace
+
+        std::vector<fs::path> searchFolders(const fs::path &exeDir, const fs::path &libDir)
+        {
+            std::vector<fs::path> folders;
+            const auto add = [&folders](const fs::path &dir) {
+                if (!dir.empty() && std::find(folders.begin(), folders.end(), dir) == folders.end())
+                    folders.push_back(dir);
+            };
+            for (const fs::path &dir : {exeDir, libDir})
+            {
+                if (dir.empty()) continue;
+                add(dir);
+                if (dir.has_parent_path() && dir.parent_path() != dir) add(dir.parent_path() / "bin");
+            }
+            return folders;
+        }
 
         bool isExecutableFile(const fs::path &p)
         {
