@@ -46,7 +46,7 @@ DroneDB is a free, open-source aerial data management platform built in C++. Its
 - To build on Windows use `full-build-win.ps1` script and to build on Linux use `full-build-linux.sh` script (skip the cmake part if the build directory already exists)
 
 #### 4. **3D Mesh Streaming (`vendor/libnexus/`)**
-- Writer for the Nexus progressive 3D-mesh format (upstream cnr-isti-vclab/nexus) in the separate **`ddb-nexus`** executable (GPL-3.0, with Nexus, vcglib and corto); it loads `libnxs` and is run as a child process, so no GPL code is linked into `libddb` or `ddbcmd` (guarded by `NO_NEXUS`)
+- Writer for the Nexus progressive 3D-mesh format (upstream cnr-isti-vclab/nexus) in the separate **`ddb-nexus`** executable (GPL-3.0, with Nexus, vcglib and corto); it loads `libnxs` and is a helper program run as a separate process, so libddb never links it and no GPL code is linked into `libddb` or `ddbcmd` (`scripts/check-gpl-linkage.py` fails CI if it is)
 - `ddb nxs` produces `.nxz` files for streamed mesh/pointcloud viewing, by running `ddb-nexus`
 
 #### 5. **Image Metadata (`vendor/metadata-util/`)**

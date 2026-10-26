@@ -665,12 +665,8 @@ void recoverTilesSwap(const fs::path& outDir, const fs::path& oldDir) {
 // VCGLib is loaded into this process
 void performNexusBuild(const std::string& inputFile, const std::string& outputFile,
                        const BuildOptions& options) {
-#ifndef NO_NEXUS
     nexus::runNexusBuild(io::fromUtf8(inputFile), io::fromUtf8(outputFile), {}, process::systemProcessRunner(),
                          options);
-#else
-    throw AppException("This version of ddb does not have the ability to generate Nexus files");
-#endif
 }
 }  // namespace
 
