@@ -125,7 +125,7 @@ class ModelEntryHandler : public EntryHandler {
     void build(const BuildContext& ctx) const override {
         const std::string inputPath = io::toUtf8(ctx.inputPath);
         const std::string datasetRoot = io::toUtf8(ctx.datasetRoot);
-        buildNexus(inputPath, io::toUtf8(ctx.tempFolder / NexusFileName), false, datasetRoot);
+        buildNexus(inputPath, io::toUtf8(ctx.tempFolder / NexusFileName), false, datasetRoot, ctx.options);
 
         // Additive, best-effort OGC 3D Tiles output for the unified Giro3D viewer.
         // Written directly to a sibling 3dtiles/ folder (buildModel3DTiles performs
@@ -145,6 +145,7 @@ class ModelEntryHandler : public EntryHandler {
             Tiles3DOptions tilesOptions;
             tilesOptions.overwrite = true;
             tilesOptions.datasetRoot = datasetRoot;
+            tilesOptions.build = ctx.options;
             buildModel3DTiles(inputPath, io::toUtf8(tilesFolder), tilesOptions);
         } catch (const BuildInProgressException& tilesEx) {
             LOGW << "3D Tiles for " << ctx.entry.path << " not generated: another tiles build holds "

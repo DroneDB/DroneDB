@@ -38,6 +38,7 @@ namespace ddb
             int ktx2Quality = 128;         // --ktx2-quality (since v1.6.0; 1-255, only emitted when textureFormat == "Ktx2")
             int ktx2Threads = 0;           // --ktx2-threads (since v1.8.0; 0 = single-threaded encoder, only emitted when textureFormat == "Ktx2" and no core cap applies)
             std::string splitStrategy;     // --split-strategy (since v1.4.0; "VertexMedian"/"VertexBaricenter"/"AbsoluteCenter", empty = Obj2Tiles default)
+            std::optional<int> maxCores;   // the cores the child may use at most (the cap of a build, build_budget.h): lowers DDB_OBJ2TILES_MAX_CORES, an inherited DOTNET_PROCESSOR_COUNT or the host cores, never raises them, and is no cap at all when it does not lower them; not an Obj2Tiles flag
         };
 
         // Locates the Obj2Tiles executable with tools::findTool (see tool_locator.h for the
@@ -62,7 +63,11 @@ namespace ddb
          * concurrency. Empty/unset inherits the environment; invalid values are
          * logged and ignored. libktx encoder threads are native and ignore
          * DOTNET_PROCESSOR_COUNT, so opts.ktx2Threads is dropped whenever a core
-         * cap applies (DDB_OBJ2TILES_MAX_CORES or an inherited DOTNET_PROCESSOR_COUNT).
+         * cap applies (DDB_OBJ2TILES_MAX_CORES, opts.maxCores or an inherited
+         * DOTNET_PROCESSOR_COUNT). opts.maxCores, the cap of a build, sets DOTNET_PROCESSOR_COUNT
+         * like the variable does when it is below the cores the child gets without it (the
+         * variable, else an inherited DOTNET_PROCESSOR_COUNT, else the host cores); otherwise it
+         * limits nothing and the run is that of no cap (opts.ktx2Threads kept).
          *
          * @param inputObj Source OBJ file.
          * @param outDir Absent or empty destination for tileset.json and LOD-* tiles.

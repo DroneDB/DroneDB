@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "build_budget.h"
 #include "entry_types.h"
 #include "exceptions.h"
 #include "fs.h"
@@ -115,6 +116,9 @@ struct BuildContext {
     // Scratch folder; renamed onto outputFolder after build() when usesTempFolder()
     fs::path tempFolder;
     bool force = false;
+    // What the caller asked of this build (the thread cap): the handler passes it on to the
+    // builders that use threads
+    BuildOptions options{};
 };
 
 // ---- Completeness helpers ------------------------------------------------------------------

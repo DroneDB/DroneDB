@@ -7,6 +7,7 @@
 #include "include/build.h"
 #include <ddb.h>
 #include "dbops.h"
+#include "env.h"
 #include "fs.h"
 #include "mio.h"
 
@@ -18,13 +19,15 @@ namespace cmd
         // clang-format off
     opts
         .positional_help("[args]")
-        .custom_help("build [-p path/to/file.laz] [--output out_dir]");
+        .custom_help("build [-p path/to/file.laz] [--output out_dir] [--threads n]");
     cmd::addOutputOption(opts, "Output folder", ddb::io::toUtf8(fs::path(DDB_FOLDER) / DDB_BUILD_PATH));
     opts.add_options()
         ("p,path", "File to process", cxxopts::value<std::string>());
     cmd::addWorkingDirOption(opts);
     opts.add_options()
-    	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"));
+    	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"))
+        ("threads", "Most threads one build may use, 1 to " + std::to_string(ddb::BuildOptions::MaxThreads) +
+                    " (default: the DDB_BUILD_THREADS budget)", cxxopts::value<std::string>());
 
         // clang-format on
         opts.parse_positional({"path"});
@@ -41,6 +44,15 @@ namespace cmd
         const auto output = opts["output"].as<std::string>();
         const auto ddbPath = opts["working-dir"].as<std::string>();
         const auto force = opts["force"].as<bool>();
+        // Decimal digits only (no sign, hex or exponent), like the numeric settings of the environment
+        ddb::BuildOptions buildOptions;
+        if (opts.count("threads"))
+        {
+            const auto threads = ddb::env::parseDecimal(opts["threads"].as<std::string>(), 1, ddb::BuildOptions::MaxThreads);
+            if (!threads)
+                usageError(ddb::BuildOptions::threadsRule());
+            buildOptions = ddb::BuildOptions::withThreads(static_cast<int64_t>(*threads));
+        }
 
         if (output.length() == 0)
             usageError();
@@ -49,12 +61,12 @@ namespace cmd
 
         if (!opts.count("path"))
         {
-            buildAll(db.get(), output, force);
+            buildAll(db.get(), output, force, buildOptions);
         }
         else
         {
             const auto path = opts["path"].as<std::string>();
-            build(db.get(), path, output, force);
+            build(db.get(), path, output, force, buildOptions);
         }
 
         return EXIT_SUCCESS;

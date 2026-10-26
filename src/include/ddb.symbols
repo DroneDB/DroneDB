@@ -20,6 +20,7 @@ DDBAppendPassword
 DDBApplyDelta
 DDBApplyDeltaEx
 DDBBuild
+DDBBuildEx
 DDBCalculateVolume
 DDBCancel
 DDBChattr

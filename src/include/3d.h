@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include "build_budget.h"
 #include "entry_types.h"
 #include "fs.h"
 #include <vector>
@@ -43,6 +44,9 @@ namespace ddb
         /// Root folder of the dataset that contains the model, or empty when unknown (same
         /// meaning as in @ref buildNexus).
         std::string datasetRoot{};
+        /// What the caller asks of the build: the cap on the cores Obj2Tiles may use (it lowers
+        /// DDB_OBJ2TILES_MAX_CORES, never raises it)
+        BuildOptions build{};
     };
 
     /**
@@ -58,6 +62,7 @@ namespace ddb
      *                    when unknown. When set, OBJ/MTL/PLY texture references that
      *                    resolve outside it are rejected. It never applies to the
      *                    temporary files produced from a GLTF/GLB or PLY input.
+     * @param options What the caller asks of the build: the threads ddb-nexus may use.
      * @throws BuildDepMissingException if a dependency (MTL, texture, buffer) is missing
      *         and could still be added to the dataset.
      * @throws AppException if a reference is absolute or escapes @p datasetRoot (it can
@@ -67,7 +72,7 @@ namespace ddb
      *         references a file that cannot be resolved, or on any other failure.
      */
     std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite = false,
-                           const std::string &datasetRoot = "");
+                           const std::string &datasetRoot = "", const BuildOptions &options = {});
 
     /**
      * @brief Detect a model's WGS84 georeferencing origin from sidecar files.

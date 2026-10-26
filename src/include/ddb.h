@@ -752,6 +752,38 @@ extern "C"
      *         are errors, not deferrals. */
     DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *dest, bool force, bool pendingOnly);
 
+    /** Build with options (new in 2.0): DDBBuild, and the threads one build may use.
+     * @param optionsJson NULL, "" or "{}" for no cap (each tool keeps the threads it has without
+     *        one, below), else a JSON object whose only member is
+     *          "threads"  integer from 1 to 4096 (not 2.0, true or "2"): the most threads each
+     *                     build of this call may use. It only lowers; what it bounds, per tool:
+     *                       raster (GDAL warp and compression): NUM_THREADS, the lower of the
+     *                         cap and the DDB_BUILD_THREADS budget (see DDBConfigure);
+     *                       3D model, Nexus file (ddb-nexus): --threads, the lower of the cap
+     *                         and the DDB_BUILD_THREADS budget;
+     *                       3D model, 3D Tiles (Obj2Tiles): the cores it runs on
+     *                         (DOTNET_PROCESSOR_COUNT), the lowest of the cap,
+     *                         DDB_OBJ2TILES_MAX_CORES (else an inherited DOTNET_PROCESSOR_COUNT)
+     *                         and the host cores; DDB_BUILD_THREADS does not apply. A cap below
+     *                         that count drops the texture encoder threads as that variable
+     *                         does; a cap at or above it limits nothing and the run is that of
+     *                         no cap (the encoder keeps its threads);
+     *                       point cloud, Untwine: not bounded. Untwine has no thread option: it
+     *                         keeps its own fixed thread count and keeps holding 10 CPU pool
+     *                         tokens whatever the cap is;
+     *                       point cloud, PDAL writers.copc (when Untwine is not installed or
+     *                         fails): its threads, the lower of the cap and the
+     *                         DDB_BUILD_THREADS budget;
+     *                       Gaussian splat (build-lod): not bounded, it has no thread option.
+     *        The threads a build gets still come from the CPU pool (cpuPoolSize), which may give
+     *        fewer. A cap does not change what is built.
+     * @return as DDBBuild; a malformed text, a value that is not a JSON object, a member other
+     *         than "threads" and a "threads" outside the rule above are refused with
+     *         DDBERR_EXCEPTION and a message that names the problem, before anything is built
+     *         (see DDBGetLastError). The build is canceled like DDBBuild. */
+    DDB_DLL DDBErr DDBBuildEx(const char *ddbPath, const char *source, const char *dest, bool force,
+                              bool pendingOnly, const char *optionsJson);
+
     /** Cleanup a dataset:
      *   1. Remove from the database all (non-directory) entries whose underlying
      *      file no longer exists on the filesystem.

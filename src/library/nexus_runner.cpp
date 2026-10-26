@@ -44,16 +44,19 @@ namespace ddb
         void runNexusBuild(const fs::path &input,
                            const fs::path &output,
                            const fs::path &binary,
-                           const process::IProcessRunner &runner)
+                           const process::IProcessRunner &runner,
+                           const BuildOptions &options)
         {
             const fs::path bin = binary.empty() ? findNexusBinary() : binary;
             if (!tools::isExecutableFile(bin))
                 fail(input, std::string("ddb-nexus not found; set ") + kNexusEnv +
                                 " or install ddb-nexus next to ddb");
 
-            // The threads of one build (DDB_BUILD_THREADS, as for the raster builds) that the CPU
-            // pool has free: the child keeps that many busy, and the tokens are held until it ends
-            const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(BuildResourceBudget::fromConfig().threads));
+            // The threads of one build (DDB_BUILD_THREADS, as for the raster builds, lowered to the
+            // caller's cap) that the CPU pool has free: the child keeps that many busy, and the
+            // tokens are held until it ends
+            const auto cpu =
+                parallel::tryAcquireThreads(static_cast<size_t>(BuildResourceBudget::fromConfig(options).threads));
             const std::vector<std::string> args = {"--threads", std::to_string(cpu.threads()), io::toUtf8(input),
                                                    io::toUtf8(output)};
             LOGD << "Spawning ddb-nexus: " << process::formatCommandLine(bin, args);

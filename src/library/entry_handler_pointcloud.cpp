@@ -76,7 +76,7 @@ class PointCloudEntryHandler : public EntryHandler {
         const std::vector vec = {io::toUtf8(ctx.inputPath)};
         // Defensive cleanup: remove any legacy EPT artifacts from previous builds
         io::assureIsRemoved(ctx.baseOutputPath / LegacyEptBuildSubfolder);
-        buildCopc(vec, io::toUtf8(ctx.tempFolder));
+        buildCopc(vec, io::toUtf8(ctx.tempFolder), ctx.options);
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::BuildArtifact; }

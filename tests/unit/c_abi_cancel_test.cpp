@@ -235,6 +235,8 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
         {"DDBApplyDelta", [=] { return applyAddedFile(false); }},
         {"DDBApplyDeltaEx", [=] { return applyAddedFile(true); }},
         {"DDBBuild", [=] { return DDBBuild(dataset.c_str(), "ortho.tif", nullptr, true, false); }},
+        {"DDBBuildEx",
+         [=] { return DDBBuildEx(dataset.c_str(), "ortho.tif", nullptr, true, false, R"({"threads": 2})"); }},
         {"DDBCalculateVolume",
          [=] {
              return withString([&](char** text) {

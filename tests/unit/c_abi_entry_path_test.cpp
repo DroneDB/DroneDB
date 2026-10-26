@@ -358,6 +358,13 @@ std::vector<PathExport> pathExports(Output& last) {
                        },
                        nullptr});
 
+    exports.push_back({"DDBBuildEx",
+                       Blank::Optional,
+                       [](const Dataset& ds, const std::string& p) {
+                           return DDBBuildEx(ds.path().c_str(), p.c_str(), nullptr, false, false, "{}");
+                       },
+                       nullptr});
+
     exports.push_back(
         {"DDBIsBuildable",
          Blank::Required,

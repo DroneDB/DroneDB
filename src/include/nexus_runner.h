@@ -4,6 +4,7 @@
 #ifndef NEXUS_RUNNER_H
 #define NEXUS_RUNNER_H
 
+#include "build_budget.h"
 #include "fs.h"
 #include "process_runner.h"
 
@@ -23,8 +24,9 @@ namespace ddb
         // Builds the Nexus file `output` (.nxs or .nxz) from the model `input` by running
         // `ddb-nexus --threads N <input> <output>` as a child process: no Nexus or VCGLib code is
         // loaded into the calling process. N is what the CPU pool (parallel.h) has free of the
-        // threads one build wants (DDB_BUILD_THREADS, build_budget.h), at least 1; the tokens are
-        // held while the child runs. The binary is findNexusBinary() unless `binary` is non-empty.
+        // threads one build wants (DDB_BUILD_THREADS, build_budget.h, lowered to options.threads
+        // when the caller capped the build), at least 1; the tokens are held while the child
+        // runs. The binary is findNexusBinary() unless `binary` is non-empty.
         //
         // @throws AppException when the tool is not found (the message names ddb-nexus and
         //         DDB_NEXUS_PATH), cannot start, is killed, exits with a non-zero code, or exits
@@ -34,7 +36,8 @@ namespace ddb
         void runNexusBuild(const fs::path &input,
                            const fs::path &output,
                            const fs::path &binary = {},
-                           const process::IProcessRunner &runner = process::systemProcessRunner());
+                           const process::IProcessRunner &runner = process::systemProcessRunner(),
+                           const BuildOptions &options = {});
 
     } // namespace nexus
 

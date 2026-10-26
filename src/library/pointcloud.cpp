@@ -27,6 +27,7 @@
 #include "hash.h"
 #include "logger.h"
 #include "mio.h"
+#include "parallel.h"
 #include "ply.h"
 #include "untwine_runner.h"
 
@@ -630,10 +631,16 @@ bool isCopcPath(const std::string& filename) {
 
 // PDAL-based COPC builder: classic readers.las -> writers.copc pipeline.
 // Used as the default fallback when Untwine is not available or fails.
+// writers.copc runs a pool of its own threads (its "threads" option, 10 when unset): it gets the
+// threads of one build (DDB_BUILD_THREADS lowered to options.threads) that the CPU pool has
+// free, and the tokens are held until the pipeline ends.
 static void buildCopcPdal(const std::vector<std::string>& inputFiles,
                           const fs::path& outPath,
-                          const fs::path& tmpDir) {
+                          const fs::path& tmpDir,
+                          const BuildOptions& options) {
     try {
+        const auto cpu =
+            parallel::tryAcquireThreads(static_cast<size_t>(BuildResourceBudget::fromConfig(options).threads));
         // Build a PDAL pipeline: one or more LAS readers -> writers.copc.
         // When there's a single input we attach the writer directly; when there are
         // multiple inputs, PDAL's writers.copc expects a single stream, which we get
@@ -660,6 +667,8 @@ static void buildCopcPdal(const std::vector<std::string>& inputFiles,
         wo.add("forward", "all");
         // Preserve any extra dimensions present in the source.
         wo.add("extra_dims", "all");
+        wo.add("threads", static_cast<int>(cpu.threads()));
+        LOGD << "PDAL writers.copc of " << io::toUtf8(outPath) << " on " << cpu.threads() << " threads";
         pdal::Stage& writer = mgr.makeWriter(io::toUtf8(outPath), "writers.copc", *tail, wo);
         (void)writer;
 
@@ -743,7 +752,7 @@ static std::vector<std::string> lasInputs(const std::vector<std::string>& filena
     return inputFiles;
 }
 
-void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir) {
+void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir, const BuildOptions& options) {
     fs::path dest = io::fromUtf8(outdir);
     io::assureFolderExists(dest);
 
@@ -802,7 +811,7 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
         io::assureIsRemoved(outPath);
     }
 
-    buildCopcPdal(inputFiles, outPath, tmpDir);
+    buildCopcPdal(inputFiles, outPath, tmpDir, options);
 }
 
 void to_json(json& j, const PointCloudInfo& info) {

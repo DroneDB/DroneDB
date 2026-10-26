@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "obj2tiles_runner.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -141,6 +142,36 @@ namespace ddb
                 return cap;
             }
 
+            // The cores the child is asked to run on before the pool has its say: DDB_OBJ2TILES_MAX_CORES
+            // (readMaxCores), lowered to the cap of the build. The cap of a build counts only when it
+            // is below the cores the child gets without it (the variable, else an inherited
+            // DOTNET_PROCESSOR_COUNT, else every core of the host): a cap that limits nothing leaves
+            // the run exactly as without one, so the texture encoder keeps its threads.
+            std::optional<unsigned int> requestedCores(const std::optional<int> &buildCap, unsigned int hw)
+            {
+                const auto variableCap = readMaxCores();
+                if (!buildCap)
+                    return variableCap;
+
+                unsigned int withoutBuildCap = hw;
+                if (variableCap)
+                    withoutBuildCap = *variableCap;
+                else if (const char *inherited = std::getenv("DOTNET_PROCESSOR_COUNT"))
+                {
+                    if (const auto n = parseCoreCount(inherited))
+                        withoutBuildCap = std::min(*n, hw);
+                }
+
+                const auto cap = static_cast<unsigned int>(*buildCap);
+                if (cap >= withoutBuildCap)
+                {
+                    LOGD << "Obj2Tiles: the build cap of " << cap << " threads does not lower its "
+                         << withoutBuildCap << " cores";
+                    return variableCap;
+                }
+                return cap;
+            }
+
 
             // Public calls require a fresh destination. Otherwise a successful no-output tool could
             // make an old tileset look like new output. "" when outDir is absent or an empty
@@ -264,8 +295,8 @@ namespace ddb
 
             // Per-child core cap: only the child's environment is changed. The child's
             // cores are CPU tokens, held while it runs.
-            const auto requestedCap = readMaxCores();
             const auto hw = static_cast<unsigned int>(parallel::hardwareThreads());
+            const auto requestedCap = requestedCores(opts.maxCores, hw);
             const auto cpu = parallel::tryAcquireThreads(requestedCap ? *requestedCap : hw);
             const CoreCap cap = decideCoreCap(requestedCap, hw, static_cast<unsigned int>(cpu.threads()));
             const auto &maxCores = cap.maxCores;

@@ -47,6 +47,7 @@
 #include "hash.h"
 #include "info.h"
 #include "json.h"
+#include "json_options.h"
 #include "logger.h"
 #include "mask.h"
 #include "align.h"
@@ -950,12 +951,45 @@ DDBErr DDBMoveEntry(const char* ddbPath, const char* source, const char* dest) {
 
 // ------------------------------------------------------------------ builds
 
+namespace {
+
+// The options of DDBBuildEx: NULL and "" are none; otherwise a JSON object whose only member,
+// "threads", is an integer from 1 to BuildOptions::MaxThreads (not 2.0, true or "2")
+BuildOptions buildOptionsArg(const char* optionsJson) {
+    if (optionsJson == nullptr || optionsJson[0] == '\0')
+        return {};
+    const json options = parseJsonArg(optionsJson);
+    if (!options.is_object())
+        throw InvalidArgsException("The build options must be a JSON object");
+    rejectUnknownMembers(options, {"threads"}, "build option");
+
+    const auto threads = options.find("threads");
+    if (threads == options.end())
+        return {};
+    if (!threads->is_number_integer())
+        throw InvalidArgsException(BuildOptions::threadsRule());
+    // An unsigned value beyond int64 is refused like any value above the maximum
+    const int64_t value = threads->is_number_unsigned()
+                              ? static_cast<int64_t>(std::min<uint64_t>(threads->get<uint64_t>(), INT64_MAX))
+                              : threads->get<int64_t>();
+    return BuildOptions::withThreads(value);
+}
+
+}  // namespace
+
 DDBErr DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly) {
-    // The two build codes DDBBuild has always returned (1.x)
+    return DDBBuildEx(ddbPath, source, dest, force, pendingOnly, nullptr);
+}
+
+DDBErr DDBBuildEx(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly,
+                  const char* optionsJson) {
+    // The two build codes DDBBuild has always returned (1.x); a refused option is DDBERR_EXCEPTION
+    // like the other arguments of DDBBuild
     constexpr auto kBuildCodes =
         kFrozenCodes | codeBit(DDBERR_BUILDDEPMISSING) | codeBit(DDBERR_BUILDINPROGRESS);
     return guarded<kBuildCodes>([&] {
         requireText(ddbPath, "No ddb path provided");
+        const BuildOptions options = buildOptionsArg(optionsJson);
 
         // dest and source can be null (optional parameters); dest is a folder of the
         // filesystem, source an entry path
@@ -966,11 +1000,11 @@ DDBErr DDBBuild(const char* ddbPath, const char* source, const char* dest, bool 
 
         if (path.empty()) {
             if (pendingOnly)
-                buildPending(ddb.get(), destPath, force);
+                buildPending(ddb.get(), destPath, force, options);
             else
-                buildAll(ddb.get(), destPath, force);
+                buildAll(ddb.get(), destPath, force, options);
         } else {
-            build(ddb.get(), path, destPath, force);
+            build(ddb.get(), path, destPath, force, options);
         }
     });
 }

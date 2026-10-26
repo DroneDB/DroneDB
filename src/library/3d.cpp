@@ -663,9 +663,11 @@ void recoverTilesSwap(const fs::path& outDir, const fs::path& oldDir) {
 
 // Perform the actual nexus build: ddb-nexus, a program of its own, so that neither Nexus nor
 // VCGLib is loaded into this process
-void performNexusBuild(const std::string& inputFile, const std::string& outputFile) {
+void performNexusBuild(const std::string& inputFile, const std::string& outputFile,
+                       const BuildOptions& options) {
 #ifndef NO_NEXUS
-    nexus::runNexusBuild(io::fromUtf8(inputFile), io::fromUtf8(outputFile));
+    nexus::runNexusBuild(io::fromUtf8(inputFile), io::fromUtf8(outputFile), {}, process::systemProcessRunner(),
+                         options);
 #else
     throw AppException("This version of ddb does not have the ability to generate Nexus files");
 #endif
@@ -694,7 +696,7 @@ void recoverModel3DTilesSwap(const std::string& outputDir) {
 }
 
 std::string buildNexus(const std::string& inputObj, const std::string& outputNxs, bool overwrite,
-                       const std::string& datasetRoot) {
+                       const std::string& datasetRoot, const BuildOptions& options) {
     // Default output: next to the original input (never inside a conversion temp folder).
     const auto outFile =
         outputNxs.empty() ? io::toUtf8(io::fromUtf8(inputObj).replace_extension(".nxz")) : outputNxs;
@@ -715,7 +717,7 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
         prepareModelInput(inputObj, ModelConsumer::Nexus, datasetRoot, tempGuard);
 
     // Build the nexus file
-    performNexusBuild(model.path, outFile);
+    performNexusBuild(model.path, outFile, options);
 
     return outFile;
 }
@@ -961,7 +963,8 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     io::assureFolderExists(tempOut);
     outGuard.reset(tempOut);
 
-    const obj2tiles::Obj2TilesOptions opts = chooseObj2TilesOptions(inputObj, model, georef);
+    obj2tiles::Obj2TilesOptions opts = chooseObj2TilesOptions(inputObj, model, georef);
+    opts.maxCores = options.build.threads;
 
     std::string err;
     if (!obj2tiles::runObj2Tiles(io::fromUtf8(model.path), tempOut, opts, err))

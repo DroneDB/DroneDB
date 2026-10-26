@@ -4,6 +4,7 @@
 #ifndef BUILD_H
 #define BUILD_H
 
+#include "build_budget.h"
 #include "dbops.h"
 
 #include <ctime>
@@ -34,8 +35,13 @@ namespace ddb
      */
     std::vector<std::string> findSidecarMains(Database *db, const std::string &path);
 
-    void buildAll(Database *db, const std::string &outputPath, bool force = false);
-    void build(Database *db, const std::string &path, const std::string &outputPath, bool force = false);
+    /// Builds every buildable entry (a failed entry is logged and the next one builds). `options` is what the
+    /// caller asks of each build (the thread cap, see BuildOptions).
+    void buildAll(Database *db, const std::string &outputPath, bool force = false,
+                  const BuildOptions &options = {});
+    /// Builds the entry at `path`; throws what its build throws
+    void build(Database *db, const std::string &path, const std::string &outputPath, bool force = false,
+               const BuildOptions &options = {});
 
     /**
      * @brief Retry every deferred build (one per "<hash>.pending" marker in the build
@@ -49,8 +55,10 @@ namespace ddb
      * @param db database (already opened)
      * @param outputPath base build directory; if empty, uses db->buildDirectory()
      * @param force rebuild even if complete, and ignore the retry backoff
+     * @param options what the caller asks of each build (the thread cap, see BuildOptions)
      */
-    void buildPending(Database *db, const std::string &outputPath, bool force = false);
+    void buildPending(Database *db, const std::string &outputPath, bool force = false,
+                      const BuildOptions &options = {});
     bool isBuildPending(Database *db);
 
     /**

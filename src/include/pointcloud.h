@@ -6,6 +6,7 @@
 
 #include <string>
 #include <vector>
+#include "build_budget.h"
 #include "build_layout.h"
 #include "json_fwd.h"
 #include "basicgeometry.h"
@@ -36,7 +37,11 @@ namespace ddb
 
     // Builds a Cloud Optimized Point Cloud (COPC) file from one or more input
     // point cloud files. Output is a single file named `cloud.copc.laz` placed inside `outdir`.
-    void buildCopc(const std::vector<std::string> &filenames, const std::string &outdir);
+    // Untwine builds it when it is installed (with its own fixed thread count: options do not
+    // bound it); otherwise, or when Untwine fails, PDAL's writers.copc does, on the threads of one
+    // build (DDB_BUILD_THREADS, lowered to options.threads).
+    void buildCopc(const std::vector<std::string> &filenames, const std::string &outdir,
+                   const BuildOptions &options = {});
 
     void translateToLas(const std::string &input, const std::string &outputLas);
 

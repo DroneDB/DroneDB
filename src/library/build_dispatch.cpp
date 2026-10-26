@@ -60,9 +60,9 @@ namespace {
 class BuildAttempt {
   public:
     BuildAttempt(Database* db, const Entry& target, const EntryHandler& handler, const fs::path& baseOutputPath,
-                 const std::string& outputFolder, bool force)
+                 const std::string& outputFolder, bool force, const BuildOptions& options)
         : db_(db), target_(target), handler_(handler), baseOutputPath_(baseOutputPath),
-          outputFolder_(outputFolder), force_(force),
+          outputFolder_(outputFolder), force_(force), options_(options),
           // Marker snapshot is read after exclusive primary ownership. Mutation waits
           // until serialized Model recovery has finished, so a busy tiles holder leaves
           // the original attempt timestamp untouched.
@@ -106,7 +106,8 @@ class BuildAttempt {
                                        baseOutputPath_,
                                        io::fromUtf8(outputFolder_),
                                        io::fromUtf8(tempFolder_),
-                                       force_};
+                                       force_,
+                                       options_};
             handler_.build(context);
 
             publish();
@@ -216,6 +217,7 @@ class BuildAttempt {
     const fs::path baseOutputPath_;
     const std::string outputFolder_;
     const bool force_;
+    const BuildOptions options_;
     const fs::path pendFile_;
     const std::string tempFolder_;
     bool wasPending_ = false;
@@ -224,7 +226,8 @@ class BuildAttempt {
 
 }  // namespace
 
-void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force) {
+void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force,
+                   const BuildOptions& options) {
     std::string outPath = outputPath;
     if (outPath.empty())
         outPath = io::toUtf8(db->buildDirectory());
@@ -270,7 +273,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // corrupt the in-progress output of the other process.
     BuildLock processLock(outputFolder);
 
-    BuildAttempt attempt(db, target, handler, baseOutputPath, outputFolder, force);
+    BuildAttempt attempt(db, target, handler, baseOutputPath, outputFolder, force, options);
     try {
         attempt.run();
     } catch (...) {
@@ -278,7 +281,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     }
 }
 
-void buildAll(Database* db, const std::string& outputPath, bool force) {
+void buildAll(Database* db, const std::string& outputPath, bool force, const BuildOptions& options) {
     std::string outPath = outputPath;
     if (outPath.empty())
         outPath = io::toUtf8(db->buildDirectory());
@@ -299,7 +302,7 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
         // Call build on each of them; a canceled call stops before the next one
         cancel::throwIfCanceled();
         try {
-            buildInternal(db, e, outPath, force);
+            buildInternal(db, e, outPath, force, options);
         } catch (const CanceledException&) {
             throw;
         } catch (const AppException& err) {
@@ -308,14 +311,15 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     }
 }
 
-void build(Database* db, const std::string& path, const std::string& outputPath, bool force) {
+void build(Database* db, const std::string& path, const std::string& outputPath, bool force,
+           const BuildOptions& options) {
     LOGD << "In build('" << path << "','" << outputPath << "')";
 
     const auto e = getEntry(db, path);
     if (!e)
         throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    buildInternal(db, *e, outputPath, force);
+    buildInternal(db, *e, outputPath, force, options);
 }
 
 }  // namespace ddb

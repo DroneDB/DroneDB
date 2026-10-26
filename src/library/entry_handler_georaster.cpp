@@ -200,7 +200,7 @@ class GeoRasterEntryHandler : public EntryHandler {
     }
 
     void build(const BuildContext& ctx) const override {
-        buildCog(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder / CogFileName));
+        buildCog(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder / CogFileName), ctx.options);
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::File; }

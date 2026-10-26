@@ -23,6 +23,7 @@
 #include "cmd/include/push.h"
 #include "exceptions.h"
 #include "fake_http_client.h"
+#include "fake_model_tools.h"
 #include "gtest/gtest.h"
 #include "tagmanager.h"
 #include "test.h"
@@ -351,6 +352,63 @@ TEST(CliCommands, aRealCommandWithoutItsArgumentsIsAUsageError) {
         EXPECT_NE(outcome.err.find("Usage:"), std::string::npos) << name;
     }
 }
+
+// ddb build --threads N: the same rule as DDBBuildEx, refused as a usage error before the dataset
+// is opened
+TEST(CliCommands, buildRefusesAThreadCountThatIsNotAWholeNumberFromOneTo4096) {
+    TestArea ta("cli_build_threads_refused", true);
+    const std::string dataset = ta.getPath("not_a_dataset").string();
+    for (const char *bad : {"0", "-1", "4097", "99999", "99999999999999", "two", "2.5", "", "1e2", "0x2"}) {
+        auto command = CommandRegistry::builtin().create("build");
+        const auto outcome = execute(*command, {"--threads", bad, "-w", dataset});
+        EXPECT_EQ(outcome.code, EXIT_FAILURE) << "'" << bad << "'";
+        EXPECT_TRUE(outcome.out.empty()) << outcome.out;
+        EXPECT_NE(outcome.err.find("Usage:"), std::string::npos) << "'" << bad << "': " << outcome.err;
+        // Refused by the option parser or by the rule of the cap, never by the dataset
+        EXPECT_EQ(outcome.err.find("not_a_dataset"), std::string::npos) << "'" << bad << "': " << outcome.err;
+    }
+    auto command = CommandRegistry::builtin().create("build");
+    const auto outcome = execute(*command, {"--threads", "0", "-w", dataset});
+    EXPECT_NE(outcome.err.find("threads must be an integer from 1 to 4096"), std::string::npos) << outcome.err;
+}
+
+TEST(CliCommands, buildTakesAThreadCountFromOneTo4096) {
+    const auto root = makeIndex("cli_build_threads_accepted");
+    for (const char *threads : {"1", "2", "4096"}) {
+        auto command = CommandRegistry::builtin().create("build");
+        const auto outcome = execute(*command, {"--threads", threads, "-w", root.string()});
+        EXPECT_EQ(outcome.code, EXIT_SUCCESS) << threads << ": " << outcome.err;
+    }
+    // --threads=N and the path of one entry
+    auto command = CommandRegistry::builtin().create("build");
+    EXPECT_EQ(execute(*command, {"--threads=2", "-p", "a.txt", "-w", root.string()}).code, EXIT_SUCCESS);
+    // without it, as before
+    auto plain = CommandRegistry::builtin().create("build");
+    EXPECT_EQ(execute(*plain, {"-w", root.string()}).code, EXIT_SUCCESS);
+}
+
+#ifndef _WIN32
+// --threads reaches the tools of the build: ddb-nexus gets it as its own --threads, for the build
+// of one entry (-p) and for the build of every entry
+TEST(CliCommands, buildGivesTheThreadCountToTheToolsOfTheBuild) {
+    testtools::ModelDataset ds("cli_build_threads_reach_nexus");
+    testtools::FakeModelTools tools(ds.index.ta);
+    const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
+    EnvVarGuard budget("DDB_BUILD_THREADS", "6");
+    const std::string output = ds.index.db->buildDirectory().string();
+
+    auto one = CommandRegistry::builtin().create("build");
+    const auto entry = execute(*one, {"--threads", "2", "-f", "-p", "model.obj", "-o", output, "-w", ds.root()});
+    ASSERT_EQ(entry.code, EXIT_SUCCESS) << entry.err;
+    EXPECT_EQ(testtools::readText(tools.nexusLog).rfind("--threads 2 ", 0), 0u) << testtools::readText(tools.nexusLog);
+
+    fs::remove(tools.nexusLog);
+    auto all = CommandRegistry::builtin().create("build");
+    const auto every = execute(*all, {"--threads", "3", "-f", "-o", output, "-w", ds.root()});
+    ASSERT_EQ(every.code, EXIT_SUCCESS) << every.err;
+    EXPECT_EQ(testtools::readText(tools.nexusLog).rfind("--threads 3 ", 0), 0u) << testtools::readText(tools.nexusLog);
+}
+#endif
 
 TEST(CliCommands, anUnknownMetaFormatIsAUsageErrorWithoutOutput) {
     TestArea ta("cli_info_format", true);

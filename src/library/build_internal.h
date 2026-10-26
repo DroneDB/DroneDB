@@ -147,7 +147,8 @@ std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const 
 // ---- Build dispatch (build_dispatch.cpp) ----------------------------------
 
 // One build attempt of an entry (or of the main file it is a sidecar of).
-void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force);
+void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force,
+                   const BuildOptions& options = {});
 
 // Throws RetryableBuildException(LowDiskSpace) when the filesystem of dir has less free space
 // than the free-disk floor (ProcessConfig::minFreeDiskMb: DDBConfigure "minFreeDiskMb", else

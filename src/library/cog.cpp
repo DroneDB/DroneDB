@@ -216,7 +216,7 @@ namespace ddb
         return targs;
     }
 
-    void buildCog(const std::string &inputGTiff, const std::string &outputCog)
+    void buildCog(const std::string &inputGTiff, const std::string &outputCog, const BuildOptions &options)
     {
         // Check if input is already an optimized COG
         if (copyOptimizedCog(inputGTiff, outputCog))
@@ -246,9 +246,10 @@ namespace ddb
         // that several builds running in one process stay within known bounds;
         // the threads beyond this one take CPU tokens, held until the
         // output is closed.
-        const BuildResourceBudget budget = BuildResourceBudget::fromConfig();
+        const BuildResourceBudget budget = BuildResourceBudget::fromConfig(options);
         const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
         const std::string numThreads = parallel::gdalNumThreads(cpu);
+        LOGD << "COG warp and compression of " << inputGTiff << ": " << numThreads;
 
         CPLStringList targs = cogWarpArgs(hSrcDataset, hSrcBand1, budget, numThreads);
 

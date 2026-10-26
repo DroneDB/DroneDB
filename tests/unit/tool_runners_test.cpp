@@ -6,12 +6,14 @@
 // through a fake process runner: arguments, options, exit-code / timeout / cancel mapping and a
 // missing tool, without running any tool.
 
+#include <algorithm>
 #include <fstream>
 #include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "build_budget.h"
 #include "buildlod_runner.h"
 #include "cad.h"
 #include "env.h"
@@ -383,6 +385,83 @@ TEST(Obj2TilesRunner, withoutACapKtx2ThreadsReachTheTool) {
     }
 }
 
+// The cap of a build (BuildOptions::threads) below the cores of the host sets the cores of the
+// child like DDB_OBJ2TILES_MAX_CORES does, and the lower of the two counts
+TEST(Obj2TilesRunner, theCapOfABuildGoesToTheChildEnvironmentAndDropsKtx2Threads) {
+    if (parallel::hardwareThreads() < 2)
+        GTEST_SKIP() << "a cap below the cores of the host needs two cores";
+    EnvVarGuard cores("DDB_OBJ2TILES_MAX_CORES");
+    unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnet("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
+    const int below = static_cast<int>(parallel::hardwareThreads()) - 1;
+
+    Obj2TilesFixture f("runner_obj2tiles_build_cap");
+    f.opts.maxCores = below;
+    f.opts.textureFormat = "Ktx2";
+    f.opts.ktx2Threads = 4;
+    ASSERT_TRUE(f.run()) << f.error;
+    const auto &call = f.fake.calls.at(0);
+    EXPECT_EQ(envOverride(call.options, "DOTNET_PROCESSOR_COUNT"), std::to_string(below));
+    EXPECT_FALSE(contains(call.args, "--ktx2-threads"));
+}
+
+// A cap of a build at or above the cores of the host limits nothing: the run is that of no cap,
+// without DOTNET_PROCESSOR_COUNT and with the threads of the texture encoder
+TEST(Obj2TilesRunner, aCapOfABuildThatDoesNotLowerTheCoresIsNoCap) {
+    EnvVarGuard cores("DDB_OBJ2TILES_MAX_CORES");
+    unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnet("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    // Every core of the host is free, so the pool lowers nothing either
+    const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
+    const auto hw = static_cast<int>(parallel::hardwareThreads());
+
+    for (const int cap : {hw, hw + 1, 4096}) {
+        Obj2TilesFixture f("runner_obj2tiles_build_cap_none_" + std::to_string(cap));
+        f.opts.maxCores = cap;
+        f.opts.textureFormat = "Ktx2";
+        f.opts.ktx2Threads = 4;
+        ASSERT_TRUE(f.run()) << f.error;
+        const auto &call = f.fake.calls.at(0);
+        EXPECT_FALSE(envOverride(call.options, "DOTNET_PROCESSOR_COUNT")) << cap;
+        const auto at = std::find(call.args.begin(), call.args.end(), "--ktx2-threads");
+        ASSERT_NE(at, call.args.end()) << cap;
+        ASSERT_NE(at + 1, call.args.end());
+        EXPECT_EQ(*(at + 1), "4") << cap;
+    }
+
+    // Nor does a cap at or above an inherited DOTNET_PROCESSOR_COUNT replace it
+    EnvVarGuard inherited("DOTNET_PROCESSOR_COUNT", "1");
+    Obj2TilesFixture f("runner_obj2tiles_build_cap_inherited");
+    f.opts.maxCores = 1;
+    ASSERT_TRUE(f.run()) << f.error;
+    EXPECT_FALSE(envOverride(f.fake.calls.at(0).options, "DOTNET_PROCESSOR_COUNT"));
+}
+
+TEST(Obj2TilesRunner, theLowerOfTheCapOfABuildAndTheVariableCounts) {
+    EnvVarGuard dotnet("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
+    const auto atMost = [](size_t n) { return std::to_string(std::min(n, parallel::hardwareThreads())); };
+
+    {
+        EnvVarGuard cores("DDB_OBJ2TILES_MAX_CORES", "1");
+        Obj2TilesFixture f("runner_obj2tiles_variable_lower");
+        f.opts.maxCores = 3;
+        ASSERT_TRUE(f.run()) << f.error;
+        EXPECT_EQ(envOverride(f.fake.calls.at(0).options, "DOTNET_PROCESSOR_COUNT"), "1");
+    }
+    {
+        EnvVarGuard cores("DDB_OBJ2TILES_MAX_CORES", "4096");
+        Obj2TilesFixture f("runner_obj2tiles_cap_lower");
+        f.opts.maxCores = 1;
+        ASSERT_TRUE(f.run()) << f.error;
+        EXPECT_EQ(envOverride(f.fake.calls.at(0).options, "DOTNET_PROCESSOR_COUNT"), atMost(1));
+    }
+}
+
 TEST(Obj2TilesRunner, anInvalidCapIsIgnored) {
     EnvVarGuard cores("DDB_OBJ2TILES_MAX_CORES", "many");
     EnvVarGuard dotnet("DOTNET_PROCESSOR_COUNT");
@@ -524,6 +603,38 @@ TEST(NexusRunner, theToolGetsTheThreadsOfABuildThatThePoolHasFree) {
     }
 }
 
+// The cap of a build (BuildOptions::threads) lowers the threads of the tool and the tokens it
+// holds; it never raises them above DDB_BUILD_THREADS
+TEST(NexusRunner, theCapOfABuildLowersTheThreadsOfTheTool) {
+    NexusFixture f("runner_nexus_build_cap");
+    EnvVarGuard threads("DDB_BUILD_THREADS", "6");
+    const ScopedProcessConfig pool(R"({"cpuPoolSize": 16})");
+    const auto before = parallel::cpuTokensInUse();
+    size_t heldWhileRunning = 0;
+    f.fake.effect = [&](const FakeProcessRunner::Call &) {
+        heldWhileRunning = parallel::cpuTokensInUse() - before;
+        touch(f.output, "nxz");
+    };
+    const auto threadsArg = [&f]() {
+        const auto &args = f.fake.calls.back().args;
+        return args.at(1);
+    };
+
+    nexus::runNexusBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(2));
+    EXPECT_EQ(threadsArg(), "2");
+    EXPECT_EQ(heldWhileRunning, 1u);
+    EXPECT_EQ(parallel::cpuTokensInUse(), before);
+
+    nexus::runNexusBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(4096));
+    EXPECT_EQ(threadsArg(), "6") << "a cap above the budget does not raise it";
+
+    nexus::runNexusBuild(f.input, f.output, f.tool, f.fake, BuildOptions());
+    EXPECT_EQ(threadsArg(), "6");
+
+    nexus::runNexusBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(1));
+    EXPECT_EQ(threadsArg(), "1");
+}
+
 TEST(NexusRunner, anExitCodeIsAFailureWithTheLastOutput) {
     NexusFixture f("runner_nexus_exit");
     // the reason comes last, after more than the 2000 bytes the message keeps
@@ -659,6 +770,23 @@ TEST(UntwineRunner, buildsTheArgumentsAndTheProgressChannel) {
                                     "--temp_dir", io::toUtf8(f.tempDir), "--progress_fd",
                                     process::kExtraChannelPlaceholder}));
     EXPECT_TRUE(call.options.extraChannel);
+}
+
+// Untwine has no thread option: it runs its own threads whatever a build is capped to, and the
+// tokens of its 10 threads (the calling thread is one) say so to the other sections
+TEST(UntwineRunner, itHoldsTheTokensOfItsFixedThreadsWhateverTheCapOfTheBuild) {
+    UntwineFixture f("runner_untwine_tokens");
+    const ScopedProcessConfig pool(R"({"cpuPoolSize": 64})");
+    EnvVarGuard threads("DDB_BUILD_THREADS", "1");
+    const auto before = parallel::cpuTokensInUse();
+    size_t heldWhileRunning = 0;
+    f.fake.effect = [&](const FakeProcessRunner::Call &) {
+        heldWhileRunning = parallel::cpuTokensInUse() - before;
+        touch(f.outFile);
+    };
+    ASSERT_TRUE(f.run().succeeded);
+    EXPECT_EQ(heldWhileRunning, 9u) << "10 threads: the calling one and 9 tokens";
+    EXPECT_EQ(parallel::cpuTokensInUse(), before);
 }
 
 TEST(UntwineRunner, theCallersOptionsAreKept) {

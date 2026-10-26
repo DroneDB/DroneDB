@@ -173,7 +173,7 @@ std::vector<fs::path> collectPendingFiles(const fs::path& buildDir) {
 // primary transient failures keep an existing marker and refresh its timestamp;
 // permanent failures consume it. Build-lock contention leaves it untouched.
 // Failures remain logged at warning level for the next bounded coordinator/sweep.
-void buildPending(Database* db, const std::string& outputPath, bool force) {
+void buildPending(Database* db, const std::string& outputPath, bool force, const BuildOptions& options) {
     const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : io::fromUtf8(outputPath);
     std::error_code ec;
     if (!fs::exists(buildDir, ec) || ec)
@@ -220,7 +220,7 @@ void buildPending(Database* db, const std::string& outputPath, bool force) {
             cancel::throwIfCanceled();
             try {
                 LOGD << "Retrying pending build for " << e.path;
-                buildInternal(db, e, outPath, force);
+                buildInternal(db, e, outPath, force, options);
             } catch (const CanceledException&) {
                 throw;
             } catch (const BuildDepMissingException& err) {

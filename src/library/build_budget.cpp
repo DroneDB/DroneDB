@@ -3,11 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "build_budget.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <mutex>
 #include <optional>
 #include <set>
 
+#include "exceptions.h"
 #include "gdal_inc.h"
 #include "logger.h"
 #include "parallel.h"
@@ -48,12 +50,26 @@ CacheGuardState& cacheGuardState() {
 
 }  // namespace
 
-BuildResourceBudget BuildResourceBudget::fromConfig() {
+std::string BuildOptions::threadsRule() {
+    return "threads must be an integer from 1 to " + std::to_string(MaxThreads);
+}
+
+BuildOptions BuildOptions::withThreads(int64_t threads) {
+    if (threads < 1 || threads > MaxThreads)
+        throw InvalidArgsException(threadsRule());
+    BuildOptions options;
+    options.threads = static_cast<int>(threads);
+    return options;
+}
+
+BuildResourceBudget BuildResourceBudget::fromConfig(const BuildOptions& options) {
     BuildResourceBudget budget{};
     budget.cacheBytes = static_cast<int64_t>(positiveOption("DDB_COG_CACHE_MB", DefaultCacheMb)) * MiB;
     budget.warpMemoryMb = positiveOption("DDB_WARP_MEMORY_MB", DefaultWarpMemoryMb);
     // 0 is a valid explicit value (all cores)
     budget.threads = parallel::threadsOption("DDB_BUILD_THREADS", DefaultMaxThreads);
+    if (options.threads)
+        budget.threads = std::min(budget.threads, *options.threads);
     return budget;
 }
 

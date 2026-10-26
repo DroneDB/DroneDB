@@ -10,6 +10,7 @@
 #include "build_budget.h"
 #include "env.h"
 #include "exceptions.h"
+#include "json_options.h"
 #include "logger.h"
 #include "mio.h"
 #include "parallel.h"
@@ -137,7 +138,7 @@ namespace ddb
             while (index < kIntegerSettings.size() && kIntegerSettings[index].name != name)
                 index++;
             if (index == kIntegerSettings.size())
-                throw InvalidArgsException("Unknown setting \"" + name + "\" (known: " + knownNames() + ")");
+                throwUnknownMember("setting", name, knownNames());
             integers[index] = value.is_null() ? std::optional<uint64_t>()
                                               : std::optional<uint64_t>(integerValue(kIntegerSettings[index], value));
         }
