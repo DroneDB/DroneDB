@@ -20,7 +20,7 @@
 //
 // DDB_FAKE_EXIF_PROTOCOL ("2.0") sets the protocol `--version` reports (default "1.0").
 // DDB_FAKE_EXIF_LOG names a file where every request is appended as "<pid> <file name>".
-// DDB_FAKE_EXIF_VERSION_LOG names a file where every run of `--version` appends a line.
+// DDB_FAKE_EXIF_VERSION_LOG names a file where every run of `--version` appends "<pid> --version".
 // DDB_FAKE_EXIF_VERSION_DELAY_MS makes `--version` take that long to answer, after its line in
 // the version log (a check that is still running when other helpers of the program start).
 // DDB_FAKE_EXIF_EXIT_ON_EOF_DELAY_MS makes the helper wait that long after its input ended
@@ -36,9 +36,14 @@
 #include <thread>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #include <process.h>
 #define FAKE_GETPID _getpid
 #else
+#include <fcntl.h>
 #include <unistd.h>
 #define FAKE_GETPID getpid
 #endif
@@ -95,6 +100,40 @@ bool exists(const std::string &path) {
     return std::ifstream(path).good();
 }
 
+// Appends "<pid> <text>" to the log at `path`. The helpers of a pool write their logs at the same
+// moment (a test starts them together and they get their requests together), and the test counts
+// the lines, so no line may be lost: each goes out in one write on a file opened for appending
+// only, which the system puts at the end of the file as one step, whatever the other processes
+// write at the time. std::ofstream in append mode does not on Windows: its C runtime moves to the
+// end of the file and then writes, and a helper that writes in between leaves both lines at the
+// same offset, the later over the earlier. A log that cannot be written ends the helper with
+// status 70, so the test sees a failed helper instead of waiting for a line that never comes.
+void appendToLog(const std::string &path, const std::string &text) {
+    const std::string line = std::to_string(FAKE_GETPID()) + " " + text + "\n";
+    bool written = false;
+#ifdef _WIN32
+    const HANDLE file = CreateFileA(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+        DWORD count = 0;
+        written = WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &count, nullptr) != 0 &&
+                  count == line.size();
+        CloseHandle(file);
+    }
+#else
+    const int file = ::open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+    if (file >= 0) {
+        written = ::write(file, line.data(), line.size()) == static_cast<ssize_t>(line.size());
+        ::close(file);
+    }
+#endif
+    if (!written) {
+        std::fprintf(stderr, "ddbtest_fake_exif: cannot append to %s\n", path.c_str());
+        std::fflush(stderr);
+        std::_Exit(70);
+    }
+}
+
 std::string tag(const std::string &key, const std::string &type, size_t count, const std::string &text,
                 const std::string &components) {
     return "{\"k\":\"" + key + "\",\"t\":\"" + type + "\",\"n\":" + std::to_string(count) + ",\"s\":\"" + text +
@@ -130,10 +169,7 @@ int serve() {
         const std::string path = stringMember(line, "path");
         const std::string name = baseName(path);
 
-        if (!log.empty()) {
-            std::ofstream out(log, std::ios::app);
-            out << FAKE_GETPID() << " " << name << "\n";
-        }
+        if (!log.empty()) appendToLog(log, name);
 
         if (name.size() > 5 && name.compare(name.size() - 5, 5, ".hold") == 0) {
             while (!exists(path + ".release")) std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -180,7 +216,7 @@ int main(int argc, char **argv) {
     const std::string mode = argc > 1 ? argv[1] : "";
     if (mode == "--version") {
         const std::string log = envOr("DDB_FAKE_EXIF_VERSION_LOG", "");
-        if (!log.empty()) std::ofstream(log, std::ios::app) << FAKE_GETPID() << "\n";
+        if (!log.empty()) appendToLog(log, "--version");
         const int delayMs = std::atoi(envOr("DDB_FAKE_EXIF_VERSION_DELAY_MS", "0").c_str());
         if (delayMs > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
         std::printf("metadata-util fake (Exiv2 0.0.0) protocol %s\n", envOr("DDB_FAKE_EXIF_PROTOCOL", "1.0").c_str());

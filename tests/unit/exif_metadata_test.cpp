@@ -20,6 +20,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -1037,6 +1038,38 @@ namespace
 
         ASSERT_TRUE(pool.read("again.jpg").metadata.has_value());
         EXPECT_EQ(pool.startedHelpers(), 4u);
+    }
+
+    // The tests wait for and count the lines of the request log, which the helpers of a pool
+    // append to at the same moment: no line may be lost. Two helpers that appended at once with
+    // std::ofstream on Windows left one line over the other, and a test that started three helpers
+    // together then waited for a third line that never came.
+    TEST(ExifHelperPool, theRequestLogHasTheLineOfEveryRequestOfHelpersThatReadTogether)
+    {
+        TestArea area("ExifHelperPool.requestLog", true);
+        const fs::path log = area.getFolder() / "requests.log";
+        EnvVarGuard logEnv("DDB_FAKE_EXIF_LOG", io::toUtf8(log));
+        constexpr size_t kHelpers = 8;
+        constexpr size_t kReadsEach = 100;
+        HelperMetadataReader pool(fakeOptions(kHelpers));
+        std::atomic<size_t> served{0};
+        {
+            Threads threads;
+            for (size_t t = 0; t < kHelpers; t++)
+                threads.start([&, t] {
+                    for (size_t i = 0; i < kReadsEach; i++)
+                        if (pool.read(std::to_string(t) + "-" + std::to_string(i) + ".jpg").metadata.has_value())
+                            served++;
+                });
+        }
+        ASSERT_EQ(served.load(), kHelpers * kReadsEach);
+
+        const auto requests = fakeRequests(log);
+        std::set<std::string> names;
+        for (const auto &request : requests)
+            names.insert(request.name);
+        EXPECT_EQ(requests.size(), kHelpers * kReadsEach);
+        EXPECT_EQ(names.size(), kHelpers * kReadsEach) << "every request has its own whole line";
     }
 
     TEST(ExifHelperPool, aCallerWaitingDuringShutdownIsServed)
