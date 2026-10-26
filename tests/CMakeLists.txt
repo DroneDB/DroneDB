@@ -23,9 +23,9 @@ if(BUILD_TESTING)
     #                   its tests downloads anything (TestFS or downloadTestAsset with a URL),
     #                   calls a network service (DSM elevation), runs an external tool that
     #                   is not built in this tree (Obj2Tiles, untwine, dwg2dxf, build-lod; the
-    #                   fake tools a test writes itself and the helper programs built with the
-    #                   tests, ddbtest_child, metadata-util and ddb-nexus, are fine), reads CAD assets
-    #                   or builds a 3D model (Nexus/3D Tiles: ddb-nexus and Obj2Tiles). Whole
+    #                   fake tools a test writes itself, ddbtest_child and the helper programs
+    #                   built with the tests (scripts/helper-tools.txt) are fine), reads CAD
+    #                   assets or builds a 3D model (Nexus/3D Tiles: ddb-nexus and Obj2Tiles). Whole
     #                   files are classified, so a file with one such test is an integration
     #                   file.
     #                   main.cpp initializes the process through the core
@@ -153,11 +153,11 @@ if(BUILD_TESTING)
         target_include_directories(${name} BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
         ddb_embed_library(${name})
         target_link_libraries(${name} PRIVATE ${T_LINK} ddb_test_support ddb_warnings)
-        # ddb-nexus (vendor/libnexus) and metadata-util (vendor/metadata-util) are built next to the test
-        # binary, where the tool locator looks: the tests that build a Nexus file or read the
-        # metadata of an image run them
+        # The helper programs (scripts/helper-tools.txt) are built next to the test binary, where the
+        # tool locator looks: the tests that build a Nexus file or read the metadata of an image
+        # run them
         add_dependencies(${name} ddbtest_child ddbtest_signal_probe ddbtest_config_probe ddbtest_log_probe
-            ddbtest_shared_probe ddbtest_fake_exif ddb-nexus metadata-util)
+            ddbtest_shared_probe ddbtest_fake_exif ${DDB_HELPER_TOOLS})
 
         gtest_discover_tests(${name}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

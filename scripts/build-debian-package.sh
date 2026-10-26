@@ -130,7 +130,16 @@ ddb (${DDB_VERSION}) unstable; urgency=medium
  -- DroneDB Team <support@dronedb.app>  $(date -R)
 EOF
 
-# Licence texts of the helper tools (metadata-util, ddb-nexus), collected in debian/helper-licences for
+# The helper tools libddb starts as child processes: scripts/helper-tools.txt is the one list of them
+# (the CMake build, the Windows package and the package checks read it too). The rules file below
+# installs each of them.
+HELPER_TOOLS="$(python3 scripts/check-helper-tools.py --names | tr '\n' ' ')"
+if [ -z "${HELPER_TOOLS// /}" ]; then
+  echo "ERROR: scripts/helper-tools.txt lists no helper tool"
+  exit 1
+fi
+
+# Licence texts of the helper tools, collected in debian/helper-licences for
 # the rules file; scripts/helper-licences.txt lists them, the Windows package reads the same list
 echo "Collecting the helper licence texts..."
 rm -rf debian/helper-licences
@@ -207,16 +216,16 @@ override_dh_auto_install:
 	# libddb and ddb do not link it
 	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
 
-	# Required: the helper tools libddb starts as child processes. metadata-util reads (and writes)
-	# image metadata with Exiv2, ddb-nexus builds Nexus multiresolution models; both are GPL, which
-	# is why they are separate executables and not part of libddb. Installed in /usr/bin so
-	# the runtime discovery (exe folder, then PATH, which is how Registry finds them) needs no
-	# configuration. The package is broken without them: image indexing and Nexus builds stop.
-	@test -f \$(CURDIR)/build/metadata-util || { echo "ERROR: build/metadata-util not found (built by the metadata-util target)"; exit 1; }
-	@test -f \$(CURDIR)/build/ddb-nexus || { echo "ERROR: build/ddb-nexus not found (built by the ddb-nexus target)"; exit 1; }
-	cp \$(CURDIR)/build/metadata-util debian/ddb/usr/bin/metadata-util
-	cp \$(CURDIR)/build/ddb-nexus debian/ddb/usr/bin/ddb-nexus
-	chmod +x debian/ddb/usr/bin/metadata-util debian/ddb/usr/bin/ddb-nexus
+	# Required: the helper tools libddb starts as child processes (scripts/helper-tools.txt: image
+	# metadata with Exiv2, Nexus multiresolution models). They are GPL, which is why they are
+	# separate executables and not part of libddb. Installed in /usr/bin so the runtime discovery
+	# (exe folder, then PATH, which is how Registry finds them) needs no configuration. The package
+	# is broken without them: image indexing and Nexus builds stop.
+	for tool in $HELPER_TOOLS; do \\
+		test -f \$(CURDIR)/build/\$\$tool || { echo "ERROR: build/\$\$tool not found (built by the \$\$tool target)"; exit 1; }; \\
+		cp \$(CURDIR)/build/\$\$tool debian/ddb/usr/bin/\$\$tool; \\
+		chmod +x debian/ddb/usr/bin/\$\$tool; \\
+	done
 
 	# Their licence texts and those of the code inside them, next to the other notices
 	cp \$(CURDIR)/debian/helper-licences/* debian/ddb/usr/share/doc/ddb/

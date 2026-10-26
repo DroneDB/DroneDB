@@ -291,7 +291,8 @@ jobs:
           mkdir -p build/dist build/package
 
           # Verify required files exist in build directory
-          for file in ddbcmd libddb.so metadata-util ddb-nexus libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt gdal/gdalvrt.xsd; do
+          # The helper tools are the ones of scripts/helper-tools.txt
+          for file in ddbcmd libddb.so $(python3 scripts/check-helper-tools.py --names) libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt gdal/gdalvrt.xsd; do
             if [ ! -f "build/$file" ]; then
               echo "Error: Required file $file not found in build directory!"
               exit 1
@@ -398,16 +399,16 @@ jobs:
           docker run --rm \
             -v "$GITHUB_WORKSPACE/build/package:/pkg:ro" \
             -e TEST_DATA_SHA \
+            -e HELPER_TOOLS="$(python3 scripts/check-helper-tools.py --names | tr '\n' ' ')" \
             ubuntu:24.04 bash -ec '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
               apt-get install -y -qq /pkg/ddb_*.deb curl ca-certificates >/dev/null
               mkdir -p /tmp/e57smoke && cd /tmp/e57smoke
               ddb --version
-              # The helper tools libddb starts, as installed: libnxs.so (ddb-nexus) must resolve
-              # from /usr/lib alone
-              metadata-util --version
-              ddb-nexus --version
+              # The helper tools libddb starts (scripts/helper-tools.txt), as installed: libnxs.so
+              # (ddb-nexus) must resolve from /usr/lib alone
+              for tool in $HELPER_TOOLS; do $tool --version; done
               curl -fsSL --retry 3 -o a4.e57 https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/point-clouds/A4.e57
               ddb init . > /dev/null
               ddb add a4.e57

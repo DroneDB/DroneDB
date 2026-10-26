@@ -96,15 +96,29 @@ New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 Write-Host "  ✓ Staging directory: $stagingDir" -ForegroundColor Green
 Write-Host "  ✓ Output directory: $OutputDir" -ForegroundColor Green
 
+# Python reads the helper tool list and collects the vcpkg licence notices
+$python = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $python) {
+    Write-Error "Python is needed to read scripts/helper-tools.txt and to collect the vcpkg licence notices (scripts/collect-vcpkg-notices.py)"
+    exit 1
+}
+
+# The helper executables libddb starts as child processes (scripts/helper-tools.txt: image metadata
+# with Exiv2, Nexus builds), as file names
+$helperTools = @(& $python.Source (Join-Path $PSScriptRoot "check-helper-tools.py") --names)
+if ($LASTEXITCODE -ne 0 -or $helperTools.Count -eq 0) {
+    Write-Error "Reading scripts/helper-tools.txt failed ($LASTEXITCODE)"
+    exit 1
+}
+$helperExecutables = @($helperTools | ForEach-Object { "$_.exe" })
+
 # Define required files for verification
-# metadata-util.exe and ddb-nexus.exe are the helper executables libddb starts as child processes
-# (image metadata with Exiv2, Nexus builds). nxs.dll is loaded by ddb-nexus.exe only, libddb itself
-# does not import it; the zip check that runs both helpers proves the DLLs of metadata-util.exe are there
+# nxs.dll is loaded by ddb-nexus.exe only, libddb itself does not import it; the zip check that
+# runs the helpers proves the DLLs of the other helpers are there
 $requiredFiles = @(
     "ddbcmd.exe",
-    "ddb.dll",
-    "metadata-util.exe",
-    "ddb-nexus.exe",
+    "ddb.dll"
+) + $helperExecutables + @(
     "nxs.dll",
     "proj.db",
     "timezone21.bin",
@@ -142,7 +156,7 @@ Write-Host "  ✓ ddbcmd.exe" -ForegroundColor Green
 # The helper executables sit next to ddbcmd.exe, where libddb looks for them first; Registry puts
 # this folder on PATH. Their DLLs (exiv2.dll, nxs.dll and the libraries they load) are copied with
 # all the others below.
-foreach ($helper in @("metadata-util.exe", "ddb-nexus.exe")) {
+foreach ($helper in $helperExecutables) {
     Copy-Item (Join-Path $BuildDir $helper) $stagingDir -Force
     Write-Host "  ✓ $helper" -ForegroundColor Green
 }
@@ -252,8 +266,7 @@ foreach ($lic in $licenseFiles) {
     }
 }
 
-# Licence texts of the helper executables and of the code inside them (GPL-2.0-or-later Exiv2 in
-# metadata-util, GPL-3.0 ddb-nexus with Nexus, vcglib and corto): the list is shared with the
+# Licence texts of the helper executables and of the code inside them: the list is shared with the
 # Debian package. "<name> | <path>" per line; a '*' in the path matches the vcpkg triplet folder.
 Write-Host ""
 Write-Host "Copying helper licence texts..." -ForegroundColor Cyan
@@ -274,11 +287,6 @@ foreach ($line in Get-Content (Join-Path $PSScriptRoot "helper-licences.txt")) {
 # codecs, zlib ...), in third-party/; the Debian package runs the same collector
 Write-Host ""
 Write-Host "Collecting the vcpkg licence notices..." -ForegroundColor Cyan
-$python = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $python) {
-    Write-Error "Python is needed to collect the vcpkg licence notices (scripts/collect-vcpkg-notices.py)"
-    exit 1
-}
 & $python.Source (Join-Path $PSScriptRoot "collect-vcpkg-notices.py") --installed (Join-Path $BuildDir "vcpkg_installed") --output (Join-Path $stagingDir "third-party")
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Collecting the vcpkg licence notices failed ($LASTEXITCODE)"

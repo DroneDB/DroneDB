@@ -214,11 +214,11 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq ddb_headers PUBLIC ddb_c_api)
 ddb_gc_sections(${PROJECT_NAME})
 
-# Nexus files are written by ddb-nexus, a program of its own (vendor/libnexus, GPL-3.0), and
-# image metadata is read and written by metadata-util (vendor/metadata-util, GPL-2.0-or-later): libddb
-# starts them (nexus_runner.h, exif_helper_pool.h) and links none of their code. They are built
-# next to libddb, which is where the tool locator looks for them.
-add_dependencies(${PROJECT_NAME} ddb-nexus metadata-util)
+# The helper programs (scripts/helper-tools.txt: ddb-nexus, which writes Nexus files, and
+# metadata-util, which reads and writes image metadata) are started by libddb (nexus_runner.h,
+# exif_helper_pool.h), which links none of their code. They are built next to libddb, which is
+# where the tool locator looks for them.
+add_dependencies(${PROJECT_NAME} ${DDB_HELPER_TOOLS})
 
 # ddb_embed_library(<target>): <target> contains the library instead of loading libddb: the
 # objects of ddb_core and ddb_capi, the libraries they need and DDB_STATIC_DEFINE (ddb_static_api).
@@ -243,7 +243,7 @@ add_custom_target(
 
 message(STATUS "Build target 'update_sensor_data' is ready.")
 
-# Runtime files next to libddb: ddb, ddb-nexus (with libnxs), ddbcmd and the test binaries are all
+# Runtime files next to libddb: ddb, the helper programs (with libnxs), ddbcmd and the test binaries are all
 # built in DDB_RUNTIME_DIR (root CMakeLists.txt), so getDataPath() finds these files whether it
 # looks next to the library or next to the executable.
 
