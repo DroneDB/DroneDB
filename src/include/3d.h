@@ -90,11 +90,11 @@ namespace ddb
     std::optional<ModelGeoref> detectModelGeoref(const std::string &inputObj);
 
     /**
-     * @brief Generate an OGC 3D Tiles tileset from an OBJ/GLTF/GLB/PLY model using Obj2Tiles.
+     * @brief Generate an OGC 3D Tiles tileset from an OBJ/GLTF/GLB/PLY/STL model using Obj2Tiles.
      *
-     * Mirrors @ref buildNexus: file dependencies are validated, then GLTF/GLB inputs
-     * are converted to OBJ (vertex colours kept as `v x y z r g b` when there are no
-     * texture coordinates) and PLY inputs are streamed to OBJ (+ MTL + texture) by
+     * Mirrors @ref buildNexus: file dependencies are validated, then GLTF/GLB and STL
+     * inputs are converted to OBJ (vertex colours kept as `v x y z r g b` when there
+     * are no texture coordinates) and PLY inputs are streamed to OBJ (+ MTL + texture) by
      * convertPlyToObj(), whose face count and bounds replace the Assimp pass of
      * @ref getModelInfo. The Obj2Tiles binary is invoked as a subprocess
      * (see obj2tiles_runner.h). On success the output directory contains
@@ -171,7 +171,7 @@ namespace ddb
     /**
      * @brief Read a 3D model's local-space axis-aligned bounding box via Assimp.
      *
-     * Supports every mesh format Assimp can import (OBJ/PLY/GLTF/GLB). Node
+     * Supports every mesh format Assimp can import (OBJ/PLY/STL/GLTF/GLB). Node
      * transforms are baked in so the bounds are in the model's root frame.
      * Best-effort: returns false (leaving @p info untouched) when the model cannot
      * be read or has no vertices, so a model can still be indexed without a
@@ -238,9 +238,9 @@ namespace ddb
     EntryType identifyGltf(const fs::path &gltfFile);
 
     /**
-     * @brief Convert glTF/GLB to OBJ or PLY format
+     * @brief Convert a model Assimp reads (glTF/GLB, STL) to OBJ or PLY format
      *
-     * @param inputGltf Path to the input glTF or GLB file
+     * @param inputGltf Path to the input glTF, GLB or STL file
      * @param outputBasePath Base path for output files (without extension)
      * @param outGeomPath Output parameter for the generated geometry file path
      * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)

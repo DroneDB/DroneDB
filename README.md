@@ -20,7 +20,7 @@
 - **Geospatial Analysis** - Flight path visualization, EXIF metadata extraction, dataset partitioning, and STAC catalog support
 - **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Cloud-Optimized Point Clouds (COPC)
 - **Cloud Sync** - Push and pull datasets to/from DroneDB Hub for collaboration
-- **Format Support** - Orthophotos (GeoTIFF, COG, JPEG 2000), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, glTF/GLB, OGC 3D Tiles), Gaussian Splats (PLY, SPLAT, SPZ), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG, GPX), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
+- **Format Support** - Orthophotos (GeoTIFF, COG, JPEG 2000), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, STL, glTF/GLB, OGC 3D Tiles), Gaussian Splats (PLY, SPLAT, SPZ), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG, GPX), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
 - **Cross-Platform** - Works on Windows and Linux
 
 ---
@@ -95,7 +95,7 @@ ddb share . --tag myproject/dataset
 | `cog` | Create Cloud-Optimized GeoTIFFs |
 | `copc` | Create Cloud-Optimized Point Clouds |
 | `nxs` | Create Nexus 3D mesh format |
-| `3dtiles` | Generate OGC 3D Tiles (tileset.json + b3dm) from OBJ/glTF/GLB models |
+| `3dtiles` | Generate OGC 3D Tiles (tileset.json + b3dm) from OBJ/STL/glTF/GLB models |
 | `gsplat` | Convert Gaussian Splat to compressed .spz format |
 | `stac` | Export as STAC catalog |
 | `clone` | Clone a remote repository |

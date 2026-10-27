@@ -886,4 +886,110 @@ TEST(tiles3dBuild, converterInfoSkipsGetModelInfo) {
     }
 }
 
+// ---- STL inputs ----
+
+// Number of vertex and face lines in an OBJ
+std::pair<size_t, size_t> objCounts(const fs::path& obj) {
+    size_t v = 0, f = 0;
+    for (const auto& l : readLines(obj)) {
+        if (l.rfind("v ", 0) == 0)
+            ++v;
+        else if (l.rfind("f ", 0) == 0)
+            ++f;
+    }
+    return {v, f};
+}
+
+// Obj2Tiles reads OBJ only: an STL, ASCII or binary, reaches it as an OBJ with every triangle,
+// written in a temp folder that is gone afterwards.
+TEST(tiles3dBuild, stlIsConvertedToObjForTiles) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    Obj2TilesEnvReset reset;
+    TestArea ta(TEST_NAME);
+    usePath(writeFakeObj2Tiles(ta.getFolder(), true));
+
+    for (const bool binary : {false, true}) {
+        const std::string name = binary ? "binary" : "ascii";
+        const fs::path stl = ta.getPath(name + ".stl");
+        writeFile(stl, gridStl(6, binary));
+        const fs::path out = ta.getPath("3dtiles_" + name);
+
+        buildModel3DTiles(stl.string(), out.string(), {.overwrite = true});
+
+        const auto args = readLines(out / "args.txt");
+        ASSERT_GE(args.size(), 2u) << name;
+        EXPECT_EQ(fs::path(args[0]).extension(), ".obj") << name;
+        EXPECT_NE(fs::path(args[0]).parent_path(), stl.parent_path())
+            << "converted in a temp folder";
+        EXPECT_FALSE(fs::exists(args[0])) << "the conversion temp folder is removed";
+
+        const auto [v, f] = objCounts(out / "input.copy");
+        EXPECT_EQ(f, 50u) << name;
+        EXPECT_EQ(v, 36u) << name << ": the triangles share their vertices";
+        expectNoLeftovers(out);
+    }
+}
+
+// What Nexus gets is the STL itself, and no converted copy is made for it
+TEST(tiles3dBuild, stlGoesToNexusUnconverted) {
+    Obj2TilesEnvReset reset;
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.stl", gridStl(6, true));
+    usePath(kBogusBinary);
+
+    CaptureScope cap(plog::debug);
+    ddb::build(ds.db.get(), "model.stl", "", false);
+    EXPECT_TRUE(cap.contains("STL, handing it to Nexus as is"));
+    EXPECT_FALSE(cap.contains("converting"));
+}
+
+// A dataset with an STL (ASCII or binary): Model, built into Nexus plus 3D Tiles
+TEST(tiles3dBuild, stlModelBuildProducesNexusAndTiles) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    Obj2TilesEnvReset reset;
+    ModelDataset ds(TEST_NAME);
+    ds.add("ascii.stl", gridStl(6, false));
+    ds.add("sub/binary.stl", gridStl(6, true));
+    usePath(writeFakeObj2Tiles(ds.ta.getFolder(), true));
+
+    for (const std::string rel : {"ascii.stl", "sub/binary.stl"}) {
+        ddb::build(ds.db.get(), rel, "", false);
+
+        EXPECT_GT(fs::file_size(ds.out(rel) / "nxs" / "model.nxz"), 0u) << rel;
+        EXPECT_TRUE(fs::exists(ds.out(rel) / "3dtiles" / "tileset.json")) << rel;
+        EXPECT_EQ(objCounts(ds.out(rel) / "3dtiles" / "input.copy").second, 50u) << rel;
+        EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), rel)) << rel;
+        expectNoLeftovers(ds.out(rel) / "3dtiles");
+    }
+}
+
+// The test files of the test-data repository: real STLs (MeshLab ASCII, binary) are Models, Assimp
+// reads them and they build through the real Nexus builder and Obj2Tiles.
+TEST(tiles3dBuild, stlFixturesBuild) {
+    Obj2TilesEnvReset reset;
+    ModelDataset ds(TEST_NAME);
+
+    struct Fixture {
+        const char* asset;
+        const char* rel;
+    };
+    for (const Fixture& fx :
+         {Fixture{"3d/stl_ascii.stl", "ascii.stl"}, Fixture{"3d/stl_binary.stl", "binary.stl"}}) {
+        const fs::path file = ds.ta.downloadTestAsset(testDataUrl(fx.asset), fx.rel);
+        EXPECT_EQ(fingerprint(file), EntryType::Model) << fx.rel;
+
+        ModelInfo info;
+        ASSERT_TRUE(getModelInfo(file.string(), info)) << fx.rel;
+        EXPECT_GT(info.faceCount, 0u) << fx.rel;
+
+        ds.add(fx.rel, readText(file));
+        ddb::build(ds.db.get(), fx.rel, "", false);
+        EXPECT_GT(fs::file_size(ds.out(fx.rel) / "nxs" / "model.nxz"), 0u) << fx.rel;
+        EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), fx.rel)) << fx.rel;
+        if (!obj2tiles::findObj2TilesBinary(true).empty()) {
+            EXPECT_TRUE(fs::exists(ds.out(fx.rel) / "3dtiles" / "tileset.json")) << fx.rel;
+        }
+    }
+}
+
 }  // namespace

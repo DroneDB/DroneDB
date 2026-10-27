@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Model entries: textured meshes (OBJ, PLY, glTF), built into Nexus plus an additive OGC 3D
+// Model entries: meshes (OBJ, PLY, STL, glTF), built into Nexus plus an additive OGC 3D
 // Tiles tileset.
 
 #include <algorithm>
@@ -15,6 +15,7 @@
 #include "entry_handlers_builtin.h"
 #include "mio.h"
 #include "ply.h"
+#include "stl.h"
 
 namespace ddb {
 
@@ -81,13 +82,18 @@ class ModelEntryHandler : public EntryHandler {
 
     // A .ply can be a mesh, a plain point cloud or a Gaussian Splat; a .gltf/.glb can also
     // carry point geometry (3D Gaussian Splat tiles) or lines, neither of which yields a
-    // buildable model: both are classified from their content.
-    std::vector<std::string> extensions() const override { return {"obj", "ply", "gltf", "glb"}; }
+    // buildable model: both are classified from their content. An .stl has no signature, so it
+    // is a model only when its size (binary) or its first tokens (ASCII) say it holds triangles.
+    std::vector<std::string> extensions() const override {
+        return {"obj", "ply", "stl", "gltf", "glb"};
+    }
 
     EntryType detect(const fs::path& path, FingerprintContext& /*ctx*/) const override {
         io::Path p(path);
         if (p.checkExtension({"ply"}))
             return identifyPly(path);
+        if (p.checkExtension({"stl"}))
+            return identifyStl(path);
         if (p.checkExtension({"gltf", "glb"}))
             return identifyGltf(path);
         return EntryType::Model;

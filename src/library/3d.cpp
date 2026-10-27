@@ -36,6 +36,11 @@ bool isGlbFile(const fs::path& filePath) {
     return io::Path(filePath).checkExtension({"glb"});
 }
 
+// Check if file extension is STL
+bool isStlFile(const fs::path& filePath) {
+    return io::Path(filePath).checkExtension({"stl"});
+}
+
 // Check if file extension is PLY
 bool isPlyFile(const fs::path& filePath) {
     return io::Path(filePath).checkExtension({"ply"});
@@ -506,33 +511,51 @@ void stageGltfTextures(const fs::path& gltfDir, const std::string& convertedObj)
     }
 }
 
-// Convert GLTF/GLB to OBJ in a temporary directory. With preferPLYIfNoUV a glTF
-// without texture coordinates is written as PLY instead (keeps vertex colours for
-// Nexus, whose OBJ reader ignores them); Obj2Tiles reads OBJ only, and the OBJ
-// exporter writes vertex colours as `v x y z r g b`.
-std::string convertGltfToObj(const std::string& inputGltf, io::ScopedTempDir& tempGuard,
-                             bool preferPLYIfNoUV) {
-    LOGD << "Input is GLTF/GLB, converting to OBJ first";
+// The files a conversion with Assimp wrote in the temp folder
+struct AssimpConversion {
+    std::string geomPath;  // OBJ or PLY
+    std::string mtlPath;   // MTL next to the OBJ, empty for a PLY or when there is none
+};
 
-    fs::path inputPath = io::fromUtf8(inputGltf);
-    fs::path tempDir =
-        fs::temp_directory_path() / ("ddb_gltf_convert_" + randomString(16));
+// Convert a model Assimp reads (glTF/GLB, STL) to OBJ in a temporary directory. With
+// preferPLYIfNoUV a model without texture coordinates is written as PLY instead (keeps
+// vertex colours for Nexus, whose OBJ reader ignores them); Obj2Tiles reads OBJ only, and
+// the OBJ exporter writes vertex colours as `v x y z r g b`.
+AssimpConversion convertWithAssimp(const std::string& input,
+                                   io::ScopedTempDir& tempGuard,
+                                   bool preferPLYIfNoUV) {
+    LOGD << "Converting " << input << " to OBJ first";
+
+    fs::path inputPath = io::fromUtf8(input);
+    fs::path tempDir = fs::temp_directory_path() / ("ddb_assimp_convert_" + randomString(16));
     fs::create_directories(tempDir);
     tempGuard.reset(tempDir);
 
-    std::string outGeomPath;
-    std::string outMtlPath;
+    AssimpConversion converted;
     std::string outputBasePath = io::toUtf8(tempDir / inputPath.stem());
 
-    convertGltfTo3dModel(inputGltf, outputBasePath, outGeomPath, outMtlPath, false,
+    convertGltfTo3dModel(input,
+                         outputBasePath,
+                         converted.geomPath,
+                         converted.mtlPath,
+                         false,
                          preferPLYIfNoUV);
 
-    LOGD << "GLTF/GLB converted to: " << outGeomPath;
+    LOGD << "Converted to: " << converted.geomPath;
+    return converted;
+}
 
-    if (!outMtlPath.empty())
-        stageGltfTextures(inputPath.parent_path(), outGeomPath);
+// glTF/GLB to OBJ (or PLY, see convertWithAssimp), with the images the OBJ's MTL
+// references staged next to it.
+std::string convertGltfToObj(const std::string& inputGltf,
+                             io::ScopedTempDir& tempGuard,
+                             bool preferPLYIfNoUV) {
+    const AssimpConversion converted = convertWithAssimp(inputGltf, tempGuard, preferPLYIfNoUV);
 
-    return outGeomPath;
+    if (!converted.mtlPath.empty())
+        stageGltfTextures(io::fromUtf8(inputGltf).parent_path(), converted.geomPath);
+
+    return converted.geomPath;
 }
 
 // Consumer of a prepared model (see prepareModelInput).
@@ -567,6 +590,8 @@ void validateConvertedDependencies(const std::string& convertedObj, const std::s
 //   - glTF/GLB: validated, then converted to OBJ in a temp folder. For Nexus a
 //     glTF without UVs becomes a PLY (Nexus ignores OBJ vertex colours); for
 //     Obj2Tiles it is always an OBJ.
+//   - STL: Nexus reads it natively; Obj2Tiles reads OBJ only, so it becomes an OBJ in a temp
+//     folder (an STL has no texture: the OBJ has no dependency).
 //   - PLY: never text-scanned as an OBJ. Its TextureFile (if any) is checked from
 //     the header against the dataset root. Nexus reads an untextured PLY natively;
 //     otherwise the streaming converter writes OBJ (+ MTL + texture) in a temp
@@ -585,6 +610,18 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         // An Assimp-exported PLY has no file dependencies.
         if (!isPlyFile(io::fromUtf8(m.path)))
             validateConvertedDependencies(m.path, input);
+        return m;
+    }
+
+    if (isStlFile(inputPath)) {
+        if (consumer == ModelConsumer::Nexus) {
+            LOGD << "STL, handing it to Nexus as is: " << input;
+            return {input, std::nullopt};
+        }
+
+        PreparedModel m;
+        m.path = convertWithAssimp(input, tempGuard, false).geomPath;
+        validateConvertedDependencies(m.path, input);
         return m;
     }
 

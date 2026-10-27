@@ -372,7 +372,7 @@ TEST(entryHandler, ExtensionsArePinned) {
         {EntryType::Markdown, {"md"}},
         {EntryType::PointCloud, {"laz", "las", "e57", "pts", "xyz"}},
         {EntryType::GaussianSplat, {"spz", "splat", "ksplat"}},
-        {EntryType::Model, {"obj", "ply", "gltf", "glb"}},
+        {EntryType::Model, {"obj", "ply", "stl", "gltf", "glb"}},
         {EntryType::Tiles3D, {"3tz"}},
         {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx"}},
         {EntryType::Image, {"jpg", "jpeg", "dng", "tif", "tiff", "jp2", "j2k", "png", "gif", "webp", "mp4", "mov", "webm",
@@ -407,6 +407,8 @@ TEST(entryHandler, FingerprintByExtension) {
     // Unreadable content: the Image handler falls back to Image, a broken .ply to Generic
     EXPECT_EQ(fingerprint(file("photo.png")), EntryType::Image);
     EXPECT_EQ(fingerprint(file("broken.ply")), EntryType::Generic);
+    // An .stl is a model only when its content is one
+    EXPECT_EQ(fingerprint(file("broken.stl")), EntryType::Generic);
 }
 
 TEST(entryHandler, ScopedHandlerPutsBackTheOneItReplaced) {

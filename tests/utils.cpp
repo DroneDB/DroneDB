@@ -5,9 +5,11 @@
 #include "randomutil.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 #include <boolinq/boolinq.h>
@@ -283,6 +285,52 @@ std::filesystem::path makeIndex(const std::string &testArea, const std::filesyst
     writeFile(index.root / "a.txt", "alpha");
     ddb::addToIndex(index.db.get(), {(index.root / "a.txt").string()});
     return index.root;
+}
+
+std::string gridStl(int n, bool binary, bool solidHeader) {
+    struct Vertex {
+        float x, y, z;
+    };
+    const auto at = [n](int i, int j) {
+        return Vertex{static_cast<float>(i),
+                      static_cast<float>(j),
+                      static_cast<float>((i + j) % 3) * 0.25f};
+    };
+
+    std::vector<std::array<Vertex, 3>> triangles;
+    for (int j = 0; j + 1 < n; ++j)
+        for (int i = 0; i + 1 < n; ++i) {
+            triangles.push_back({at(i, j), at(i + 1, j), at(i + 1, j + 1)});
+            triangles.push_back({at(i, j), at(i + 1, j + 1), at(i, j + 1)});
+        }
+
+    std::string out;
+    if (binary) {
+        std::string header = solidHeader ? "solid grid, written as binary" : "binary grid";
+        header.resize(80, ' ');
+        out = header;
+        const uint32_t count = static_cast<uint32_t>(triangles.size());
+        out.append(reinterpret_cast<const char*>(&count), sizeof(count));
+        for (const auto& t : triangles) {
+            const float normal[3] = {0.f, 0.f, 1.f};
+            out.append(reinterpret_cast<const char*>(normal), sizeof(normal));
+            for (const auto& v : t)
+                out.append(reinterpret_cast<const char*>(&v), sizeof(v));
+            out.append(2, '\0');
+        }
+        return out;
+    }
+
+    std::ostringstream o;
+    o << "solid grid\n";
+    for (const auto& t : triangles) {
+        o << "  facet normal 0 0 1\n    outer loop\n";
+        for (const auto& v : t)
+            o << "      vertex " << v.x << " " << v.y << " " << v.z << "\n";
+        o << "    endloop\n  endfacet\n";
+    }
+    o << "endsolid grid\n";
+    return o.str();
 }
 
 void insertEntry(ddb::Database *db, const std::string &path, const std::string &hash, ddb::EntryType type)

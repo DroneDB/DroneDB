@@ -41,6 +41,11 @@ std::vector<ddb::VegetationFormula> availableFormulas(const ddb::BandFilter &fil
 std::filesystem::path writeFile(const std::filesystem::path &path, const std::string &content);
 std::filesystem::path writeFile(const std::filesystem::path &path, const std::vector<uint8_t> &content);
 
+// An STL of an n x n grid of vertices (2 (n-1)^2 triangles, z = ((i + j) % 3) * 0.25), ASCII or
+// binary (80-byte header, the little-endian count, 50-byte records). The header of a binary STL
+// starts with "solid" when `solidHeader` is set, as the exports of several CAD programs do.
+std::string gridStl(int n, bool binary, bool solidHeader = false);
+
 // Deletes `path` first, then writes it: a file with other hard links is not written through.
 void fileWriteAllText(const std::filesystem::path &path, const std::string &content);
 
