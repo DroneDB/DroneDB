@@ -45,6 +45,16 @@ The package installs the CLI as `ddb`. When building from source the executable 
 #### Windows
 Download the latest release from [GitHub Releases](https://github.com/DroneDB/DroneDB/releases) and run the installer.
 
+**Long paths.** Windows refuses a path of 260 characters or more unless it allows long paths, and a
+build writes temporary files about 130 characters below the root of the dataset (a point cloud
+build, for one), so a dataset in a deep folder fails to build. The programs of the package
+(`ddb`, `bm3d`, `metadata-util`, `untwine`) declare themselves long path aware, but Windows has to
+allow it: set `LongPathsEnabled` to 1 under `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`
+(or enable the group policy *Enable Win32 long paths*), as an administrator, and start the programs
+again. Without it, keep the root of a dataset under about 130 characters. A program that
+embeds `ddb.dll` takes long paths only if its own executable is long path aware too. Code that
+keeps a path in a fixed buffer of 260 characters is not helped by the setting.
+
 ### Basic Usage
 
 ```bash
