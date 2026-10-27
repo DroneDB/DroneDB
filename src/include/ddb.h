@@ -877,30 +877,34 @@ extern "C"
      *   gsplat.spz       Gaussian Splat in SPZ
      *   gsplat.bounds    local bounding box of a splat (JSON)
      *
-     * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?,
-     * "fallbackFor"?} path          relative to the build root ("root" below), '/'-separated; URLs
-     * append it to ".../build/{hash}/" and DDBResolveBuildFile takes it kind          "file", or
-     * "dir" for a directory (index names its descriptor file; its other files, e.g. tiles, are
-     * "<path>/<file>") mediaType     of the file a client opens: the file, or the index of a
-     * directory downloadName  the file name to offer for a download; absent when the artifact is
-     * not one index         the descriptor file of a directory, relative to path legacy        true
-     * for an output of an older layout: read when present, never written; listed only while the
-     * role named by fallbackFor is not listed fallbackFor   legacy artifacts only: the role this
-     * one stands in for ("pointcloud.copc" for pointcloud.ept); the entry lists the legacy artifact
-     * or that role, never both
+     * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?}
+     *   path          relative to the build root ("root" below), '/'-separated; URLs append it
+     *                 to ".../build/{hash}/" and DDBResolveBuildFile takes it
+     *   kind          "file", or "dir" for a directory (index names its descriptor file; its
+     *                 other files, e.g. tiles, are "<path>/<file>")
+     *   mediaType     of the file a client opens: the file, or the index of a directory
+     *   downloadName  the file name to offer for a download; absent when the artifact is not one
+     *   index         the descriptor file of a directory, relative to path
+     *   legacy        true for an output of an older layout: read when present, never written;
+     *                 listed only while the role named by fallbackFor is not listed
+     *   fallbackFor   legacy artifacts only: the role this one stands in for ("pointcloud.copc"
+     *                 for pointcloud.ept); the entry lists the legacy artifact or that role,
+     *                 never both
      *
      * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
      *   {"buildable": bool, "source": string|null, "hash": string|null, "root": string|null,
      *    "state": "none"|"pending"|"building"|"complete", "missingDependencies": [string],
      *    "lastAttempt": integer|null, "retryAfter": integer|null, "artifacts": [artifact]}
-     *   buildable  the entry is built, by itself or as a sidecar of its main file (a .dbf of a
-     * .shp) source     dataset-relative path of the entry the artifacts belong to: the entry
-     * itself, or the main file of a sidecar hash       the hash of source, which names its build
-     * (URLs: ".../build/{hash}/{path}") root       the absolute build root of source (UTF-8); it
-     * may not exist yet state      in this order: "building" a live build holds the build lock of
-     * the entry; "pending" a build waits for missing dependencies; "complete" the artifacts are
-     * complete (as DDBIsBuildComplete); "none" not built, failed or incomplete missingDependencies,
-     * lastAttempt from the pending marker when there is one (a pending or a building entry),
+     *   buildable  the entry is built, by itself or as a sidecar of its main file (a .dbf of a .shp)
+     *   source     dataset-relative path of the entry the artifacts belong to: the entry itself,
+     *              or the main file of a sidecar
+     *   hash       the hash of source, which names its build (URLs: ".../build/{hash}/{path}")
+     *   root       the absolute build root of source (UTF-8); it may not exist yet
+     *   state      in this order: "building" a live build holds the build lock of the entry;
+     *              "pending" a build waits for missing dependencies; "complete" the artifacts
+     *              are complete (as DDBIsBuildComplete); "none" not built, failed or incomplete
+     *   missingDependencies, lastAttempt
+     *              from the pending marker when there is one (a pending or a building entry),
      *              [] and null otherwise: dataset-relative names, and the time of the last
      *              attempt in Unix seconds (0 when the marker's time is unreadable)
      *   retryAfter the Unix second from which DDBBuild with pendingOnly (and no force) retries it:
