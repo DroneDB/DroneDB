@@ -13,9 +13,3 @@
 # closes it, and libddb logs that as a WARNING with the exit status and the end of the helper's
 # stderr.
 leak:Exiv2::XmpProperties::registerNs
-
-# corto (vendor/libnexus/vendor/nexus/src/corto, upstream cnr-isti-vclab/corto): when a nexus
-# node has fewer than 4 vertices, Encoder::encodeMesh() calls BitStream::reserve(nvert/4 == 0),
-# which allocates new uint32_t[0] but records allocated = 0, so ~BitStream never frees it.
-# One empty allocation per such node.
-leak:crt::BitStream::reserve

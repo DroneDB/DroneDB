@@ -22,23 +22,26 @@ distribution archives.
 
 Two GPL-licensed code bases are **not** part of `libddb` or `ddbcmd`:
 Exiv2 (image metadata) lives in the separate `metadata-util` executable, and
-Nexus with vcglib and corto (3D mesh streaming) in the separate
-`ddb-nexus` executable. DroneDB runs both as child processes. The Linux
-and Windows CI builds check this on the files they produce, each as far
-as its platform's tools allow:
+bm3d (3D mesh streaming, with the Nexus, vcglib and corto code it is made
+of) in the separate `bm3d` executable. DroneDB runs both as child
+processes. The Linux and Windows CI builds check this on the files they
+produce, each as far as its platform's tools allow:
 
 - On Linux, [`scripts/check-gpl-linkage.py`](scripts/check-gpl-linkage.py)
   reads every symbol defined in `libddb.so` and `ddbcmd` (none may come
-  from Exiv2, Nexus, vcglib or corto) and the shared libraries they load
-  (neither may load `libexiv2` or `libnxs`).
+  from Exiv2, bm3d, vcglib or corto) and the shared libraries they load
+  (neither may load `libexiv2` or `libbm3d`). It also checks that the
+  pattern used to find bm3d, vcglib and corto symbols does match symbols
+  of the `bm3d` binary, which contains them, so that the check on
+  `libddb.so` cannot pass because the pattern stopped matching; its
+  `--self-test` runs the patterns and that control on made-up symbols.
 - On Windows, [`scripts/check-gpl-linkage.ps1`](scripts/check-gpl-linkage.ps1)
   reads only the DLLs `ddb.dll` and `ddbcmd.exe` import
-  (`dumpbin /dependents`): neither may load `exiv2.dll` or `nxs.dll`. It
+  (`dumpbin /dependents`): neither may load `exiv2.dll` or a `bm3d` DLL. It
   does not look at symbols, so code compiled into them is not seen there.
 
-Both also check that `ddb-nexus` and its Nexus library (`libnxs.so`,
-`nxs.dll`) do not use Qt: on Linux by symbols and loaded libraries, on
-Windows by the DLLs they import.
+Both also check that `bm3d` does not use Qt: on Linux by symbols and loaded
+libraries, on Windows by the DLLs it imports.
 
 ---
 
@@ -125,7 +128,7 @@ corresponding git tag in this repository.
 
 `Obj2Tiles` is an **optional generator**: when the binary is missing
 from the installation, DroneDB skips OGC 3D Tiles generation for
-`MODEL` entries and still produces the Nexus (`.nxz`) output, so no
+`MODEL` entries and still produces the bm3d (`.bm3d`) output, so no
 build fails. Distributors who prefer not to redistribute AGPL code may
 safely omit the `Obj2Tiles` / `Obj2Tiles.exe` file from the archive
 without affecting DroneDB's core functionality (only the additive 3D
@@ -154,7 +157,7 @@ subprocess and is never linked into `ddbcmd` / `libddb`; it does not
 affect DroneDB's MPL-2.0 licensing. It is optional: when absent,
 Obj2Tiles fails to honor `--texture-format Ktx2`, which DroneDB treats
 as a best-effort 3D Tiles generation failure (same as a missing
-Obj2Tiles binary), while Nexus output is unaffected.
+Obj2Tiles binary), while bm3d output is unaffected.
 
 ---
 
@@ -285,82 +288,89 @@ CC0-licensed protocol and point `DDB_METADATA_UTIL_PATH` at it.
 
 ---
 
-## `ddb-nexus` (Nexus 3D mesh streaming helper)
+## `bm3d` (3D mesh streaming helper)
 
-DroneDB builds the progressive Nexus format (`.nxz`) for 3D models with
-the separate `ddb-nexus` / `ddb-nexus.exe` executable, built from
-[DroneDB/libnexus](https://github.com/DroneDB/libnexus) (git submodule
-[`vendor/libnexus`](vendor/libnexus)), a fork of
-[cnr-isti-vclab/nexus](https://github.com/cnr-isti-vclab/nexus). It
-loads the `libnxs.so` / `nxs.dll` library of the same fork, which ships
-for it alone: neither `libddb` nor `ddbcmd` links or loads it.
+DroneDB builds the progressive `.bm3d` format for 3D models with the
+separate `bm3d` / `bm3d.exe` executable, built from
+[DroneDB/bm3d](https://github.com/DroneDB/bm3d) (git submodule
+[`vendor/bm3d`](vendor/bm3d)). bm3d is derived from
+[Nexus](https://github.com/cnr-isti-vclab/nexus) (Federico Ponchio,
+ISTI - CNR) and uses [VCGLib](https://github.com/cnr-isti-vclab/vcglib)
+and [corto](https://github.com/cnr-isti-vclab/corto), by way of the
+DroneDB fork of Nexus and its `libnexus` wrapper; the repository's
+`PROVENANCE.md` names the exact upstream commits. It is one program: it
+has no library of its own, and neither `libddb` nor `ddbcmd` links or loads
+any of its code.
 
-- **License of `ddb-nexus` and the libnexus wrapper**: GNU General
-  Public License, version 3 (GPL-3.0). The wrapper is DroneDB's own code
-  (Digipa), relicensed from AGPL-3.0 so that it matches the code it is
-  combined with; the text is in [`vendor/libnexus/LICENSE`](vendor/libnexus/LICENSE).
+- **License of `bm3d`**: GNU General Public License, version 3 (GPL-3.0),
+  Digipa; the text is in [`vendor/bm3d/LICENSE`](vendor/bm3d/LICENSE) and
+  the notice that names the code and libraries inside it in
+  [`vendor/bm3d/NOTICE`](vendor/bm3d/NOTICE). The wrapper it derives from was
+  DroneDB's own code (relicensed from AGPL-3.0 so that it matches the code it
+  is combined with).
 - **Nexus**: GNU General Public License, Visual Computing Lab,
-  ISTI - CNR (`vendor/libnexus/vendor/nexus/src/LICENSE` is version 3; the
+  ISTI - CNR (`vendor/bm3d/licenses/Nexus.LICENSE` is version 3; the
   source headers say version 2 or later).
-- **vcglib**: GNU General Public License, Visual Computing Lab,
-  ISTI - CNR (`vendor/libnexus/vendor/vcglib/LICENSE.txt` is version 3; the
-  source headers say version 2 or later).
+- **VCGLib**: GNU General Public License, Visual Computing Lab,
+  ISTI - CNR (`vendor/bm3d/licenses/vcglib.LICENSE` is version 3; the
+  source headers say version 2 or later). bm3d carries a few patches to it.
 - **corto** (mesh compression): Visual Computing Lab, ISTI - CNR
-  (`vendor/libnexus/vendor/nexus/src/corto/LICENSE.txt` is the MIT
-  license; the headers of the library sources built into `ddb-nexus` say
-  GNU Lesser General Public License, version 3 or later, and its README
-  says the C++ code is under the GPL). Either reading is compatible with
-  the GPL-3.0 of the executable.
+  (`vendor/bm3d/licenses/corto.LICENSE` is the MIT license; the headers
+  of the library sources say GNU Lesser General Public License, version 3
+  or later, and its README says the C++ code is under the GPL). Either
+  reading is compatible with the GPL-3.0 of the executable. bm3d carries
+  patches to it.
 - **Image codec libraries** (texture decoding and encoding), from the
   vcpkg ports of the same names, with permissive licences:
   [libjpeg-turbo](https://libjpeg-turbo.org/) (IJG License and
-  3-clause BSD License), [libpng](http://www.libpng.org/pub/png/libpng.html)
-  (PNG Reference Library License version 2),
+  3-clause BSD License),
   [libtiff](https://libtiff.gitlab.io/libtiff/) (libtiff licence, an
   MIT-style licence) and [libwebp](https://github.com/webmproject/libwebp)
   (3-clause BSD License), together with
   [stb](https://github.com/nothings/stb) (MIT or public domain, at your
-  choice; no notice is required). `ddb-nexus` uses no GUI
-  toolkit: it needs no Qt, X11, OpenGL or D-Bus library. On Linux the
-  codecs are linked statically into `libnxs.so`, which ships only for
-  `ddb-nexus`; on Windows their DLLs ship next to `ddb-nexus.exe`. The
-  CI checks listed above also fail a build in which `ddb-nexus` or
-  `libnxs` contains or loads Qt again.
-- **Distributed copy**: the `ddb-nexus` / `ddb-nexus.exe` binary, with
-  `ddb-nexus.LICENSE`, `Nexus.LICENSE`, `vcglib.LICENSE` and
-  `corto.LICENSE` in `/usr/share/doc/ddb` (Debian package) or the root of
-  the ZIP archive, and `libjpeg-turbo.LICENSE`, `libpng.LICENSE`,
-  `tiff.LICENSE`, `libwebp.LICENSE` and `stb.LICENSE` in the
-  `third-party` folder there. All of the GPL code is under GPL version 3
-  or compatible terms; the image codec libraries are permissive and their
-  notices ship with the binary.
+  choice; no notice is required). bm3d uses no GUI toolkit: it needs no
+  Qt, X11, OpenGL or D-Bus library. The CI checks listed above fail a build
+  in which `bm3d` contains or loads Qt again.
+- **Distributed copy**: the `bm3d` / `bm3d.exe` binary, with
+  `bm3d.LICENSE`, `bm3d.NOTICE.LICENSE`, `Nexus.LICENSE`, `vcglib.LICENSE`
+  and `corto.LICENSE` in `/usr/share/doc/ddb` (Debian package) or the root
+  of the ZIP archive, and the notices of the image codec libraries
+  (`libjpeg-turbo.LICENSE`, `tiff.LICENSE`, `libwebp.LICENSE` and
+  `stb.LICENSE`) in the `third-party` folder there. All of the GPL code is
+  under GPL version 3 or compatible terms; the image codec libraries are
+  permissive and their notices ship with the binary.
 
 ### Why GPL is compatible with MPL-licensed DroneDB
 
-`libddb` starts `ddb-nexus` exclusively as a **separate subprocess**
-through [`src/library/nexus_runner.cpp`](src/library/nexus_runner.cpp) (an input model, an
-output path, the exit status and a message on failure); Nexus, vcglib
-and corto are never linked (statically or dynamically) into
+`libddb` starts `bm3d` exclusively as a **separate subprocess**
+through [`src/library/bm3d_runner.cpp`](src/library/bm3d_runner.cpp) (an input model, an
+output path, the exit status and a message on failure); bm3d, Nexus,
+vcglib and corto are never linked (statically or dynamically) into
 `ddbcmd`, `libddb`, or any other DroneDB-licensed binary, which the CI
 checks listed above enforce. Per the
 [GPL FAQ on aggregation](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation)
 this constitutes "mere aggregation" of independent programs, and the GPL
-terms therefore apply only to the `ddb-nexus` executable.
+terms therefore apply only to the `bm3d` executable.
 
 ### Obtaining the corresponding source
 
-The `ddb-nexus` source code (the wrapper, Nexus, vcglib and corto) is
-the `vendor/libnexus` submodule of the corresponding git tag of this
-repository, publicly available at the repository linked above. The image codec
-libraries are permissive and need no source offer.
+The `bm3d` source code (including the Nexus, vcglib and corto code in it) is
+the [`vendor/bm3d`](vendor/bm3d) submodule of the corresponding git tag of
+this repository. The submodule only ever points at a release of
+[DroneDB/bm3d](https://github.com/DroneDB/bm3d): the CI checks that its
+commit is the one of the tag `v` plus the text of `vendor/bm3d/VERSION`
+(the version `bm3d --version` prints). The source is therefore the
+[GitHub release](https://github.com/DroneDB/bm3d/releases) of bm3d at that
+tag, which includes a source tarball. The image codec libraries are
+permissive and need no source offer.
 
 ### Optionality
 
-`ddb-nexus` is needed only for Nexus output: when it is missing, a build
-that produces Nexus fails with a message that names the tool and the
-`DDB_NEXUS_PATH` environment variable (which overrides where DroneDB
-looks for it), and every other build type is unaffected. Distributors who prefer not to redistribute this code may
-omit `ddb-nexus` and `libnxs.so` / `nxs.dll`.
+`bm3d` is needed only for `.bm3d` output: when it is missing, a build
+that produces it fails with a message that names the tool and the
+`DDB_BM3D_PATH` environment variable (which overrides where DroneDB
+looks for it), and every other build type is unaffected. Distributors who
+prefer not to redistribute this code may omit `bm3d` / `bm3d.exe`.
 
 ---
 

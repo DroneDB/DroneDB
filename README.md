@@ -94,7 +94,7 @@ ddb share . --tag myproject/dataset
 | `tile` | Generate map tiles |
 | `cog` | Create Cloud-Optimized GeoTIFFs |
 | `copc` | Create Cloud-Optimized Point Clouds |
-| `nxs` | Create Nexus 3D mesh format |
+| `bm3d` | Create bm3d multiresolution 3D model format |
 | `3dtiles` | Generate OGC 3D Tiles (tileset.json + b3dm) from OBJ/STL/glTF/GLB models |
 | `gsplat` | Convert Gaussian Splat to compressed .spz format |
 | `stac` | Export as STAC catalog |
@@ -327,6 +327,13 @@ cmake --build build --config Release -j$(nproc)  # Linux
 cmake --build build --config Release -- /maxcpucount:14  # Windows
 ```
 
+The build also makes the helper programs DroneDB starts as separate processes
+(`metadata-util` for image metadata and `bm3d` for 3D models), listed in
+`scripts/helper-tools.txt`; they come from the git submodules in `vendor/`, so the submodules
+must be initialised (`vendor/bm3d` is pinned to a release of
+[DroneDB/bm3d](https://github.com/DroneDB/bm3d)). `DDB_METADATA_UTIL_PATH` and `DDB_BM3D_PATH`
+point DroneDB at other builds of them.
+
 #### Windows Manual Build (Visual Studio Developer Command Prompt)
 
 ```powershell
@@ -362,8 +369,8 @@ third-party components under different licenses - most notably the optional
 [Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0), the
 [Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles) 3D Tiles converter (AGPL-3.0)
 with its bundled libktx (Apache-2.0), the `metadata-util` image metadata helper (Exiv2,
-GPL-2.0-or-later), the `ddb-nexus` mesh streaming helper (GPL-3.0, with Nexus, vcglib
-and corto), both run as separate processes and not linked into DroneDB, the
+GPL-2.0-or-later), the [`bm3d`](https://github.com/DroneDB/bm3d) mesh streaming helper
+(GPL-3.0, derived from Nexus, with vcglib and corto), both run as separate processes and not linked into DroneDB, the
 statically linked [SPZ](https://github.com/nianticlabs/spz) Gaussian Splat compression
 library (MIT), and the vcpkg-managed runtime libraries.
 See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details and
