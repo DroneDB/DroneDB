@@ -134,6 +134,14 @@ public:
     void restore();
 };
 
+// ----------------------------------------------------------------------------- long paths
+
+// Windows: true when the system lets a process that is long path aware use a path of 260
+// characters or more (LongPathsEnabled=1 in HKLM\SYSTEM\CurrentControlSet\Control\FileSystem).
+// The test binaries are long path aware (cmake/LongPathAware.cmake), so for them this tells
+// whether such a path works. False on other systems, where the question does not arise.
+bool windowsLongPathsEnabled();
+
 // ------------------------------------------------------------------- process configuration
 
 // Applies a DDBConfigure JSON object (failing the test when DDBConfigure fails) and, on scope
@@ -149,6 +157,23 @@ public:
 
     ScopedProcessConfig(const ScopedProcessConfig &) = delete;
     ScopedProcessConfig &operator=(const ScopedProcessConfig &) = delete;
+};
+
+// ------------------------------------------------------------------------------ point cloud
+
+// A fresh index (folder `folder` of the test area `testArea`, as IndexFixture) with one point
+// cloud added, cloud.xyz (a few points over a 10 x 10 square), and the environment set so that a
+// build converts it with PDAL writers.copc in the process, not with Untwine. For as long as it
+// lives. The build writes under <root>/.ddb/build/<hash>/copc-temp-<rand>/tmp/<crc>.las, about
+// 130 characters below the root.
+struct PointCloudDataset
+{
+    IndexFixture index;
+    EnvVarGuard backend{"DDB_COPC_BACKEND", "pdal"}, forcePdal{"DDB_USE_PDAL_COPC"};
+
+    explicit PointCloudDataset(const std::string &testArea, const std::filesystem::path &folder = "");
+
+    std::string root() const { return index.root.string(); }
 };
 
 #endif // TEST_UTILS_H

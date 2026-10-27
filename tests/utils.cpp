@@ -25,6 +25,10 @@
 
 #include <zip.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 static OGRSpatialReference srsOfEpsg(int epsg)
 {
     OGRSpatialReference srs;
@@ -424,6 +428,30 @@ void EnvVarGuard::restore()
         setEnv(name_, *saved_);
     else
         unsetEnv(name_);
+}
+
+bool windowsLongPathsEnabled()
+{
+#ifdef _WIN32
+    DWORD value = 0;
+    DWORD size = sizeof(value);
+    const LSTATUS status = RegGetValueW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+                                        L"LongPathsEnabled", RRF_RT_REG_DWORD, nullptr, &value, &size);
+    return status == ERROR_SUCCESS && value == 1;
+#else
+    return false;
+#endif
+}
+
+PointCloudDataset::PointCloudDataset(const std::string &testArea, const std::filesystem::path &folder)
+    : index(testArea, folder)
+{
+    unsetEnv("DDB_USE_PDAL_COPC");
+    std::ofstream xyz(index.root / "cloud.xyz");
+    for (int i = 0; i <= 10; i++)
+        xyz << i << " " << (i * 7) % 11 << " " << i % 3 << "\n";
+    xyz.close();
+    ddb::addToIndex(index.db.get(), {(index.root / "cloud.xyz").string()});
 }
 
 ScopedProcessConfig::ScopedProcessConfig(const std::string &configJson)

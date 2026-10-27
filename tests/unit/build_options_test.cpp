@@ -216,28 +216,12 @@ TEST(DDBBuildEx, theCapReachesTheGdalThreadsOfARasterBuildThroughTheEntryHandler
     }
 }
 
-// A dataset with one point cloud (cloud.xyz, a few points over a 10 x 10 square), in a test area
-// with a short name: the build converts cloud.xyz to <root>/.ddb/build/<hash>/copc-temp-<rand>/
-// tmp/<crc>.las, about 130 characters below the root, and PDAL opens it with a path that the
-// 260-character limit of Windows applies to. The temporary folder of the runner and the test
-// name of the area (over 70 characters) took that path to 265 and PDAL could not create the file.
-struct PointCloudDataset {
-    IndexFixture index;
-    EnvVarGuard backend{"DDB_COPC_BACKEND", "pdal"}, forcePdal{"DDB_USE_PDAL_COPC"};
-    PointCloudDataset() : index("DDBBuildEx.copc", "") {
-        unsetEnv("DDB_USE_PDAL_COPC");
-        std::ofstream xyz(index.root / "cloud.xyz");
-        for (int i = 0; i <= 10; i++)
-            xyz << i << " " << (i * 7) % 11 << " " << i % 3 << "\n";
-        xyz.close();
-        addToIndex(index.db.get(), {(index.root / "cloud.xyz").string()});
-    }
-    std::string root() const { return index.root.string(); }
-};
-
-// Without Untwine (the PDAL backend is chosen here), writers.copc runs on the threads of the build
+// Without Untwine (the PDAL backend is chosen here), writers.copc runs on the threads of the build.
+// The test area has a short name: the build converts cloud.xyz to a LAS about 130 characters below
+// the root, and the temporary folder of the runner and a test area named after the test (over 70
+// characters) took that path to 265, over the 260 of Windows, so PDAL could not create the file.
 TEST(DDBBuildEx, theCapReachesTheThreadsOfPdalWritersCopcThroughTheEntryHandler) {
-    PointCloudDataset ds;
+    PointCloudDataset ds("DDBBuildEx.copc");
     const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
     EnvVarGuard budget("DDB_BUILD_THREADS", "4");
 

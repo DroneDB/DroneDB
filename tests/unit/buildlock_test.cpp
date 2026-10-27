@@ -9,6 +9,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "helpers/process_test_utils.h"
+#include "utils.h"
 
 #include <thread>
 #include <iterator>
@@ -251,8 +252,9 @@ TEST_F(BuildLockTest, LongPathName) {
     auto longPath = testArea->getPath(longName);
 
 #ifdef WIN32
-    // Windows has path length limitations
-    if (longPath.string().length() > 260) {
+    // Windows has path length limitations, unless it allows long paths to the processes that are
+    // long path aware, as the test binaries are (cmake/LongPathAware.cmake)
+    if (longPath.string().length() > 260 && !windowsLongPathsEnabled()) {
         EXPECT_THROW({
             BuildLock lock(longPath.string());
         }, AppException);
@@ -268,7 +270,7 @@ TEST_F(BuildLockTest, LongPathName) {
     }
 #endif
 
-    // If path is not too long, lock should work normally
+    // If the path is not too long, or the system allows it, lock should work normally
     BuildLock lock(longPath.string());
 }
 
