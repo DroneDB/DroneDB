@@ -322,12 +322,38 @@ namespace ddb
             return res;
         }
 
+#ifdef _WIN32
+        namespace
+        {
+            // The file name of a module (nullptr: the executable) of any length: GetModuleFileNameW
+            // cuts the name to the buffer and returns its size, so the buffer grows until the name
+            // fits. Empty when the call fails.
+            fs::path moduleFilePath(HMODULE module)
+            {
+                constexpr DWORD kMaxWideChars = 32768; // the longest path of Windows
+                std::wstring name(MAX_PATH, L'\0');
+                while (true)
+                {
+                    const DWORD length = GetModuleFileNameW(module, name.data(), static_cast<DWORD>(name.size()));
+                    if (length == 0)
+                        return {};
+                    if (length < name.size())
+                    {
+                        name.resize(length);
+                        return fs::path(name);
+                    }
+                    if (name.size() >= kMaxWideChars)
+                        return {};
+                    name.resize(name.size() * 2);
+                }
+            }
+        }
+#endif
+
         fs::path getExeFolderPath()
         {
 #ifdef WIN32
-            wchar_t path[MAX_PATH] = {0};
-            GetModuleFileNameW(NULL, path, MAX_PATH);
-            return fs::path(path).parent_path();
+            return moduleFilePath(nullptr).parent_path();
 #elif __APPLE__
             char result[PATH_MAX];
             uint32_t size = sizeof(result);
@@ -361,13 +387,13 @@ namespace ddb
                 return {};
             }
 
-            wchar_t path[MAX_PATH] = {0};
-            if (GetModuleFileNameW(module, path, MAX_PATH) == 0)
+            const fs::path file = moduleFilePath(module);
+            if (file.empty())
             {
                 LOGD << "GetModuleFileNameW failed, error = " << GetLastError();
                 return {};
             }
-            return fs::path(path).parent_path();
+            return file.parent_path();
 #else
             Dl_info info{};
             if (dladdr(&kModuleAnchor, &info) == 0 || info.dli_fname == nullptr || *info.dli_fname == '\0')
