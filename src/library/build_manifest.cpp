@@ -245,8 +245,18 @@ void removeSupersededArtifacts(const EntryHandler& handler,
             std::any_of(existing.begin(), existing.end(), [&](const BuildArtifact& a) {
                 return !a.legacy && a.role == legacy.fallbackFor;
             });
-        if (replaced)
-            io::assureIsRemoved(root / io::fromUtf8(legacy.folder()));
+        if (!replaced)
+            continue;
+        // Cleanup after a published build: a folder that cannot go now (a file kept open on
+        // Windows, a permission) must not fail that build. The next build of the entry tries
+        // again, also when it finds the output complete.
+        const fs::path folder = root / io::fromUtf8(legacy.folder());
+        try {
+            io::assureIsRemoved(folder);
+        } catch (const std::exception& e) {
+            LOGW << "Cannot remove the superseded build output '" << io::toUtf8(folder)
+                 << "': " << e.what();
+        }
     }
 }
 

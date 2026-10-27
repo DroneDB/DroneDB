@@ -23,6 +23,10 @@
 #include <thread>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include "3d.h"
 #include "build.h"
 #include "build_manifest.h"
@@ -30,6 +34,7 @@
 #include "dbops.h"
 #include "ddb.h"
 #include "exceptions.h"
+#include "fake_model_tools.h"
 #include "fs.h"
 #include "gtest/gtest.h"
 #include "json.h"
@@ -918,6 +923,65 @@ struct CaptureScope {
     CaptureAppender& cap;
     plog::Severity prev_;
 };
+
+#ifndef _WIN32
+// A process that died between the publish of bm3d/ and the removal of nxs/ left both: the next
+// build finds the output complete, does not run bm3d again and removes the stale Nexus build
+TEST(tiles3dBuild, completeBuildRemovesTheLeftoverLegacyNexusBuild) {
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", gridObj());
+    testtools::FakeModelTools tools(ds.ta);
+    const fs::path base = ds.out("model.obj");
+    seedLegacyNexusBuild(base);
+    writeFile(base / "bm3d" / "model.bm3d", "bm3d file of an earlier build");
+
+    EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", false));
+
+    EXPECT_FALSE(fs::exists(base / "nxs")) << "the superseded build is removed by the next build";
+    EXPECT_FALSE(fs::exists(tools.bm3dLog)) << "a complete build is not run again";
+    EXPECT_EQ(readText(base / "bm3d" / "model.bm3d"), "bm3d file of an earlier build");
+    EXPECT_EQ(listedRoles(ds.db.get(), "model.obj"),
+              (std::vector<std::string>{"model.bm3d", "model.3dtiles"}));
+}
+
+// The removal of the superseded nxs/ fails after bm3d/ is published: the build still succeeds,
+// with a warning, and the next build removes nxs/
+TEST(tiles3dBuild, undeletableLegacyNexusBuildDoesNotFailThePublishedBuild) {
+    if (geteuid() == 0)
+        GTEST_SKIP() << "root removes files from a read-only folder";
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", gridObj());
+    testtools::FakeModelTools tools(ds.ta);
+    const fs::path base = ds.out("model.obj");
+    seedLegacyNexusBuild(base);
+    const fs::path nxs = base / "nxs";
+    fs::permissions(nxs, fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
+    struct PermissionsRestore {
+        fs::path folder;
+        ~PermissionsRestore() {
+            std::error_code ignored;
+            fs::permissions(folder, fs::perms::owner_all, fs::perm_options::replace, ignored);
+        }
+    } restore{nxs};
+
+    {
+        CaptureScope cap(plog::warning);
+        EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", false));
+        EXPECT_TRUE(cap.contains("Cannot remove the superseded build output"));
+        EXPECT_TRUE(cap.contains(nxs.string()));
+    }
+    EXPECT_TRUE(fs::exists(tools.bm3dLog)) << "the build ran";
+    EXPECT_TRUE(fs::exists(base / "bm3d" / "model.bm3d"));
+    EXPECT_TRUE(fs::exists(nxs / "model.nxz"));
+    EXPECT_EQ(listedRoles(ds.db.get(), "model.obj"),
+              (std::vector<std::string>{"model.bm3d", "model.3dtiles"}));
+    EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "model.obj"));
+
+    fs::permissions(nxs, fs::perms::owner_all, fs::perm_options::replace);
+    EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", false));
+    EXPECT_FALSE(fs::exists(nxs));
+}
+#endif
 
 // When the converter supplies face count and bounds, getModelInfo (Assimp)
 // is not consulted for a PLY (it still is for an OBJ). The decision is visible in

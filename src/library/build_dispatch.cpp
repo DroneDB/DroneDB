@@ -89,6 +89,9 @@ class BuildAttempt {
             // pending work even when the output was already complete before this attempt.
             if (handler_.isComplete(baseOutputPath_, false) && !force_) {
                 LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder_;
+                // A process that died after the publish, or a removal that failed then, left
+                // the superseded output behind: it is removed here, under the same lock
+                removeSupersededOutput();
                 io::assureIsRemoved(pendFile_);
                 return;
             }
@@ -112,7 +115,7 @@ class BuildAttempt {
 
             publish();
             // Only now, with the new output in place: a failed build keeps the old one
-            removeSupersededArtifacts(handler_, baseOutputPath_, filesystemBuildProbe());
+            removeSupersededOutput();
 
             io::assureIsRemoved(io::fromUtf8(tempFolder_));
             io::assureIsRemoved(pendFile_);
@@ -191,6 +194,11 @@ class BuildAttempt {
 
         io::assureFolderExists(io::fromUtf8(outputFolder_).parent_path());
         io::rename(io::fromUtf8(tempFolder_), io::fromUtf8(outputFolder_));
+    }
+
+    // The legacy output the published one replaces; best effort, it never fails the build
+    void removeSupersededOutput() const {
+        removeSupersededArtifacts(handler_, baseOutputPath_, filesystemBuildProbe());
     }
 
     void cleanupTemporary() {
