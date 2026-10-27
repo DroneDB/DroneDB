@@ -1054,6 +1054,9 @@ TEST(tiles3dBuild, stlIsConvertedToObjForTiles) {
     }
 }
 
+// The log capture reads narrow POSIX strings only (CaptureAppender), so this one is not run on
+// Windows
+#ifndef _WIN32
 // What bm3d gets is the STL itself, and no converted copy is made for it
 TEST(tiles3dBuild, stlGoesToBm3dUnconverted) {
     Obj2TilesEnvReset reset;
@@ -1066,6 +1069,7 @@ TEST(tiles3dBuild, stlGoesToBm3dUnconverted) {
     EXPECT_TRUE(cap.contains("STL, handing it to bm3d as is"));
     EXPECT_FALSE(cap.contains("converting"));
 }
+#endif
 
 // A dataset with an STL (ASCII or binary): Model, built into bm3d plus 3D Tiles
 TEST(tiles3dBuild, stlModelBuildProducesBm3dAndTiles) {
