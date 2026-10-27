@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Model entries: meshes (OBJ, PLY, STL, glTF), built into Nexus plus an additive OGC 3D
+// Model entries: meshes (OBJ, PLY, STL, glTF), built into bm3d plus an additive OGC 3D
 // Tiles tileset.
 
 #include <algorithm>
@@ -103,17 +103,27 @@ class ModelEntryHandler : public EntryHandler {
         parseModelMetadata(path, entry);
     }
 
-    std::string subfolder() const override { return NexusBuildSubfolder; }
+    std::string subfolder() const override { return Bm3dBuildSubfolder; }
 
+    // A model built before bm3d has its Nexus file in nxs/ and is served as model.nexus until a
+    // rebuild publishes bm3d/ (the dispatcher then removes nxs/). A Nexus file stands in for
+    // model.bm3d, not for the whole entry: such a model usually has 3D Tiles as well.
     std::vector<BuildArtifact> artifacts() const override {
-        return {BuildArtifact::file("model.nexus", artifactPath(NexusBuildSubfolder, NexusFileName),
-                                    "application/octet-stream"),
-                BuildArtifact::directory("model.3dtiles", Tiles3DBuildSubfolder, "application/json",
+        return {BuildArtifact::file("model.bm3d",
+                                    artifactPath(Bm3dBuildSubfolder, Bm3dFileName),
+                                    "application/vnd.dronedb.bm3d"),
+                BuildArtifact::file("model.nexus",
+                                    artifactPath(LegacyNexusBuildSubfolder, LegacyNexusFileName),
+                                    "application/octet-stream")
+                    .legacyFor("model.bm3d"),
+                BuildArtifact::directory("model.3dtiles",
+                                         Tiles3DBuildSubfolder,
+                                         "application/json",
                                          TilesetFileName)};
     }
 
     // Lock order is primary Model lock then tiles lock. Recovery runs before the complete
-    // Nexus check of a build, without recursively taking the tiles lock.
+    // bm3d check of a build, without recursively taking the tiles lock.
     void recoverOutput(const fs::path& baseOutputPath) const override {
         recoverModel3DTilesSwap(io::toUtf8(baseOutputPath / Tiles3DBuildSubfolder));
     }
@@ -121,27 +131,31 @@ class ModelEntryHandler : public EntryHandler {
     // The 3D Tiles tileset is intentionally optional for completeness. The sole exception is
     // an identifiable interrupted tiles swap (usable backup and missing/incomplete final):
     // it is reported incomplete so the normal completeness sweep can enqueue recovery
-    // without rebuilding nxs/.
+    // without rebuilding bm3d/. A model with only the legacy nxs/ is incomplete: it is rebuilt.
     bool isComplete(const fs::path& baseOutputPath, bool reportRecoverable) const override {
         if (reportRecoverable && hasRecoverableModel3DTilesSwap(baseOutputPath / Tiles3DBuildSubfolder))
             return false;
-        return directoryHasNonEmptyContent(baseOutputPath / NexusBuildSubfolder);
+        return directoryHasNonEmptyContent(baseOutputPath / Bm3dBuildSubfolder);
     }
 
     void build(const BuildContext& ctx) const override {
         const std::string inputPath = io::toUtf8(ctx.inputPath);
         const std::string datasetRoot = io::toUtf8(ctx.datasetRoot);
-        buildNexus(inputPath, io::toUtf8(ctx.tempFolder / NexusFileName), false, datasetRoot, ctx.options);
+        buildBm3d(inputPath,
+                  io::toUtf8(ctx.tempFolder / Bm3dFileName),
+                  false,
+                  datasetRoot,
+                  ctx.options);
 
         // Additive, best-effort OGC 3D Tiles output for the unified Giro3D viewer.
         // Written directly to a sibling 3dtiles/ folder (buildModel3DTiles performs
         // its own atomic temp+rename), exactly as buildVector co-produces vec/+mvt/.
         // Non-blocking by design: if Obj2Tiles is unavailable or fails on a given
-        // mesh, the Nexus output above is still published and build completeness
-        // stays keyed on nxs/ (see isComplete), so the build never loops.
+        // mesh, the bm3d output above is still published and build completeness
+        // stays keyed on bm3d/ (see isComplete), so the build never loops.
         // Nothing is rethrown from here, BuildDepMissingException included: it cannot
-        // occur (buildNexus validated the same input above), and rethrowing it would
-        // discard tempFolder before model.nxz reaches nxs/.
+        // occur (buildBm3d validated the same input above), and rethrowing it would
+        // discard tempFolder before model.bm3d reaches bm3d/.
         // Lock order is the primary lock (held here) then the "3dtiles" lock.
         // cleanupBuild follows the same order, so the only way to meet a busy
         // tiles lock is a tiles build started outside a Model build (the
@@ -154,10 +168,11 @@ class ModelEntryHandler : public EntryHandler {
             tilesOptions.build = ctx.options;
             buildModel3DTiles(inputPath, io::toUtf8(tilesFolder), tilesOptions);
         } catch (const BuildInProgressException& tilesEx) {
-            LOGW << "3D Tiles for " << ctx.entry.path << " not generated: another tiles build holds "
+            LOGW << "3D Tiles for " << ctx.entry.path
+                 << " not generated: another tiles build holds "
                  << buildLockPath(io::toUtf8(tilesFolder))
-                 << " (for example 'ddb tiles3d'): "
-                 << tilesEx.what() << ". The Nexus output is published; rebuild with force to "
+                 << " (for example 'ddb tiles3d'): " << tilesEx.what()
+                 << ". The bm3d output is published; rebuild with force to "
                  << "produce the tiles";
         } catch (const std::exception& tilesEx) {
             LOGW << "3D Tiles generation skipped for " << ctx.entry.path << ": " << tilesEx.what();

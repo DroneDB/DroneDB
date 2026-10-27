@@ -6,43 +6,43 @@
 
 #include <stdexcept>
 
-#include "include/build.h"
-#include "include/init.h"
 #include "include/add.h"
 #include "include/align.h"
-#include "include/remove.h"
-#include "include/sync.h"
-#include "include/rescan.h"
-#include "include/geoproj.h"
-#include "include/info.h"
-#include "include/list.h"
-#include "include/thumbs.h"
-#include "include/setexif.h"
-#include "include/login.h"
-#include "include/logout.h"
-#include "include/tile.h"
-#include "include/share.h"
-#include "include/system.h"
-#include "include/status.h"
-#include "include/password.h"
-#include "include/delta.h"
+#include "include/bm3d.h"
+#include "include/build.h"
+#include "include/cleanup.h"
 #include "include/clone.h"
-#include "include/tag.h"
-#include "include/copc.h"
-#include "include/push.h"
-#include "include/pull.h"
-#include "include/meta.h"
-#include "include/stamp.h"
 #include "include/cog.h"
 #include "include/contour.h"
-#include "include/nxs.h"
-#include "include/tiles3d.h"
+#include "include/copc.h"
+#include "include/delta.h"
+#include "include/geoproj.h"
 #include "include/gsplat.h"
-#include "include/search.h"
-#include "include/stac.h"
+#include "include/info.h"
+#include "include/init.h"
+#include "include/list.h"
+#include "include/login.h"
+#include "include/logout.h"
 #include "include/mask.h"
 #include "include/merge_multispectral.h"
-#include "include/cleanup.h"
+#include "include/meta.h"
+#include "include/password.h"
+#include "include/pull.h"
+#include "include/push.h"
+#include "include/remove.h"
+#include "include/rescan.h"
+#include "include/search.h"
+#include "include/setexif.h"
+#include "include/share.h"
+#include "include/stac.h"
+#include "include/stamp.h"
+#include "include/status.h"
+#include "include/sync.h"
+#include "include/system.h"
+#include "include/tag.h"
+#include "include/thumbs.h"
+#include "include/tile.h"
+#include "include/tiles3d.h"
 
 namespace cmd
 {
@@ -80,7 +80,7 @@ namespace cmd
       r.add<Stamp>("stamp");
       r.add<Cog>("cog");
       r.add<Contour>("contour");
-      r.add<Nxs>("nxs");
+      r.add<Bm3d>("bm3d");
       r.add<Tiles3d>("3dtiles");
       r.add<Gsplat>("gsplat");
       r.add<Search>("search");

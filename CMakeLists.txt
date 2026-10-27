@@ -18,11 +18,11 @@ else()
 endif()
 
 # Build tree layout: everything users and tests run, and everything packaging copies, is in the
-# build root (ddbcmd, libddb, libnxs, ddbtest and its helpers, the data files and, on Windows,
+# build root (ddbcmd, libddb, bm3d, ddbtest and its helpers, the data files and, on Windows,
 # the DLLs). Targets are built there directly instead of being copied after the
 # build, so build/Makefile and build/CTestTestfile.cmake stay the top-level ones. The generator
 # expression stops multi-config generators (Visual Studio) from appending a per-config
-# subdirectory. Set before add_subdirectory(vendor) so it also covers libnexus's nxs.
+# subdirectory. Set before add_subdirectory(vendor) so it also covers the bm3d program.
 set(DDB_RUNTIME_DIR "${CMAKE_BINARY_DIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$<1:${DDB_RUNTIME_DIR}>")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "$<1:${DDB_RUNTIME_DIR}>")

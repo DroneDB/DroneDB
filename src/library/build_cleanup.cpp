@@ -43,14 +43,14 @@ static void removeOrphanFolder(const fs::path& p, CleanupResult& result) {
 
 // The 3D Tiles siblings "3dtiles-temp-<rand>" and "3dtiles-old" belong to
 // buildModel3DTiles, which runs under the "3dtiles" lock inside a Model build
-// that already holds the primary "nxs" lock (buildInternal); the standalone
+// that already holds the primary "bm3d" lock (buildInternal); the standalone
 // "ddb tiles3d" command holds only the "3dtiles" lock.
 //
-// Lock order here is the same as in a build: first the primary "nxs" lock, then
-// the "3dtiles" lock, both non-blocking. Holding "nxs" means no Model build can
+// Lock order here is the same as in a build: first the primary "bm3d" lock, then
+// the "3dtiles" lock, both non-blocking. Holding "bm3d" means no Model build can
 // be in flight, so a build can never meet this cleanup on the "3dtiles" lock
 // (a refusal there would be swallowed as a best-effort tiles failure and the
-// tiles would never be produced, because completeness is keyed on nxs/). A
+// tiles would never be produced, because completeness is keyed on bm3d/). A
 // Model build that arrives while both locks are held is refused on its primary
 // lock instead, which every caller already treats as benign contention
 // (buildPending leaves the marker untouched, the Registry skips the job and
@@ -68,7 +68,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
                                      const fs::path& oldFolder,
                                      const std::vector<fs::path>& trashFolders,
                                      CleanupResult& result) {
-    const fs::path primaryDir = hashDir / NexusBuildSubfolder;
+    const fs::path primaryDir = hashDir / Bm3dBuildSubfolder;
     const fs::path tilesDir = hashDir / Tiles3DBuildSubfolder;
 
     // (trash path, path to report once deleted)
@@ -78,7 +78,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
 
     if (!tempFolders.empty() || !oldFolder.empty()) {
         // Declared in acquisition order: destruction releases "3dtiles" first,
-        // then "nxs" (reverse order).
+        // then "bm3d" (reverse order).
         std::optional<BuildLock> primaryLock;
         std::optional<BuildLock> tilesLock;
         try {
@@ -126,7 +126,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
                          << " has no complete tiles sentinel; a build can restore it";
             }
         }
-        // Both locks are released here ("3dtiles" then "nxs"), before any deletion.
+        // Both locks are released here ("3dtiles" then "bm3d"), before any deletion.
     }
 
     for (const auto& [trash, reported] : toDelete) {
@@ -145,7 +145,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
 // Remove orphaned "<subfolder>-temp-<rand>" scratch folders inside a build hash
 // directory. buildInternal() creates such a folder per build and renames it to
 // the final output (or deletes it) when done; a process crash during the build
-// leaves it behind together with any GDAL/COG/Nexus scratch it contains. A
+// leaves it behind together with any GDAL/COG/bm3d scratch it contains. A
 // folder is removed only when there is no live build lock for its subfolder, so
 // an in-progress build is never disturbed. "3dtiles-temp-*" (including the
 // "3dtiles-temp-trash-*" leftovers of an earlier cleanup) and "3dtiles-old" are

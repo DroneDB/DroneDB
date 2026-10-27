@@ -411,8 +411,8 @@ namespace ddb
             if (info.isMesh)
             {
                 // Textured meshes are Models too: the build converts them to
-                // OBJ + MTL + texture (plyconv.h) before Nexus, which the
-                // plyconv.texturedPlyBuildsNexus test verifies.
+                // OBJ + MTL + texture (plyconv.h) before bm3d, which the
+                // plyconv.texturedPlyBuildsBm3d test verifies.
                 // Multi-texture meshes (several TextureFile comments or a
                 // per-face texnumber) cannot be converted faithfully: they
                 // stay Generic, like any other unsupported textured PLY.

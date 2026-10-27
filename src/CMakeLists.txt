@@ -214,8 +214,8 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq ddb_headers PUBLIC ddb_c_api)
 ddb_gc_sections(${PROJECT_NAME})
 
-# The helper programs (scripts/helper-tools.txt: ddb-nexus, which writes Nexus files, and
-# metadata-util, which reads and writes image metadata) are started by libddb (nexus_runner.h,
+# The helper programs (scripts/helper-tools.txt: bm3d, which writes bm3d model files, and
+# metadata-util, which reads and writes image metadata) are started by libddb (bm3d_runner.h,
 # exif_helper_pool.h), which links none of their code. They are built next to libddb, which is
 # where the tool locator looks for them.
 add_dependencies(${PROJECT_NAME} ${DDB_HELPER_TOOLS})
@@ -243,7 +243,7 @@ add_custom_target(
 
 message(STATUS "Build target 'update_sensor_data' is ready.")
 
-# Runtime files next to libddb: ddb, the helper programs (with libnxs), ddbcmd and the test binaries are all
+# Runtime files next to libddb: ddb, the helper programs, ddbcmd and the test binaries are all
 # built in DDB_RUNTIME_DIR (root CMakeLists.txt), so getDataPath() finds these files whether it
 # looks next to the library or next to the executable.
 

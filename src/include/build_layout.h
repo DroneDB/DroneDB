@@ -53,7 +53,7 @@ constexpr const char* VectorBackupPrefix = ".vec-backup-";
 constexpr const char* CogBuildSubfolder = "cog";
 constexpr const char* CopcBuildSubfolder = "copc";
 // Primary output of a Model build. Its ".building" lock is held for the whole Model build.
-constexpr const char* NexusBuildSubfolder = "nxs";
+constexpr const char* Bm3dBuildSubfolder = "bm3d";
 constexpr const char* VectorBuildSubfolder = "vec";
 constexpr const char* MvtBuildSubfolder = "mvt";
 constexpr const char* GsplatBuildSubfolder = "gsplat";
@@ -64,7 +64,7 @@ constexpr const char* Tiles3DBuildSubfolder = "3dtiles";
 
 constexpr const char* CogFileName = "cog.tif";
 constexpr const char* CopcFileName = "cloud.copc.laz";
-constexpr const char* NexusFileName = "model.nxz";
+constexpr const char* Bm3dFileName = "model.bm3d";
 // Vector: the GeoPackage copy, the MVT pyramid descriptor, and the drawing-coordinate
 // metadata of a CAD vector without CRS (written instead of an MVT pyramid).
 constexpr const char* VectorGpkgFileName = "source.gpkg";
@@ -73,7 +73,7 @@ constexpr const char* VectorLocalFileName = "local.json";
 // Root descriptor of an OGC 3D Tiles tileset (also the root entry of a .3tz archive).
 constexpr const char* TilesetFileName = "tileset.json";
 
-// Gaussian Splat. Mirrors the COPC/COG/NXS conventions.
+// Gaussian Splat. Mirrors the COPC/COG/BM3D conventions.
 constexpr const char* GsplatFileName = "model.spz";
 // Level-of-detail delivery artifact (Spark "RAD" container). Produced by the vendored
 // build-lod tool; streamed progressively by the viewer via HTTP range requests (paged: true).
@@ -96,6 +96,11 @@ constexpr const char* LegacyEptBuildSubfolder = "ept";
 constexpr const char* LegacyEptFileName = "ept.json";
 constexpr const char* LegacyEptDataFolder = "ept-data";
 constexpr const char* LegacyEptHierarchyFolder = "ept-hierarchy";
+
+// Legacy Nexus, the 3D model output before bm3d (a program of the same family; the format
+// and the viewer changed). Never written any more; a build that publishes bm3d/ removes it.
+constexpr const char* LegacyNexusBuildSubfolder = "nxs";
+constexpr const char* LegacyNexusFileName = "model.nxz";
 
 // ---- Composed names ------------------------------------------------------------------------
 

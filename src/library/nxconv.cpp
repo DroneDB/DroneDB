@@ -519,7 +519,7 @@ void convertGltfTo3dModel(const std::string& inputGltf,
     Assimp::Importer importer;
     // SortByPType alone only sorts primitives into per-type meshes, it does not drop them;
     // without this, a point/line mesh sitting next to a triangle mesh still reaches the
-    // PLY/OBJ exporter and desyncs libnexus' triangle-soup reader.
+    // PLY/OBJ exporter and desyncs bm3d's triangle-soup reader.
     importer.SetPropertyInteger(AI_CONFIG_PP_SBP_REMOVE,
                                 aiPrimitiveType_POINT | aiPrimitiveType_LINE);
     const aiScene* scene = importer.ReadFile(inputGltf, pp);

@@ -21,9 +21,9 @@ if(NOT DDB_HELPER_TOOLS)
     message(FATAL_ERROR "scripts/helper-tools.txt lists no helper program")
 endif()
 
-# libnexus is built for its ddb-nexus program (GPL-3.0), which libddb runs as a child process;
+# bm3d is built for its bm3d program (GPL-3.0), which libddb runs as a child process;
 # nothing of it is linked into libddb or the CLI
-add_subdirectory("libnexus")
+add_subdirectory("bm3d")
 # metadata-util (GPL-2.0-or-later, Exiv2) is a separate program too: libddb sends it requests over
 # a pipe (exif_helper_pool.h) and links none of its code. It takes APP_VERSION from here.
 add_subdirectory("metadata-util")

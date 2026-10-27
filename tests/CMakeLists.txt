@@ -25,7 +25,7 @@ if(BUILD_TESTING)
     #                   is not built in this tree (Obj2Tiles, untwine, dwg2dxf, build-lod; the
     #                   fake tools a test writes itself, ddbtest_child and the helper programs
     #                   built with the tests (scripts/helper-tools.txt) are fine), reads CAD
-    #                   assets or builds a 3D model (Nexus/3D Tiles: ddb-nexus and Obj2Tiles). Whole
+    #                   assets or builds a 3D model (bm3d/3D Tiles: bm3d and Obj2Tiles). Whole
     #                   files are classified, so a file with one such test is an integration
     #                   file.
     #                   main.cpp initializes the process through the core
@@ -154,7 +154,7 @@ if(BUILD_TESTING)
         ddb_embed_library(${name})
         target_link_libraries(${name} PRIVATE ${T_LINK} ddb_test_support ddb_warnings)
         # The helper programs (scripts/helper-tools.txt) are built next to the test binary, where the
-        # tool locator looks: the tests that build a Nexus file or read the metadata of an image
+        # tool locator looks: the tests that build a bm3d file or read the metadata of an image
         # run them
         add_dependencies(${name} ddbtest_child ddbtest_signal_probe ddbtest_config_probe ddbtest_log_probe
             ddbtest_shared_probe ddbtest_fake_exif ${DDB_HELPER_TOOLS})

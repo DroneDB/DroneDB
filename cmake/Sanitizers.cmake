@@ -8,12 +8,12 @@
 # Scope: the flags are directory-wide compile and link options, so include this module in the
 # root CMakeLists.txt before add_subdirectory(vendor). They then reach every target compiled
 # from source in this tree: ddb, ddbcmd, ddbtest and its helpers, and the vendored code built
-# here (spz, lazperf, zonedetect, url, base64, libnexus with nexus/corto/vcglib). The vendored
+# here (spz, lazperf, zonedetect, url, base64, bm3d with corto/vcglib). The vendored
 # code is instrumented on purpose:
 #   * spz, lazperf and zonedetect are linked into libddb, so their memory is libddb's memory,
 #     and they decode untrusted input (.spz, LAZ, timezone data);
-#   * libnexus is not part of libddb: ddb-nexus runs as a child process of the Nexus build, so the
-#     sanitizer runtime of the child checks the Nexus code there (and the environment, with its
+#   * bm3d is not part of libddb: it runs as a child process of the model build, so the
+#     sanitizer runtime of the child checks the bm3d code there (and the environment, with its
 #     suppression files, is inherited from the test);
 #   * the cost is nil: we compile these sources anyway.
 # vcpkg dependencies (GDAL, PDAL, PROJ, SQLite, ...) are prebuilt with the triplet's flags

@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "3d.h"
-#include "randomutil.h"
-#include "stringutil.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +11,7 @@
 #include <sstream>
 #include <system_error>
 
+#include "bm3d_runner.h"
 #include "build_layout.h"
 #include "buildlock.h"
 #include "deppath.h"
@@ -20,9 +19,10 @@
 #include "json.h"
 #include "logger.h"
 #include "mio.h"
-#include "nexus_runner.h"
 #include "obj2tiles_runner.h"
 #include "plyconv.h"
+#include "randomutil.h"
+#include "stringutil.h"
 
 namespace ddb {
 namespace {
@@ -473,7 +473,7 @@ void validateDependencies(const std::string& objFile, const fs::path& datasetRoo
 // The OBJ converted from a glTF lives in a temp folder, but its MTL keeps the
 // glTF's relative image URIs (embedded images are extracted next to it by the
 // converter). Stage external images there too, so that dependency validation,
-// Nexus and Obj2Tiles find them. Only images inside the glTF's folder are
+// bm3d and Obj2Tiles find them. Only images inside the glTF's folder are
 // staged, matching validateGltfDependencies. Images are copied, never linked, so
 // nothing writing into the temp folder can alter the dataset's files.
 void stageGltfTextures(const fs::path& gltfDir, const std::string& convertedObj) {
@@ -519,7 +519,7 @@ struct AssimpConversion {
 
 // Convert a model Assimp reads (glTF/GLB, STL) to OBJ in a temporary directory. With
 // preferPLYIfNoUV a model without texture coordinates is written as PLY instead (keeps
-// vertex colours for Nexus, whose OBJ reader ignores them); Obj2Tiles reads OBJ only, and
+// vertex colours as properties of the mesh); Obj2Tiles reads OBJ only, and
 // the OBJ exporter writes vertex colours as `v x y z r g b`.
 AssimpConversion convertWithAssimp(const std::string& input,
                                    io::ScopedTempDir& tempGuard,
@@ -559,9 +559,9 @@ std::string convertGltfToObj(const std::string& inputGltf,
 }
 
 // Consumer of a prepared model (see prepareModelInput).
-enum class ModelConsumer { Nexus, Tiles };
+enum class ModelConsumer { Bm3d, Tiles };
 
-// A model ready for Nexus or Obj2Tiles, plus the stats a converter computed.
+// A model ready for bm3d or Obj2Tiles, plus the stats a converter computed.
 struct PreparedModel {
     std::string path;               // file to hand to the consumer
     std::optional<ModelInfo> info;  // face count + bounds when a converter supplied them
@@ -584,16 +584,15 @@ void validateConvertedDependencies(const std::string& convertedObj, const std::s
     }
 }
 
-// Single owner of the input-format dispatch for buildNexus and buildModel3DTiles.
+// Single owner of the input-format dispatch for buildBm3d and buildModel3DTiles.
 // Validates the dependencies of the input and converts it when the consumer
 // cannot read it as is:
-//   - glTF/GLB: validated, then converted to OBJ in a temp folder. For Nexus a
-//     glTF without UVs becomes a PLY (Nexus ignores OBJ vertex colours); for
-//     Obj2Tiles it is always an OBJ.
-//   - STL: Nexus reads it natively; Obj2Tiles reads OBJ only, so it becomes an OBJ in a temp
+//   - glTF/GLB: validated, then converted to OBJ in a temp folder. For bm3d a
+//     glTF without UVs becomes a PLY; for Obj2Tiles it is always an OBJ.
+//   - STL: bm3d reads it natively; Obj2Tiles reads OBJ only, so it becomes an OBJ in a temp
 //     folder (an STL has no texture: the OBJ has no dependency).
 //   - PLY: never text-scanned as an OBJ. Its TextureFile (if any) is checked from
-//     the header against the dataset root. Nexus reads an untextured PLY natively;
+//     the header against the dataset root. bm3d reads an untextured PLY natively;
 //     otherwise the streaming converter writes OBJ (+ MTL + texture) in a temp
 //     folder and reports face count and bounds.
 //   - anything else (OBJ): validated in place.
@@ -606,7 +605,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
     if (isGltfFile(inputPath)) {
         validateGltfDependencies(input, inputPath.parent_path());
         PreparedModel m;
-        m.path = convertGltfToObj(input, tempGuard, consumer == ModelConsumer::Nexus);
+        m.path = convertGltfToObj(input, tempGuard, consumer == ModelConsumer::Bm3d);
         // An Assimp-exported PLY has no file dependencies.
         if (!isPlyFile(io::fromUtf8(m.path)))
             validateConvertedDependencies(m.path, input);
@@ -614,8 +613,8 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
     }
 
     if (isStlFile(inputPath)) {
-        if (consumer == ModelConsumer::Nexus) {
-            LOGD << "STL, handing it to Nexus as is: " << input;
+        if (consumer == ModelConsumer::Bm3d) {
+            LOGD << "STL, handing it to bm3d as is: " << input;
             return {input, std::nullopt};
         }
 
@@ -630,8 +629,8 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         // AppException for an absolute or root-escaping TextureFile.
         const std::string texture = getPlyTexture(input, datasetRoot);
 
-        if (consumer == ModelConsumer::Nexus && texture.empty()) {
-            LOGD << "Untextured PLY, handing it to Nexus as is: " << input;
+        if (consumer == ModelConsumer::Bm3d && texture.empty()) {
+            LOGD << "Untextured PLY, handing it to bm3d as is: " << input;
             return {input, std::nullopt};
         }
 
@@ -698,12 +697,16 @@ void recoverTilesSwap(const fs::path& outDir, const fs::path& oldDir) {
     }
 }
 
-// Perform the actual nexus build: ddb-nexus, a program of its own, so that neither Nexus nor
-// VCGLib is loaded into this process
-void performNexusBuild(const std::string& inputFile, const std::string& outputFile,
-                       const BuildOptions& options) {
-    nexus::runNexusBuild(io::fromUtf8(inputFile), io::fromUtf8(outputFile), {}, process::systemProcessRunner(),
-                         options);
+// Perform the actual bm3d build: bm3d is a program of its own, so that none of its code (VCGLib,
+// corto) is loaded into this process
+void performBm3dBuild(const std::string& inputFile,
+                      const std::string& outputFile,
+                      const BuildOptions& options) {
+    bm3d::runBm3dBuild(io::fromUtf8(inputFile),
+                       io::fromUtf8(outputFile),
+                       {},
+                       process::systemProcessRunner(),
+                       options);
 }
 }  // namespace
 
@@ -728,11 +731,15 @@ void recoverModel3DTilesSwap(const std::string& outputDir) {
     recoverTilesSwap(outDir, oldDir);
 }
 
-std::string buildNexus(const std::string& inputObj, const std::string& outputNxs, bool overwrite,
-                       const std::string& datasetRoot, const BuildOptions& options) {
+std::string buildBm3d(const std::string& inputObj,
+                      const std::string& outputBm3d,
+                      bool overwrite,
+                      const std::string& datasetRoot,
+                      const BuildOptions& options) {
     // Default output: next to the original input (never inside a conversion temp folder).
-    const auto outFile =
-        outputNxs.empty() ? io::toUtf8(io::fromUtf8(inputObj).replace_extension(".nxz")) : outputNxs;
+    const auto outFile = outputBm3d.empty()
+                             ? io::toUtf8(io::fromUtf8(inputObj).replace_extension(".bm3d"))
+                             : outputBm3d;
 
     // Check if output file already exists (overwrite deletes it, so it must not be the input)
     io::assureDistinctOutput(io::fromUtf8(inputObj), io::fromUtf8(outFile));
@@ -744,13 +751,13 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
     }
 
     // Validate dependencies and convert when needed (glTF/GLB, textured PLY).
-    // Throws before Nexus runs, so a missing dependency never produces output.
+    // Throws before bm3d runs, so a missing dependency never produces output.
     io::ScopedTempDir tempGuard;
     const PreparedModel model =
-        prepareModelInput(inputObj, ModelConsumer::Nexus, datasetRoot, tempGuard);
+        prepareModelInput(inputObj, ModelConsumer::Bm3d, datasetRoot, tempGuard);
 
-    // Build the nexus file
-    performNexusBuild(model.path, outFile, options);
+    // Build the bm3d file
+    performBm3dBuild(model.path, outFile, options);
 
     return outFile;
 }
@@ -883,7 +890,7 @@ obj2tiles::Obj2TilesOptions chooseObj2TilesOptions(const std::string& inputObj, 
              << " lon=" << georef->longitude << " alt=" << georef->altitude;
     } else {
         // Non-georeferenced (local) tiling: identity transform, parity with the
-        // current non-georeferenced Nexus viewer.
+        // current non-georeferenced bm3d viewer.
         opts.localMode = true;
         LOGD << "Building non-georeferenced (local) 3D Tiles for " << inputObj;
     }
@@ -946,7 +953,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
                               const Tiles3DOptions& options) {
     // Fail fast: if Obj2Tiles is unavailable, skip georef detection, conversion and
     // dependency validation entirely. Callers treat 3D Tiles as best-effort and keep
-    // producing Nexus.
+    // producing the bm3d file.
     if (obj2tiles::findObj2TilesBinary().empty())
         throw Obj2TilesException(
             "Obj2Tiles binary not found; cannot generate 3D Tiles. Set DDB_OBJ2TILES_PATH "

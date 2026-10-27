@@ -24,6 +24,6 @@ add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
 # the packages ship ddbcmd and libddb from the same folder.
 ddb_embed_library(${PROJECT_NAME}cmd)
 target_link_libraries(${PROJECT_NAME}cmd PRIVATE cxxopts::cxxopts ddb_warnings)
-# ddb nxs and the commands that read or write image metadata run the helper programs
+# ddb bm3d and the commands that read or write image metadata run the helper programs
 # (scripts/helper-tools.txt), found next to the executable: built with the CLI
 add_dependencies(${PROJECT_NAME}cmd ${PROJECT_NAME} ${DDB_HELPER_TOOLS})
