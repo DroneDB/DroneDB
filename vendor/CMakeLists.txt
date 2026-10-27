@@ -34,6 +34,10 @@ foreach(_helper IN LISTS DDB_HELPER_TOOLS)
                             "(no vendor/ subdirectory defines it)")
     endif()
 endforeach()
+# metadata-util reads and writes the images of a dataset, wherever it lies (cmake/LongPathAware.cmake).
+# bm3d (a release of its own repository, 1.1.1 and later) declares itself long path aware in its
+# own CMakeLists.txt, so it is not given a second manifest here.
+ddb_long_path_aware(metadata-util)
 # Read by src/, apps/ and tests/ (add_dependencies on the helpers)
 set(DDB_HELPER_TOOLS "${DDB_HELPER_TOOLS}" PARENT_SCOPE)
 

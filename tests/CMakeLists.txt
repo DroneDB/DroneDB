@@ -152,6 +152,8 @@ if(BUILD_TESTING)
         # shadowed by a library header of the same name
         target_include_directories(${name} BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
         ddb_embed_library(${name})
+        # The tests that build in a dataset under a long path run in these processes
+        ddb_long_path_aware(${name})
         target_link_libraries(${name} PRIVATE ${T_LINK} ddb_test_support ddb_warnings)
         # The helper programs (scripts/helper-tools.txt) are built next to the test binary, where the
         # tool locator looks: the tests that build a bm3d file or read the metadata of an image

@@ -23,6 +23,8 @@ add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
 # stages everything next to it (libddb for the hosts, the data files and, on Windows, the DLLs):
 # the packages ship ddbcmd and libddb from the same folder.
 ddb_embed_library(${PROJECT_NAME}cmd)
+# The programs of the package run on datasets that can lie deep (cmake/LongPathAware.cmake)
+ddb_long_path_aware(${PROJECT_NAME}cmd)
 target_link_libraries(${PROJECT_NAME}cmd PRIVATE cxxopts::cxxopts ddb_warnings)
 # ddb bm3d and the commands that read or write image metadata run the helper programs
 # (scripts/helper-tools.txt), found next to the executable: built with the CLI

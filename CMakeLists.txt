@@ -124,6 +124,7 @@ endif()
 # Add custom CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(MsvcReleaseDebugInfo)
+include(LongPathAware)
 include(Warnings)
 # DDB_ENABLE_ASAN/UBSAN/TSAN/COVERAGE. Directory-wide options: must stay before
 # add_subdirectory(vendor) so the vendored code built in this tree is instrumented too.
