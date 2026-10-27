@@ -15,4 +15,4 @@
 # Programs that a build only uses when they are present (Obj2Tiles, untwine, build-lod, dwg2dxf) are
 # not helpers in this sense and are not listed.
 metadata-util | package
-ddb-nexus | package
+bm3d | vendor/bm3d/VERSION

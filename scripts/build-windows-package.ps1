@@ -104,7 +104,7 @@ if (-not $python) {
 }
 
 # The helper executables libddb starts as child processes (scripts/helper-tools.txt: image metadata
-# with Exiv2, Nexus builds), as file names
+# with Exiv2, bm3d builds), as file names
 $helperTools = @(& $python.Source (Join-Path $PSScriptRoot "check-helper-tools.py") --names)
 if ($LASTEXITCODE -ne 0 -or $helperTools.Count -eq 0) {
     Write-Error "Reading scripts/helper-tools.txt failed ($LASTEXITCODE)"
@@ -113,13 +113,11 @@ if ($LASTEXITCODE -ne 0 -or $helperTools.Count -eq 0) {
 $helperExecutables = @($helperTools | ForEach-Object { "$_.exe" })
 
 # Define required files for verification
-# nxs.dll is loaded by ddb-nexus.exe only, libddb itself does not import it; the zip check that
-# runs the helpers proves the DLLs of the other helpers are there
+# The DLLs the helpers load are not listed: the zip check that runs the helpers proves they are there
 $requiredFiles = @(
     "ddbcmd.exe",
     "ddb.dll"
 ) + $helperExecutables + @(
-    "nxs.dll",
     "proj.db",
     "timezone21.bin",
     "sensor_data.sqlite",
@@ -154,7 +152,7 @@ Copy-Item $exePath $stagingDir -Force
 Write-Host "  ✓ ddbcmd.exe" -ForegroundColor Green
 
 # The helper executables sit next to ddbcmd.exe, where libddb looks for them first; Registry puts
-# this folder on PATH. Their DLLs (exiv2.dll, nxs.dll and the libraries they load) are copied with
+# this folder on PATH. Their DLLs (exiv2.dll and the libraries it loads) are copied with
 # all the others below.
 foreach ($helper in $helperExecutables) {
     Copy-Item (Join-Path $BuildDir $helper) $stagingDir -Force
@@ -238,7 +236,7 @@ if (Test-Path $obj2tilesPath) {
         Write-Host "  ✓ ktx.dll (libktx, KTX2 texture compression)" -ForegroundColor Green
     }
 } else {
-    Write-Host "  - Obj2Tiles.exe (not found, skipping - 3D Tiles generation disabled, Nexus still produced)" -ForegroundColor Yellow
+    Write-Host "  - Obj2Tiles.exe (not found, skipping - 3D Tiles generation disabled, bm3d still produced)" -ForegroundColor Yellow
 }
 
 # Copy dwg2dxf.exe if present (optional - enables DWG drawings; LibreDWG, GPL-3.0,

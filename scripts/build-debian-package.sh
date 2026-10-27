@@ -212,15 +212,12 @@ override_dh_auto_install:
 	# Copy binary and libs from build directory directly
 	cp \$(CURDIR)/build/ddbcmd debian/ddb/usr/bin/ddb
 	cp \$(CURDIR)/build/libddb.so debian/ddb/usr/lib/
-	# libnxs.so is only loaded by ddb-nexus (its RUNPATH reaches ../lib from /usr/bin, i.e. /usr/lib);
-	# libddb and ddb do not link it
-	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
 
 	# Required: the helper tools libddb starts as child processes (scripts/helper-tools.txt: image
-	# metadata with Exiv2, Nexus multiresolution models). They are GPL, which is why they are
+	# metadata with Exiv2, bm3d multiresolution models). They are GPL, which is why they are
 	# separate executables and not part of libddb. Installed in /usr/bin so the runtime discovery
 	# (exe folder, then PATH, which is how Registry finds them) needs no configuration. The package
-	# is broken without them: image indexing and Nexus builds stop.
+	# is broken without them: image indexing and bm3d builds stop.
 	for tool in $HELPER_TOOLS; do \\
 		test -f \$(CURDIR)/build/\$\$tool || { echo "ERROR: build/\$\$tool not found (built by the \$\$tool target)"; exit 1; }; \\
 		cp \$(CURDIR)/build/\$\$tool debian/ddb/usr/bin/\$\$tool; \\
@@ -258,7 +255,7 @@ override_dh_auto_install:
 	# (scripts/download-obj2tiles.sh). Installed alongside ddb so that runtime
 	# discovery (obj2tiles_runner.cpp::findObj2TilesBinary -> getExeFolder())
 	# finds it without any extra configuration. OGC 3D Tiles generation for
-	# MODEL entries is skipped (Nexus still produced) when the binary is missing.
+	# MODEL entries is skipped (bm3d still produced) when the binary is missing.
 	if [ -f \$(CURDIR)/build/Obj2Tiles ]; then \\
 		cp \$(CURDIR)/build/Obj2Tiles debian/ddb/usr/bin/Obj2Tiles; \\
 		chmod +x debian/ddb/usr/bin/Obj2Tiles; \\

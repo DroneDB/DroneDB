@@ -36,7 +36,8 @@ TOOL_LIST = SCRIPTS_DIR / "helper-tools.txt"
 PACKAGE_VERSION = "package"
 THIRD_PARTY_FOLDER = "third-party"
 THIRD_PARTY_INDEX = "index.txt"
-# vcpkg ports built into the helpers: Exiv2 (GPL, metadata-util) and the image codecs of ddb-nexus
+# vcpkg ports built into the helpers: Exiv2 (GPL, metadata-util; its PNG support brings libpng) and
+# the image codecs of bm3d
 HELPER_PORTS = ("exiv2", "libjpeg-turbo", "libpng", "libwebp", "tiff")
 VERSION_TIMEOUT_SECONDS = 60
 

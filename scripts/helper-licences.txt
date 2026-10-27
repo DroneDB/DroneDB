@@ -1,4 +1,4 @@
-# Licence texts of the helper executables (metadata-util, ddb-nexus) and of the code built into
+# Licence texts of the helper executables (metadata-util, bm3d) and of the code built into
 # them from this repository's submodules, one per line:
 #
 #   <file name in the package> | <source path, relative to the repository root>
@@ -8,11 +8,15 @@
 # added in one place. Every file name contains ".LICENSE", which the Debian build leaves
 # uncompressed.
 #
-# The vcpkg libraries inside the helpers (Exiv2 in metadata-util, the image codecs ddb-nexus reads
+# The vcpkg libraries inside the helpers (Exiv2 in metadata-util, the image codecs bm3d reads
 # and writes textures with) are not listed: scripts/collect-vcpkg-notices.py ships the notice of
 # every vcpkg port in the package, theirs included, in the third-party folder next to these.
 metadata-util.LICENSE | vendor/metadata-util/LICENSE
-ddb-nexus.LICENSE | vendor/libnexus/LICENSE
-Nexus.LICENSE | vendor/libnexus/vendor/nexus/src/LICENSE
-vcglib.LICENSE | vendor/libnexus/vendor/vcglib/LICENSE.txt
-corto.LICENSE | vendor/libnexus/vendor/nexus/src/corto/LICENSE.txt
+# bm3d: its licence, the NOTICE that names the code and libraries inside it (the name keeps
+# ".LICENSE" so that the Debian build leaves it uncompressed), and each text in its licenses/
+# folder (add a line here when that folder gets a file).
+bm3d.LICENSE | vendor/bm3d/LICENSE
+bm3d.NOTICE.LICENSE | vendor/bm3d/NOTICE
+Nexus.LICENSE | vendor/bm3d/licenses/Nexus.LICENSE
+vcglib.LICENSE | vendor/bm3d/licenses/vcglib.LICENSE
+corto.LICENSE | vendor/bm3d/licenses/corto.LICENSE

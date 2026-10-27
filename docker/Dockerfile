@@ -35,7 +35,7 @@ RUN cd /workspace && \
 
 # Optional: download the OpenDroneMap Obj2Tiles binary (OGC 3D Tiles generator).
 # AGPL-3.0, invoked only as a subprocess (see THIRD_PARTY_LICENSES.md). Failure is
-# non-blocking; DroneDB skips 3D Tiles generation (Nexus still produced) when missing.
+# non-blocking; DroneDB skips 3D Tiles generation (bm3d still produced) when missing.
 RUN cd /workspace && \
     chmod +x scripts/download-obj2tiles.sh && \
     ./scripts/download-obj2tiles.sh build || \

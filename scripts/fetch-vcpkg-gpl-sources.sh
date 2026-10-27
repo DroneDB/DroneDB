@@ -3,7 +3,7 @@
 # executables a release ships: the exact Exiv2 archive linked into metadata-util (GPL-2.0-or-later).
 # The tag holds the sources of DroneDB and its helpers but not this one, which vcpkg downloads
 # while it builds, so a release attaches it. The other vcpkg libraries the helpers use (the image
-# codecs of ddb-nexus) have permissive licences and need no source offer.
+# codecs of bm3d) have permissive licences and need no source offer.
 #
 # Version, URL and SHA512 are read from the vcpkg port files, so the archives are the ones vcpkg
 # verified when it built the libraries; each download is checked against the same SHA512 and a
