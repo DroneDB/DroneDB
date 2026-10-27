@@ -1,22 +1,24 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Fails when ddb.dll or ddbcmd.exe depends on a GPL library (Exiv2, libnxs) or on Qt, or when
-    ddb-nexus.exe or nxs.dll depends on Qt.
+    Fails when ddb.dll or ddbcmd.exe depends on a GPL library (Exiv2, bm3d) or on Qt, or when
+    bm3d.exe depends on Qt.
 
 .DESCRIPTION
     Windows counterpart of scripts/check-gpl-linkage.py. Exiv2 is used only by the separate
-    metadata-util.exe, and Nexus, vcglib and corto only by the separate ddb-nexus.exe (with nxs.dll);
-    libddb starts both as child processes. A build whose ddb.dll or ddbcmd.exe imports exiv2.dll,
-    nxs.dll or a Qt5*.dll again would link that code into the library. Qt is the other way round:
-    ddb-nexus.exe and nxs.dll decode textures with plain image codec libraries and must not import
-    a Qt DLL, which would bring back the Qt DLLs and plugins the package no longer carries.
+    metadata-util.exe, and bm3d (with the Nexus, VCGLib and corto code it is derived from) only by
+    the separate bm3d.exe, a static program with no DLL of its own; libddb starts both as child
+    processes. A build whose ddb.dll or ddbcmd.exe imports exiv2.dll, a bm3d*.dll or a Qt5*.dll
+    would link that code into the library. Qt is the other way round: bm3d.exe decodes textures
+    with plain image codec libraries and must not import a Qt DLL, which would bring back the Qt
+    DLLs and plugins the package no longer carries. The symbol check (and its positive control) of
+    the Linux script has no counterpart here: dumpbin only lists imports.
 
     The imports are read with `dumpbin /dependents`, which is found on PATH (a Visual Studio
     command prompt) or through vswhere (the hosted CI runners).
 
 .PARAMETER BuildDir
-    Directory holding ddb.dll, ddbcmd.exe, ddb-nexus.exe and nxs.dll (default: "build")
+    Directory holding ddb.dll, ddbcmd.exe and bm3d.exe (default: "build")
 
 .EXAMPLE
     .\scripts\check-gpl-linkage.ps1 -BuildDir build
@@ -26,21 +28,21 @@
 #>
 
 param(
-    [Parameter(HelpMessage = "Directory holding ddb.dll, ddbcmd.exe, ddb-nexus.exe and nxs.dll")]
+    [Parameter(HelpMessage = "Directory holding ddb.dll, ddbcmd.exe and bm3d.exe")]
     [string]$BuildDir = "build"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# What each group of files must not import. Exiv2, libnxs (Nexus) and Qt are kept out of libddb and
-# the CLI; Qt (5 or 6) is kept out of the Nexus helper.
+# What each group of files must not import. Exiv2, bm3d and Qt are kept out of libddb and the
+# CLI; Qt (5 or 6) is kept out of the bm3d helper.
 $qtDll = '^Qt[56].*\.dll$'
 $rules = @(
-    @{ Files = @("ddb.dll", "ddbcmd.exe"); Forbidden = "^(lib)?(exiv2|nxs)(\W.*)?\.dll$|$qtDll"
-       Failure = "GPL code is linked into ddb.dll or ddbcmd.exe; Exiv2 belongs to metadata-util and Nexus, vcglib and corto to ddb-nexus" },
-    @{ Files = @("ddb-nexus.exe", "nxs.dll"); Forbidden = $qtDll
-       Failure = "Qt is back in ddb-nexus.exe or nxs.dll, which decode textures with image codec libraries only" }
+    @{ Files = @("ddb.dll", "ddbcmd.exe"); Forbidden = "^(lib)?(exiv2|bm3d)(\W.*)?\.dll$|$qtDll"
+       Failure = "GPL code is linked into ddb.dll or ddbcmd.exe; Exiv2 belongs to metadata-util.exe, and bm3d with its vcglib and corto code to bm3d.exe" },
+    @{ Files = @("bm3d.exe"); Forbidden = $qtDll
+       Failure = "Qt is back in bm3d.exe, which decodes textures with image codec libraries only" }
 )
 
 function Find-Dumpbin {
@@ -101,5 +103,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Host "PASS: no GPL code linked into ddb.dll or ddbcmd.exe, no Qt in ddb-nexus.exe or nxs.dll" -ForegroundColor Green
+Write-Host "PASS: no GPL code linked into ddb.dll or ddbcmd.exe, no Qt in bm3d.exe" -ForegroundColor Green
 exit 0
