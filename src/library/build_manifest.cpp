@@ -226,6 +226,30 @@ std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const 
     return found;
 }
 
+void removeSupersededArtifacts(const EntryHandler& handler,
+                               const fs::path& root,
+                               const BuildProbe& probe) {
+    const auto artifacts = handler.artifacts();
+    if (std::none_of(artifacts.begin(), artifacts.end(), [](const BuildArtifact& a) {
+            return a.legacy;
+        }))
+        return;
+    const auto rootNames = probe.list(root);
+    if (!rootNames)
+        return;
+    const auto existing = existingArtifacts(handler, root, *rootNames, probe);
+    for (const auto& legacy : artifacts) {
+        if (!legacy.legacy)
+            continue;
+        const bool replaced =
+            std::any_of(existing.begin(), existing.end(), [&](const BuildArtifact& a) {
+                return !a.legacy && a.role == legacy.fallbackFor;
+            });
+        if (replaced)
+            io::assureIsRemoved(root / io::fromUtf8(legacy.folder()));
+    }
+}
+
 // ---- Build state -------------------------------------------------------------------------------
 
 BuildStateReader::BuildStateReader(Database* db, const BuildProbe& probe)

@@ -114,7 +114,8 @@ namespace ddb
         if (ext == ".dae") return "model/vnd.collada+xml";
         if (ext == ".3ds") return "application/x-3ds";
         if (ext == ".fbx") return "application/x-fbx";
-        if (ext == ".nxs" || ext == ".nxz") return "application/octet-stream";
+        if (ext == ".bm3d" || ext == ".nxs" || ext == ".nxz")
+            return "application/octet-stream";
         if (ext == ".mtl") return "model/mtl";
 
         // Vector / GIS

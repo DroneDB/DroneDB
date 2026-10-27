@@ -111,6 +111,8 @@ class BuildAttempt {
             handler_.build(context);
 
             publish();
+            // Only now, with the new output in place: a failed build keeps the old one
+            removeSupersededArtifacts(handler_, baseOutputPath_, filesystemBuildProbe());
 
             io::assureIsRemoved(io::fromUtf8(tempFolder_));
             io::assureIsRemoved(pendFile_);

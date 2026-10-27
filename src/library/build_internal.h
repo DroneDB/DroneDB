@@ -144,6 +144,13 @@ std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const 
                                              const std::vector<DirectoryName>& rootNames,
                                              const BuildProbe& probe);
 
+// Removes, under root, the folders of the legacy artifacts of handler whose role has an artifact
+// now (a build has just published it): the old output is stale and served no more. A legacy
+// artifact whose role is still missing stays, so a failed build leaves the entry as it was.
+void removeSupersededArtifacts(const EntryHandler& handler,
+                               const fs::path& root,
+                               const BuildProbe& probe);
+
 // ---- Build dispatch (build_dispatch.cpp) ----------------------------------
 
 // One build attempt of an entry (or of the main file it is a sidecar of).

@@ -82,6 +82,9 @@ struct BuildArtifact {
         return a;
     }
 
+    // The top-level folder of the artifact in the build root: the first component of path
+    std::string folder() const { return path.substr(0, path.find('/')); }
+
     // This artifact as a leftover of an older layout that stands in for the role fallbackRole
     BuildArtifact legacyFor(std::string fallbackRole) const {
         BuildArtifact a = *this;
@@ -217,7 +220,7 @@ class EntryHandler {
         for (const auto& a : artifacts()) {
             if (a.legacy && !includeLegacy)
                 continue;
-            const std::string folder = a.path.substr(0, a.path.find('/'));
+            const std::string folder = a.folder();
             bool seen = false;
             for (const auto& f : folders)
                 seen = seen || f == folder;
