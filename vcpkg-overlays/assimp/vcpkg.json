@@ -1,7 +1,7 @@
 {
   "name": "assimp",
   "version": "6.0.5",
-  "description": "Open Asset Import Library built minimally for OBJ/PLY/GLTF import+export with Draco support.",
+  "description": "Open Asset Import Library built minimally for OBJ/PLY/GLTF import+export and STL import with Draco support.",
   "homepage": "https://github.com/assimp/assimp",
   "license": "BSD-3-Clause",
   "supports": "windows | linux | osx",
