@@ -265,14 +265,14 @@ class VectorEntryHandler : public EntryHandler {
     std::string subfolder() const override { return VectorBuildSubfolder; }
 
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"vector.gpkg", artifactPath(VectorBuildSubfolder, VectorGpkgFileName), ArtifactKind::File,
-                 "application/geopackage+sqlite3", VectorGpkgFileName, "", false},
+        return {BuildArtifact::file("vector.gpkg", artifactPath(VectorBuildSubfolder, VectorGpkgFileName),
+                                    "application/geopackage+sqlite3", VectorGpkgFileName),
                 // The media type of a directory artifact is its index's: the TileJSON (the tiles
                 // themselves, "<z>/<x>/<y>.pbf", are application/vnd.mapbox-vector-tile)
-                {"vector.mvt", MvtBuildSubfolder, ArtifactKind::Directory, "application/json", "",
-                 MvtMetadataFileName, false},
-                {"vector.local", artifactPath(VectorBuildSubfolder, VectorLocalFileName), ArtifactKind::File,
-                 "application/json", "", "", false}};
+                BuildArtifact::directory("vector.mvt", MvtBuildSubfolder, "application/json",
+                                         MvtMetadataFileName),
+                BuildArtifact::file("vector.local", artifactPath(VectorBuildSubfolder, VectorLocalFileName),
+                                    "application/json")};
     }
 
     // buildVector manages its own atomic write to baseOutputPath/vec and baseOutputPath/mvt

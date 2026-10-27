@@ -429,7 +429,7 @@ class ManifestFakeHandler : public EntryHandler {
     std::vector<std::string> extensions() const override { return {"ddbmanifestfake"}; }
     std::string subfolder() const override { return "fake"; }
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"fake.out", "fake/out.txt", ArtifactKind::File, "text/plain", "out.txt", "", false}};
+        return {BuildArtifact::file("fake.out", "fake/out.txt", "text/plain", "out.txt")};
     }
 };
 
@@ -554,9 +554,9 @@ class LegacyFakeHandler : public EntryHandler {
     std::vector<std::string> extensions() const override { return {"ddblegacyfake"}; }
     std::string subfolder() const override { return "alpha"; }
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"fake.alpha", "alpha/a.txt", ArtifactKind::File, "text/plain", "", "", false},
-                {"fake.beta", "beta/b.txt", ArtifactKind::File, "text/plain", "", "", false},
-                {"fake.old", "old/o.txt", ArtifactKind::File, "text/plain", "", "", true, "fake.alpha"}};
+        return {BuildArtifact::file("fake.alpha", "alpha/a.txt", "text/plain"),
+                BuildArtifact::file("fake.beta", "beta/b.txt", "text/plain"),
+                BuildArtifact::file("fake.old", "old/o.txt", "text/plain").legacyFor("fake.alpha")};
     }
 };
 

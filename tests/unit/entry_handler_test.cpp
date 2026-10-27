@@ -303,7 +303,7 @@ class FakeEntryHandler : public EntryHandler {
     std::string subfolder() const override { return "fake"; }
 
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"fake.out", "fake/out.txt", ArtifactKind::File, "text/plain", "out.txt", "", false}};
+        return {BuildArtifact::file("fake.out", "fake/out.txt", "text/plain", "out.txt")};
     }
 
     bool isComplete(const fs::path& baseOutputPath, bool) const override {

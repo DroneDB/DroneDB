@@ -73,8 +73,8 @@ class Tiles3DEntryHandler : public EntryHandler {
     std::string subfolder() const override { return Tiles3DBuildSubfolder; }
 
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"model.3dtiles", Tiles3DBuildSubfolder, ArtifactKind::Directory, "application/json", "",
-                 TilesetFileName, false}};
+        return {BuildArtifact::directory("model.3dtiles", Tiles3DBuildSubfolder, "application/json",
+                                         TilesetFileName)};
     }
 
     bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {

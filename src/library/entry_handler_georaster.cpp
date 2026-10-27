@@ -195,8 +195,8 @@ class GeoRasterEntryHandler : public EntryHandler {
     std::string subfolder() const override { return CogBuildSubfolder; }
 
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"raster.cog", artifactPath(CogBuildSubfolder, CogFileName), ArtifactKind::File,
-                 "image/tiff; application=geotiff; profile=cloud-optimized", CogFileName, "", false}};
+        return {BuildArtifact::file("raster.cog", artifactPath(CogBuildSubfolder, CogFileName),
+                                    "image/tiff; application=geotiff; profile=cloud-optimized", CogFileName)};
     }
 
     void build(const BuildContext& ctx) const override {

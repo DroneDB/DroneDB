@@ -100,10 +100,10 @@ class ModelEntryHandler : public EntryHandler {
     std::string subfolder() const override { return NexusBuildSubfolder; }
 
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"model.nexus", artifactPath(NexusBuildSubfolder, NexusFileName), ArtifactKind::File,
-                 "application/octet-stream", "", "", false},
-                {"model.3dtiles", Tiles3DBuildSubfolder, ArtifactKind::Directory, "application/json", "",
-                 TilesetFileName, false}};
+        return {BuildArtifact::file("model.nexus", artifactPath(NexusBuildSubfolder, NexusFileName),
+                                    "application/octet-stream"),
+                BuildArtifact::directory("model.3dtiles", Tiles3DBuildSubfolder, "application/json",
+                                         TilesetFileName)};
     }
 
     // Lock order is primary Model lock then tiles lock. Recovery runs before the complete

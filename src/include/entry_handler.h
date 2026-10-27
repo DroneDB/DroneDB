@@ -58,6 +58,37 @@ struct BuildArtifact {
     // Legacy artifacts only (required for them): the role this one stands in for. It is served
     // only while an artifact of that role does not exist, so an entry never lists both
     std::string fallbackFor;
+
+    // Not an aggregate on purpose: an artifact is made by file(), directory() and legacyFor(), so a
+    // member added later has its default in one place instead of in every list of artifacts, and a
+    // legacy artifact cannot be made without the role it stands in for
+    BuildArtifact() = default;
+
+    static BuildArtifact file(std::string role, std::string path, std::string mediaType,
+                              std::string downloadName = "") {
+        BuildArtifact a;
+        a.role = std::move(role);
+        a.path = std::move(path);
+        a.mediaType = std::move(mediaType);
+        a.downloadName = std::move(downloadName);
+        return a;
+    }
+
+    static BuildArtifact directory(std::string role, std::string path, std::string mediaType,
+                                   std::string index) {
+        BuildArtifact a = file(std::move(role), std::move(path), std::move(mediaType));
+        a.kind = ArtifactKind::Directory;
+        a.index = std::move(index);
+        return a;
+    }
+
+    // This artifact as a leftover of an older layout that stands in for the role fallbackRole
+    BuildArtifact legacyFor(std::string fallbackRole) const {
+        BuildArtifact a = *this;
+        a.legacy = true;
+        a.fallbackFor = std::move(fallbackRole);
+        return a;
+    }
 };
 
 // "<folder>/<file>": the path of an artifact file, from the names in build_layout.h

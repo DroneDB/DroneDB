@@ -67,12 +67,12 @@ class GaussianSplatEntryHandler : public EntryHandler {
     std::string subfolder() const override { return GsplatBuildSubfolder; }
 
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"gsplat.lod", artifactPath(GsplatBuildSubfolder, GsplatRadFileName), ArtifactKind::File,
-                 "application/octet-stream", "", "", false},
-                {"gsplat.spz", artifactPath(GsplatBuildSubfolder, GsplatFileName), ArtifactKind::File,
-                 "application/octet-stream", "", "", false},
-                {"gsplat.bounds", artifactPath(GsplatBuildSubfolder, GsplatBoundsFileName), ArtifactKind::File,
-                 "application/json", "", "", false}};
+        return {BuildArtifact::file("gsplat.lod", artifactPath(GsplatBuildSubfolder, GsplatRadFileName),
+                                    "application/octet-stream"),
+                BuildArtifact::file("gsplat.spz", artifactPath(GsplatBuildSubfolder, GsplatFileName),
+                                    "application/octet-stream"),
+                BuildArtifact::file("gsplat.bounds", artifactPath(GsplatBuildSubfolder, GsplatBoundsFileName),
+                                    "application/json")};
     }
 
     bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {

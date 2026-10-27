@@ -66,10 +66,11 @@ class PointCloudEntryHandler : public EntryHandler {
     }
 
     std::vector<BuildArtifact> artifacts() const override {
-        return {{"pointcloud.copc", artifactPath(CopcBuildSubfolder, CopcFileName), ArtifactKind::File,
-                 "application/vnd.laszip+copc", CopcFileName, "", false},
-                {"pointcloud.ept", LegacyEptBuildSubfolder, ArtifactKind::Directory, "application/json", "",
-                 LegacyEptFileName, true, "pointcloud.copc"}};
+        return {BuildArtifact::file("pointcloud.copc", artifactPath(CopcBuildSubfolder, CopcFileName),
+                                    "application/vnd.laszip+copc", CopcFileName),
+                BuildArtifact::directory("pointcloud.ept", LegacyEptBuildSubfolder, "application/json",
+                                         LegacyEptFileName)
+                    .legacyFor("pointcloud.copc")};
     }
 
     void build(const BuildContext& ctx) const override {
