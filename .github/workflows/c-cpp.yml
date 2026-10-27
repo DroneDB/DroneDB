@@ -261,6 +261,10 @@ jobs:
         run: |
           python3 scripts/check-gpl-linkage.py --self-test
           python3 scripts/check-gpl-linkage.py build
+      - name: Check the detection of the long path check (self-test)
+        # The Windows job runs the check on the executables (scripts/check-long-path-aware.py);
+        # its detection of a manifest is tested here, on made-up files
+        run: python3 scripts/check-long-path-aware.py --self-test
       - name: Verify Spark RAD format pin
         run: |
           echo "Checking vendor/spark/rust/spark-lib/src/rad.rs against the reviewed pin..."
@@ -830,6 +834,25 @@ jobs:
         run: |
           Copy-Item libredwg-out/windows/dwg2dxf.exe, libredwg-out/windows/dwg2dxf.LICENSE.txt build/ -Force
           & build/dwg2dxf.exe --version
+      - name: Check that the executables are long path aware
+        # Windows takes a path of 260 characters or more only in a process whose executable has
+        # <longPathAware>true</longPathAware> in its manifest (cmake/LongPathAware.cmake): the
+        # CLI, the test binaries, the helper programs (scripts/helper-tools.txt) and Untwine
+        shell: pwsh
+        run: |
+          $names = @('ddbcmd.exe', 'ddbtest.exe', 'ddb_unit_tests.exe')
+          $names += @(python scripts/check-helper-tools.py --names | ForEach-Object { "$_.exe" })
+          if (Test-Path build/untwine.exe) { $names += 'untwine.exe' }
+          python scripts/check-long-path-aware.py @($names | ForEach-Object { "build/$_" })
+          exit $LASTEXITCODE
+      - name: Allow long paths in Windows
+        # Set whatever the runner image has: the long path test (tests/unit/long_path_test.cpp)
+        # builds under a root of over 200 characters and skips itself when the system does not
+        # allow long paths. It applies to the processes started from here on, the test binaries
+        shell: pwsh
+        run: |
+          reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f
+          if ($LASTEXITCODE -ne 0) { throw "reg add LongPathsEnabled failed ($LASTEXITCODE)" }
       - name: Enable crash dumps for the test binaries
         shell: pwsh
         run: |
