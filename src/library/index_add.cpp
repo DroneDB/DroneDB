@@ -482,7 +482,7 @@ namespace ddb
                     // A GeoPackage kept open for WFS/OGC queries would block this on Windows
                     const fs::path out = db->buildDirectory() / old.hash;
                     releaseCachedFiles(out);
-                    for (const auto &folder : entryHandler(old.type).artifactFolders())
+                    for (const auto &folder : entryHandler(old.type).artifactFolders(true))
                         io::assureIsRemoved(out / folder);
                     LOGD << "Refreshed " << mainPath << " after a change to " << prj;
                 } catch (const std::exception &e) {

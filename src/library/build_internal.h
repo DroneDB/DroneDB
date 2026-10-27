@@ -119,7 +119,7 @@ const BuildProbe& filesystemBuildProbe();
 //   1 read of "<hash>.pending";
 //   1 lock probe, only when "<subfolder>.building" exists;
 //   1 query per artifact folder that exists (a listing for file artifacts, the index file of
-//     a directory artifact), legacy artifacts only when no current one exists;
+//     a directory artifact), a legacy artifact only while the role it stands in for is missing;
 //   the completeness check of getBuildStatus(), only when the state is neither building nor
 //     pending and the build root exists.
 class BuildStateReader {
@@ -139,7 +139,7 @@ class BuildStateReader {
 
 // The artifacts of handler that exist under root, in manifest order: a file artifact when
 // its file exists, a directory artifact when its index file exists; a legacy artifact only
-// when no current one exists. rootNames is the listing of root (probe.list(root)).
+// while the role it stands in for (fallbackFor) is missing. rootNames is the listing of root (probe.list(root)).
 std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const fs::path& root,
                                              const std::vector<DirectoryName>& rootNames,
                                              const BuildProbe& probe);

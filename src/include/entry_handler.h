@@ -55,6 +55,9 @@ struct BuildArtifact {
     std::string index;
     // Leftover of an older layout: read when present, never written
     bool legacy = false;
+    // Legacy artifacts only (required for them): the role this one stands in for. It is served
+    // only while an artifact of that role does not exist, so an entry never lists both
+    std::string fallbackFor;
 };
 
 // "<folder>/<file>": the path of an artifact file, from the names in build_layout.h
@@ -176,11 +179,12 @@ class EntryHandler {
     // Every artifact a build of this type can produce (the build manifest)
     virtual std::vector<BuildArtifact> artifacts() const { return {}; }
     // The top-level folders of artifacts() in "<build root>/<hash>/", in order, without
-    // duplicates (legacy artifacts excluded)
-    std::vector<std::string> artifactFolders() const {
+    // duplicates. The folders a build writes; includeLegacy adds the ones it only reads, which
+    // are the data that follows the entry (copy) or goes stale with it (cleanup)
+    std::vector<std::string> artifactFolders(bool includeLegacy = false) const {
         std::vector<std::string> folders;
         for (const auto& a : artifacts()) {
-            if (a.legacy)
+            if (a.legacy && !includeLegacy)
                 continue;
             const std::string folder = a.path.substr(0, a.path.find('/'));
             bool seen = false;

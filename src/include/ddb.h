@@ -875,7 +875,7 @@ extern "C"
      *   gsplat.spz       Gaussian Splat in SPZ
      *   gsplat.bounds    local bounding box of a splat (JSON)
      *
-     * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?}
+     * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?}
      *   path          relative to the build root ("root" below), '/'-separated; URLs append it
      *                 to ".../build/{hash}/" and DDBResolveBuildFile takes it
      *   kind          "file", or "dir" for a directory (index names its descriptor file; its
@@ -884,7 +884,10 @@ extern "C"
      *   downloadName  the file name to offer for a download; absent when the artifact is not one
      *   index         the descriptor file of a directory, relative to path
      *   legacy        true for an output of an older layout: read when present, never written;
-     *                 listed only when the entry has none of its current artifacts
+     *                 listed only while the role named by fallbackFor is not listed
+     *   fallbackFor   legacy artifacts only: the role this one stands in for ("pointcloud.copc"
+     *                 for pointcloud.ept); the entry lists the legacy artifact or that role,
+     *                 never both
      *
      * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
      *   {"buildable": bool, "source": string|null, "hash": string|null, "root": string|null,

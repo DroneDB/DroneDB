@@ -181,6 +181,11 @@
         "legacy": {
           "const": true,
           "description": "An output of an older layout, read only; absent otherwise"
+        },
+        "fallbackFor": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+\\.[a-z0-9]+$",
+          "description": "Legacy artifacts only: the role this one stands in for; listed only while that role is not"
         }
       }
     }

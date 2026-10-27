@@ -73,6 +73,8 @@ void to_json(json& j, const BuildArtifact& artifact) {
         j["index"] = artifact.index;
     if (artifact.legacy)
         j["legacy"] = true;
+    if (!artifact.fallbackFor.empty())
+        j["fallbackFor"] = artifact.fallbackFor;
 }
 
 void to_json(json& j, const EntryBuild& build) {
@@ -206,20 +208,21 @@ std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const 
                                              const std::vector<DirectoryName>& rootNames,
                                              const BuildProbe& probe) {
     ArtifactLookup lookup(root, rootNames, probe);
-    std::vector<BuildArtifact> found;
-    std::vector<BuildArtifact> legacy;
-    for (auto& a : handler.artifacts()) {
-        if (a.legacy)
-            legacy.push_back(std::move(a));
-        else if (lookup.exists(a))
-            found.push_back(std::move(a));
-    }
+    auto artifacts = handler.artifacts();
+    // The roles of the current artifacts that exist
+    std::vector<std::string> current;
+    for (const auto& a : artifacts)
+        if (!a.legacy && lookup.exists(a))
+            current.push_back(a.role);
+    const auto has = [&current](const std::string& role) {
+        return std::find(current.begin(), current.end(), role) != current.end();
+    };
     // The fallback of a dataset built before the current layout (EPT before COPC): an older
-    // output is served only while no current one exists
-    if (found.empty())
-        for (auto& a : legacy)
-            if (lookup.exists(a))
-                found.push_back(std::move(a));
+    // output is served only while the role it stands in for is missing, whatever else exists
+    std::vector<BuildArtifact> found;
+    for (auto& a : artifacts)
+        if (a.legacy ? !has(a.fallbackFor) && lookup.exists(a) : has(a.role))
+            found.push_back(std::move(a));
     return found;
 }
 
@@ -410,8 +413,8 @@ json copyBuildArtifacts(Database* source, Database* destination, const std::stri
         appendUnique(lockFolders, h->subfolder());
         for (const auto& folder : h->artifactFolders())
             appendUnique(lockFolders, folder);
-        for (const auto& a : h->artifacts())
-            appendUnique(copyFolders, a.path.substr(0, a.path.find('/')));
+        for (const auto& folder : h->artifactFolders(true))
+            appendUnique(copyFolders, folder);
     }
 
     const fs::path sourceRoot = fs::absolute(source->buildDirectory() / hash);

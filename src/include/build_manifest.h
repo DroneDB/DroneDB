@@ -60,7 +60,7 @@ struct EntryBuild {
     std::vector<BuildArtifact> artifacts;
 };
 
-// {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?}
+// {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?}
 void to_json(json& j, const BuildArtifact& artifact);
 // {"buildable", "source", "hash", "root", "state", "missingDependencies", "lastAttempt",
 // "retryAfter", "artifacts"}; source, hash, root, lastAttempt and retryAfter are null when they

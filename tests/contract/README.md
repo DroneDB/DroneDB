@@ -141,8 +141,8 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
 * An artifact is identified by its `role`; its `path` is relative to the build `root` and to the
   URL `.../build/{hash}/`. A host never composes `cog/cog.tif` itself.
 * Only artifacts that exist are listed; a directory artifact (`kind: "dir"`) exists when its
-  `index` does. A `legacy` artifact (`pointcloud.ept`) is listed only when none of the type's
-  current artifacts exists.
+  `index` does. A `legacy` artifact (`pointcloud.ept`) names the role it stands in for in
+  `fallbackFor` (`pointcloud.copc`) and is listed only while that role is not.
 * `mediaType` is the media type of the file a client opens: the file itself, or the index of a
   directory (so `vector.mvt` is `application/json`, its TileJSON; the tiles are served by file
   name). The values: `raster.cog` `image/tiff; application=geotiff; profile=cloud-optimized`,
@@ -345,3 +345,9 @@ Registry has to adopt first.
   The `properties` of a Gaussian splat entry no longer carry `"georeferenced": false` either; a
   splat is never georeferenced, so a host reads the absent member as false. The `entry-types`
   fixture changed; no other fixture did.
+
+* 2026-10-27: an artifact may carry `fallbackFor` (additive; only legacy artifacts do): the role
+  it stands in for. `pointcloud.ept` has `"fallbackFor": "pointcloud.copc"`. A legacy artifact
+  is listed while that role is missing, as before for a point cloud; the rule no longer depends
+  on whether other current artifacts of the type exist. No fixture changed (none lists a legacy
+  artifact).

@@ -169,6 +169,7 @@ TEST(BuildManifest, StatesAndExistingArtifacts) {
     EXPECT_EQ(roles(b["cloud.laz"]), (std::vector<std::string>{"pointcloud.copc"}));
     EXPECT_EQ(roles(b["old.laz"]), (std::vector<std::string>{"pointcloud.ept"}));
     EXPECT_TRUE(b["old.laz"].artifacts[0].legacy);
+    EXPECT_EQ(b["old.laz"].artifacts[0].fallbackFor, "pointcloud.copc");
     EXPECT_EQ(b["old.laz"].state, BuildState::None) << "an EPT-only point cloud is rebuilt to COPC";
 
     EXPECT_EQ(b["roads.shp"].state, BuildState::Complete);
@@ -313,6 +314,13 @@ TEST(BuildManifest, Json) {
               json::parse(R"([{"role": "raster.cog", "path": "cog/cog.tif", "kind": "file",
                   "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
                   "downloadName": "cog.tif"}])"));
+
+    // A legacy artifact names the role it stands in for; no other artifact has the member
+    const json legacy = getBuildArtifactsJson(fx.db.get(), {"old.laz"});
+    EXPECT_EQ(legacy[0]["build"]["artifacts"],
+              json::parse(R"([{"role": "pointcloud.ept", "path": "ept", "kind": "dir",
+                  "mediaType": "application/json", "index": "ept.json", "legacy": true,
+                  "fallbackFor": "pointcloud.copc"}])"));
 
     EXPECT_EQ(out[1]["build"]["state"], "pending");
     EXPECT_EQ(out[1]["build"]["lastAttempt"], 1700000000);
@@ -533,6 +541,64 @@ TEST(BuildManifest, CopyBuildArtifacts) {
     const json nothing = copyBuildArtifacts(fx.source.db.get(), fx.destination.db.get(), H_DSM);
     EXPECT_TRUE(nothing["artifacts"].empty());
     EXPECT_EQ(nothing["pending"], false);
+}
+
+// A legacy artifact is served while the role it stands in for is missing, not while the type has
+// no current artifact at all: a type with other current artifacts (an old model with its 3D
+// Tiles) must still list its legacy output
+constexpr auto LegacyFakeType = static_cast<EntryType>(28);
+
+class LegacyFakeHandler : public EntryHandler {
+  public:
+    LegacyFakeHandler() : EntryHandler(LegacyFakeType, "LegacyFake") {}
+    std::vector<std::string> extensions() const override { return {"ddblegacyfake"}; }
+    std::string subfolder() const override { return "alpha"; }
+    std::vector<BuildArtifact> artifacts() const override {
+        return {{"fake.alpha", "alpha/a.txt", ArtifactKind::File, "text/plain", "", "", false},
+                {"fake.beta", "beta/b.txt", ArtifactKind::File, "text/plain", "", "", false},
+                {"fake.old", "old/o.txt", ArtifactKind::File, "text/plain", "", "", true, "fake.alpha"}};
+    }
+};
+
+TEST(BuildManifest, LegacyArtifactIsServedWhileItsRoleIsMissing) {
+    EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+    CopyFixture fx(TEST_NAME);
+    ScopedEntryHandler registration(std::make_unique<LegacyFakeHandler>());
+
+    const auto listed = [&](const std::string& hash, std::initializer_list<const char*> files) {
+        const fs::path root = fx.source.db->buildDirectory() / hash;
+        fs::remove_all(root);
+        for (const char* file : files)
+            writeFile(root / file, "x");
+        const auto names = filesystemBuildProbe().list(root);
+        std::vector<std::string> found;
+        if (names)
+            for (const auto& a : existingArtifacts(*findEntryHandler(LegacyFakeType), root, *names, filesystemBuildProbe()))
+                found.push_back(a.role);
+        return found;
+    };
+    using Roles = std::vector<std::string>;
+    const std::string hash(64, '0');
+
+    // The role is missing and another current artifact exists: the legacy one is listed, in
+    // manifest order (the old rule left it out)
+    EXPECT_EQ(listed(hash, {"beta/b.txt", "old/o.txt"}), (Roles{"fake.beta", "fake.old"}));
+    EXPECT_EQ(listed(hash, {"old/o.txt"}), (Roles{"fake.old"}));
+    // The role exists: the legacy artifact is not listed, whatever else exists
+    EXPECT_EQ(listed(hash, {"alpha/a.txt", "beta/b.txt", "old/o.txt"}), (Roles{"fake.alpha", "fake.beta"}));
+    EXPECT_EQ(listed(hash, {"alpha/a.txt", "old/o.txt"}), (Roles{"fake.alpha"}));
+    // Nothing to serve
+    EXPECT_EQ(listed(hash, {"beta/b.txt"}), (Roles{"fake.beta"}));
+    EXPECT_EQ(listed(hash, {"alpha/unrelated.txt"}), Roles{});
+
+    // The legacy folder follows the entry in a copy
+    insertEntry(fx.source.db.get(), "a.ddblegacyfake", hash, LegacyFakeType);
+    listed(hash, {"beta/b.txt", "old/o.txt"});
+    const json copied = copyBuildArtifacts(fx.source.db.get(), fx.destination.db.get(), hash);
+    ASSERT_EQ(copied["artifacts"].size(), 2u);
+    EXPECT_EQ(copied["artifacts"][1]["role"], "fake.old");
+    EXPECT_EQ(copied["artifacts"][1]["fallbackFor"], "fake.alpha");
+    EXPECT_TRUE(fs::exists(fx.destinationBuild / hash / "old" / "o.txt"));
 }
 
 TEST(BuildManifest, CopyBuildArtifactsRefusals) {

@@ -69,7 +69,7 @@ class PointCloudEntryHandler : public EntryHandler {
         return {{"pointcloud.copc", artifactPath(CopcBuildSubfolder, CopcFileName), ArtifactKind::File,
                  "application/vnd.laszip+copc", CopcFileName, "", false},
                 {"pointcloud.ept", LegacyEptBuildSubfolder, ArtifactKind::Directory, "application/json", "",
-                 LegacyEptFileName, true}};
+                 LegacyEptFileName, true, "pointcloud.copc"}};
     }
 
     void build(const BuildContext& ctx) const override {

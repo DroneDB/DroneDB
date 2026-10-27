@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 
 #include "build.h"
@@ -184,6 +185,35 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
     EXPECT_EQ(entryHandler(EntryType::Vector).artifactFolders(), (std::vector<std::string>{"vec", "mvt"}));
     EXPECT_EQ(entryHandler(EntryType::PointCloud).artifactFolders(), (std::vector<std::string>{"copc"}));
     EXPECT_EQ(entryHandler(EntryType::Model).artifactFolders(), (std::vector<std::string>{"nxs", "3dtiles"}));
+    // The folders that follow the entry or go stale with it: the legacy ones too
+    EXPECT_EQ(entryHandler(EntryType::PointCloud).artifactFolders(true), (std::vector<std::string>{"copc", "ept"}));
+    EXPECT_EQ(entryHandler(EntryType::Vector).artifactFolders(true), entryHandler(EntryType::Vector).artifactFolders());
+}
+
+// A legacy artifact is served while the role it stands in for is missing: every one of them
+// names a current role of its own handler, and a current artifact names none
+TEST(entryHandler, LegacyArtifactsNameTheRoleTheyStandInFor) {
+    for (const EntryHandler* handler : entryHandlers()) {
+        SCOPED_TRACE(handler->name());
+        std::set<std::string> current;
+        for (const auto& a : handler->artifacts())
+            if (!a.legacy)
+                current.insert(a.role);
+        for (const auto& a : handler->artifacts()) {
+            SCOPED_TRACE(a.role);
+            if (a.legacy) {
+                EXPECT_FALSE(a.fallbackFor.empty()) << "a legacy artifact must name the role it stands in for";
+                EXPECT_EQ(current.count(a.fallbackFor), 1u) << "no current artifact has the role " << a.fallbackFor;
+            } else {
+                EXPECT_TRUE(a.fallbackFor.empty());
+            }
+        }
+    }
+
+    const auto& artifacts = entryHandler(EntryType::PointCloud).artifacts();
+    ASSERT_EQ(artifacts.size(), 2u);
+    EXPECT_EQ(artifacts[1].role, "pointcloud.ept");
+    EXPECT_EQ(artifacts[1].fallbackFor, "pointcloud.copc");
 }
 
 TEST(entryHandler, SidecarRulesArePinned) {
