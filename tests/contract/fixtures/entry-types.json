@@ -104,6 +104,7 @@
       "id": 11,
       "name": "Model",
       "roles": [
+        "model.bm3d",
         "model.nexus",
         "model.3dtiles"
       ],

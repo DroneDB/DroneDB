@@ -344,7 +344,8 @@ TEST(CliHandler, theOutputOfACommandReachesStdoutUntouchedWhenItFails) {
 // ------------------------------------------------------------------------ real commands
 
 TEST(CliCommands, aRealCommandWithoutItsArgumentsIsAUsageError) {
-    for (const char *name : {"cog", "copc", "add", "remove", "geoproj", "mask", "nxs", "thumbs", "tile"}) {
+    for (const char* name :
+         {"cog", "copc", "add", "remove", "geoproj", "mask", "bm3d", "thumbs", "tile"}) {
         auto command = CommandRegistry::builtin().create(name);
         const auto outcome = execute(*command, {});
         EXPECT_EQ(outcome.code, EXIT_FAILURE) << name;
@@ -388,10 +389,10 @@ TEST(CliCommands, buildTakesAThreadCountFromOneTo4096) {
 }
 
 #ifndef _WIN32
-// --threads reaches the tools of the build: ddb-nexus gets it as its own --threads, for the build
+// --threads reaches the tools of the build: bm3d gets it as its own --threads, for the build
 // of one entry (-p) and for the build of every entry
 TEST(CliCommands, buildGivesTheThreadCountToTheToolsOfTheBuild) {
-    testtools::ModelDataset ds("cli_build_threads_reach_nexus");
+    testtools::ModelDataset ds("cli_build_threads_reach_bm3d");
     testtools::FakeModelTools tools(ds.index.ta);
     const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
     EnvVarGuard budget("DDB_BUILD_THREADS", "6");
@@ -400,13 +401,15 @@ TEST(CliCommands, buildGivesTheThreadCountToTheToolsOfTheBuild) {
     auto one = CommandRegistry::builtin().create("build");
     const auto entry = execute(*one, {"--threads", "2", "-f", "-p", "model.obj", "-o", output, "-w", ds.root()});
     ASSERT_EQ(entry.code, EXIT_SUCCESS) << entry.err;
-    EXPECT_EQ(testtools::readText(tools.nexusLog).rfind("--threads 2 ", 0), 0u) << testtools::readText(tools.nexusLog);
+    EXPECT_EQ(testtools::readText(tools.bm3dLog).rfind("--threads 2 ", 0), 0u)
+        << testtools::readText(tools.bm3dLog);
 
-    fs::remove(tools.nexusLog);
+    fs::remove(tools.bm3dLog);
     auto all = CommandRegistry::builtin().create("build");
     const auto every = execute(*all, {"--threads", "3", "-f", "-o", output, "-w", ds.root()});
     ASSERT_EQ(every.code, EXIT_SUCCESS) << every.err;
-    EXPECT_EQ(testtools::readText(tools.nexusLog).rfind("--threads 3 ", 0), 0u) << testtools::readText(tools.nexusLog);
+    EXPECT_EQ(testtools::readText(tools.bm3dLog).rfind("--threads 3 ", 0), 0u)
+        << testtools::readText(tools.bm3dLog);
 }
 #endif
 

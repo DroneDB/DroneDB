@@ -87,7 +87,7 @@ TEST_F(IsBuildCompleteTest, NoArtifactsReturnsFalse) {
     EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
 }
 
-// --- Generic types: copc/cog/nxs ---
+// --- Generic types: copc/cog/bm3d ---
 
 TEST_F(IsBuildCompleteTest, RasterEmptyFolderReturnsFalse) {
     const auto hash = indexedHash(orthoPath);
@@ -208,11 +208,25 @@ TEST_F(IsBuildCompleteTest, ModelWithoutArtifactsReturnsFalse) {
     EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
 }
 
-TEST_F(IsBuildCompleteTest, ModelEmptyNxsReturnsFalse) {
+TEST_F(IsBuildCompleteTest, ModelEmptyBm3dReturnsFalse) {
     const auto rel = addModel(db.get(), dbPath);
     const fs::path base = fs::path(db->buildDirectory()) / indexedHash(dbPath / rel);
-    writeFile(base / "nxs" / "model.nxz", "");
+    writeFile(base / "bm3d" / "model.bm3d", "");
     EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+}
+
+// A model built before bm3d (nxs/, with or without 3D Tiles) is incomplete: it is rebuilt
+TEST_F(IsBuildCompleteTest, ModelWithOnlyTheLegacyBuildReturnsFalse) {
+    const auto rel = addModel(db.get(), dbPath);
+    const fs::path base = fs::path(db->buildDirectory()) / indexedHash(dbPath / rel);
+    writeFile(base / "nxs" / "model.nxz", "some NXZ bytes");
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+
+    writeFile(base / "3dtiles" / "tileset.json", "{}");
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+
+    writeFile(base / "bm3d" / "model.bm3d", "some bm3d bytes");
+    EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
 }
 
 TEST_F(IsBuildCompleteTest, ModelTilesOnlyReturnsFalse) {
@@ -222,10 +236,10 @@ TEST_F(IsBuildCompleteTest, ModelTilesOnlyReturnsFalse) {
     EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
 }
 
-TEST_F(IsBuildCompleteTest, ModelNxsWithoutTilesReturnsTrue) {
+TEST_F(IsBuildCompleteTest, ModelBm3dWithoutTilesReturnsTrue) {
     const auto rel = addModel(db.get(), dbPath);
     const fs::path base = fs::path(db->buildDirectory()) / indexedHash(dbPath / rel);
-    writeFile(base / "nxs" / "model.nxz", "some NXZ bytes");
+    writeFile(base / "bm3d" / "model.bm3d", "some bm3d bytes");
     EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
 
     writeFile(base / "3dtiles" / "tileset.json", "{}");
@@ -243,8 +257,8 @@ TEST(isBuildComplete, modelSwapExceptionIsNarrowAndReadOnly) {
     const fs::path base = db->buildDirectory() / entry.hash;
     const fs::path tiles = base / "3dtiles";
     const fs::path old = base / "3dtiles-old";
-    fs::create_directories(base / "nxs");
-    std::ofstream(base / "nxs" / "model.nxz") << "existing Nexus";
+    fs::create_directories(base / "bm3d");
+    std::ofstream(base / "bm3d" / "model.bm3d") << "existing bm3d";
     const auto check = [&](bool expected) {
         bool complete = !expected;
         ASSERT_EQ(DDBIsBuildComplete(root.string().c_str(), rel.c_str(), &complete), DDBERR_NONE);

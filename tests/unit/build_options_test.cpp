@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "bm3d_runner.h"
 #include "build_budget.h"
 #include "dbops.h"
 #include "ddb.h"
@@ -23,7 +24,6 @@
 #include "json_options.h"
 #include "logger.h"
 #include "mio.h"
-#include "nexus_runner.h"
 #include "obj2tiles_runner.h"
 #include "parallel.h"
 #include "raster_test_utils.h"
@@ -265,14 +265,14 @@ using testtools::FakeModelTools;
 using testtools::ModelDataset;
 using testtools::readText;
 
-TEST(DDBBuildEx, theCapReachesNexusAndObj2TilesThroughTheEntryHandler) {
+TEST(DDBBuildEx, theCapReachesBm3dAndObj2TilesThroughTheEntryHandler) {
     ModelDataset ds(TEST_NAME);
     FakeModelTools tools(ds.index.ta);
     const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
     EnvVarGuard budget("DDB_BUILD_THREADS", "6");
 
     ASSERT_DDB_OK(DDBBuildEx(ds.root().c_str(), "model.obj", nullptr, true, false, R"({"threads": 2})"));
-    EXPECT_EQ(readText(tools.nexusLog).rfind("--threads 2 ", 0), 0u) << readText(tools.nexusLog);
+    EXPECT_EQ(readText(tools.bm3dLog).rfind("--threads 2 ", 0), 0u) << readText(tools.bm3dLog);
     // A cap that does not lower the cores of the host is no cap for Obj2Tiles
     EXPECT_EQ(readText(tools.tilesLog), parallel::hardwareThreads() > 2 ? "count=2\n" : "count=\n");
 }
@@ -284,14 +284,14 @@ TEST(DDBBuildEx, theCapOfABuildAllAndOfAPendingRetryReachesTheTools) {
     EnvVarGuard budget("DDB_BUILD_THREADS", "6");
 
     ASSERT_DDB_OK(DDBBuildEx(ds.root().c_str(), nullptr, nullptr, true, false, R"({"threads": 3})"));
-    EXPECT_EQ(readText(tools.nexusLog).rfind("--threads 3 ", 0), 0u) << readText(tools.nexusLog);
+    EXPECT_EQ(readText(tools.bm3dLog).rfind("--threads 3 ", 0), 0u) << readText(tools.bm3dLog);
 
     // A pending marker makes the retry build the entry again, under the cap of the retry
     const std::string hash = indexedHash(ds.index.db.get(), "model.obj");
     std::ofstream(ds.index.db->buildDirectory() / (hash + ".pending")) << "1\n";
-    fs::remove(tools.nexusLog);
+    fs::remove(tools.bm3dLog);
     ASSERT_DDB_OK(DDBBuildEx(ds.root().c_str(), nullptr, nullptr, true, true, R"({"threads": 1})"));
-    EXPECT_EQ(readText(tools.nexusLog).rfind("--threads 1 ", 0), 0u) << readText(tools.nexusLog);
+    EXPECT_EQ(readText(tools.bm3dLog).rfind("--threads 1 ", 0), 0u) << readText(tools.bm3dLog);
 }
 
 TEST(DDBBuildEx, withoutACapABuildKeepsTheBudgetAsDDBBuildDid) {
@@ -301,10 +301,10 @@ TEST(DDBBuildEx, withoutACapABuildKeepsTheBudgetAsDDBBuildDid) {
     EnvVarGuard budget("DDB_BUILD_THREADS", "4");
 
     ASSERT_DDB_OK(DDBBuild(ds.root().c_str(), "model.obj", nullptr, true, false));
-    EXPECT_EQ(readText(tools.nexusLog).rfind("--threads 4 ", 0), 0u) << readText(tools.nexusLog);
+    EXPECT_EQ(readText(tools.bm3dLog).rfind("--threads 4 ", 0), 0u) << readText(tools.bm3dLog);
 
     ASSERT_DDB_OK(DDBBuildEx(ds.root().c_str(), "model.obj", nullptr, true, false, "{}"));
-    EXPECT_EQ(readText(tools.nexusLog).rfind("--threads 4 ", 0), 0u) << readText(tools.nexusLog);
+    EXPECT_EQ(readText(tools.bm3dLog).rfind("--threads 4 ", 0), 0u) << readText(tools.bm3dLog);
 }
 
 #endif

@@ -4,7 +4,7 @@
 #ifndef FAKE_MODEL_TOOLS_H
 #define FAKE_MODEL_TOOLS_H
 
-// The tools of a model build (ddb-nexus, Obj2Tiles) as shell scripts that record how they were
+// The tools of a model build (bm3d, Obj2Tiles) as shell scripts that record how they were
 // started, and a dataset with one model to build with them. POSIX only (the tools are sh scripts).
 
 #ifndef _WIN32
@@ -13,9 +13,9 @@
 #include <iterator>
 #include <string>
 
+#include "bm3d_runner.h"
 #include "dbops.h"
 #include "fs.h"
-#include "nexus_runner.h"
 #include "obj2tiles_runner.h"
 #include "testarea.h"
 #include "utils.h"
@@ -38,38 +38,39 @@ namespace testtools
         return path;
     }
 
-    // ddb-nexus records its arguments in nexusLog and writes the file named by its last one;
+    // bm3d records its arguments in bm3dLog and writes the file named by its last one;
     // Obj2Tiles records its DOTNET_PROCESSOR_COUNT in tilesLog and writes tileset.json in its
     // output folder. The tool paths and core variables are put back when it ends.
     struct FakeModelTools
     {
         TestArea &ta;
-        fs::path nexusLog, tilesLog;
-        EnvVarGuard nexusPath{"DDB_NEXUS_PATH"}, tilesPath{"DDB_OBJ2TILES_PATH"}, dotnet{"DOTNET_PROCESSOR_COUNT"},
-            cores{"DDB_OBJ2TILES_MAX_CORES"};
+        fs::path bm3dLog, tilesLog;
+        EnvVarGuard bm3dPath{ddb::bm3d::kBm3dEnv}, tilesPath{"DDB_OBJ2TILES_PATH"},
+            dotnet{"DOTNET_PROCESSOR_COUNT"}, cores{"DDB_OBJ2TILES_MAX_CORES"};
 
-        explicit FakeModelTools(TestArea &area)
-            : ta(area), nexusLog(ta.getPath("nexus.log")), tilesLog(ta.getPath("tiles.log"))
-        {
+        explicit FakeModelTools(TestArea& area)
+            : ta(area), bm3dLog(ta.getPath("bm3d.log")), tilesLog(ta.getPath("tiles.log")) {
             unsetEnv("DOTNET_PROCESSOR_COUNT");
             unsetEnv("DDB_OBJ2TILES_MAX_CORES");
-            const auto nexus = writeFakeTool(ta, "ddb-nexus",
-                                             "echo \"$@\" > '" + nexusLog.string() + "'\n"
-                                             "for last; do :; done\nprintf nxz > \"$last\"\n");
+            const auto bm3d = writeFakeTool(ta,
+                                            ddb::bm3d::kBm3dName,
+                                            "echo \"$@\" > '" + bm3dLog.string() +
+                                                "'\n"
+                                                "for last; do :; done\nprintf bm3d > \"$last\"\n");
             const auto tiles = writeFakeTool(ta, "Obj2Tiles",
                                              "echo \"count=$DOTNET_PROCESSOR_COUNT\" > '" + tilesLog.string() + "'\n"
                                              "printf '{}' > \"$2/tileset.json\"\n");
-            setEnv("DDB_NEXUS_PATH", nexus.string());
+            setEnv(ddb::bm3d::kBm3dEnv, bm3d.string());
             setEnv("DDB_OBJ2TILES_PATH", tiles.string());
-            ddb::nexus::findNexusBinary(true);
+            ddb::bm3d::findBm3dBinary(true);
             ddb::obj2tiles::findObj2TilesBinary(true);
         }
 
         ~FakeModelTools()
         {
-            nexusPath.restore();
+            bm3dPath.restore();
             tilesPath.restore();
-            ddb::nexus::findNexusBinary(true);
+            ddb::bm3d::findBm3dBinary(true);
             ddb::obj2tiles::findObj2TilesBinary(true);
         }
     };

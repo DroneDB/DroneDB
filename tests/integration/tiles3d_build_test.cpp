@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // 3D Tiles integration: safe tiles rebuild, the Model build producing
-// Nexus + best-effort tiles and the input dispatch of buildModel3DTiles
+// bm3d + best-effort tiles and the input dispatch of buildModel3DTiles
 // for PLY and glTF.
 //
 // The safe-rebuild tests drive buildModel3DTiles with a fake Obj2Tiles (a POSIX shell
@@ -16,15 +16,16 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <thread>
 #include <map>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "3d.h"
 #include "build.h"
+#include "build_manifest.h"
 #include "buildlock.h"
 #include "dbops.h"
 #include "ddb.h"
@@ -473,7 +474,7 @@ TEST(tiles3dBuild, noUvGltfConvertsToColouredObj) {
     EXPECT_EQ(f, 2u);
     EXPECT_GT(colourSum, 0.0);
 
-    // The Nexus path keeps the previous PLY output for a no-UV glTF.
+    // The bm3d path keeps the previous PLY output for a no-UV glTF.
     std::string geomPly, mtlPly;
     convertGltfTo3dModel(gltf.string(), ta.getPath("out2/quad").string(), geomPly, mtlPly, false, true);
     EXPECT_EQ(fs::path(geomPly).extension(), ".ply");
@@ -544,7 +545,7 @@ MANUAL_TEST(tiles3dBuild, realObj2TilesFromBrightonPly) {
 }
 
 // ---------------------------------------------------------------------------
-// buildInternal for a Model (Nexus + best-effort tiles)
+// buildInternal for a Model (bm3d + best-effort tiles)
 // ---------------------------------------------------------------------------
 
 struct ModelDataset : IndexFixture {
@@ -570,11 +571,11 @@ TEST(tiles3dBuild, completeModelRecoversTilesBeforeReturningWithoutTools) {
     ModelDataset ds(TEST_NAME);
     ds.add("model.obj", gridObj());
     const fs::path base = ds.out("model.obj");
-    const fs::path nxs = base / "nxs" / "model.nxz";
+    const fs::path bm3dFile = base / "bm3d" / "model.bm3d";
     const fs::path tiles = base / "3dtiles";
     const fs::path old = base / "3dtiles-old";
-    writeFile(nxs, "existing Nexus bytes");
-    const auto nxsTime = fs::last_write_time(nxs);
+    writeFile(bm3dFile, "existing bm3d bytes");
+    const auto bm3dTime = fs::last_write_time(bm3dFile);
 
     // Recovery is reached through the public API, even with no converter tool.
     for (const std::string state : {"missing", "empty", "partial", "sentinel-directory"}) {
@@ -598,11 +599,11 @@ TEST(tiles3dBuild, completeModelRecoversTilesBeforeReturningWithoutTools) {
         EXPECT_FALSE(fs::exists(old));
         ASSERT_EQ(DDBIsBuildComplete(ds.root.string().c_str(), "model.obj", &complete), DDBERR_NONE);
         EXPECT_TRUE(complete);
-        EXPECT_EQ(readText(nxs), "existing Nexus bytes");
-        EXPECT_EQ(fs::last_write_time(nxs), nxsTime);
+        EXPECT_EQ(readText(bm3dFile), "existing bm3d bytes");
+        EXPECT_EQ(fs::last_write_time(bm3dFile), bm3dTime);
     }
 
-    // A complete final wins; ordinary Nexus-only models remain complete.
+    // A complete final wins; ordinary bm3d-only models remain complete.
     writeFile(tiles / "marker", "newer");
     writeFile(old / "tileset.json", "{}");
     ASSERT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false, false), DDBERR_NONE);
@@ -618,7 +619,7 @@ TEST(tiles3dBuild, completeModelDefersRecoveryUnderLiveTilesLock) {
     const fs::path base = ds.out("model.obj");
     const fs::path tiles = base / "3dtiles";
     const fs::path old = base / "3dtiles-old";
-    writeFile(base / "nxs" / "model.nxz", "existing Nexus");
+    writeFile(base / "bm3d" / "model.bm3d", "existing bm3d");
     writeFile(old / "tileset.json", "{}");
     writeFile(old / "marker", "previous");
     writeFile(tiles / "unfinished", "in flight");
@@ -655,7 +656,7 @@ TEST(tiles3dBuild, recoveryInspectionErrorPreservesUsableBackup) {
     EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
 }
 
-TEST(tiles3dBuild, modelBuildProducesNexusAndTiles) {
+TEST(tiles3dBuild, modelBuildProducesBm3dAndTiles) {
     SKIP_WITHOUT_POSIX_SHELL();
     Obj2TilesEnvReset reset;
     ModelDataset ds(TEST_NAME);
@@ -664,23 +665,81 @@ TEST(tiles3dBuild, modelBuildProducesNexusAndTiles) {
     usePath(writeFakeObj2Tiles(ds.ta.getFolder(), true));
     ddb::build(ds.db.get(), "model.obj", "", false);
 
-    EXPECT_TRUE(fs::exists(ds.out("model.obj") / "nxs" / "model.nxz"));
+    EXPECT_TRUE(fs::exists(ds.out("model.obj") / "bm3d" / "model.bm3d"));
     EXPECT_TRUE(fs::exists(ds.out("model.obj") / "3dtiles" / "tileset.json"));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "model.obj"));
     expectNoLeftovers(ds.out("model.obj") / "3dtiles");
 
-    // A forced rebuild whose tiles step fails still publishes Nexus and keeps the
+    // A forced rebuild whose tiles step fails still publishes bm3d and keeps the
     // previous tiles.
     writeFile(ds.out("model.obj") / "3dtiles" / "marker.txt", "previous");
     usePath(writeFakeObj2Tiles(ds.ta.getFolder(), false));
     EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", true));
-    EXPECT_TRUE(fs::exists(ds.out("model.obj") / "nxs" / "model.nxz"));
+    EXPECT_TRUE(fs::exists(ds.out("model.obj") / "bm3d" / "model.bm3d"));
     EXPECT_EQ(readText(ds.out("model.obj") / "3dtiles" / "marker.txt"), "previous");
     expectNoLeftovers(ds.out("model.obj") / "3dtiles");
 }
 
+// The roles an entry lists, in order
+std::vector<std::string> listedRoles(Database* db, const std::string& rel) {
+    std::vector<std::string> roles;
+    const json listing = getBuildArtifactsJson(db, {rel});
+    for (const auto& artifact : listing.at(0).at("build").at("artifacts"))
+        roles.push_back(artifact.at("role").get<std::string>());
+    return roles;
+}
+
+// A model built before bm3d: the Nexus file in nxs/, and 3D Tiles
+void seedLegacyNexusBuild(const fs::path& base) {
+    writeFile(base / "nxs" / "model.nxz", "Nexus file of an older build");
+    writeFile(base / "3dtiles" / "tileset.json", "{}");
+}
+
+// A model with only the legacy build is served as it is until the rebuild, and incomplete; the
+// rebuild publishes bm3d/ and then removes nxs/
+TEST(tiles3dBuild, bm3dBuildReplacesTheLegacyNexusBuild) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    Obj2TilesEnvReset reset;
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", gridObj());
+    usePath(writeFakeObj2Tiles(ds.ta.getFolder(), true));
+    const fs::path base = ds.out("model.obj");
+    seedLegacyNexusBuild(base);
+
+    using Roles = std::vector<std::string>;
+    EXPECT_EQ(listedRoles(ds.db.get(), "model.obj"), (Roles{"model.nexus", "model.3dtiles"}));
+    EXPECT_FALSE(ddb::isBuildComplete(ds.db.get(), "model.obj"));
+
+    ddb::build(ds.db.get(), "model.obj", "", false);
+
+    EXPECT_GT(fs::file_size(base / "bm3d" / "model.bm3d"), 0u);
+    EXPECT_FALSE(fs::exists(base / "nxs")) << "the legacy build goes once bm3d/ is published";
+    EXPECT_TRUE(fs::exists(base / "3dtiles" / "tileset.json"));
+    EXPECT_EQ(listedRoles(ds.db.get(), "model.obj"), (Roles{"model.bm3d", "model.3dtiles"}));
+    EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "model.obj"));
+}
+
+// bm3d refuses the model (exit code 2): nothing is published, so the legacy build stays and
+// model.nexus is still listed. The input is invalid for the build, not a missing dependency.
+TEST(tiles3dBuild, failedBm3dBuildKeepsTheLegacyNexusBuild) {
+    Obj2TilesEnvReset reset;
+    usePath(kBogusBinary);
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", "this is not a mesh\n");
+    const fs::path base = ds.out("model.obj");
+    seedLegacyNexusBuild(base);
+
+    EXPECT_THROW(ddb::build(ds.db.get(), "model.obj", "", true), InvalidArgsException);
+
+    EXPECT_EQ(readText(base / "nxs" / "model.nxz"), "Nexus file of an older build");
+    EXPECT_FALSE(fs::exists(base / "bm3d"));
+    EXPECT_EQ(listedRoles(ds.db.get(), "model.obj"),
+              (std::vector<std::string>{"model.nexus", "model.3dtiles"}));
+    EXPECT_FALSE(ddb::isBuildComplete(ds.db.get(), "model.obj"));
+}
+
 // Stress test for the lock order shared by builds and cleanupBuild (primary
-// "nxs" lock, then "3dtiles"). A cleanup thread keeps seeding a stale
+// "bm3d" lock, then "3dtiles"). A cleanup thread keeps seeding a stale
 // "3dtiles-temp-*" leftover and collecting it (which takes both locks for the
 // rename) while forced Model builds run on the main thread. Invariant: a build
 // that returns normally has replaced the tiles (the stale marker is gone and
@@ -731,7 +790,7 @@ TEST(tiles3dBuild, cleanupNeverStripsTilesFromConcurrentModelBuild) {
             continue;
         }
         ++built;
-        EXPECT_TRUE(fs::exists(base / "nxs" / "model.nxz")) << "iteration " << i;
+        EXPECT_TRUE(fs::exists(base / "bm3d" / "model.bm3d")) << "iteration " << i;
         EXPECT_TRUE(fs::exists(tiles / "tileset.json")) << "iteration " << i;
         EXPECT_FALSE(fs::exists(tiles / "stale.marker"))
             << "iteration " << i << ": build returned normally without replacing the tiles";
@@ -749,10 +808,10 @@ TEST(tiles3dBuild, cleanupNeverStripsTilesFromConcurrentModelBuild) {
     std::error_code ec;
     fs::remove_all(base / "3dtiles-temp-0123456789abcdef", ec);
     expectNoLeftovers(tiles);
-    EXPECT_NO_THROW({ BuildLock probe((base / "nxs").string(), false); });
+    EXPECT_NO_THROW({ BuildLock probe((base / "bm3d").string(), false); });
 }
 
-TEST(tiles3dBuild, modelBuildNexusOnlyWithoutObj2Tiles) {
+TEST(tiles3dBuild, modelBuildBm3dOnlyWithoutObj2Tiles) {
     Obj2TilesEnvReset reset;
     ModelDataset ds(TEST_NAME);
     ds.add("model.obj", gridObj());
@@ -760,7 +819,7 @@ TEST(tiles3dBuild, modelBuildNexusOnlyWithoutObj2Tiles) {
     usePath(kBogusBinary);
     EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", false));
 
-    EXPECT_TRUE(fs::exists(ds.out("model.obj") / "nxs" / "model.nxz"));
+    EXPECT_TRUE(fs::exists(ds.out("model.obj") / "bm3d" / "model.bm3d"));
     EXPECT_FALSE(fs::exists(ds.out("model.obj") / "3dtiles"));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "model.obj"));
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
@@ -773,31 +832,31 @@ TEST(tiles3dBuild, modelBuildWithRealObj2Tiles) {
     ds.add("sub/mesh.ply", gridPly(8));
 
     ddb::build(ds.db.get(), "sub/mesh.ply", "", false);
-    EXPECT_TRUE(fs::exists(ds.out("sub/mesh.ply") / "nxs" / "model.nxz"));
+    EXPECT_TRUE(fs::exists(ds.out("sub/mesh.ply") / "bm3d" / "model.bm3d"));
     EXPECT_TRUE(fs::exists(ds.out("sub/mesh.ply") / "3dtiles" / "tileset.json"));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/mesh.ply"));
     expectNoLeftovers(ds.out("sub/mesh.ply") / "3dtiles");
 }
 
-// An untextured PLY still goes to Nexus as is and builds through build().
-TEST(tiles3dBuild, untexturedPlyBuildsNexus) {
+// An untextured PLY still goes to bm3d as is and builds through build().
+TEST(tiles3dBuild, untexturedPlyBuildsBm3d) {
     Obj2TilesEnvReset reset;
     ModelDataset ds(TEST_NAME);
     ds.add("mesh.ply", gridPly(6));
 
     usePath(kBogusBinary);
     ddb::build(ds.db.get(), "mesh.ply", "", false);
-    EXPECT_TRUE(fs::exists(ds.out("mesh.ply") / "nxs" / "model.nxz"));
-    EXPECT_GT(fs::file_size(ds.out("mesh.ply") / "nxs" / "model.nxz"), 0u);
+    EXPECT_TRUE(fs::exists(ds.out("mesh.ply") / "bm3d" / "model.bm3d"));
+    EXPECT_GT(fs::file_size(ds.out("mesh.ply") / "bm3d" / "model.bm3d"), 0u);
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "mesh.ply"));
 }
 
 // ---- Untextured and unordered PLY inputs ----
 
-// An untextured PLY is handed to Nexus as is. A PLY whose element order the
-// converter forbids (face before vertex) fails inside Nexus ("Could not build
-// nexus file"), not in the converter, which proves no conversion preceded Nexus.
-TEST(tiles3dBuild, untexturedPlyGoesToNexusUnconverted) {
+// An untextured PLY is handed to bm3d as is. A PLY whose element order the
+// converter forbids (face before vertex) fails inside bm3d ("Could not build
+// bm3d file"), not in the converter, which proves no conversion preceded bm3d.
+TEST(tiles3dBuild, untexturedPlyGoesToBm3dUnconverted) {
     TestArea ta(TEST_NAME, true);
     const fs::path ply = ta.getPath("mesh.ply");
     writeFile(ply,
@@ -807,10 +866,11 @@ TEST(tiles3dBuild, untexturedPlyGoesToNexusUnconverted) {
     EXPECT_THROW(convertPlyToObj(ply.string(), ta.getPath("c/m").string()), AppException)
         << "precondition: the converter rejects this element order";
     try {
-        buildNexus(ply.string(), ta.getPath("a.nxz").string(), false);
-        FAIL() << "Nexus is expected to reject this file";
+        buildBm3d(ply.string(), ta.getPath("a.bm3d").string(), false);
+        FAIL() << "bm3d is expected to reject this file";
     } catch (const AppException& e) {
-        EXPECT_NE(std::string(e.what()).find("Could not build nexus file"), std::string::npos) << e.what();
+        EXPECT_NE(std::string(e.what()).find("Could not build bm3d file"), std::string::npos)
+            << e.what();
     }
 }
 
@@ -930,8 +990,8 @@ TEST(tiles3dBuild, stlIsConvertedToObjForTiles) {
     }
 }
 
-// What Nexus gets is the STL itself, and no converted copy is made for it
-TEST(tiles3dBuild, stlGoesToNexusUnconverted) {
+// What bm3d gets is the STL itself, and no converted copy is made for it
+TEST(tiles3dBuild, stlGoesToBm3dUnconverted) {
     Obj2TilesEnvReset reset;
     ModelDataset ds(TEST_NAME);
     ds.add("model.stl", gridStl(6, true));
@@ -939,12 +999,12 @@ TEST(tiles3dBuild, stlGoesToNexusUnconverted) {
 
     CaptureScope cap(plog::debug);
     ddb::build(ds.db.get(), "model.stl", "", false);
-    EXPECT_TRUE(cap.contains("STL, handing it to Nexus as is"));
+    EXPECT_TRUE(cap.contains("STL, handing it to bm3d as is"));
     EXPECT_FALSE(cap.contains("converting"));
 }
 
-// A dataset with an STL (ASCII or binary): Model, built into Nexus plus 3D Tiles
-TEST(tiles3dBuild, stlModelBuildProducesNexusAndTiles) {
+// A dataset with an STL (ASCII or binary): Model, built into bm3d plus 3D Tiles
+TEST(tiles3dBuild, stlModelBuildProducesBm3dAndTiles) {
     SKIP_WITHOUT_POSIX_SHELL();
     Obj2TilesEnvReset reset;
     ModelDataset ds(TEST_NAME);
@@ -955,7 +1015,7 @@ TEST(tiles3dBuild, stlModelBuildProducesNexusAndTiles) {
     for (const std::string rel : {"ascii.stl", "sub/binary.stl"}) {
         ddb::build(ds.db.get(), rel, "", false);
 
-        EXPECT_GT(fs::file_size(ds.out(rel) / "nxs" / "model.nxz"), 0u) << rel;
+        EXPECT_GT(fs::file_size(ds.out(rel) / "bm3d" / "model.bm3d"), 0u) << rel;
         EXPECT_TRUE(fs::exists(ds.out(rel) / "3dtiles" / "tileset.json")) << rel;
         EXPECT_EQ(objCounts(ds.out(rel) / "3dtiles" / "input.copy").second, 50u) << rel;
         EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), rel)) << rel;
@@ -964,7 +1024,7 @@ TEST(tiles3dBuild, stlModelBuildProducesNexusAndTiles) {
 }
 
 // The test files of the test-data repository: real STLs (MeshLab ASCII, binary) are Models, Assimp
-// reads them and they build through the real Nexus builder and Obj2Tiles.
+// reads them and they build through the real bm3d builder and Obj2Tiles.
 TEST(tiles3dBuild, stlFixturesBuild) {
     Obj2TilesEnvReset reset;
     ModelDataset ds(TEST_NAME);
@@ -984,7 +1044,7 @@ TEST(tiles3dBuild, stlFixturesBuild) {
 
         ds.add(fx.rel, readText(file));
         ddb::build(ds.db.get(), fx.rel, "", false);
-        EXPECT_GT(fs::file_size(ds.out(fx.rel) / "nxs" / "model.nxz"), 0u) << fx.rel;
+        EXPECT_GT(fs::file_size(ds.out(fx.rel) / "bm3d" / "model.bm3d"), 0u) << fx.rel;
         EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), fx.rel)) << fx.rel;
         if (!obj2tiles::findObj2TilesBinary(true).empty()) {
             EXPECT_TRUE(fs::exists(ds.out(fx.rel) / "3dtiles" / "tileset.json")) << fx.rel;

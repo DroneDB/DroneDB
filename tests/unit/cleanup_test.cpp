@@ -579,7 +579,7 @@ namespace
         EXPECT_TRUE(fs::exists(hashDir / "cog" / "cog.tif"));
     }
 
-    // A Model build holds "nxs.building" while buildModel3DTiles writes
+    // A Model build holds "bm3d.building" while buildModel3DTiles writes
     // "3dtiles-temp-*" under its own "3dtiles" lock: only that lock protects them.
     TEST(cleanupBuild, TilesTempAndOldKeptUnderLiveTilesLock)
     {
@@ -602,8 +602,8 @@ namespace
         EXPECT_TRUE(fs::exists(tiles.string() + ".building"));
     }
 
-    // Cleanup follows the build's lock order: primary "nxs" lock first, then
-    // "3dtiles". A live "nxs" lock (a Model build in progress) therefore protects
+    // Cleanup follows the build's lock order: primary "bm3d" lock first, then
+    // "3dtiles". A live "bm3d" lock (a Model build in progress) therefore protects
     // the tiles siblings too, and cleanup never waits for it.
     TEST(cleanupBuild, TilesTempAndOldKeptUnderLivePrimaryLock)
     {
@@ -616,7 +616,7 @@ namespace
         const fs::path tiles = makeSubfolder(hashDir, "3dtiles");
         const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
         const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
-        ddb::BuildLock nxsLive((hashDir / "nxs").string());
+        ddb::BuildLock bm3dLive((hashDir / "bm3d").string());
 
         const auto start = std::chrono::steady_clock::now();
         const auto r = ddb::cleanupBuild(db.get(), "");
@@ -654,8 +654,8 @@ namespace
         EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
         // Both locks taken by cleanup are released, in order.
         EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
-        EXPECT_FALSE(fs::exists((hashDir / "nxs").string() + ".building"));
-        EXPECT_NO_THROW({ ddb::BuildLock probeNxs((hashDir / "nxs").string(), false); });
+        EXPECT_FALSE(fs::exists((hashDir / "bm3d").string() + ".building"));
+        EXPECT_NO_THROW({ ddb::BuildLock probeBm3d((hashDir / "bm3d").string(), false); });
         EXPECT_NO_THROW({ ddb::BuildLock probeTiles(tiles.string(), false); });
     }
 
@@ -673,7 +673,7 @@ namespace
         makeSubfolder(hashDir, "3dtiles");
         const fs::path trash = makeSubfolder(hashDir, "3dtiles-temp-trash-0123456789abcdef");
         const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
-        ddb::BuildLock nxsLive((hashDir / "nxs").string());
+        ddb::BuildLock bm3dLive((hashDir / "bm3d").string());
 
         const auto r = ddb::cleanupBuild(db.get(), "");
         EXPECT_FALSE(fs::exists(trash));

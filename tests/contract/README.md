@@ -147,7 +147,8 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   directory (so `vector.mvt` is `application/json`, its TileJSON; the tiles are served by file
   name). The values: `raster.cog` `image/tiff; application=geotiff; profile=cloud-optimized`,
   `pointcloud.copc` `application/vnd.laszip+copc`, `vector.gpkg`
-  `application/geopackage+sqlite3` (the IANA registration), `model.nexus`, `gsplat.lod`,
+  `application/geopackage+sqlite3` (the IANA registration), `model.bm3d`
+  `application/vnd.dronedb.bm3d`, `model.nexus`, `gsplat.lod`,
   `gsplat.spz` `application/octet-stream`, the JSON artifacts and directory indexes
   `application/json`.
 * `downloadName` is set for the three artifacts a download offers today: `cog.tif`,

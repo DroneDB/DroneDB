@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "bm3d_runner.h"
 #include "build_budget.h"
 #include "buildlod_runner.h"
 #include "cad.h"
@@ -21,7 +22,6 @@
 #include "fs.h"
 #include "gtest/gtest.h"
 #include "mio.h"
-#include "nexus_runner.h"
 #include "obj2tiles_runner.h"
 #include "parallel.h"
 #include "process_runner.h"
@@ -256,13 +256,12 @@ TEST(ToolLocator, theLibraryFolderIsTheFolderOfTheFileThatHoldsDroneDB) {
 TEST(ToolLocator, theRunnersFindTheirToolThroughIt) {
     TestArea ta("runner_locator_runners", true);
     const fs::path tool = fakeTool(ta, "bin/tool");
-    for (const auto &[var, find] :
-         std::vector<std::pair<const char *, std::function<fs::path()>>>{
+    for (const auto& [var, find] : std::vector<std::pair<const char*, std::function<fs::path()>>>{
              {"DDB_OBJ2TILES_PATH", [] { return obj2tiles::findObj2TilesBinary(true); }},
              {"DDB_UNTWINE_PATH", [] { return untwine::findUntwineBinary(true); }},
              {"DDB_BUILDLOD_PATH", [] { return buildlod::findBuildLodBinary(true); }},
              {"DDB_DWG2DXF_PATH", [] { return cad::findDwg2DxfBinary(true); }},
-             {"DDB_NEXUS_PATH", [] { return nexus::findNexusBinary(true); }}}) {
+             {"DDB_BM3D_PATH", [] { return bm3d::findBm3dBinary(true); }}}) {
         EnvVarGuard guard(var, io::toUtf8(tool));
         EXPECT_EQ(find(), tool) << var;
         setEnv(var, io::toUtf8(ta.getPath("missing")));
@@ -523,26 +522,26 @@ TEST(Obj2TilesRunner, aCanceledChildPropagatesAndReleasesItsCpuTokens) {
     EXPECT_EQ(parallel::cpuTokensInUse(), before);
 }
 
-// ------------------------------------------------------------------------ ddb-nexus
+// ------------------------------------------------------------------------ bm3d
 
-struct NexusFixture {
+struct Bm3dFixture {
     TestArea ta;
     fs::path tool;
     fs::path input;
     fs::path output;
     FakeProcessRunner fake;
 
-    explicit NexusFixture(const std::string &name)
+    explicit Bm3dFixture(const std::string& name)
         : ta(name, true),
-          tool(fakeTool(ta, "bin/ddb-nexus")),
+          tool(fakeTool(ta, "bin/bm3d")),
           input(ta.getPath("model.obj")),
-          output(ta.getPath("out/model.nxz")) {
+          output(ta.getPath("out/model.bm3d")) {
         touch(input);
         // the tool writes its output unless a test replaces this
-        fake.effect = [this](const FakeProcessRunner::Call &) { touch(output, "nxz"); };
+        fake.effect = [this](const FakeProcessRunner::Call&) { touch(output, "bm3d"); };
     }
 
-    void run() { nexus::runNexusBuild(input, output, tool, fake); }
+    void run() { bm3d::runBm3dBuild(input, output, tool, fake); }
 
     std::string failureMessage() {
         try {
@@ -555,8 +554,8 @@ struct NexusFixture {
     }
 };
 
-TEST(NexusRunner, runsTheToolOnTheInputAndTheOutput) {
-    NexusFixture f("runner_nexus");
+TEST(Bm3dRunner, runsTheToolOnTheInputAndTheOutput) {
+    Bm3dFixture f("runner_bm3d");
     const ScopedProcessConfig pool(R"({"cpuPoolSize": 16})");
     EnvVarGuard threads("DDB_BUILD_THREADS", "1");
     f.run();
@@ -567,10 +566,10 @@ TEST(NexusRunner, runsTheToolOnTheInputAndTheOutput) {
 }
 
 // The tool keeps busy the threads one build may use (DDB_BUILD_THREADS), as many as the CPU pool
-// has free, and their tokens are held while it runs: a Nexus build counts against the same
+// has free, and their tokens are held while it runs: a bm3d build counts against the same
 // budget as the raster builds and the other tools, so concurrent builds cannot take every core
-TEST(NexusRunner, theToolGetsTheThreadsOfABuildThatThePoolHasFree) {
-    NexusFixture f("runner_nexus_threads");
+TEST(Bm3dRunner, theToolGetsTheThreadsOfABuildThatThePoolHasFree) {
+    Bm3dFixture f("runner_bm3d_threads");
     EnvVarGuard threads("DDB_BUILD_THREADS", "3");
     auto threadsArg = [&f]() {
         const auto &args = f.fake.calls.back().args;
@@ -581,7 +580,7 @@ TEST(NexusRunner, theToolGetsTheThreadsOfABuildThatThePoolHasFree) {
     size_t heldWhileRunning = 0;
     f.fake.effect = [&](const FakeProcessRunner::Call &) {
         heldWhileRunning = parallel::cpuTokensInUse() - before;
-        touch(f.output, "nxz");
+        touch(f.output, "bm3d");
     };
 
     {
@@ -605,65 +604,104 @@ TEST(NexusRunner, theToolGetsTheThreadsOfABuildThatThePoolHasFree) {
 
 // The cap of a build (BuildOptions::threads) lowers the threads of the tool and the tokens it
 // holds; it never raises them above DDB_BUILD_THREADS
-TEST(NexusRunner, theCapOfABuildLowersTheThreadsOfTheTool) {
-    NexusFixture f("runner_nexus_build_cap");
+TEST(Bm3dRunner, theCapOfABuildLowersTheThreadsOfTheTool) {
+    Bm3dFixture f("runner_bm3d_build_cap");
     EnvVarGuard threads("DDB_BUILD_THREADS", "6");
     const ScopedProcessConfig pool(R"({"cpuPoolSize": 16})");
     const auto before = parallel::cpuTokensInUse();
     size_t heldWhileRunning = 0;
     f.fake.effect = [&](const FakeProcessRunner::Call &) {
         heldWhileRunning = parallel::cpuTokensInUse() - before;
-        touch(f.output, "nxz");
+        touch(f.output, "bm3d");
     };
     const auto threadsArg = [&f]() {
         const auto &args = f.fake.calls.back().args;
         return args.at(1);
     };
 
-    nexus::runNexusBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(2));
+    bm3d::runBm3dBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(2));
     EXPECT_EQ(threadsArg(), "2");
     EXPECT_EQ(heldWhileRunning, 1u);
     EXPECT_EQ(parallel::cpuTokensInUse(), before);
 
-    nexus::runNexusBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(4096));
+    bm3d::runBm3dBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(4096));
     EXPECT_EQ(threadsArg(), "6") << "a cap above the budget does not raise it";
 
-    nexus::runNexusBuild(f.input, f.output, f.tool, f.fake, BuildOptions());
+    bm3d::runBm3dBuild(f.input, f.output, f.tool, f.fake, BuildOptions());
     EXPECT_EQ(threadsArg(), "6");
 
-    nexus::runNexusBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(1));
+    bm3d::runBm3dBuild(f.input, f.output, f.tool, f.fake, BuildOptions::withThreads(1));
     EXPECT_EQ(threadsArg(), "1");
 }
 
-TEST(NexusRunner, anExitCodeIsAFailureWithTheLastOutput) {
-    NexusFixture f("runner_nexus_exit");
+TEST(Bm3dRunner, anExitCodeIsAFailureWithTheLastOutput) {
+    Bm3dFixture f("runner_bm3d_exit");
     // the reason comes last, after more than the 2000 bytes the message keeps
-    f.fake.result = FakeProcessRunner::exited(
-        1, "first line of the progress\n" + std::string(3000, '.') + "\nddb-nexus: could not build the model");
+    f.fake.result =
+        FakeProcessRunner::exited(1,
+                                  "first line of the progress\n" + std::string(3000, '.') +
+                                      "\nbm3d: could not build the model");
     f.fake.effect = nullptr;
     const std::string message = f.failureMessage();
-    EXPECT_EQ(message.rfind("Could not build nexus file for " + io::toUtf8(f.input) + ": ", 0), 0u) << message;
-    EXPECT_NE(message.find("ddb-nexus exited with code 1: "), std::string::npos) << message;
-    EXPECT_NE(message.find("ddb-nexus: could not build the model"), std::string::npos) << message;
+    EXPECT_EQ(message.rfind("Could not build bm3d file for " + io::toUtf8(f.input) + ": ", 0), 0u)
+        << message;
+    EXPECT_NE(message.find("bm3d exited with code 1: "), std::string::npos) << message;
+    EXPECT_NE(message.find("bm3d: could not build the model"), std::string::npos) << message;
     EXPECT_EQ(message.find("first line of the progress"), std::string::npos) << "only the tail";
     EXPECT_LT(message.size(), 2400u);
 }
 
-TEST(NexusRunner, aSignalIsAFailureThatNamesIt) {
-    NexusFixture f("runner_nexus_signal");
+// Exit code 2 is bm3d refusing the model (missing, unreadable or unparseable mesh or texture):
+// the build cannot succeed until the input changes, which is an invalid argument of the build and
+// no failure of the tool; 1 (the build failed) and 64 (usage) stay plain failures
+TEST(Bm3dRunner, anInvalidInputIsToldApartFromAFailedBuild) {
+    Bm3dFixture f("runner_bm3d_invalid_input");
+    f.fake.effect = nullptr;
+    f.fake.result = FakeProcessRunner::exited(2, "bm3d: model.obj: no vertices");
+    try {
+        f.run();
+        FAIL() << "an invalid input throws";
+    } catch (const InvalidArgsException& e) {
+        const std::string message = e.what();
+        EXPECT_EQ(message.rfind("Could not build bm3d file for " + io::toUtf8(f.input) + ": ", 0),
+                  0u)
+            << message;
+        EXPECT_NE(message.find("bm3d exited with code 2: "), std::string::npos) << message;
+        EXPECT_NE(message.find("no vertices"), std::string::npos) << message;
+    }
+
+    for (const int code : {1, 64}) {
+        f.fake.result = FakeProcessRunner::exited(code, "bm3d: failed");
+        try {
+            f.run();
+            FAIL() << "exit code " << code << " throws";
+        } catch (const InvalidArgsException&) {
+            ADD_FAILURE() << "exit code " << code << " is not an invalid input";
+        } catch (const AppException& e) {
+            EXPECT_NE(std::string(e.what()).find("bm3d exited with code " + std::to_string(code)),
+                      std::string::npos)
+                << e.what();
+        }
+    }
+}
+
+TEST(Bm3dRunner, aSignalIsAFailureThatNamesIt) {
+    Bm3dFixture f("runner_bm3d_signal");
     process::Result killed;
     killed.started = true;
     killed.termSignal = 11;
-    killed.outputTail = "QFSFileEngine::map: error";
+    killed.outputTail = "terminate called after throwing an instance of std::bad_alloc";
     f.fake.result = killed;
     f.fake.effect = nullptr;
     const std::string message = f.failureMessage();
     EXPECT_NE(message.find("killed by signal 11"), std::string::npos) << message;
-    EXPECT_NE(message.find("QFSFileEngine::map: error"), std::string::npos) << message;
+    EXPECT_NE(message.find("terminate called after throwing an instance of std::bad_alloc"),
+              std::string::npos)
+        << message;
 }
 
-TEST(NexusRunner, aTimeoutAndAToolThatCannotStartAreFailures) {
-    NexusFixture f("runner_nexus_timeout");
+TEST(Bm3dRunner, aTimeoutAndAToolThatCannotStartAreFailures) {
+    Bm3dFixture f("runner_bm3d_timeout");
     f.fake.effect = nullptr;
     f.fake.result = FakeProcessRunner::timedOutAfterIdle();
     EXPECT_NE(f.failureMessage().find("killed after 3600 s without output"), std::string::npos);
@@ -674,48 +712,48 @@ TEST(NexusRunner, aTimeoutAndAToolThatCannotStartAreFailures) {
     EXPECT_NE(f.failureMessage().find("failed to start: Permission denied"), std::string::npos);
 }
 
-TEST(NexusRunner, successWithoutTheOutputFileIsAFailure) {
-    NexusFixture f("runner_nexus_nooutput");
+TEST(Bm3dRunner, successWithoutTheOutputFileIsAFailure) {
+    Bm3dFixture f("runner_bm3d_nooutput");
     f.fake.effect = nullptr;
-    f.fake.result = FakeProcessRunner::exited(0, "ddb-nexus: building");
+    f.fake.result = FakeProcessRunner::exited(0, "bm3d: building");
     const std::string message = f.failureMessage();
     EXPECT_NE(message.find("wrote no output file " + io::toUtf8(f.output)), std::string::npos) << message;
-    EXPECT_NE(message.find("ddb-nexus: building"), std::string::npos) << message;
+    EXPECT_NE(message.find("bm3d: building"), std::string::npos) << message;
 
     // an empty file is no output either
     f.fake.effect = [&](const FakeProcessRunner::Call &) { touch(f.output, ""); };
     EXPECT_NE(f.failureMessage().find("wrote no output file"), std::string::npos);
 }
 
-TEST(NexusRunner, aMissingToolNamesItAndTheVariableAndStartsNothing) {
-    NexusFixture f("runner_nexus_missing");
-    f.tool = f.ta.getPath("missing/ddb-nexus");
+TEST(Bm3dRunner, aMissingToolNamesItAndTheVariableAndStartsNothing) {
+    Bm3dFixture f("runner_bm3d_missing");
+    f.tool = f.ta.getPath("missing/bm3d");
     const std::string message = f.failureMessage();
-    EXPECT_NE(message.find("ddb-nexus"), std::string::npos) << message;
-    EXPECT_NE(message.find("DDB_NEXUS_PATH"), std::string::npos) << message;
+    EXPECT_NE(message.find("bm3d"), std::string::npos) << message;
+    EXPECT_NE(message.find("DDB_BM3D_PATH"), std::string::npos) << message;
     EXPECT_TRUE(f.fake.calls.empty());
 }
 
-TEST(NexusRunner, aMissingToolIsLookedUpThroughTheVariable) {
-    NexusFixture f("runner_nexus_variable");
-    EnvVarGuard guard("DDB_NEXUS_PATH", io::toUtf8(f.ta.getPath("missing/ddb-nexus")));
-    nexus::findNexusBinary(true);
+TEST(Bm3dRunner, aMissingToolIsLookedUpThroughTheVariable) {
+    Bm3dFixture f("runner_bm3d_variable");
+    EnvVarGuard guard("DDB_BM3D_PATH", io::toUtf8(f.ta.getPath("missing/bm3d")));
+    bm3d::findBm3dBinary(true);
     try {
-        nexus::runNexusBuild(f.input, f.output, {}, f.fake);
+        bm3d::runBm3dBuild(f.input, f.output, {}, f.fake);
         FAIL() << "a missing tool throws";
     } catch (const AppException &e) {
-        EXPECT_NE(std::string(e.what()).find("DDB_NEXUS_PATH"), std::string::npos) << e.what();
+        EXPECT_NE(std::string(e.what()).find("DDB_BM3D_PATH"), std::string::npos) << e.what();
     }
     EXPECT_TRUE(f.fake.calls.empty());
 
-    setEnv("DDB_NEXUS_PATH", io::toUtf8(f.tool));
-    nexus::runNexusBuild(f.input, f.output, {}, f.fake);
+    setEnv("DDB_BM3D_PATH", io::toUtf8(f.tool));
+    bm3d::runBm3dBuild(f.input, f.output, {}, f.fake);
     ASSERT_EQ(f.fake.calls.size(), 1u);
     EXPECT_EQ(f.fake.calls[0].binary, f.tool);
 }
 
-TEST(NexusRunner, aCanceledChildPropagatesAndReleasesItsCpuTokens) {
-    NexusFixture f("runner_nexus_cancel");
+TEST(Bm3dRunner, aCanceledChildPropagatesAndReleasesItsCpuTokens) {
+    Bm3dFixture f("runner_bm3d_cancel");
     f.fake.effect = [](const FakeProcessRunner::Call &) { throw CanceledException("canceled"); };
     const auto before = parallel::cpuTokensInUse();
     EXPECT_THROW(f.run(), CanceledException);

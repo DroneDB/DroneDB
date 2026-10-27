@@ -69,9 +69,12 @@ TEST(entryHandler, EveryBuiltinTypeHasItsHandlerAndName) {
 
 // The types isBuildableInternal() built, with their output subfolders
 TEST(entryHandler, BuildableTypesAndSubfoldersArePinned) {
-    const std::map<EntryType, std::string> buildable = {
-        {EntryType::PointCloud, "copc"}, {EntryType::GeoRaster, "cog"},        {EntryType::Model, "nxs"},
-        {EntryType::Vector, "vec"},      {EntryType::GaussianSplat, "gsplat"}, {EntryType::Tiles3D, "3dtiles"}};
+    const std::map<EntryType, std::string> buildable = {{EntryType::PointCloud, "copc"},
+                                                        {EntryType::GeoRaster, "cog"},
+                                                        {EntryType::Model, "bm3d"},
+                                                        {EntryType::Vector, "vec"},
+                                                        {EntryType::GaussianSplat, "gsplat"},
+                                                        {EntryType::Tiles3D, "3dtiles"}};
 
     for (const auto t : AllBuiltinTypes) {
         SCOPED_TRACE(typeToHuman(t));
@@ -158,7 +161,8 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
          {Row{"pointcloud.copc", "copc/cloud.copc.laz", ArtifactKind::File, "", false},
           Row{"pointcloud.ept", "ept", ArtifactKind::Directory, "ept.json", true}}},
         {EntryType::Model,
-         {Row{"model.nexus", "nxs/model.nxz", ArtifactKind::File, "", false},
+         {Row{"model.bm3d", "bm3d/model.bm3d", ArtifactKind::File, "", false},
+          Row{"model.nexus", "nxs/model.nxz", ArtifactKind::File, "", true},
           Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}},
         {EntryType::Vector,
          {Row{"vector.gpkg", "vec/source.gpkg", ArtifactKind::File, "", false},
@@ -168,7 +172,8 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
          {Row{"gsplat.lod", "gsplat/model.rad", ArtifactKind::File, "", false},
           Row{"gsplat.spz", "gsplat/model.spz", ArtifactKind::File, "", false},
           Row{"gsplat.bounds", "gsplat/bounds.json", ArtifactKind::File, "", false}}},
-        {EntryType::Tiles3D, {Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}}};
+        {EntryType::Tiles3D,
+         {Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}}};
 
     for (const auto t : AllBuiltinTypes) {
         SCOPED_TRACE(typeToHuman(t));
@@ -184,9 +189,12 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
     // The folders a build of the type owns
     EXPECT_EQ(entryHandler(EntryType::Vector).artifactFolders(), (std::vector<std::string>{"vec", "mvt"}));
     EXPECT_EQ(entryHandler(EntryType::PointCloud).artifactFolders(), (std::vector<std::string>{"copc"}));
-    EXPECT_EQ(entryHandler(EntryType::Model).artifactFolders(), (std::vector<std::string>{"nxs", "3dtiles"}));
+    EXPECT_EQ(entryHandler(EntryType::Model).artifactFolders(),
+              (std::vector<std::string>{"bm3d", "3dtiles"}));
     // The folders that follow the entry or go stale with it: the legacy ones too
     EXPECT_EQ(entryHandler(EntryType::PointCloud).artifactFolders(true), (std::vector<std::string>{"copc", "ept"}));
+    EXPECT_EQ(entryHandler(EntryType::Model).artifactFolders(true),
+              (std::vector<std::string>{"bm3d", "nxs", "3dtiles"}));
     EXPECT_EQ(entryHandler(EntryType::Vector).artifactFolders(true), entryHandler(EntryType::Vector).artifactFolders());
 }
 
@@ -214,6 +222,16 @@ TEST(entryHandler, LegacyArtifactsNameTheRoleTheyStandInFor) {
     ASSERT_EQ(artifacts.size(), 2u);
     EXPECT_EQ(artifacts[1].role, "pointcloud.ept");
     EXPECT_EQ(artifacts[1].fallbackFor, "pointcloud.copc");
+
+    // The Nexus file of a model stands in for model.bm3d only: the 3D Tiles are a role of their own
+    const auto& model = entryHandler(EntryType::Model).artifacts();
+    ASSERT_EQ(model.size(), 3u);
+    EXPECT_EQ(model[0].role, "model.bm3d");
+    EXPECT_EQ(model[0].mediaType, "application/vnd.dronedb.bm3d");
+    EXPECT_EQ(model[1].role, "model.nexus");
+    EXPECT_EQ(model[1].fallbackFor, "model.bm3d");
+    EXPECT_EQ(model[2].role, "model.3dtiles");
+    EXPECT_FALSE(model[2].legacy);
 }
 
 TEST(entryHandler, SidecarRulesArePinned) {

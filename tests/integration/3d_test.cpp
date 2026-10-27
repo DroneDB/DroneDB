@@ -456,17 +456,17 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
-            // Test nexus conversion from the converted OBJ
-            fs::path nexusOutput = fs::path(testFS.testFolder) / "model_from_gltf.nxz";
-            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+            // Test bm3d conversion from the converted OBJ
+            fs::path bm3dOutput = fs::path(testFS.testFolder) / "model_from_gltf.bm3d";
+            std::string bm3dPath = buildBm3d(outGeomPath, bm3dOutput.string(), true);
 
-            // Verify nexus file was created
-            ASSERT_FALSE(nexusPath.empty());
-            ASSERT_TRUE(fs::exists(nexusPath));
-            ASSERT_GT(fs::file_size(nexusPath), 0);
+            // Verify the bm3d file was created
+            ASSERT_FALSE(bm3dPath.empty());
+            ASSERT_TRUE(fs::exists(bm3dPath));
+            ASSERT_GT(fs::file_size(bm3dPath), 0);
 
-            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
-            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+            std::cout << "Successfully created bm3d file: " << bm3dPath << std::endl;
+            std::cout << "bm3d file size: " << fs::file_size(bm3dPath) << " bytes" << std::endl;
 
         }
         catch (const std::exception &e)
@@ -515,17 +515,17 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
-            // Test nexus conversion from the converted OBJ
-            fs::path nexusOutput = testArea.getPath("model_from_glb.nxz");
-            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+            // Test bm3d conversion from the converted OBJ
+            fs::path bm3dOutput = testArea.getPath("model_from_glb.bm3d");
+            std::string bm3dPath = buildBm3d(outGeomPath, bm3dOutput.string(), true);
 
-            // Verify nexus file was created
-            ASSERT_FALSE(nexusPath.empty());
-            ASSERT_TRUE(fs::exists(nexusPath));
-            ASSERT_GT(fs::file_size(nexusPath), 0);
+            // Verify the bm3d file was created
+            ASSERT_FALSE(bm3dPath.empty());
+            ASSERT_TRUE(fs::exists(bm3dPath));
+            ASSERT_GT(fs::file_size(bm3dPath), 0);
 
-            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
-            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+            std::cout << "Successfully created bm3d file: " << bm3dPath << std::endl;
+            std::cout << "bm3d file size: " << fs::file_size(bm3dPath) << " bytes" << std::endl;
 
         }
         catch (const std::exception &e)
@@ -574,17 +574,17 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
-            // Test nexus conversion from the converted OBJ
-            fs::path nexusOutput = testArea.getPath("sunglasses.nxz");
-            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+            // Test bm3d conversion from the converted OBJ
+            fs::path bm3dOutput = testArea.getPath("sunglasses.bm3d");
+            std::string bm3dPath = buildBm3d(outGeomPath, bm3dOutput.string(), true);
 
-            // Verify nexus file was created
-            ASSERT_FALSE(nexusPath.empty());
-            ASSERT_TRUE(fs::exists(nexusPath));
-            ASSERT_GT(fs::file_size(nexusPath), 0);
+            // Verify the bm3d file was created
+            ASSERT_FALSE(bm3dPath.empty());
+            ASSERT_TRUE(fs::exists(bm3dPath));
+            ASSERT_GT(fs::file_size(bm3dPath), 0);
 
-            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
-            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+            std::cout << "Successfully created bm3d file: " << bm3dPath << std::endl;
+            std::cout << "bm3d file size: " << fs::file_size(bm3dPath) << " bytes" << std::endl;
 
         }
         catch (const std::exception &e)
@@ -633,17 +633,17 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
-            // Test nexus conversion from the converted OBJ
-            fs::path nexusOutput = testArea.getPath("dish.nxz");
-            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+            // Test bm3d conversion from the converted OBJ
+            fs::path bm3dOutput = testArea.getPath("dish.bm3d");
+            std::string bm3dPath = buildBm3d(outGeomPath, bm3dOutput.string(), true);
 
-            // Verify nexus file was created
-            ASSERT_FALSE(nexusPath.empty());
-            ASSERT_TRUE(fs::exists(nexusPath));
-            ASSERT_GT(fs::file_size(nexusPath), 0);
+            // Verify the bm3d file was created
+            ASSERT_FALSE(bm3dPath.empty());
+            ASSERT_TRUE(fs::exists(bm3dPath));
+            ASSERT_GT(fs::file_size(bm3dPath), 0);
 
-            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
-            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+            std::cout << "Successfully created bm3d file: " << bm3dPath << std::endl;
+            std::cout << "bm3d file size: " << fs::file_size(bm3dPath) << " bytes" << std::endl;
 
         }
         catch (const std::exception &e)
@@ -692,17 +692,17 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
-            // Test nexus conversion from the converted OBJ
-            fs::path nexusOutput = testArea.getPath("toycar.nxz");
-            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+            // Test bm3d conversion from the converted OBJ
+            fs::path bm3dOutput = testArea.getPath("toycar.bm3d");
+            std::string bm3dPath = buildBm3d(outGeomPath, bm3dOutput.string(), true);
 
-            // Verify nexus file was created
-            ASSERT_FALSE(nexusPath.empty());
-            ASSERT_TRUE(fs::exists(nexusPath));
-            ASSERT_GT(fs::file_size(nexusPath), 0);
+            // Verify the bm3d file was created
+            ASSERT_FALSE(bm3dPath.empty());
+            ASSERT_TRUE(fs::exists(bm3dPath));
+            ASSERT_GT(fs::file_size(bm3dPath), 0);
 
-            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
-            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+            std::cout << "Successfully created bm3d file: " << bm3dPath << std::endl;
+            std::cout << "bm3d file size: " << fs::file_size(bm3dPath) << " bytes" << std::endl;
 
         }
         catch (const std::exception &e)
@@ -751,17 +751,17 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
-            // Test nexus conversion from the converted OBJ
-            fs::path nexusOutput = testArea.getPath("draco_model.nxz");
-            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+            // Test bm3d conversion from the converted OBJ
+            fs::path bm3dOutput = testArea.getPath("draco_model.bm3d");
+            std::string bm3dPath = buildBm3d(outGeomPath, bm3dOutput.string(), true);
 
-            // Verify nexus file was created
-            ASSERT_FALSE(nexusPath.empty());
-            ASSERT_TRUE(fs::exists(nexusPath));
-            ASSERT_GT(fs::file_size(nexusPath), 0);
+            // Verify the bm3d file was created
+            ASSERT_FALSE(bm3dPath.empty());
+            ASSERT_TRUE(fs::exists(bm3dPath));
+            ASSERT_GT(fs::file_size(bm3dPath), 0);
 
-            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
-            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+            std::cout << "Successfully created bm3d file: " << bm3dPath << std::endl;
+            std::cout << "bm3d file size: " << fs::file_size(bm3dPath) << " bytes" << std::endl;
 
         }
         catch (const std::exception &e)
@@ -934,11 +934,10 @@ namespace
     }
 
     // Regression test: a mesh mixing a triangle primitive with a point primitive must not
-    // reach libnexus' triangle-soup PLY reader with desynchronized 1-index face records.
+    // reach the triangle-soup PLY reader of bm3d with desynchronized 1-index face records.
     // Without AI_CONFIG_PP_SBP_REMOVE in convertGltfTo3dModel, this used to throw
-    // "Bad index in triangle list" (or worse) deep inside nexusBuild.
-    TEST(file3d, buildNexusMixedTrianglePointDoesNotCrash)
-    {
+    // "Bad index in triangle list" (or worse) deep inside the bm3d build.
+    TEST(file3d, buildBm3dMixedTrianglePointDoesNotCrash) {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("mixed.gltf");
         writeFile(gltf, mixedTrianglePointGltfJson());
@@ -946,11 +945,11 @@ namespace
         // The classifier only requires one triangle primitive to declare the asset a Model.
         EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Model);
 
-        const fs::path nxz = ta.getPath("mixed.nxz");
-        std::string outNxz;
-        ASSERT_NO_THROW(outNxz = buildNexus(gltf.string(), nxz.string(), true));
-        ASSERT_TRUE(fs::exists(outNxz));
-        EXPECT_GT(fs::file_size(outNxz), 0);
+        const fs::path bm3dFile = ta.getPath("mixed.bm3d");
+        std::string outBm3d;
+        ASSERT_NO_THROW(outBm3d = buildBm3d(gltf.string(), bm3dFile.string(), true));
+        ASSERT_TRUE(fs::exists(outBm3d));
+        EXPECT_GT(fs::file_size(outBm3d), 0);
     }
 
     // ---------------------------------------------------------------------------
@@ -959,7 +958,7 @@ namespace
     // still be found.
     // ---------------------------------------------------------------------------
 
-    // A real 4x4 RGB PNG (Nexus aborts on an invalid image).
+    // A real 4x4 RGB PNG (bm3d refuses an invalid image).
     const std::vector<uint8_t> kTinyPng = {
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
         0x44, 0x52, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x08, 0x02, 0x00, 0x00,
@@ -1039,7 +1038,7 @@ namespace
         ASSERT_NO_THROW(ddb::build(ds.db.get(), "sub/model.gltf", "", false));
         EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/model.gltf"));
         EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
-        EXPECT_TRUE(fs::exists(ds.db->buildDirectory() / e.hash / "nxs" / "model.nxz"));
+        EXPECT_TRUE(fs::exists(ds.db->buildDirectory() / e.hash / "bm3d" / "model.bm3d"));
     }
 
     // Builds rel and expects a plain AppException mentioning `mentions`, with no

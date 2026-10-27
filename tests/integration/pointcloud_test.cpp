@@ -98,7 +98,7 @@ TEST(pointcloud, copcFromPly) {
     EXPECT_GT(copcInfo.pointCount, 0) << "COPC should have points";
 }
 
-TEST(pointcloud, nexusFromPlyMesh) {
+TEST(pointcloud, bm3dFromPlyMesh) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
         testDataUrl("point-clouds/odm_25dmesh.ply"),
@@ -108,18 +108,17 @@ TEST(pointcloud, nexusFromPlyMesh) {
     auto fp = ddb::fingerprint(pc);
     EXPECT_TRUE(fp == ddb::EntryType::Model);
 
-    // Convert PLY mesh to Nexus
-    fs::path nexusOutput = ta.getPath("odm_25dmesh.nxz");
-    std::string nexusPath = buildNexus(pc.string(), nexusOutput.string(), true);
+    // Convert PLY mesh to bm3d
+    fs::path bm3dOutput = ta.getPath("odm_25dmesh.bm3d");
+    std::string bm3dPath = buildBm3d(pc.string(), bm3dOutput.string(), true);
 
-    // Verify nexus file was created
-    ASSERT_FALSE(nexusPath.empty());
-    ASSERT_TRUE(fs::exists(nexusPath));
-    ASSERT_GT(fs::file_size(nexusPath), 0);
+    // Verify the bm3d file was created
+    ASSERT_FALSE(bm3dPath.empty());
+    ASSERT_TRUE(fs::exists(bm3dPath));
+    ASSERT_GT(fs::file_size(bm3dPath), 0);
 
-    LOGD << "Successfully created nexus file: " << nexusPath;
-    LOGD << "Nexus file size: " << fs::file_size(nexusPath) << " bytes";
-
+    LOGD << "Successfully created bm3d file: " << bm3dPath;
+    LOGD << "bm3d file size: " << fs::file_size(bm3dPath) << " bytes";
 }
 
 TEST(pointcloud, ptsInfo) {

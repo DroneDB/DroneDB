@@ -46,7 +46,7 @@ const std::string H_PENDING(64, '5');  // pending.shp: deferred, a dependency mi
 const std::string H_BUSY(64, '6');     // busy.tif: a live build holds the lock
 const std::string H_STALE(64, '7');    // stale.tif: complete, a crashed build's lock file
 const std::string H_SPLAT(64, '8');    // splat.spz: RAD + bounds
-const std::string H_MODEL(64, '9');    // model.obj: Nexus + 3D Tiles
+const std::string H_MODEL(64, '9');    // model.obj: legacy Nexus (nxs/) + 3D Tiles
 const std::string H_TILES(64, 'f');    // city.3tz: 3D Tiles
 
 const std::vector<std::string> kPaths = {"ortho.tif",  "dsm.tif",   "cloud.laz",  "old.laz",   "roads.shp",
@@ -194,7 +194,12 @@ TEST(BuildManifest, StatesAndExistingArtifacts) {
 
     EXPECT_EQ(roles(b["splat.spz"]), (std::vector<std::string>{"gsplat.lod", "gsplat.bounds"}));
     EXPECT_EQ(b["splat.spz"].state, BuildState::Complete);
+    // A model built before bm3d: its Nexus file is served next to the 3D Tiles it also has
     EXPECT_EQ(roles(b["model.obj"]), (std::vector<std::string>{"model.nexus", "model.3dtiles"}));
+    EXPECT_TRUE(b["model.obj"].artifacts[0].legacy);
+    EXPECT_EQ(b["model.obj"].artifacts[0].fallbackFor, "model.bm3d");
+    EXPECT_EQ(b["model.obj"].state, BuildState::None)
+        << "a model with only the legacy build is rebuilt to bm3d";
     EXPECT_EQ(roles(b["city.3tz"]), (std::vector<std::string>{"model.3dtiles"}));
 
     for (const auto* path : {"photo.jpg", "orphan.dbf", "dir"}) {
@@ -383,6 +388,8 @@ TEST(BuildManifest, EntryTypes) {
     EXPECT_EQ(byName["GeoRaster"]["thumbnail"], "file");
     EXPECT_EQ(byName["PointCloud"]["roles"], json::parse(R"(["pointcloud.copc", "pointcloud.ept"])"));
     EXPECT_EQ(byName["PointCloud"]["thumbnail"], "build");
+    EXPECT_EQ(byName["Model"]["roles"],
+              json::parse(R"(["model.bm3d", "model.nexus", "model.3dtiles"])"));
     EXPECT_EQ(byName["Vector"]["sidecarExtensions"], json::parse(R"(["cpg", "dbf", "shx", "prj"])"));
     EXPECT_EQ(byName["Panorama"]["thumbnail"], "file");
     EXPECT_EQ(byName["GeoPanorama"]["thumbnail"], "file");
@@ -599,6 +606,54 @@ TEST(BuildManifest, LegacyArtifactIsServedWhileItsRoleIsMissing) {
     EXPECT_EQ(copied["artifacts"][1]["role"], "fake.old");
     EXPECT_EQ(copied["artifacts"][1]["fallbackFor"], "fake.alpha");
     EXPECT_TRUE(fs::exists(fx.destinationBuild / hash / "old" / "o.txt"));
+}
+
+// What a build leaves of the legacy output: it goes once the role it stood in for exists
+TEST(BuildManifest, SupersededLegacyOutputIsRemovedOnceItsRoleExists) {
+    EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+    CopyFixture fx(TEST_NAME);
+    ScopedEntryHandler registration(std::make_unique<LegacyFakeHandler>());
+    const EntryHandler& handler = *findEntryHandler(LegacyFakeType);
+    const fs::path root = fx.source.db->buildDirectory() / std::string(64, '0');
+    fs::remove_all(root);
+
+    // The role is still missing (a failed build): the legacy output stays, and is still served
+    writeFile(root / "beta" / "b.txt", "x");
+    writeFile(root / "old" / "o.txt", "x");
+    removeSupersededArtifacts(handler, root, filesystemBuildProbe());
+    EXPECT_TRUE(fs::exists(root / "old" / "o.txt"));
+
+    // The role exists: the legacy folder goes, the current ones stay
+    writeFile(root / "alpha" / "a.txt", "x");
+    removeSupersededArtifacts(handler, root, filesystemBuildProbe());
+    EXPECT_FALSE(fs::exists(root / "old"));
+    EXPECT_TRUE(fs::exists(root / "alpha" / "a.txt"));
+    EXPECT_TRUE(fs::exists(root / "beta" / "b.txt"));
+
+    // Nothing to remove, and no build root, are not errors
+    EXPECT_NO_THROW(removeSupersededArtifacts(handler, root, filesystemBuildProbe()));
+    EXPECT_NO_THROW(removeSupersededArtifacts(handler, root / "missing", filesystemBuildProbe()));
+}
+
+// The legacy Nexus file of a model is served while bm3d/ is missing, with the 3D Tiles it also
+// has, and never next to model.bm3d
+TEST(BuildManifest, LegacyNexusFileIsServedOnlyWhileBm3dIsMissing) {
+    ManifestFixture fx(TEST_NAME);
+    const auto modelRoles = [&] { return roles(fx.readAll()["model.obj"]); };
+    using Roles = std::vector<std::string>;
+
+    EXPECT_EQ(modelRoles(), (Roles{"model.nexus", "model.3dtiles"}));
+
+    writeFile(fx.build / H_MODEL / "bm3d" / "model.bm3d", "x");
+    EXPECT_EQ(modelRoles(), (Roles{"model.bm3d", "model.3dtiles"}));
+    EXPECT_EQ(fx.readAll()["model.obj"].artifacts[0].mediaType, "application/vnd.dronedb.bm3d");
+    EXPECT_EQ(fx.readAll()["model.obj"].state, BuildState::Complete);
+
+    // The legacy folder is still on disk (a build removes it) but is not listed
+    EXPECT_TRUE(fs::exists(fx.build / H_MODEL / "nxs" / "model.nxz"));
+
+    fs::remove_all(fx.build / H_MODEL / "bm3d");
+    EXPECT_EQ(modelRoles(), (Roles{"model.nexus", "model.3dtiles"}));
 }
 
 TEST(BuildManifest, CopyBuildArtifactsRefusals) {

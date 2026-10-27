@@ -29,18 +29,20 @@ TEST(buildLayout, MarkerAndScratchNamesArePinned) {
 TEST(buildLayout, SubfolderNamesArePinned) {
     EXPECT_STREQ(CogBuildSubfolder, "cog");
     EXPECT_STREQ(CopcBuildSubfolder, "copc");
-    EXPECT_STREQ(NexusBuildSubfolder, "nxs");
+    EXPECT_STREQ(Bm3dBuildSubfolder, "bm3d");
     EXPECT_STREQ(VectorBuildSubfolder, "vec");
     EXPECT_STREQ(MvtBuildSubfolder, "mvt");
     EXPECT_STREQ(GsplatBuildSubfolder, "gsplat");
     EXPECT_STREQ(Tiles3DBuildSubfolder, "3dtiles");
     EXPECT_STREQ(LegacyEptBuildSubfolder, "ept");
+    EXPECT_STREQ(LegacyNexusBuildSubfolder, "nxs");
 }
 
 TEST(buildLayout, ArtifactFileNamesArePinned) {
     EXPECT_STREQ(CogFileName, "cog.tif");
     EXPECT_STREQ(CopcFileName, "cloud.copc.laz");
-    EXPECT_STREQ(NexusFileName, "model.nxz");
+    EXPECT_STREQ(Bm3dFileName, "model.bm3d");
+    EXPECT_STREQ(LegacyNexusFileName, "model.nxz");
     EXPECT_STREQ(VectorGpkgFileName, "source.gpkg");
     EXPECT_STREQ(MvtMetadataFileName, "metadata.json");
     EXPECT_STREQ(VectorLocalFileName, "local.json");

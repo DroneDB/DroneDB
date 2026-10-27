@@ -454,7 +454,7 @@ TEST(ply, headerModel) {
 TEST(ply, identifyFixtures) {
     TestArea ta(TEST_NAME);
 
-    // Textured mesh -> Model (see texturedPlyBuildsNexus); the
+    // Textured mesh -> Model (see texturedPlyBuildsBm3d); the
     // texture name is exposed.
     const fs::path f1 = ta.getPath("textured.ply");
     writeTexturedPly(f1);
@@ -1321,9 +1321,9 @@ TEST(plyconv, textureDependencyContract) {
 }
 
 // The converter's OBJ + MTL +
-// texture for a textured PLY is accepted by buildNexus and yields a non-empty .nxz
+// texture for a textured PLY is accepted by buildBm3d and yields a non-empty .bm3dFile
 // that carries the texture (larger than the same mesh converted without it).
-TEST(plyconv, texturedPlyBuildsNexus) {
+TEST(plyconv, texturedPlyBuildsBm3d) {
     TestArea ta(TEST_NAME);
     const fs::path root = ta.getFolder("ds");
     const fs::path ply = root / "textured.ply";
@@ -1336,21 +1336,55 @@ TEST(plyconv, texturedPlyBuildsNexus) {
     ASSERT_FALSE(r.mtlPath.empty());
     ASSERT_TRUE(fs::exists(r.texturePath));
 
-    const std::string nxz = buildNexus(r.objPath, ta.getPath("out/textured.nxz").string(), true);
-    ASSERT_TRUE(fs::exists(nxz));
-    const auto texturedSize = fs::file_size(nxz);
+    const std::string bm3dFile =
+        buildBm3d(r.objPath, ta.getPath("out/textured.bm3d").string(), true);
+    ASSERT_TRUE(fs::exists(bm3dFile));
+    const auto texturedSize = fs::file_size(bm3dFile);
     EXPECT_GT(texturedSize, 0u);
 
     PlyToObjOptions noTex;
     noTex.withTexture = false;
     const auto r2 = convertPlyToObj(ply.string(), ta.getPath("out2/textured").string(), noTex);
-    const std::string nxz2 = buildNexus(r2.objPath, ta.getPath("out2/textured.nxz").string(), true);
-    ASSERT_TRUE(fs::exists(nxz2));
-    EXPECT_GT(texturedSize, fs::file_size(nxz2));
+    const std::string bm3dFile2 =
+        buildBm3d(r2.objPath, ta.getPath("out2/textured.bm3d").string(), true);
+    ASSERT_TRUE(fs::exists(bm3dFile2));
+    EXPECT_GT(texturedSize, fs::file_size(bm3dFile2));
+}
+
+// The bm3d file of a textured model starts with the BM3D magic and the format version 1 (little
+// endian, the first 8 bytes of the header), and says it holds textures: the viewers read these
+// fields before anything else
+TEST(plyconv, texturedModelGivesABm3dFileWithTheHeaderOfFormatOne) {
+    TestArea ta(TEST_NAME);
+    const fs::path root = ta.getFolder("ds");
+    writeTexturedPly(root / "textured.ply");
+    ASSERT_TRUE(writeJpeg(root / "tex.jpg", 64, 64));
+    PlyToObjOptions opts;
+    opts.datasetRoot = root.string();
+    const auto converted = convertPlyToObj((root / "textured.ply").string(),
+                                           ta.getPath("out/textured").string(),
+                                           opts);
+    const std::string file =
+        buildBm3d(converted.objPath, ta.getPath("out/textured.bm3d").string(), true);
+
+    std::ifstream in(file, std::ios::binary);
+    unsigned char header[128] = {};
+    in.read(reinterpret_cast<char*>(header), sizeof(header));
+    ASSERT_EQ(in.gcount(), static_cast<std::streamsize>(sizeof(header)));
+    const auto u32 = [&](size_t offset) {
+        return static_cast<uint32_t>(header[offset]) |
+               static_cast<uint32_t>(header[offset + 1]) << 8 |
+               static_cast<uint32_t>(header[offset + 2]) << 16 |
+               static_cast<uint32_t>(header[offset + 3]) << 24;
+    };
+    EXPECT_EQ(std::string(reinterpret_cast<char*>(header), 4), "BM3D");
+    EXPECT_EQ(u32(4), 1u) << "formatVersion";
+    EXPECT_EQ(u32(8), 128u) << "headerSize";
+    EXPECT_GT(u32(104), 0u) << "textureCount";
 }
 
 // Through build(): a textured PLY is indexed as a Model, its texture is a
-// dependency (header-only check inside buildNexus, before Nexus runs).
+// dependency (header-only check inside buildBm3d, before bm3d runs).
 struct PlyDataset : IndexFixture {
     explicit PlyDataset(const std::string& name) : IndexFixture(name) {}
     void add(const std::string& rel) { ddb::addToIndex(db.get(), {(root / rel).string()}); }
@@ -1373,7 +1407,7 @@ TEST(plyconv, texturedPlyBuildDefersUntilTextureExists) {
     const auto pending = ddb::getPendingBuildInfo(ds.db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"sub/tex.jpg"}));
-    EXPECT_FALSE(fs::exists(ds.out("sub/textured.ply") / "nxs"));
+    EXPECT_FALSE(fs::exists(ds.out("sub/textured.ply") / "bm3d"));
 
     ASSERT_TRUE(writeJpeg(ds.root / "sub" / "tex.jpg", 32, 32));
     ds.add("sub/tex.jpg");
@@ -1381,9 +1415,9 @@ TEST(plyconv, texturedPlyBuildDefersUntilTextureExists) {
 
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/textured.ply"));
-    const fs::path nxz = ds.out("sub/textured.ply") / "nxs" / "model.nxz";
-    ASSERT_TRUE(fs::exists(nxz));
-    EXPECT_GT(fs::file_size(nxz), 0u);
+    const fs::path bm3dFile = ds.out("sub/textured.ply") / "bm3d" / "model.bm3d";
+    ASSERT_TRUE(fs::exists(bm3dFile));
+    EXPECT_GT(fs::file_size(bm3dFile), 0u);
     if (!obj2tiles::findObj2TilesBinary(true).empty())
         EXPECT_TRUE(fs::exists(ds.out("sub/textured.ply") / "3dtiles" / "tileset.json"));
 }

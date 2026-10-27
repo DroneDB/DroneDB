@@ -43,7 +43,7 @@ std::string markerContents(const fs::path& path) {
     return std::string(std::istreambuf_iterator<char>(in), {});
 }
 
-// A real 4x4 RGB PNG: Nexus aborts on an invalid image, so a placeholder will not do.
+// A real 4x4 RGB PNG: bm3d refuses an invalid image, so a placeholder will not do.
 const std::vector<uint8_t> kPng = {
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
     0x44, 0x52, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x08, 0x02, 0x00, 0x00,
@@ -121,8 +121,9 @@ struct Dataset : IndexFixture {
             out << d << "\n";
     }
 
-    bool nxzBuilt(const std::string& rel) {
-        return fs::exists(db->buildDirectory() / indexedHash(db.get(), rel) / "nxs" / "model.nxz");
+    bool bm3dBuilt(const std::string& rel) {
+        return fs::exists(db->buildDirectory() / indexedHash(db.get(), rel) / "bm3d" /
+                          "model.bm3d");
     }
 };
 
@@ -148,7 +149,7 @@ void expectFailedWithoutPending(Dataset& ds, const std::string& rel, const std::
 }
 
 // OBJ + MTL + PNG whose companions arrive after the model: the pending state
-// clears through buildPending once they exist, and the Nexus output is built.
+// clears through buildPending once they exist, and the bm3d output is built.
 void runCompanionsArriveLater(const std::string& folder) {
     Dataset ds(TEST_NAME);
     const std::string prefix = folder.empty() ? "" : folder + "/";
@@ -177,7 +178,7 @@ void runCompanionsArriveLater(const std::string& folder) {
 
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), obj));
-    EXPECT_TRUE(ds.nxzBuilt(obj));
+    EXPECT_TRUE(ds.bm3dBuilt(obj));
 }
 
 TEST(PendingBuild, ObjAtRootClearsOnceCompanionsExist) {
@@ -213,7 +214,7 @@ TEST(PendingBuild, OldFormatPendingClearsOnceDependencyExists) {
 
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/m.obj"));
-    EXPECT_TRUE(ds.nxzBuilt("sub/m.obj"));
+    EXPECT_TRUE(ds.bm3dBuilt("sub/m.obj"));
 }
 
 // The retry backoff is 60 s since the last attempt; force bypasses it.
@@ -443,7 +444,7 @@ TEST(PendingBuild, QuotedNamesWithSpaces) {
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/my model.obj"));
 }
 
-// buildNexus (validateDependencies) reports missing names relative to the OBJ's folder.
+// buildBm3d (validateDependencies) reports missing names relative to the OBJ's folder.
 TEST(PendingBuild, ValidateDependenciesReportsMissingFile) {
     TestArea ta(TEST_NAME, true);
     const fs::path obj = ta.getPath("m.obj");
@@ -451,12 +452,12 @@ TEST(PendingBuild, ValidateDependenciesReportsMissingFile) {
     writeFile(ta.getPath("m.mtl"), mtlWithTexture("map_Kd tex.png\nmap_bump tex.png"));
 
     try {
-        buildNexus(obj.string(), ta.getPath("m.nxz").string(), true);
-        FAIL() << "buildNexus should report the missing texture";
+        buildBm3d(obj.string(), ta.getPath("m.bm3d").string(), true);
+        FAIL() << "buildBm3d should report the missing texture";
     } catch (const BuildDepMissingException& e) {
         EXPECT_EQ(e.getMissingDependencies(), std::vector<std::string>{"tex.png"});
     }
-    EXPECT_FALSE(fs::exists(ta.getPath("m.nxz")));
+    EXPECT_FALSE(fs::exists(ta.getPath("m.bm3d")));
 }
 
 // ---------------------------------------------------------------------------
@@ -694,7 +695,7 @@ TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_GE(pending[0].lastAttempt, beforeAttempt);
     EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"m.mtl"}));
-    EXPECT_FALSE(ds.nxzBuilt("m.obj"));
+    EXPECT_FALSE(ds.bm3dBuilt("m.obj"));
 
     EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
     ddb::buildPending(ds.db.get(), "", false);
@@ -722,7 +723,7 @@ TEST(PendingBuild, PrimaryLockContentionLeavesMarkerByteForByteUnchanged) {
     const auto original = markerContents(ds.pendingFile("m.obj"));
     const auto base = ds.db->buildDirectory() / indexedHash(ds.db.get(), "m.obj");
     fs::create_directories(base);
-    BuildLock lock((base / "nxs").string());
+    BuildLock lock((base / "bm3d").string());
     EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), BuildInProgressException);
     EXPECT_EQ(markerContents(ds.pendingFile("m.obj")), original);
 }
