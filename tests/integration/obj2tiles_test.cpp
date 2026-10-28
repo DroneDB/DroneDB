@@ -142,13 +142,37 @@ MANUAL_TEST(obj2tiles, endToEndGeneration) {
     EXPECT_NEAR(std::abs(tx) + std::abs(ty) + std::abs(tz), 0.0, 1e-9);
 }
 
+// A model georeferenced by a projected CRS and an offset (ODM's coords.txt) is placed at the WGS84
+// position of the offset point: the translation of the root transform is its ECEF position, which
+// PROJ gives as (-152070.337, -4367817.964, 4629817.481) for EPSG:32615 (576705, 5188170).
+// Disabled on CI (needs the Obj2Tiles binary).
+MANUAL_TEST(obj2tiles, endToEndGenerationWithAProjectedGeoref) {
+    if (ddb::obj2tiles::findObj2TilesBinary(true).empty())
+        GTEST_SKIP() << "Obj2Tiles binary not available";
+
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(ta.getPath("coords.txt"), "WGS84 UTM 15N\n576705 5188170\n");
+
+    const std::string tileset = ddb::buildModel3DTiles(obj.string(), ta.getPath("out3dtiles").string(), {.overwrite = true});
+    std::ifstream in(tileset);
+    json j;
+    in >> j;
+    const auto t = j["root"]["transform"];
+    ASSERT_EQ(t.size(), 16u);
+    EXPECT_NEAR(t[12].get<double>(), -152070.337, 0.01);
+    EXPECT_NEAR(t[13].get<double>(), -4367817.964, 0.01);
+    EXPECT_NEAR(t[14].get<double>(), 4629817.481, 0.01);
+}
+
 // --- Georeferencing detection (CI-safe: pure function, no binary needed) ---
 
 TEST(obj2tiles, detectGeorefNoneWhenNoSidecar) {
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
     writeFile(obj, "v 0 0 0\nf 1 1 1\n");  // not JSON, just a placeholder OBJ
-    EXPECT_FALSE(detectModelGeoref(obj.string()).has_value());
+    EXPECT_FALSE(detectLocalFrameGeoref(obj.string()).has_value());
 }
 
 TEST(obj2tiles, detectGeorefFromGeorefJson) {
@@ -158,11 +182,11 @@ TEST(obj2tiles, detectGeorefFromGeorefJson) {
     writeFile(ta.getPath("georef.json"),
                  R"({"latitude": 45.5, "longitude": 9.25, "altitude": 120.0})");
 
-    const auto g = detectModelGeoref(obj.string());
+    const auto g = detectLocalFrameGeoref(obj.string());
     ASSERT_TRUE(g.has_value());
-    EXPECT_NEAR(g->latitude, 45.5, 1e-9);
-    EXPECT_NEAR(g->longitude, 9.25, 1e-9);
-    EXPECT_NEAR(g->altitude, 120.0, 1e-9);
+    EXPECT_NEAR(g->origin.latitude, 45.5, 1e-9);
+    EXPECT_NEAR(g->origin.longitude, 9.25, 1e-9);
+    EXPECT_NEAR(g->origin.altitude, 120.0, 1e-9);
 }
 
 TEST(obj2tiles, detectGeorefFromReferenceLla) {
@@ -173,11 +197,11 @@ TEST(obj2tiles, detectGeorefFromReferenceLla) {
     writeFile(ta.getPath("reference_lla.json"),
                  R"({"latitude": -33.86, "longitude": 151.21})");
 
-    const auto g = detectModelGeoref(obj.string());
+    const auto g = detectLocalFrameGeoref(obj.string());
     ASSERT_TRUE(g.has_value());
-    EXPECT_NEAR(g->latitude, -33.86, 1e-9);
-    EXPECT_NEAR(g->longitude, 151.21, 1e-9);
-    EXPECT_NEAR(g->altitude, 0.0, 1e-9);
+    EXPECT_NEAR(g->origin.latitude, -33.86, 1e-9);
+    EXPECT_NEAR(g->origin.longitude, 151.21, 1e-9);
+    EXPECT_NEAR(g->origin.altitude, 0.0, 1e-9);
 }
 
 TEST(obj2tiles, detectGeorefFromPerModelSidecar) {
@@ -188,11 +212,11 @@ TEST(obj2tiles, detectGeorefFromPerModelSidecar) {
     writeFile(ta.getPath("mymodel.geo.json"),
                  R"({"lat": 10.0, "lon": 20.0, "alt": 5.0})");
 
-    const auto g = detectModelGeoref(obj.string());
+    const auto g = detectLocalFrameGeoref(obj.string());
     ASSERT_TRUE(g.has_value());
-    EXPECT_NEAR(g->latitude, 10.0, 1e-9);
-    EXPECT_NEAR(g->longitude, 20.0, 1e-9);
-    EXPECT_NEAR(g->altitude, 5.0, 1e-9);
+    EXPECT_NEAR(g->origin.latitude, 10.0, 1e-9);
+    EXPECT_NEAR(g->origin.longitude, 20.0, 1e-9);
+    EXPECT_NEAR(g->origin.altitude, 5.0, 1e-9);
 }
 
 TEST(obj2tiles, detectGeorefRejectsOutOfRange) {
@@ -201,7 +225,7 @@ TEST(obj2tiles, detectGeorefRejectsOutOfRange) {
     writeFile(obj, "v 0 0 0\n");
     writeFile(ta.getPath("georef.json"),
                  R"({"latitude": 999.0, "longitude": 9.0})");
-    EXPECT_FALSE(detectModelGeoref(obj.string()).has_value());
+    EXPECT_FALSE(detectLocalFrameGeoref(obj.string()).has_value());
 }
 
 // getModelInfo reads a model's local-space bounding box (used to derive a

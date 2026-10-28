@@ -5,11 +5,15 @@
 // GaussianSplat entries: the formats of splat_format.h (and splat-flavoured PLY), built into a
 // level-of-detail RAD container with its bounds.
 
+#include <optional>
+
 #include "build_layout.h"
 #include "json.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
 #include "gsplat.h"
+#include "local_frame_georef.h"
+#include "logger.h"
 #include "mio.h"
 #include "splat_format.h"
 #include "thumbs.h"
@@ -39,6 +43,20 @@ void parseGaussianSplatMetadata(const fs::path &path, Entry &entry)
     GaussianSplatInfo info;
     if (getGaussianSplatInfo(io::toUtf8(path), info))
         entry.properties = info;
+
+    // A splat trained in the frame of an ODM project (or of a model with a georeferencing sidecar) is
+    // georeferenced: its origin is the point of the entry. The footprint needs the bounds of the
+    // scene, which only the build knows, so it is not a polygon of the entry but the wgs84Footprint
+    // of bounds.json. Best-effort: a splat whose georeference cannot be used stays local.
+    try
+    {
+        if (const auto georef = detectLocalFrameGeoref(io::toUtf8(path)))
+            applyLocalFrameOrigin(entry, *georef);
+    }
+    catch (const std::exception &e)
+    {
+        LOGD << "Splat georeference ignored for " << io::toUtf8(path) << ": " << e.what();
+    }
 }
 
 class GaussianSplatEntryHandler : public EntryHandler {

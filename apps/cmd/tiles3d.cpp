@@ -73,11 +73,11 @@ namespace cmd
 
         // Explicit --lat/--lon override sidecar auto-detection; --local forces local
         // mode; otherwise georeferencing is auto-detected from sidecars next to the input.
-        std::optional<ddb::ModelGeoref> georef;
+        std::optional<ddb::LocalFrameGeoref> georef;
         if (opts.count("lat") && opts.count("lon"))
         {
-            georef = ddb::ModelGeoref{opts["lat"].as<double>(), opts["lon"].as<double>(),
-                                      opts["alt"].as<double>()};
+            georef = ddb::LocalFrameGeoref::enu(opts["lat"].as<double>(), opts["lon"].as<double>(),
+                                                 opts["alt"].as<double>());
         }
 
         const bool autoDetect = !forceLocal && !georef.has_value();

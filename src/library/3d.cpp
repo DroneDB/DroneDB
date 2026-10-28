@@ -762,70 +762,6 @@ std::string buildBm3d(const std::string& inputObj,
     return outFile;
 }
 
-std::optional<ModelGeoref> detectModelGeoref(const std::string& inputObj) {
-    const fs::path objPath = io::fromUtf8(inputObj);
-    const fs::path dir = objPath.parent_path();
-    const fs::path parent = dir.parent_path();
-    const std::string stem = io::toUtf8(objPath.stem());
-
-    // Search order: explicit per-model sidecar, generic dataset sidecar, then the
-    // OpenDroneMap reference_lla.json (co-located, one level up, or in an opensfm/
-    // sibling for full ODM project layouts).
-    const std::vector<fs::path> candidates = {
-        dir / io::fromUtf8(stem + ".geo.json"),
-        dir / "georef.json",
-        dir / "reference_lla.json",
-        parent / "reference_lla.json",
-        parent / "opensfm" / "reference_lla.json",
-    };
-
-    // Returns the first present numeric value among keys, or def when none match.
-    const auto getNum = [](const json& j, std::initializer_list<const char*> keys,
-                           std::optional<double> def) -> std::optional<double> {
-        for (const char* k : keys) {
-            if (j.contains(k) && j[k].is_number())
-                return j[k].get<double>();
-        }
-        return def;
-    };
-
-    for (const auto& c : candidates) {
-        std::error_code ec;
-        if (!fs::exists(c, ec) || ec)
-            continue;
-
-        try {
-            std::ifstream in(c);
-            if (!in.good())
-                continue;
-
-            json j;
-            in >> j;
-
-            const auto lat = getNum(j, {"latitude", "lat"}, std::nullopt);
-            const auto lon = getNum(j, {"longitude", "lon", "lng"}, std::nullopt);
-            const auto alt = getNum(j, {"altitude", "alt", "elevation"}, 0.0);
-
-            if (!lat.has_value() || !lon.has_value())
-                continue;
-
-            if (*lat < -90.0 || *lat > 90.0 || *lon < -180.0 || *lon > 180.0) {
-                LOGD << "Ignoring out-of-range georeference in " << io::toUtf8(c) << " (lat=" << *lat
-                     << ", lon=" << *lon << ")";
-                continue;
-            }
-
-            LOGD << "Model georeference found in " << io::toUtf8(c) << ": lat=" << *lat
-                 << " lon=" << *lon << " alt=" << *alt;
-            return ModelGeoref{*lat, *lon, alt.value_or(0.0)};
-        } catch (const std::exception& e) {
-            LOGD << "Could not parse georeference sidecar " << io::toUtf8(c) << ": " << e.what();
-        }
-    }
-
-    return std::nullopt;
-}
-
 namespace {
 
 // The Obj2Tiles parameters for a model: the face-count heuristic picks the tile hierarchy, or
@@ -838,7 +774,7 @@ namespace {
 // --force-defaults / DDB_OBJ2TILES_FORCE_DEFAULTS env var skips the heuristic
 // and uses hardcoded defaults for testing/debugging.
 obj2tiles::Obj2TilesOptions chooseObj2TilesOptions(const std::string& inputObj, const PreparedModel& model,
-                                                   const std::optional<ModelGeoref>& georef) {
+                                                   const std::optional<LocalFrameGeoref>& georef) {
     const std::string& actualInputObj = model.path;
     const bool forceDefaults = [] {
         const char* env = std::getenv("DDB_OBJ2TILES_FORCE_DEFAULTS");
@@ -882,12 +818,15 @@ obj2tiles::Obj2TilesOptions chooseObj2TilesOptions(const std::string& inputObj, 
     if (georef.has_value()) {
         // Georeferenced tiling: Obj2Tiles builds the ECEF transform from the origin,
         // placing the model's local frame at the given WGS84 coordinates.
+        // The origin is the ENU origin itself, or the offset point of a projected georef converted to
+        // WGS84 (the axes are then taken as East/North/Up there).
+        const Wgs84Position origin = localFrameOrigin(*georef);
         opts.localMode = false;
-        opts.lat = georef->latitude;
-        opts.lon = georef->longitude;
-        opts.alt = georef->altitude;
-        LOGD << "Building georeferenced 3D Tiles for " << inputObj << " at lat=" << georef->latitude
-             << " lon=" << georef->longitude << " alt=" << georef->altitude;
+        opts.lat = origin.latitude;
+        opts.lon = origin.longitude;
+        opts.alt = origin.altitude;
+        LOGD << "Building georeferenced 3D Tiles for " << inputObj << " at lat=" << origin.latitude
+             << " lon=" << origin.longitude << " alt=" << origin.altitude;
     } else {
         // Non-georeferenced (local) tiling: identity transform, parity with the
         // current non-georeferenced bm3d viewer.
@@ -986,9 +925,9 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     // Resolve georeferencing from sidecars next to the ORIGINAL input (before any
     // conversion moves us into a temp directory). An explicit georef argument
     // always wins.
-    std::optional<ModelGeoref> georef = options.georef;
+    std::optional<LocalFrameGeoref> georef = options.georef;
     if (!georef.has_value() && options.autoDetectGeoref)
-        georef = detectModelGeoref(inputObj);
+        georef = detectLocalFrameGeoref(inputObj);
 
     // Validate dependencies and convert to OBJ when needed (glTF/GLB, PLY).
     io::ScopedTempDir inputGuard;

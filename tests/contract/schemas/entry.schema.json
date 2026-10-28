@@ -262,6 +262,65 @@
             }
           }
         },
+        "georeferenced": {
+          "type": "boolean",
+          "description": "Models: false when the model is in local space. Models and Gaussian splats: true when a sidecar says where the local frame of the file sits on the Earth (a splat that has none carries no member); the point geometry of the entry is then the origin of that frame."
+        },
+        "georef": {
+          "description": "Models and Gaussian splats: where the local frame (meters, X East, Y North, Z up) sits on the Earth. Present with georeferenced: true.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "origin"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "enu"
+                },
+                "origin": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "[latitude, longitude, altitude] of the origin of the local tangent plane, degrees and meters"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "crs",
+                "offset"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "projected"
+                },
+                "crs": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The projected CRS the frame is shifted in: EPSG:xxxx, a PROJ string or WKT"
+                },
+                "offset": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "[x, y, z] added to a local point to get its coordinates in crs"
+                }
+              }
+            }
+          ]
+        },
         "pointCount": {
           "type": "integer",
           "minimum": 0

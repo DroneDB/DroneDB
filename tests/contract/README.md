@@ -370,3 +370,14 @@ Registry has to adopt first.
   schema `build-file.schema.json` changed; no other fixture did.
   STAC names the `.spz`, `.splat` and `.ksplat` data asset `application/octet-stream`, the media
   type of the manifest (it said `application/x-spz` for `.spz`).
+
+* 2026-10-28: the `properties` of an entry may carry `georef` (additive), with `georeferenced: true`
+  and the origin of the local frame as the point geometry of the entry: `{"kind": "enu", "origin":
+  [latitude, longitude, altitude]}` or `{"kind": "projected", "crs": "<EPSG:xxxx, PROJ string or
+  WKT>", "offset": [x, y, z]}` (a point of the file plus `offset` is in `crs`). A Gaussian splat
+  with a georeferencing sidecar (`<stem>.geo.json`, `georef.json`, `reference_lla.json` or the
+  ODM `coords.txt`, see `detectLocalFrameGeoref`) now has them, as a georeferenced model has the
+  first two (a model gains `georef`); a splat without one still carries neither, as noted on
+  2026-10-25. The `bounds.json` of the built splat gains `up: [0, 0, 1]`, `upConfidence: 1` and
+  `upSource: "georef"` and `wgs84Footprint`, a GeoJSON Polygon geometry (`[longitude, latitude]`
+  ring) of its bounding box. `entry.schema.json` describes the two members; no fixture changed.

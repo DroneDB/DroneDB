@@ -10,26 +10,12 @@
 #include "build_budget.h"
 #include "entry_types.h"
 #include "fs.h"
+#include "local_frame_georef.h"
 #include <vector>
 #include "obj2tiles_runner.h"
 
 namespace ddb
 {
-
-    /**
-     * @brief WGS84 georeferencing origin for a 3D model.
-     *
-     * The model's local coordinate frame (meters, ENU-like) is assumed to be
-     * centered at this latitude/longitude/altitude, matching the OpenDroneMap /
-     * Obj2Tiles convention. Used to build the ECEF transform in the 3D Tiles
-     * `tileset.json` so the model sits in the correct place on the globe.
-     */
-    struct ModelGeoref
-    {
-        double latitude = 0.0;  ///< WGS84 latitude of the model origin, degrees.
-        double longitude = 0.0; ///< WGS84 longitude of the model origin, degrees.
-        double altitude = 0.0;  ///< Altitude of the model origin, meters.
-    };
 
     /** What @ref buildModel3DTiles may be told besides the model and the destination. */
     struct Tiles3DOptions
@@ -37,8 +23,11 @@ namespace ddb
         /// When true, an existing non-empty output directory is replaced (only once the new
         /// tileset is complete); when false, a non-empty one causes an exception.
         bool overwrite = false;
-        /// Explicit georeferencing origin (overrides auto-detection).
-        std::optional<ModelGeoref> georef{};
+        /// Explicit georeferencing (overrides auto-detection). The tileset is placed by an ENU origin:
+        /// the offset point of a projected georef is converted to WGS84 and used as that origin, so
+        /// the axes of the model are taken as East/North/Up there, as the grid of the CRS differs from
+        /// that by the convergence of the meridians (about 1 degree at the edge of a UTM zone).
+        std::optional<LocalFrameGeoref> georef{};
         /// When true and @c georef is empty, attempt sidecar detection.
         bool autoDetectGeoref = true;
         /// Root folder of the dataset that contains the model, or empty when unknown (same
@@ -78,21 +67,6 @@ namespace ddb
                           const BuildOptions& options = {});
 
     /**
-     * @brief Detect a model's WGS84 georeferencing origin from sidecar files.
-     *
-     * Looks next to @p inputObj (and one directory up, plus an `opensfm/` sibling
-     * for OpenDroneMap project layouts) for one of these JSON sidecars, in order:
-     * `<stem>.geo.json`, `georef.json`, `reference_lla.json`. Each is parsed for
-     * `latitude`/`longitude` (required) and `altitude` (optional, default 0);
-     * the short keys `lat`/`lon`/`alt` are also accepted.
-     *
-     * @param inputObj Path to the source model (OBJ/GLTF/GLB).
-     * @return The georeferencing origin, or std::nullopt if none is found or the
-     *         coordinates are out of range (then the model is treated as local).
-     */
-    std::optional<ModelGeoref> detectModelGeoref(const std::string &inputObj);
-
-    /**
      * @brief Generate an OGC 3D Tiles tileset from an OBJ/GLTF/GLB/PLY/STL model using Obj2Tiles.
      *
      * Mirrors @ref buildBm3d: file dependencies are validated, then GLTF/GLB and STL
@@ -122,7 +96,7 @@ namespace ddb
      * separators in @p outputDir are ignored.
      *
      * Georeferencing: if @p georef is provided it is used; otherwise, when
-     * @p autoDetectGeoref is true (the default), @ref detectModelGeoref is used to
+     * @p autoDetectGeoref is true (the default), @ref detectLocalFrameGeoref is used to
      * find a sidecar next to @p inputObj. When neither yields coordinates the model
      * is tiled in local mode (identity transform), as the bm3d viewer shows it.
      *
@@ -160,7 +134,7 @@ namespace ddb
      *
      * Bounds are expressed in the model's own local coordinate frame (meters),
      * following the OpenDroneMap / Obj2Tiles ENU convention where X is East, Y is
-     * North and Z is up. Combined with a @ref ModelGeoref origin this yields the
+     * North and Z is up. Combined with a @ref LocalFrameGeoref this yields the
      * model's WGS84 footprint.
      */
     struct ModelInfo
