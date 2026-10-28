@@ -85,9 +85,10 @@ This project adheres to the [Contributor Covenant](CONDUCT.md). By participating
 
 ## Bumping vendor/spz and vendor/spark
 
-- **vendor/spz** (nianticlabs): bump by checking out a tagged commit. CI runs the gsplat
-  tests (including the SPZ v2/v3/v4 fixture tests). The delivery format must remain
-  gzip-based SPZ v3 (viewer constraint, `kDeliverySpzVersion` in `gsplat.cpp`). After the
+- **vendor/spz** (nianticlabs): bump by checking out a tagged commit, or a reviewed commit of
+  upstream `main` when the fixes it needs are not in a tag yet. CI runs the gsplat tests
+  (including the SPZ v2/v3/v4 fixture tests). The `.spz` export stays gzip-based SPZ v3,
+  which every SPZ reader reads (`kDeliverySpzVersion` in `splat_convert.cpp`). After the
   bump, check the CI gsplat test count shows **0 skipped**.
 - **vendor/spark** (build-lod producer): policy is to pin to a release tag matching Hub's
   `@sparkjsdev/spark` npm version, bumping both in the same release cycle. Current
