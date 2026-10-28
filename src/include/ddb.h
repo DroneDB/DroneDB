@@ -262,7 +262,8 @@ extern "C"
      * DDBERR_SHUTDOWN.
      * The cancellable exports are the render, tile and thumbnail paths, the exports of rasters
      * (export, mask, statistics and metadata, point and area values, profile, volume, stockpiles,
-     * contours), the training data of a splat (DDBExportSplatTrainingData), DDBBuild,
+     * contours), the training data of a splat (DDBExportSplatTrainingData) and its .spz
+     * export (DDBExportSplatSpz), DDBBuild,
      * DDBComputeDeltaLocals and DDBApplyDelta(Ex). A canceled call leaves
      * no half result: a raster output file is deleted, and DDBApplyDelta changes the dataset
      * whole or not at all (see there). */
@@ -1050,6 +1051,35 @@ extern "C"
     DDB_DLL DDBErr DDBExportSplatTrainingData(const char *ddbPath, const char *folder, const char *outFolder,
                                               const char *optionsJson, DDBProgressCallback progress,
                                               void *progressUserData, char **output);
+
+    /** A Gaussian splat as one .spz file for other tools (new in 2.0): the dataset file of the entry
+     * (PLY, SPLAT or SPZ; KSPLAT, SOG and RAD are not converted) converted to SPZ and kept in the build
+     * folder of the entry as the artifact of the role "gsplat.export" (gsplat/export.spz, downloadName
+     * "export.spz"). The file is returned as it is while it exists, is not empty and is not older than
+     * the dataset file ("cached": true), and made again otherwise. It is made on demand and never by
+     * a build: the entry must have been built (its model.rad exists), the artifact is listed
+     * only while it exists, and a build of the entry removes it with the rest of gsplat/ (the host
+     * calls this again when it needs it).
+     * The call holds the build lock of the entry while it looks for and writes the file: it fails
+     * with DDBERR_BUILDINPROGRESS while a build of the entry runs (or another export of it), and
+     * a build started meanwhile finds the entry locked.
+     * The conversion reads the whole dataset file and decodes all its splats in memory (SPZ has
+     * no streaming writer): count a few times the size of the file for the peak and run the call
+     * as a heavy task. No size is refused. The call is cancellable (DDBSetThreadCancelToken): a
+     * canceled call writes nothing, and a conversion that has decoded its splats stops before it
+     * encodes them.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param entryPath dataset-relative path of the entry (see "Entry paths")
+     * @param output pointer to C-string where to store the JSON object (free with DDBFree):
+     *               {"path": string, "role": "gsplat.export", "cached": bool}: the absolute path
+     *               of the .spz file (UTF-8), its role, and whether it was already there
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, the entry is
+     *         not a Gaussian splat or its format is not converted; DDBERR_NOTFOUND when the entry is not in the
+     *         dataset or has no completed build (the message says it is not built); DDBERR_BUILDINPROGRESS
+     *         as above; DDBERR_EXCEPTION when the dataset file is missing or cannot be decoded;
+     *         DDBERR_RETRYABLE when the disk is (nearly) full (DDBGetLastErrorReason);
+     *         DDBERR_CANCELED when canceled; DDBERR_BUSY on database contention */
+    DDB_DLL DDBErr DDBExportSplatSpz(const char *ddbPath, const char *entryPath, char **output);
 
     /** Options for DDBListEntriesEx (new in 2.0). Set structSize to sizeof(DDBListEntriesOptions)
      * and every other field explicitly. A later version may append fields: a library that does not

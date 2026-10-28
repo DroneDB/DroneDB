@@ -21,6 +21,10 @@ namespace ddb
     // is ignored).
     void convertToSpz(const std::string &input, const std::string &output);
 
+    // convertToSpz() refuses a format that is not converted: this is the same refusal, for a caller
+    // that has to know before it takes a lock or reads anything (InvalidArgsException).
+    void assureConvertibleToSpz(const std::string &input);
+
     // Rewrites an SPZ of any version as the gzip-based version 3 that the viewer and build-lod
     // read (a v4 NGSP/ZSTD file is not readable by either). The quaternion precision is the same,
     // so the splats do not change. Throws AppException when nothing can be decoded from the input.

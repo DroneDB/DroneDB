@@ -93,7 +93,7 @@ class GaussianSplatEntryHandler : public EntryHandler {
                 // is no render role and not part of completeness, and the next build removes it with
                 // the rest of gsplat/. Not legacy: it stands in for nothing, so it never replaces
                 // model.rad and cleanup never touches it
-                BuildArtifact::file("gsplat.export", artifactPath(GsplatBuildSubfolder, GsplatExportFileName),
+                BuildArtifact::file(GsplatExportRole, artifactPath(GsplatBuildSubfolder, GsplatExportFileName),
                                     GsplatMediaType, GsplatExportFileName)};
     }
 

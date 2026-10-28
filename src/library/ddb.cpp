@@ -62,6 +62,7 @@
 #include "raster_region.h"
 #include "raster_utils.h"
 #include "vector_query.h"
+#include "gsplat.h"
 #include "sensorprofile.h"
 #include "splat_training_export.h"
 #include "stac.h"
@@ -1200,6 +1201,17 @@ DDBErr DDBExportSplatTrainingData(const char* ddbPath, const char* folder, const
         const SplatTrainingExportResult result =
             exportSplatTrainingData(project, pathArg(outFolder), options);
         return json{{"warnings", result.warnings}, {"images", result.images}, {"points", result.points}};
+    });
+}
+
+DDBErr DDBExportSplatSpz(const char* ddbPath, const char* entryPath, char** output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireDdbPath(ddbPath);
+        const std::string path = entryPathArg(entryPath, "No entry path provided", "entry path");
+        requireOutput(output);
+
+        const auto db = ddb::open(std::string(ddbPath), false);
+        return json(exportSplatSpz(db.get(), path));
     });
 }
 

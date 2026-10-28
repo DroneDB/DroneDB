@@ -9,11 +9,14 @@
 #include <string>
 
 #include "build_layout.h"
+#include "fs.h"
 #include "json_fwd.h"
 #include "local_frame_georef.h"
 
 namespace ddb
 {
+    class Database;
+
     // The Gaussian Splat artifact names (GsplatBuildSubfolder, GsplatRadFileName,
     // GsplatBoundsFileName, ...) are in build_layout.h; the formats a splat can be in, in
     // splat_format.h.
@@ -53,6 +56,36 @@ namespace ddb
     // without build-lod (a file the reader cannot read throws AppException with the reason).
     void buildGsplat(const std::string &input, const std::string &outdir,
                      const std::optional<LocalFrameGeoref> &georef = std::nullopt);
+
+    // The .spz that exportSplatSpz made or found
+    struct SplatSpzExport
+    {
+        fs::path path;       // `gsplat/export.spz` in the build folder of the entry
+        bool cached = false; // found, not made by this call
+    };
+
+    /// {"path": string, "role": "gsplat.export", "cached": bool}
+    void to_json(json &j, const SplatSpzExport &exported);
+
+    // Makes the splat of the entry at `entryPath` available as a single .spz file for other tools:
+    // `<build root>/<hash>/gsplat/export.spz`, the artifact of the role gsplat.export, converted from the
+    // dataset file by convertToSpz (splat_convert.h; ply, splat and spz are converted, other formats are an
+    // InvalidArgsException). The file is kept in the build folder: it is returned as it is while it exists,
+    // is not empty and is not older than the dataset file, and made again otherwise. A build of the entry
+    // removes it, as it publishes gsplat/ whole.
+    //
+    // The entry must be a Gaussian splat (InvalidArgsException) with a completed build, whose model.rad
+    // exists (EntryNotFoundException saying it is not built, so it is not made in a build folder that is
+    // still to be built); an entry that is not indexed is an EntryNotFoundException too. The build lock of
+    // the entry (the one of gsplat/, which is all a splat's build takes) is held while the file is
+    // looked for and made, so a build that runs is a BuildInProgressException and a build that starts
+    // meanwhile finds the lock held. A full disk is a RetryableBuildException.
+    //
+    // convertToSpz reads the whole source and decodes all its splats in memory (SPZ has no streaming
+    // writer): the peak is a few times the size of the dataset file, so a host runs the call as a heavy
+    // task. No size cap is applied. The call checks its cancel token before the conversion, which is not
+    // interrupted.
+    SplatSpzExport exportSplatSpz(Database *db, const std::string &entryPath);
 
 } // namespace ddb
 

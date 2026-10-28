@@ -38,6 +38,7 @@ DDBDetectAllStockpiles
 DDBDetectStockpile
 DDBExportRaster
 DDBExportRaster2
+DDBExportSplatSpz
 DDBExportSplatTrainingData
 DDBFree
 DDBFreeCancelToken

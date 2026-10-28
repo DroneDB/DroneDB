@@ -790,6 +790,72 @@ TEST(gsplat, buildLeavesTheDatasetFolderAloneAndPublishesOnlyItsOutputs) {
 #endif
 }
 
+// The .spz of an export for other tools lives in the build folder: a build that is complete leaves
+// it, a forced rebuild publishes gsplat/ whole and so removes it, and the export is made again from
+// the dataset file afterwards
+TEST(gsplat, aForcedRebuildRemovesTheExportAndAnotherOneIsMadeAgain) {
+    TestArea ta(TEST_NAME);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the export and rebuild assertions");
+
+    const fs::path dataset = ta.getFolder("dataset");
+    char* out = nullptr;
+    ASSERT_EQ(DDBInit(dataset.string().c_str(), &out), DDBERR_NONE) << DDBGetLastError();
+    DDBFree(out);
+    const fs::path ply = dataset / "scene.ply";
+    writeSplatPly(ply, 80, 1);
+    const std::string plyPath = ply.string();
+    const char* paths[] = {plyPath.c_str()};
+    ASSERT_EQ(DDBAdd(dataset.string().c_str(), paths, 1, &out, false), DDBERR_NONE) << DDBGetLastError();
+    DDBFree(out);
+    ASSERT_EQ(DDBBuild(dataset.string().c_str(), "scene.ply", nullptr, false, false), DDBERR_NONE)
+        << DDBGetLastError();
+
+    const auto exportSpz = [&] {
+        char* text = nullptr;
+        EXPECT_EQ(DDBExportSplatSpz(dataset.string().c_str(), "scene.ply", &text), DDBERR_NONE) << DDBGetLastError();
+        const json result = text != nullptr ? json::parse(text) : json();
+        DDBFree(text);
+        return result;
+    };
+    const auto roles = [&] {
+        const char* entries[] = {"scene.ply"};
+        EXPECT_EQ(DDBGetBuildArtifacts(dataset.string().c_str(), entries, 1, &out), DDBERR_NONE) << DDBGetLastError();
+        const json found = json::parse(out);
+        DDBFree(out);
+        std::vector<std::string> names;
+        for (const auto& artifact : found[0]["build"]["artifacts"])
+            names.push_back(artifact["role"]);
+        return names;
+    };
+
+    const json first = exportSpz();
+    EXPECT_FALSE(first["cached"].get<bool>());
+    const fs::path exported = fs::path(first["path"].get<std::string>());
+    ASSERT_TRUE(fs::is_regular_file(exported));
+    GaussianSplatInfo info;
+    ASSERT_TRUE(ddb::getGaussianSplatInfo(exported.string(), info));
+    EXPECT_EQ(info.splatCount, 80u);
+    EXPECT_EQ(roles(), (std::vector<std::string>{"gsplat.lod", "gsplat.bounds", "gsplat.export"}));
+
+    // A build of a complete entry does nothing to it
+    ASSERT_EQ(DDBBuild(dataset.string().c_str(), "scene.ply", nullptr, false, false), DDBERR_NONE)
+        << DDBGetLastError();
+    EXPECT_TRUE(fs::is_regular_file(exported));
+    EXPECT_TRUE(exportSpz()["cached"].get<bool>());
+
+    // A forced build publishes a new gsplat/: the export is not in it
+    ASSERT_EQ(DDBBuild(dataset.string().c_str(), "scene.ply", nullptr, true, false), DDBERR_NONE)
+        << DDBGetLastError();
+    EXPECT_FALSE(fs::exists(exported));
+    EXPECT_EQ(roles(), (std::vector<std::string>{"gsplat.lod", "gsplat.bounds"}));
+    EXPECT_TRUE(isRad(exported.parent_path() / GsplatRadFileName));
+
+    const json second = exportSpz();
+    EXPECT_FALSE(second["cached"].get<bool>());
+    EXPECT_TRUE(fs::is_regular_file(exported));
+    DDBReleaseConnections(dataset.string().c_str(), nullptr);
+}
+
 // A v4 (NGSP) SPZ cannot be read by build-lod: the build transcodes it to v3 first, in a scratch
 // folder beside the one that is published, and gone after the build
 TEST(gsplat, buildAcceptsAV4Spz) {

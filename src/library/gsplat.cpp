@@ -5,7 +5,13 @@
 
 #include <array>
 
+#include "build_internal.h"
+#include "buildlock.h"
 #include "buildlod_runner.h"
+#include "cancellation.h"
+#include "database.h"
+#include "dbops.h"
+#include "entry_handler.h"
 #include "exceptions.h"
 #include "json.h"
 #include "local_frame_georef.h"
@@ -259,6 +265,72 @@ namespace ddb
         }
 
         writeBoundsSidecar(outRad, io::fromUtf8(outdir) / GsplatBoundsFileName, georef);
+    }
+
+    void to_json(json &j, const SplatSpzExport &exported)
+    {
+        j = {{"path", io::toUtf8(exported.path)}, {"role", GsplatExportRole}, {"cached", exported.cached}};
+    }
+
+    namespace
+    {
+        // What an export found: made after the dataset file and not empty
+        bool isCurrentExport(const fs::path &exported, const fs::path &source)
+        {
+            std::error_code ec;
+            if (!fs::is_regular_file(exported, ec) || ec || fs::file_size(exported, ec) == 0 || ec)
+                return false;
+            const auto madeAt = fs::last_write_time(exported, ec);
+            if (ec)
+                return false;
+            const auto changedAt = fs::last_write_time(source, ec);
+            return !ec && madeAt >= changedAt;
+        }
+    } // namespace
+
+    SplatSpzExport exportSplatSpz(Database *db, const std::string &entryPath)
+    {
+        const auto entry = getEntry(db, entryPath);
+        if (!entry)
+            throw EntryNotFoundException("No entry " + entryPath);
+        if (entry->type != EntryType::GaussianSplat)
+            throw InvalidArgsException(entryPath + " is not a Gaussian splat");
+
+        const fs::path source = db->rootDirectory() / io::fromUtf8(entry->path);
+        assureConvertibleToSpz(io::toUtf8(source));
+        std::error_code ec;
+        if (!fs::is_regular_file(source, ec) || ec)
+            throw AppException("The file of the Gaussian splat " + entryPath + " does not exist in the dataset");
+        cancel::throwIfCanceled();
+
+        const fs::path baseOutputPath = fs::absolute(db->buildDirectory() / entry->hash);
+        const fs::path outputFolder = baseOutputPath / GsplatBuildSubfolder;
+        if (!fs::is_directory(baseOutputPath, ec) || ec)
+            throw EntryNotFoundException("The Gaussian splat " + entryPath + " is not built: build it first");
+
+        // The lock of the whole build of a splat is the one of its output folder: a build that runs
+        // holds it until it has published gsplat/, and none starts while this export writes into it
+        BuildLock lock(io::toUtf8(outputFolder));
+        if (!entryHandler(entry->type).isComplete(baseOutputPath))
+            throw EntryNotFoundException("The Gaussian splat " + entryPath + " is not built: build it first");
+
+        const fs::path exported = outputFolder / GsplatExportFileName;
+        if (isCurrentExport(exported, source))
+            return {exported, true};
+
+        try
+        {
+            ensureSufficientDiskSpace(baseOutputPath);
+            cancel::throwIfCanceled();
+            convertToSpz(io::toUtf8(source), io::toUtf8(exported));
+        }
+        catch (const FSException &e)
+        {
+            if (e.code() == std::errc::no_space_on_device)
+                throw RetryableBuildException(e.what(), RetryableBuildReason::NoSpaceOnDevice);
+            throw;
+        }
+        return {exported, false};
     }
 
 } // namespace ddb

@@ -10,6 +10,7 @@
 #include <fstream>
 #include <limits>
 
+#include "cancellation.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
@@ -199,13 +200,17 @@ namespace ddb
             throw AppException("Failed to transcode .spz to viewer-compatible version: " + io::toUtf8(output));
     }
 
-    void convertToSpz(const std::string &input, const std::string &output)
+    void assureConvertibleToSpz(const std::string &input)
     {
-        const SplatFormat fmt = splatFormatOf(io::fromUtf8(input));
-
-        if (!splatFormatAccepts(fmt, SplatStage::Convert))
+        if (!splatAccepts(io::fromUtf8(input), SplatStage::Convert))
             throw InvalidArgsException("Cannot convert " + input + " to .spz: only " + splatExtensionsText(SplatStage::Convert) +
                                        " files are converted");
+    }
+
+    void convertToSpz(const std::string &input, const std::string &output)
+    {
+        assureConvertibleToSpz(input);
+        const SplatFormat fmt = splatFormatOf(io::fromUtf8(input));
 
         // The output replaces what is at its path: the input must not be it ("x.spz" converted
         // to the default "x.spz"), or the conversion would overwrite the file it converts
@@ -257,6 +262,8 @@ namespace ddb
             throw AppException("No decoder for " + input);
         }
 
+        // Decoding is the long read of a big file: a canceled call stops before it encodes and writes
+        cancel::throwIfCanceled();
         if (!saveSpzFile(cloud, deliveryPackOptions(), io::fromUtf8(output)))
             throw AppException("Failed to encode .spz: " + output);
     }

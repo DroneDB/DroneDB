@@ -94,6 +94,8 @@ constexpr const char* GsplatBoundsFileName = "bounds.json";
 // no build writes it, no completeness check reads it, and the next build of the entry (which
 // publishes gsplat/ whole) removes it.
 constexpr const char* GsplatExportFileName = "export.spz";
+// Its role in the build manifest
+constexpr const char* GsplatExportRole = "gsplat.export";
 // Thumbnails are generated on demand from the .rad (or a legacy .spz) at request time - no
 // build-time thumbnail artifact is produced. The name is what tests check a build does not write.
 constexpr const char* GsplatThumbFileName = "thumbnail.webp";

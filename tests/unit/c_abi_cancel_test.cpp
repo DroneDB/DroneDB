@@ -145,7 +145,7 @@ struct Inputs {
     fs::path raster5;  // the same with 5 bands (spectral indexes)
     fs::path dem;  // 1 band Float32, EPSG:4326, a conical mound, 80x80 at (10, 45), 0.0001 degrees
     fs::path source;   // where the files of the deltas wait
-    fs::path dataset;  // holds ortho.tif and an ODM project in odm/
+    fs::path dataset;  // holds ortho.tif, an ODM project in odm/ and the built splat scene.spz
     explicit Inputs(const std::string& name) : area(name, true) {
         testutils::GeoRasterSpec spec;
         raster = testutils::createGeoRaster(area.getPath("raster.tif"), spec);
@@ -176,6 +176,27 @@ struct Inputs {
         const char* paths[] = {path.c_str()};
         EXPECT_EQ(DDBAdd(dataset.string().c_str(), paths, 1, &out, false), DDBERR_NONE) << DDBGetLastError();
         DDBFree(out);
+        addBuiltSplat();
+    }
+
+  private:
+    // scene.spz, a gzip stream (an SPZ is told by it and converted by copying it), indexed and with a
+    // model.rad in its build folder: the entry the .spz export needs
+    void addBuiltSplat() {
+        const auto splat = dataset / "scene.spz";
+        const std::vector<uint8_t> gzip = {0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x03, 0x00};
+        writeFile(splat, gzip);
+        const std::string path = splat.string();
+        const char* paths[] = {path.c_str()};
+        char* out = nullptr;
+        EXPECT_EQ(DDBAdd(dataset.string().c_str(), paths, 1, &out, false), DDBERR_NONE) << DDBGetLastError();
+        DDBFree(out);
+
+        const char* entries[] = {"scene.spz"};
+        EXPECT_EQ(DDBGetBuildArtifacts(dataset.string().c_str(), entries, 1, &out), DDBERR_NONE) << DDBGetLastError();
+        const json found = json::parse(out);
+        DDBFree(out);
+        writeFile(fs::path(found[0]["build"]["root"].get<std::string>()) / "gsplat" / "model.rad", "x");
     }
 };
 
@@ -286,6 +307,10 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
          [=] {
              return DDBExportRaster2(raster.c_str(), out.c_str(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0,
                                      nullptr, nullptr);
+         }},
+        {"DDBExportSplatSpz",
+         [=] {
+             return withString([&](char** text) { return DDBExportSplatSpz(dataset.c_str(), "scene.spz", text); });
          }},
         {"DDBExportSplatTrainingData",
          [=] {
@@ -825,8 +850,8 @@ TEST_F(CancelToken, applyDeltaCanceledOnceItChangesTheDatasetIsAppliedWhole) {
             EXPECT_TRUE(during.fired()) << "the apply never logged: the test checks nothing";
         }
         c.expectApplied();
-        EXPECT_EQ(c.entries().size(), c.names.size() + 2u)
-            << "the files, their folder and ortho.tif";
+        EXPECT_EQ(c.entries().size(), c.names.size() + 3u)
+            << "the files, their folder, ortho.tif and scene.spz";
         capi::resetShutdownForTests();
     }
 }

@@ -404,3 +404,15 @@ Registry has to adopt first.
   offers the first artifact with a `downloadName` as the download of an entry (Registry's
   `build-artifact`) serves a splat. The `entry-types` fixture lists the new role; no other fixture
   changed (none lists a splat build).
+
+* 2026-10-28: the export `DDBExportSplatSpz(ddbPath, entryPath, output)` is new in 2.0.0 (ABI 2.0, no
+  bump). It makes the `.spz` of a Gaussian splat for other tools in the build folder of the entry
+  (`gsplat/export.spz`, role `gsplat.export`) with the build lock of the entry held, and returns
+  `{"path": string, "role": "gsplat.export", "cached": bool}`: the absolute path of the file, and
+  whether it was there already (it exists, is not empty and is not older than the dataset file).
+  It returns `DDBERR_INVALIDARGS` for an entry that is not a splat or whose format (`.ksplat`,
+  `.sog`, `.rad`) is not converted, `DDBERR_NOTFOUND` for an entry that is not in the dataset or
+  whose build is not complete (the message says it is not built), `DDBERR_BUILDINPROGRESS` while a
+  build (or another export) of the entry holds the lock, `DDBERR_RETRYABLE` on a full disk and
+  `DDBERR_CANCELED` when its cancel token is canceled. `capabilities` lists the export in `symbols` and
+  in `cancellable`; no other fixture changed.
