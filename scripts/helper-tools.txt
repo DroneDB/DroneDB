@@ -12,7 +12,9 @@
 # (scripts/check-helper-tools.py) runs them, and the CI workflow checks they were built. Add a
 # helper here and in its subdirectory of vendor/, and every one of those picks it up.
 #
-# Programs that a build only uses when they are present (Obj2Tiles, untwine, build-lod, dwg2dxf) are
-# not helpers in this sense and are not listed.
+# Programs that a build only uses when they are present (Obj2Tiles, untwine, dwg2dxf) are not helpers
+# in this sense and are not listed. build-lod is needed by every Gaussian Splat build, but it is a
+# Rust program built by scripts/build-buildlod.{sh,ps1}, not a vendor/ target, so it is not listed
+# either.
 metadata-util | package
 bm3d | vendor/bm3d/VERSION

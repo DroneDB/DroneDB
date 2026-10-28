@@ -356,7 +356,7 @@ jobs:
               echo "  ✗ build-lod NOT present in .deb - release builds MUST include build-lod. Failing."
               exit 1
             else
-              echo "  ! build-lod NOT present in .deb (Gaussian Splat builds deferred until build-lod is available)"
+              echo "  ! build-lod NOT present in .deb (Gaussian Splat builds fail without it)"
             fi
           fi
 
@@ -1006,7 +1006,7 @@ jobs:
                 Write-Host '  ✗ build-lod.exe NOT present in zip - release builds MUST include build-lod. Failing.'
                 exit 1
               } else {
-                Write-Host '  ! build-lod.exe NOT present in zip (Gaussian Splat builds will be deferred until build-lod is available)'
+                Write-Host '  ! build-lod.exe NOT present in zip (Gaussian Splat builds fail without it)'
               }
             }
             if (Test-Path (Join-Path $zipCheckDir 'dwg2dxf.exe')) {

@@ -209,13 +209,16 @@ if (Test-Path $untwinePath) {
     Write-Host "  - untwine.exe (not found, skipping - DroneDB will fall back to PDAL writers.copc)" -ForegroundColor Yellow
 }
 
-# Copy build-lod.exe if present (mandatory for Gaussian Splat builds, vendor/spark)
+# Copy build-lod.exe (mandatory for Gaussian Splat builds, vendor/spark; the workflow fails a
+# release build whose zip does not have it)
+Write-Host ""
+Write-Host "Copying build-lod..." -ForegroundColor Cyan
 $buildLodPath = Join-Path $BuildDir "build-lod.exe"
 if (Test-Path $buildLodPath) {
     Copy-Item $buildLodPath $stagingDir -Force
     Write-Host "  ✓ build-lod.exe (Gaussian Splat LOD producer)" -ForegroundColor Green
 } else {
-    Write-Host "  - build-lod.exe (not found, skipping - Gaussian Splat builds deferred until it is available)" -ForegroundColor Yellow
+    Write-Host "  - build-lod.exe (not found, skipping - Gaussian Splat builds fail without it)" -ForegroundColor Yellow
 }
 
 # Copy Obj2Tiles.exe if present (optional - enables OGC 3D Tiles generation from OBJ models)

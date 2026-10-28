@@ -21,9 +21,9 @@
 #
 # This script is intentionally tolerant of missing sources/toolchain LOCALLY: when
 # vendor/spark is not present (submodule not initialised) or cargo is unavailable it prints
-# an informational message and exits 0. In that case Gaussian Splat (RAD) builds are
-# deferred: buildGsplat throws BuildDepMissingException until build-lod is available
-# (no delivery artifact is produced).
+# an informational message and exits 0. build-lod is mandatory for Gaussian Splat builds: without
+# it every splat build fails (buildGsplat throws an AppException that names the tool) and no
+# delivery artifact is produced.
 # Set DDB_REQUIRE_BUILDLOD (done by CI) to turn a missing source/toolchain into a hard
 # error instead, so gsplat builds cannot silently ship without the mandatory LOD producer.
 #
@@ -67,7 +67,7 @@ if [ ! -f "${MANIFEST}" ]; then
         echo "      The git submodule is probably not initialised. Run:"
         echo "        git submodule update --init vendor/spark"
     else
-        echo "INFO: vendor/spark not present, skipping build-lod build (Gaussian Splat builds deferred until build-lod is available)."
+        echo "INFO: vendor/spark not present, skipping build-lod build (Gaussian Splat builds fail until build-lod is available)."
     fi
     exit 0
 fi
