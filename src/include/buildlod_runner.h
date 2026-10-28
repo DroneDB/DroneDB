@@ -44,9 +44,14 @@ namespace ddb
         //
         // build-lod writes "<input-stem>-lod.rad" next to the file it is given, and skips a file
         // named "*-lod.spz" or "*-lod.rad". So the input is linked (else copied) as
-        // "source.<ext>" into a scratch folder beside outputRad, build-lod runs on that, and the
-        // scratch folder is removed on every path: the folder of the input is never written to,
-        // and a file there that looks like build-lod's output is never touched. The result
+        // "source.<ext>" into a scratch folder "<folder of outputRad>-build-lod-<rand>" beside the
+        // folder of outputRad (io::ScopedTempDir::createBeside), build-lod runs on that, and the
+        // scratch folder is removed on every path: the folder of the input is never written to, a
+        // file there that looks like build-lod's output is never touched, and the folder of the
+        // output holds the RAD only, even when the scratch cannot be removed. A symbolic link is
+        // staged as it is: build-lod names its output after the path it is given (it does not
+        // resolve links), so it writes in the scratch folder, never beside the dataset file. The
+        // extension keeps its case: build-lod matches it case-insensitively. The result
         // succeeds when the tool exited with code 0 and left a non-empty RAD that is moved to
         // outputRad; otherwise it carries the error with the tail of the tool's output, which is
         // where build-lod says why it wrote nothing (it exits 0 after a decode failure). The

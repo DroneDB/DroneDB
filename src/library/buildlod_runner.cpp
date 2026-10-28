@@ -43,17 +43,26 @@ namespace ddb
 
             // Makes `staged` name the content of `input` without writing to the dataset: a hard
             // link, else a symbolic link (another volume), else a copy (a file system without
-            // links, or Windows without the right to create them).
+            // links, or Windows without the right to create them). A dataset file that is itself
+            // a symbolic link is resolved first: a hard link to a link is a copy of the link, and
+            // a relative one names another file, or none, from the scratch folder.
             void stageInput(const fs::path &input, const fs::path &staged)
             {
                 std::error_code ec;
-                fs::create_hard_link(input, staged, ec);
+                const fs::path real = fs::canonical(input, ec);
+                if (ec)
+                {
+                    LOGD << "Cannot resolve " << io::toUtf8(input) << " (" << ec.message() << "), linking it as it is";
+                }
+                const fs::path &target = ec ? input : real;
+                ec.clear();
+                fs::create_hard_link(target, staged, ec);
                 if (!ec) return;
                 LOGD << "Cannot hard link " << io::toUtf8(input) << " (" << ec.message() << "), trying a symbolic link";
-                fs::create_symlink(fs::absolute(input), staged, ec);
+                fs::create_symlink(fs::absolute(target), staged, ec);
                 if (!ec) return;
                 LOGD << "Cannot link " << io::toUtf8(input) << " (" << ec.message() << "), copying it";
-                io::copy(input, staged);
+                io::copy(target, staged);
             }
 
         } // namespace
@@ -116,14 +125,14 @@ namespace ddb
                 if (ec) return failIo("Cannot create RAD output directory", ec);
             }
 
-            // The input and what build-lod writes live in a scratch folder beside the output
-            // (the build temp folder, which is published as is), removed on every path out
+            // The input and what build-lod writes live in a scratch folder beside the folder of the
+            // output, not in it: that folder is a build's scratch folder, published as it is, so a
+            // scratch folder that cannot be removed must not be in it. Removed on every path out.
             io::ScopedTempDir scratch;
             const fs::path staged = [&]() -> fs::path {
                 try
                 {
-                    const fs::path parent = outputRad.parent_path().empty() ? fs::path(".") : outputRad.parent_path();
-                    scratch = io::ScopedTempDir::create(parent, ".build-lod-");
+                    scratch = io::ScopedTempDir::createBeside(outputRad.parent_path(), "build-lod-");
                     const fs::path file = scratch.path() / io::concat(fs::path(kStagedStem), io::toUtf8(input.extension()));
                     stageInput(input, file);
                     return file;

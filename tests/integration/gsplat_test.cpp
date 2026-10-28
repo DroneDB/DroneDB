@@ -29,6 +29,7 @@
 #include "gtest/gtest.h"
 #include "load-spz.h"
 #include "ply.h"
+#include "process_runner.h"
 #include "rad.h"
 #include "stac.h"
 #include "splat_convert.h"
@@ -781,7 +782,7 @@ TEST(gsplat, buildLeavesTheDatasetFolderAloneAndPublishesOnlyItsOutputs) {
 }
 
 // A v4 (NGSP) SPZ cannot be read by build-lod: the build transcodes it to v3 first, in a scratch
-// folder that is not published
+// folder beside the one that is published, and gone after the build
 TEST(gsplat, buildAcceptsAV4Spz) {
     TestArea ta(TEST_NAME);
     REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping v4 build assertions");
@@ -797,6 +798,8 @@ TEST(gsplat, buildAcceptsAV4Spz) {
     ddb::buildGsplat(v4.string(), outdir.string());
 
     EXPECT_EQ(namesIn(outdir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
+    EXPECT_EQ(namesIn(ta.getFolder("")), (std::vector<std::string>{"out", "scene.ply", "scene_v4.spz"}))
+        << "no scratch folder is left beside the output";
     ASSERT_TRUE(isRad(outdir / GsplatRadFileName));
     EXPECT_EQ(fileSize(v4), sourceBefore);
     EXPECT_EQ(magic4(v4), "NGSP") << "the upload itself is not rewritten";
@@ -807,6 +810,51 @@ TEST(gsplat, buildAcceptsAV4Spz) {
     EXPECT_NEAR(b["max"][0].get<double>(), 9.0, 0.1);
     EXPECT_NEAR(b["max"][1].get<double>(), 6.0, 0.1);
 }
+
+// build-lod reads the extension of its input whatever its case: a SCENE.PLY builds as scene.ply does
+TEST(gsplat, aSplatWithAnUpperCaseExtensionBuilds) {
+    TestArea ta(TEST_NAME);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the upper-case extension build");
+    const fs::path ply = ta.getPath("SCENE.PLY");
+    writeSplatPly(ply, 64, 1);
+    const fs::path outdir = ta.getFolder("out");
+    ASSERT_NO_THROW(ddb::buildGsplat(ply.string(), outdir.string()));
+    EXPECT_EQ(namesIn(outdir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
+    EXPECT_TRUE(isRad(outdir / GsplatRadFileName));
+}
+
+#ifndef _WIN32
+// build-lod names its output after the path it is given and does not resolve symbolic links: given a
+// link, it writes beside the link, never beside the file the link names. The runner stages a dataset
+// file on another volume as such a link in its scratch folder, so build-lod never writes in the dataset.
+TEST(gsplat, buildLodWritesBesideASymbolicLinkNotBesideTheFileItNames) {
+    TestArea ta(TEST_NAME);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the symbolic link assertions");
+    const fs::path dataset = ta.getFolder("dataset");
+    const fs::path ply = dataset / "scene.ply";
+    writeSplatPly(ply, 64, 1);
+    const fs::path scratch = ta.getFolder("scratch");
+    fs::create_symlink(ply, scratch / "source.ply");
+
+    const auto r = process::run(ddb::buildlod::findBuildLodBinary(), {(scratch / "source.ply").string(), "--quick", "--rad"});
+    ASSERT_TRUE(r.exited && r.exitCode == 0) << r.tail(2000);
+    EXPECT_TRUE(isRad(scratch / "source-lod.rad"));
+    EXPECT_EQ(namesIn(dataset), std::vector<std::string>{"scene.ply"});
+}
+
+// A dataset file that is a relative symbolic link builds: the build reads the file it names
+TEST(gsplat, aDatasetFileThatIsARelativeLinkBuilds) {
+    TestArea ta(TEST_NAME);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the relative link build");
+    writeSplatPly(ta.getFolder("elsewhere") / "scene.ply", 64, 1);
+    const fs::path link = ta.getFolder("dataset") / "scene.ply";
+    fs::create_symlink(fs::path("..") / "elsewhere" / "scene.ply", link);
+    const fs::path outdir = ta.getFolder("build/hash/gsplat-temp-x");
+    ASSERT_NO_THROW(ddb::buildGsplat(link.string(), outdir.string()));
+    EXPECT_TRUE(isRad(outdir / GsplatRadFileName));
+    EXPECT_EQ(namesIn(ta.getFolder("dataset")), std::vector<std::string>{"scene.ply"});
+}
+#endif
 
 // The RAD reader decodes the coarse first chunk for on-the-fly previews, and generateThumb
 // dispatches a .rad to the splat rasteriser - the same on-demand model used for COPC point

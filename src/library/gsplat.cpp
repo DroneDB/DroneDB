@@ -214,13 +214,13 @@ namespace ddb
                 "(set DDB_BUILDLOD_PATH or place build-lod next to the DroneDB executable)");
 
         // build-lod reads gzip SPZ (v1-3) only: a NGSP (v4) upload is rewritten as v3 in a
-        // scratch folder that is gone when this function returns, before the folder is published
+        // scratch folder beside outdir (which is published as it is), gone when this returns
         const fs::path source = io::fromUtf8(input);
         io::ScopedTempDir transcoded;
         fs::path lodInput = source;
         if (splatFormatOf(source) == SplatFormat::Spz && sniffSpzContainer(source) == SpzContainer::Ngsp)
         {
-            transcoded = io::ScopedTempDir::create(io::fromUtf8(outdir), ".spz-v3-");
+            transcoded = io::ScopedTempDir::createBeside(io::fromUtf8(outdir), "spz-v3-");
             lodInput = transcoded.path() / "source.spz";
             transcodeSpzToV3(source, lodInput);
         }

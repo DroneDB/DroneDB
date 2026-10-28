@@ -659,6 +659,16 @@ namespace ddb
             return dir;
         }
 
+        ScopedTempDir ScopedTempDir::createBeside(const fs::path &folder, const std::string &tag)
+        {
+            fs::path absolute = fs::absolute(folder.empty() ? fs::path(".") : folder).lexically_normal();
+            if (absolute.filename().empty())
+                absolute = absolute.parent_path(); // "a/b/" names b
+            if (absolute.filename().empty() || absolute == absolute.root_path())
+                throw FSException("Cannot create a folder beside " + toUtf8(folder) + ": it has no parent folder");
+            return create(absolute.parent_path(), toUtf8(absolute.filename()) + "-" + tag);
+        }
+
         void ScopedTempDir::reset(fs::path p) noexcept
         {
             const fs::path old = std::exchange(path_, std::move(p));

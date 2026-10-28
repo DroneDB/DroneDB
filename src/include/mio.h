@@ -114,6 +114,12 @@ namespace ddb
 
             // Creates the folder <parent>/<prefix><16 random characters> and owns it
             static ScopedTempDir create(const fs::path &parent, const std::string &prefix);
+            // Creates the folder "<folder>-<tag><16 random characters>" beside `folder` (in its
+            // parent) and owns it: scratch that must not end up in `folder` when `folder` is
+            // published as it is, even when its removal fails. Beside a build's scratch folder
+            // "<subfolder>-temp-<rand>" the name keeps "-temp-", so the cleanup of orphan build
+            // folders removes what a crash leaves. Throws FSException for a root folder.
+            static ScopedTempDir createBeside(const fs::path &folder, const std::string &tag);
 
             // Removes the owned path (if any; never throws), then owns p
             void reset(fs::path p = fs::path()) noexcept;

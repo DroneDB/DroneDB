@@ -1040,7 +1040,7 @@ TEST(BuildLodRunner, theDatasetFolderIsNeverWrittenToOrDeletedFrom) {
 // build-lod skips an input that ends in "-lod.spz" or "-lod.rad", and takes the extension from the
 // last dot of the whole path: the staged name does not depend on the name of the dataset file
 TEST(BuildLodRunner, aDatasetFileIsStagedUnderOurNameWhateverItIsCalled) {
-    for (const char *name : {"scene-lod.spz", "scene-lod.rad", "a?b#c.ply", "100% done.splat", "dir.with.dots/noext.ply"}) {
+    for (const char *name : {"scene-lod.spz", "scene-lod.rad", "a?b#c.ply", "100% done.splat", "dir.with.dots/noext.ply", "SCENE.PLY"}) {
         BuildLodFixture f(std::string("runner_buildlod_names_") + std::to_string(std::hash<std::string>()(name) % 100000));
         f.input = f.ta.getPath(std::string("in/") + name);
         touch(f.input, "splat");
@@ -1067,8 +1067,66 @@ TEST(BuildLodRunner, theStagedInputHasTheContentOfTheDatasetFile) {
     EXPECT_TRUE(fs::exists(f.input)) << "the dataset file stays";
 }
 
-// The scratch folder sits in the build temp folder, which is published as is: nothing but the
-// RAD remains there, whether the tool worked, failed or wrote nothing
+#ifndef _WIN32
+// A dataset file can be a relative symbolic link to a file elsewhere: what build-lod is given is the
+// file it names, not a link that names another file, or none, from the scratch folder
+TEST(BuildLodRunner, aDatasetFileThatIsARelativeLinkIsStagedAsTheFileItNames) {
+    BuildLodFixture f("runner_buildlod_relative_link");
+    touch(f.ta.getPath("elsewhere/model.spz"), "the splats");
+    fs::remove(f.input);
+    fs::create_symlink(fs::path("..") / "elsewhere" / "model.spz", f.input);
+    f.outRad = f.ta.getPath("deeper/build/out/model.rad"); // the scratch folder is not as deep as the link
+    std::string seen;
+    f.fake.effect = [&](const FakeProcessRunner::Call &call) {
+        std::ifstream in(call.args.at(0), std::ios::binary);
+        seen.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        touch(buildLodOutputOf(call.args.at(0)), "rad");
+    };
+    ASSERT_TRUE(f.run().succeeded);
+    EXPECT_EQ(seen, "the splats");
+    EXPECT_TRUE(fs::is_symlink(f.input)) << "the dataset link stays";
+}
+#endif
+
+// The scratch folder is beside the folder of the output, named after it, and not in it: the folder
+// of the output is a build's scratch folder, published as it is, and a scratch folder whose removal
+// fails stays out of it (beside a build folder its name keeps "-temp-", for the orphan cleanup)
+TEST(BuildLodRunner, theScratchFolderIsBesideTheOutputFolderNotInIt) {
+    BuildLodFixture f("runner_buildlod_beside");
+    f.outRad = f.ta.getPath("gsplat-temp-0123456789abcdef/model.rad");
+    ASSERT_TRUE(f.run().succeeded);
+    const fs::path outFolder = fs::absolute(f.outRad.parent_path()).lexically_normal();
+    EXPECT_EQ(f.given.parent_path().parent_path(), outFolder.parent_path());
+    EXPECT_EQ(f.given.parent_path().filename().string().rfind("gsplat-temp-0123456789abcdef-build-lod-", 0), 0u)
+        << f.given;
+    EXPECT_FALSE(fs::exists(f.given.parent_path()));
+
+#ifndef _WIN32
+    if (geteuid() == 0)
+        GTEST_SKIP() << "root removes a folder whatever its permissions";
+    fs::path locked;
+    f.fake.effect = [&](const FakeProcessRunner::Call &call) {
+        f.given = fs::path(call.args.at(0));
+        touch(buildLodOutputOf(f.given), "rad");
+        locked = f.given.parent_path() / "locked";
+        touch(locked / "file");
+        fs::permissions(locked, fs::perms::owner_read | fs::perms::owner_exec);
+    };
+    const auto r = f.run();
+    std::vector<std::string> published;
+    for (const auto &e : fs::directory_iterator(f.outRad.parent_path()))
+        published.push_back(e.path().filename().string());
+    const bool leftOver = fs::exists(locked);
+    fs::permissions(locked, fs::perms::owner_all);
+    fs::remove_all(locked.parent_path());
+    ASSERT_TRUE(r.succeeded) << r.error;
+    EXPECT_TRUE(leftOver) << "the scratch folder was expected to resist its removal";
+    EXPECT_EQ(published, std::vector<std::string>{"model.rad"});
+#endif
+}
+
+// Nothing but the RAD remains in the folder of the output, whether the tool worked, failed or
+// wrote nothing
 TEST(BuildLodRunner, theOutputFolderHoldsOnlyTheRadWhateverHappened) {
     BuildLodFixture f("runner_buildlod_scratch");
     const auto remaining = [&] {
