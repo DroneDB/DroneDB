@@ -53,12 +53,14 @@ TEST(BuildRetryClassification, BuildLodIdleTimeoutIsStructured) {
     const fs::path input = area.getPath("input.spz");
     std::ofstream(input) << "test input";
     process::Options options;
-    options.idleTimeout = std::chrono::milliseconds(150);
+    options.idleTimeout = std::chrono::milliseconds(200);
     options.envOverrides.emplace_back("DDB_TEST_CHILD_MODE", "idle");
     const auto result = buildlod::runBuildLodResult({input, area.getPath("model.rad"), true, 1, testChildPath()},
                                                   options);
     EXPECT_FALSE(result.succeeded);
     EXPECT_TRUE(result.timedOut);
+    // The error names the limit that was applied
+    EXPECT_NE(result.error.find("build-lod killed after 0.2 s without output"), std::string::npos) << result.error;
     EXPECT_THROW(result.throwIfRetryable("primary build: "), RetryableBuildException);
 }
 

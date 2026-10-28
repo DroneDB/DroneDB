@@ -3,7 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "buildlod_runner.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -11,6 +13,7 @@
 #include "env.h"
 #include "logger.h"
 #include "exceptions.h"
+#include "gsplat.h"
 #include "mio.h"
 #include "parallel.h"
 #include "process_runner.h"
@@ -77,6 +80,43 @@ namespace ddb
             return !findBuildLodBinary().empty();
         }
 
+        std::chrono::milliseconds idleTimeoutForSplats(std::uint64_t splats)
+        {
+            using std::chrono::seconds;
+            // In floating point: a count from a header can be any 64-bit value
+            const double scaled = static_cast<double>(splats) / 1e6 *
+                                  static_cast<double>(seconds(kIdleTimeoutPerMillionSplats).count());
+            if (scaled >= static_cast<double>(seconds(kMaxIdleTimeout).count()))
+                return kMaxIdleTimeout;
+            return std::max<std::chrono::milliseconds>(seconds(static_cast<seconds::rep>(std::ceil(scaled))),
+                                                       process::kDefaultIdleTimeout);
+        }
+
+        std::chrono::milliseconds idleTimeoutFor(const fs::path &input)
+        {
+            const auto chosen = [&input](std::uint64_t splats, const std::string &basis) {
+                const auto limit = idleTimeoutForSplats(splats);
+                LOGD << "build-lod idle limit for " << io::toUtf8(input) << ": "
+                     << std::chrono::duration_cast<std::chrono::seconds>(limit).count() << " s (" << basis << ")";
+                return limit;
+            };
+            try
+            {
+                GaussianSplatInfo info;
+                if (getGaussianSplatInfo(io::toUtf8(input), info) && info.splatCount > 0)
+                    return chosen(info.splatCount, std::to_string(info.splatCount) + " splats");
+                std::error_code ec;
+                const std::uintmax_t size = fs::file_size(input, ec);
+                if (!ec)
+                    return chosen(size / kPlyBytesPerSplat, "estimated from " + std::to_string(size) + " bytes");
+            }
+            catch (const std::exception &e)
+            {
+                LOGD << "Cannot read the splat count of " << io::toUtf8(input) << ": " << e.what();
+            }
+            return process::kDefaultIdleTimeout;
+        }
+
         ToolRunResult runBuildLodResult(const BuildLodRequest &request,
                                        const process::Options &options,
                                        const process::IProcessRunner &runner)
@@ -88,11 +128,13 @@ namespace ddb
             const fs::path &binary = request.binary;
             ToolRunResult result;
             process::Options popts = options;
-            // 24 hours: keeps steady-clock deadlines representable
-            const auto idle = env::readPositiveInt("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", 86400);
+            const auto maxIdleSeconds = std::chrono::seconds(kMaxIdleTimeout).count();
+            const auto idle = env::readPositiveInt("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", static_cast<uint64_t>(maxIdleSeconds));
             if (idle.state == env::Integer::State::Invalid)
             {
-                result.error = "Invalid DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS; expected an integer from 1 to 86400 seconds (24 hours)";
+                result.error = "Invalid DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS; expected an integer from 1 to " +
+                               std::to_string(maxIdleSeconds) + " seconds (" +
+                               std::to_string(std::chrono::hours(kMaxIdleTimeout).count()) + " hours)";
                 return result;
             }
             if (idle.state == env::Integer::State::Valid)

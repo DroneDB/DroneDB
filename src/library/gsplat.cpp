@@ -258,7 +258,11 @@ namespace ddb
         }
 
         const fs::path outRad = io::fromUtf8(outdir) / GsplatRadFileName;
-        const auto lodResult = buildlod::runBuildLodResult({lodInput, outRad, /*quality=*/true, GsplatRadMaxSh});
+        // Its silent steps grow with the number of splats: a large splat gets a longer idle limit
+        process::Options lodOptions;
+        lodOptions.idleTimeout = buildlod::idleTimeoutFor(lodInput);
+        const auto lodResult =
+            buildlod::runBuildLodResult({lodInput, outRad, /*quality=*/true, GsplatRadMaxSh}, lodOptions);
         if (!lodResult.succeeded) {
             lodResult.throwIfRetryable("build-lod failed for " + input + ": ");
             throw AppException("build-lod failed for " + input + ": " + lodResult.error);

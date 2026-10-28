@@ -986,6 +986,103 @@ TEST(BuildLodRunner, theIdleTimeoutComesFromTheEnvironment) {
     EXPECT_EQ(f.fake.calls.back().options.idleTimeout, std::chrono::hours(24));
 }
 
+// The header of a 3DGS PLY of `splats` splats with SH degree 3 (the body is not read)
+std::string splatPlyHeader(uint64_t splats) {
+    std::string header = "ply\nformat binary_little_endian 1.0\nelement vertex " + std::to_string(splats) + "\n";
+    for (const char *name : {"x", "y", "z", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2",
+                             "rot_3", "f_dc_0", "f_dc_1", "f_dc_2"})
+        header += std::string("property float ") + name + "\n";
+    for (int i = 0; i < 45; ++i)
+        header += "property float f_rest_" + std::to_string(i) + "\n";
+    return header + "end_header\n";
+}
+
+// The 16-byte header of a v4 (NGSP) SPZ of `splats` splats
+std::string ngspSpzHeader(uint32_t splats) {
+    std::string header = "NGSP";
+    const uint32_t fields[] = {4, splats};
+    header.append(reinterpret_cast<const char *>(fields), sizeof(fields));
+    header += std::string("\x03\0\0\0", 4); // SH degree 3, flags, reserved
+    return header;
+}
+
+TEST(BuildLodIdleLimit, scalesWithTheSplatsBetweenTheDefaultAndADay) {
+    using std::chrono::hours;
+    using std::chrono::minutes;
+    using std::chrono::seconds;
+    // Never under the limit of every other tool
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(0), minutes(60));
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(1000), minutes(60));
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(7'500'000), minutes(60));
+    // 8 minutes per million splats, rounded up to a whole second
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(10'000'000), minutes(80));
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(10'000'001), seconds(4801));
+    // The 7.45 GB PLY that was killed after an hour of silence in its pruning
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(31'586'621), seconds(15162));
+    // Never over a day, however large the count a header gives
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(180'000'000), hours(24));
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(1'000'000'000), hours(24));
+    EXPECT_EQ(buildlod::idleTimeoutForSplats(UINT64_MAX), hours(24));
+}
+
+TEST(BuildLodIdleLimit, theCountComesFromTheHeaderOfThePlyOrTheSpz) {
+    TestArea ta("buildlod_idle_header", true);
+    // The files hold their headers only: the count is not taken from their size
+    const fs::path ply = ta.getPath("scene.ply");
+    touch(ply, splatPlyHeader(31'586'621));
+    EXPECT_EQ(buildlod::idleTimeoutFor(ply), std::chrono::seconds(15162));
+    const fs::path upper = ta.getPath("SCENE.PLY");
+    touch(upper, splatPlyHeader(20'000'000));
+    EXPECT_EQ(buildlod::idleTimeoutFor(upper), std::chrono::minutes(160));
+    const fs::path spz = ta.getPath("scene.spz");
+    touch(spz, ngspSpzHeader(20'000'000));
+    EXPECT_EQ(buildlod::idleTimeoutFor(spz), std::chrono::minutes(160));
+    // A small splat keeps the default
+    const fs::path small = ta.getPath("small.ply");
+    touch(small, splatPlyHeader(100));
+    EXPECT_EQ(buildlod::idleTimeoutFor(small), process::kDefaultIdleTimeout);
+}
+
+TEST(BuildLodIdleLimit, withoutACountTheSizeOfTheFileIsUsed) {
+    TestArea ta("buildlod_idle_size", true);
+    // A .sog has no header reader, a point cloud PLY no splat count: their size is used
+    const fs::path sog = ta.getPath("bundle.sog");
+    touch(sog, std::string("PK\x03\x04rest", 8));
+    EXPECT_EQ(buildlod::idleTimeoutFor(sog), process::kDefaultIdleTimeout);
+    const fs::path cloud = ta.getPath("cloud.ply");
+    touch(cloud, "ply\nformat binary_little_endian 1.0\nelement vertex 99000000\nproperty float x\nproperty float y\n"
+                 "property float z\nend_header\n");
+    EXPECT_EQ(buildlod::idleTimeoutFor(cloud), process::kDefaultIdleTimeout) << "its count is not a splat count";
+    // What cannot be read keeps the default
+    EXPECT_EQ(buildlod::idleTimeoutFor(ta.getPath("missing.sog")), process::kDefaultIdleTimeout);
+#ifndef _WIN32
+    // 236 bytes a splat, as in a PLY of SH degree 3: 15 M splats, 120 minutes (a sparse file)
+    fs::resize_file(sog, 236ull * 15'000'000);
+    EXPECT_EQ(buildlod::idleTimeoutFor(sog), std::chrono::minutes(120));
+#endif
+}
+
+TEST(BuildLodIdleLimit, theEnvironmentOverridesTheScaledLimit) {
+    BuildLodFixture f("runner_buildlod_idle_scaled");
+    f.input = f.ta.getPath("in/scene.ply");
+    touch(f.input, splatPlyHeader(31'586'621));
+    process::Options options;
+    options.idleTimeout = buildlod::idleTimeoutFor(f.input);
+    const auto run = [&] {
+        fs::remove(f.outRad);
+        return buildlod::runBuildLodResult({f.input, f.outRad, true, 3, f.tool}, options, f.fake);
+    };
+    {
+        EnvVarGuard idle("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS");
+        unsetEnv("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS");
+        ASSERT_TRUE(run().succeeded);
+        EXPECT_EQ(f.fake.calls.back().options.idleTimeout, std::chrono::seconds(15162));
+    }
+    EnvVarGuard idle("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "600");
+    ASSERT_TRUE(run().succeeded);
+    EXPECT_EQ(f.fake.calls.back().options.idleTimeout, std::chrono::seconds(600));
+}
+
 TEST(BuildLodRunner, aFailureRemovesTheProducedFileAndKeepsTheTimeoutFlag) {
     EnvVarGuard idle("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS");
     unsetEnv("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS");
