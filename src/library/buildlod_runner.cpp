@@ -10,9 +10,12 @@
 
 #include "env.h"
 #include "logger.h"
+#include "exceptions.h"
 #include "mio.h"
+#include "parallel.h"
 #include "process_runner.h"
 #include "tool_locator.h"
+#include "tool_run_support.h"
 
 namespace ddb
 {
@@ -25,13 +28,32 @@ namespace ddb
             // Tail of the captured output included in errorOut.
             constexpr size_t kErrorTailLength = 512;
 
-            // build-lod derives its output name from the input: it replaces the input's
-            // extension with "-lod" and appends ".rad" (see rust/build-lod/src/main.rs).
-            // For "<dir>/model.spz" the produced file is "<dir>/model-lod.rad".
-            fs::path expectedLodOutput(const fs::path &input)
+            // build-lod derives its output name from the input file name: it replaces the
+            // extension with "-lod" and appends ".rad" (see rust/build-lod/src/main.rs), and it
+            // silently skips an input that already ends in "-lod.spz" or "-lod.rad". It is given a
+            // file of a name that is ours, in a folder that is ours: "source.<ext>" in a scratch
+            // folder yields "source-lod.rad" there. It never writes beside, or deletes in, the
+            // dataset folder, whatever the dataset file is called.
+            constexpr const char *kStagedStem = "source";
+            constexpr const char *kStagedOutput = "source-lod.rad";
+
+            // build-lod is one busy thread of its own (no thread option, no thread pool); the
+            // calling thread only waits for it, so it counts as one more thread beside the others
+            constexpr size_t kBuildLodThreads = 2;
+
+            // Makes `staged` name the content of `input` without writing to the dataset: a hard
+            // link, else a symbolic link (another volume), else a copy (a file system without
+            // links, or Windows without the right to create them).
+            void stageInput(const fs::path &input, const fs::path &staged)
             {
-                fs::path stem = input.stem(); // "model.spz" -> "model"
-                return input.parent_path() / io::concat(stem, "-lod.rad");
+                std::error_code ec;
+                fs::create_hard_link(input, staged, ec);
+                if (!ec) return;
+                LOGD << "Cannot hard link " << io::toUtf8(input) << " (" << ec.message() << "), trying a symbolic link";
+                fs::create_symlink(fs::absolute(input), staged, ec);
+                if (!ec) return;
+                LOGD << "Cannot link " << io::toUtf8(input) << " (" << ec.message() << "), copying it";
+                io::copy(input, staged);
             }
 
         } // namespace
@@ -81,15 +103,12 @@ namespace ddb
                 return result;
             }
 
-            const fs::path producedRad = expectedLodOutput(input);
             // Preserve the actual error before cleanup can overwrite it.
             auto failIo = [&result](const std::string &operation, const std::error_code &code) {
                 result.errorCode = code;
                 result.error = operation + ": " + code.message();
                 return result;
             };
-            fs::remove(producedRad, ec);
-            if (ec) return failIo("Cannot remove stale build-lod output", ec);
             fs::remove(outputRad, ec);
             if (ec) return failIo("Cannot remove stale RAD output", ec);
             if (!outputRad.parent_path().empty()) {
@@ -97,38 +116,53 @@ namespace ddb
                 if (ec) return failIo("Cannot create RAD output directory", ec);
             }
 
+            // The input and what build-lod writes live in a scratch folder beside the output
+            // (the build temp folder, which is published as is), removed on every path out
+            io::ScopedTempDir scratch;
+            const fs::path staged = [&]() -> fs::path {
+                try
+                {
+                    const fs::path parent = outputRad.parent_path().empty() ? fs::path(".") : outputRad.parent_path();
+                    scratch = io::ScopedTempDir::create(parent, ".build-lod-");
+                    const fs::path file = scratch.path() / io::concat(fs::path(kStagedStem), io::toUtf8(input.extension()));
+                    stageInput(input, file);
+                    return file;
+                }
+                catch (const FSException &e)
+                {
+                    result.errorCode = e.code();
+                    result.error = std::string("Cannot stage the build-lod input: ") + e.what();
+                    return fs::path();
+                }
+            }();
+            if (staged.empty()) return result;
+            const fs::path producedRad = scratch.path() / kStagedOutput;
+
             int clampedSh = maxSh < 0 ? 0 : (maxSh > 3 ? 3 : maxSh);
-            std::vector<std::string> args = {io::toUtf8(input), quality ? "--quality" : "--quick",
+            std::vector<std::string> args = {io::toUtf8(staged), quality ? "--quality" : "--quick",
                                             "--max-sh=" + std::to_string(clampedSh), "--rad"};
             LOGD << "Spawning build-lod: " << process::formatCommandLine(bin, args);
 
+            const auto cpu = parallel::tryAcquireThreads(kBuildLodThreads);
+            LOGD << "build-lod CPU tokens: " << cpu.count();
+
             popts.onOutputLine = [](const std::string &line) { LOGD << "[build-lod] " << line; };
-            const process::Result res = runner.run(bin, args, popts);
-            if (auto failure = ToolRunResult::fromProcess("build-lod", res, kErrorTailLength); !failure.succeeded)
-            {
-                fs::remove(producedRad, ec);
-                return failure;
-            }
+            result = tools::runToolProducingFile({"build-lod", bin, args, popts, producedRad, kErrorTailLength}, runner).result;
+            if (!result.succeeded) return result;
 
-            if (!fs::exists(producedRad, ec) || ec)
+            try
             {
-                result.errorCode = ec;
-                result.error = "build-lod reported success but expected output is missing: " + io::toUtf8(producedRad);
+                io::moveOrCopy(producedRad, outputRad);
+            }
+            catch (const FSException &e)
+            {
+                // A full disk is terminal for this attempt (the code says so) rather than an
+                // unexplained tool failure
+                fs::remove(outputRad, ec);
+                result = ToolRunResult();
+                result.errorCode = e.code();
+                result.error = "Cannot move build-lod output to " + io::toUtf8(outputRad) + ": " + e.what();
                 return result;
-            }
-
-            fs::rename(producedRad, outputRad, ec);
-            if (ec)
-            {
-                // Cross-device moves may succeed via copy. An identifiable full disk
-                // is terminal for this attempt rather than an unexplained tool failure.
-                if (ec == std::errc::no_space_on_device)
-                    return failIo("Cannot move build-lod output", ec);
-                std::error_code copyEc;
-                fs::copy_file(producedRad, outputRad, fs::copy_options::overwrite_existing, copyEc);
-                if (copyEc)
-                    return failIo("failed to move build-lod output to " + io::toUtf8(outputRad), copyEc);
-                fs::remove(producedRad, ec);
             }
             result.succeeded = true;
             return result;

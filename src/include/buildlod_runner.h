@@ -42,11 +42,15 @@ namespace ddb
         // into a single Spark RAD LOD file at request.outputRad, using the web delivery profile:
         // bhatt-lod ("quality") with spherical harmonics capped at maxSh, single-file --rad.
         //
-        // build-lod always writes "<input-stem>-lod.rad" next to the input file; this
-        // function moves that result to outputRad. The result succeeds when the tool exited
-        // with code 0 and outputRad exists; on failure it carries the error and any partial
-        // output is removed. The binary path is resolved via findBuildLodBinary() unless
-        // request.binary is non-empty.
+        // build-lod writes "<input-stem>-lod.rad" next to the file it is given, and skips a file
+        // named "*-lod.spz" or "*-lod.rad". So the input is linked (else copied) as
+        // "source.<ext>" into a scratch folder beside outputRad, build-lod runs on that, and the
+        // scratch folder is removed on every path: the folder of the input is never written to,
+        // and a file there that looks like build-lod's output is never touched. The result
+        // succeeds when the tool exited with code 0 and left a non-empty RAD that is moved to
+        // outputRad; otherwise it carries the error with the tail of the tool's output, which is
+        // where build-lod says why it wrote nothing (it exits 0 after a decode failure). The
+        // binary path is resolved via findBuildLodBinary() unless request.binary is non-empty.
         // DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS overrides the supervised idle deadline
         // on every call, including Gaussian Splat entry builds. Set a decimal
         // integer from 1 to 86400 seconds (24 hours); empty/unset preserves Options

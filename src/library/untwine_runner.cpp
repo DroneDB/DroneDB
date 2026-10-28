@@ -19,6 +19,7 @@
 #include "parallel.h"
 #include "process_runner.h"
 #include "tool_locator.h"
+#include "tool_run_support.h"
 
 namespace ddb
 {
@@ -217,17 +218,7 @@ namespace ddb
             popts.onExtraData = [&progress](const char *data, size_t n) { progress.feed(data, n); };
             popts.onOutputLine = [](const std::string &line) { LOGD << "[untwine] " << line; };
 
-            const process::Result res = runner.run(bin, args, popts);
-            if (const auto failure = ToolRunResult::fromProcess("untwine", res, kErrorTailLength); !failure.succeeded)
-                return failure;
-            if (!fs::exists(outputFile, ec) || ec)
-            {
-                result.errorCode = ec;
-                result.error = "untwine reported success but output file is missing: " + io::toUtf8(outputFile);
-                return result;
-            }
-            result.succeeded = true;
-            return result;
+            return tools::runToolProducingFile({"untwine", bin, args, popts, outputFile, kErrorTailLength}, runner).result;
         }
 
     } // namespace untwine

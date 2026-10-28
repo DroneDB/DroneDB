@@ -13,7 +13,7 @@
 #include "mio.h"
 #include "parallel.h"
 #include "tool_locator.h"
-#include "tool_runner_result.h"
+#include "tool_run_support.h"
 
 namespace ddb {
 namespace bm3d {
@@ -60,20 +60,15 @@ void runBm3dBuild(const fs::path& input,
                                            io::toUtf8(output)};
     LOGD << "Spawning bm3d: " << process::formatCommandLine(bin, args);
 
-    const process::Result res = runner.run(bin, args, process::Options());
-    if (const auto failure = ToolRunResult::fromProcess(kBm3dName, res, kErrorTailLength);
-        !failure.succeeded) {
+    const auto run = tools::runToolProducingFile(
+        {kBm3dName, bin, args, process::Options(), output, kErrorTailLength, "wrote no output file"}, runner);
+    const process::Result &res = run.process;
+    if (!run.result.succeeded) {
         // Exit code 2: bm3d read the command line and refused the model itself
         if (res.exited && res.exitCode == kExitInvalidInput)
-            throw InvalidArgsException(failureMessage(input, failure.error));
-        fail(input, failure.error);
+            throw InvalidArgsException(failureMessage(input, run.result.error));
+        fail(input, run.result.error);
     }
-
-    std::error_code ec;
-    if (!fs::is_regular_file(output, ec) || ec || fs::file_size(output, ec) == 0 || ec)
-        fail(input,
-             "bm3d reported success but wrote no output file " + io::toUtf8(output) +
-                 (res.outputTail.empty() ? std::string() : ": " + res.tail(kErrorTailLength)));
 
     LOGD << "Built bm3d file " << io::toUtf8(output) << " from " << io::toUtf8(input) << " in "
          << (static_cast<double>(res.duration.count()) / 1000.0) << " s";

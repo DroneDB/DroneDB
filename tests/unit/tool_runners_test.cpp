@@ -28,6 +28,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "tool_locator.h"
+#include "tool_run_support.h"
 #include "tool_runner_result.h"
 #include "untwine_runner.h"
 #include "utils.h"
@@ -717,7 +718,7 @@ TEST(Bm3dRunner, successWithoutTheOutputFileIsAFailure) {
     f.fake.effect = nullptr;
     f.fake.result = FakeProcessRunner::exited(0, "bm3d: building");
     const std::string message = f.failureMessage();
-    EXPECT_NE(message.find("wrote no output file " + io::toUtf8(f.output)), std::string::npos) << message;
+    EXPECT_NE(message.find("wrote no output file: " + io::toUtf8(f.output)), std::string::npos) << message;
     EXPECT_NE(message.find("bm3d: building"), std::string::npos) << message;
 
     // an empty file is no output either
@@ -870,7 +871,7 @@ TEST(UntwineRunner, successWithoutTheOutputFileIsAFailure) {
     f.fake.effect = nullptr;
     const auto r = f.run();
     EXPECT_FALSE(r.succeeded);
-    EXPECT_NE(r.error.find("reported success but output file is missing"), std::string::npos) << r.error;
+    EXPECT_NE(r.error.find("reported success but expected output is missing"), std::string::npos) << r.error;
 }
 
 TEST(UntwineRunner, aStaleOutputIsRemovedBeforeTheLaunch) {
@@ -907,19 +908,28 @@ TEST(UntwineRunner, aCanceledChildPropagatesAndReleasesItsCpuTokens) {
 
 // ------------------------------------------------------------------------ build-lod
 
+// What build-lod does to the file it is given: writes "<stem>-lod.rad" beside it
+fs::path buildLodOutputOf(const fs::path &given) {
+    return given.parent_path() / (given.stem().string() + "-lod.rad");
+}
+
 struct BuildLodFixture {
     TestArea ta;
-    fs::path tool, input, outRad, produced;
+    fs::path tool, input, outRad;
     FakeProcessRunner fake;
+    // The files the tool was given and wrote, as seen at the launch
+    fs::path given, produced;
 
     explicit BuildLodFixture(const std::string &name) : ta(name, true) {
         tool = fakeTool(ta, "bin/build-lod");
         input = ta.getPath("in/model.spz");
         touch(input);
         outRad = ta.getPath("out/model.rad");
-        produced = ta.getPath("in/model-lod.rad");
-        // build-lod writes <stem>-lod.rad next to its input
-        fake.effect = [this](const FakeProcessRunner::Call &) { touch(produced, "rad"); };
+        fake.effect = [this](const FakeProcessRunner::Call &call) {
+            given = fs::path(call.args.at(0));
+            produced = buildLodOutputOf(given);
+            touch(produced, "rad");
+        };
     }
 
     ToolRunResult run(bool quality = true, int maxSh = 1) {
@@ -936,16 +946,21 @@ TEST(BuildLodRunner, buildsTheArgumentsAndMovesTheOutput) {
     ASSERT_TRUE(r.succeeded) << r.error;
     ASSERT_EQ(f.fake.calls.size(), 1u);
     EXPECT_EQ(f.fake.calls[0].binary, f.tool);
-    EXPECT_TRUE(hasArgs(f.fake.calls[0].args, {io::toUtf8(f.input), "--quality", "--max-sh=1", "--rad"}));
+    // the tool is given a staged copy named by us, not the dataset file
+    EXPECT_TRUE(hasArgs(f.fake.calls[0].args, {io::toUtf8(f.given), "--quality", "--max-sh=1", "--rad"}));
+    EXPECT_EQ(f.given.filename(), "source.spz");
+    EXPECT_NE(f.given.parent_path(), f.input.parent_path());
     EXPECT_EQ(f.fake.calls[0].options.idleTimeout, process::kDefaultIdleTimeout);
     EXPECT_TRUE(fs::exists(f.outRad));
+    EXPECT_EQ(fs::file_size(f.outRad), 3u) << "the RAD that build-lod wrote is the output";
     EXPECT_FALSE(fs::exists(f.produced));
+    EXPECT_FALSE(fs::exists(f.given.parent_path())) << "the scratch folder is gone";
 }
 
 TEST(BuildLodRunner, quickModeAndTheShClamp) {
     BuildLodFixture f("runner_buildlod_clamp");
     ASSERT_TRUE(f.run(false, 9).succeeded);
-    EXPECT_TRUE(hasArgs(f.fake.calls.at(0).args, {io::toUtf8(f.input), "--quick", "--max-sh=3", "--rad"}));
+    EXPECT_TRUE(hasArgs(f.fake.calls.at(0).args, {io::toUtf8(f.given), "--quick", "--max-sh=3", "--rad"}));
     ASSERT_TRUE(f.run(true, -2).succeeded);
     EXPECT_TRUE(contains(f.fake.calls.at(1).args, "--max-sh=0"));
 }
@@ -998,16 +1013,165 @@ TEST(BuildLodRunner, successWithoutTheExpectedOutputIsAFailure) {
     EXPECT_NE(r.error.find("reported success but expected output is missing"), std::string::npos) << r.error;
 }
 
-TEST(BuildLodRunner, aStaleOutputIsRemovedBeforeTheLaunch) {
-    BuildLodFixture f("runner_buildlod_stale");
-    touch(f.produced, "stale");
+// build-lod writes beside the file it is given. It is given a staged copy, so the dataset folder
+// is never written to or deleted from, and a file there that looks like its output survives.
+TEST(BuildLodRunner, theDatasetFolderIsNeverWrittenToOrDeletedFrom) {
+    BuildLodFixture f("runner_buildlod_untouched");
+    const fs::path userRad = f.input.parent_path() / "model-lod.rad";
+    touch(userRad, "the user's own file");
     touch(f.outRad, "stale");
-    bool staleAtLaunch = true;
-    f.fake.effect = [&](const FakeProcessRunner::Call &) {
-        staleAtLaunch = fs::exists(f.produced) || fs::exists(f.outRad);
+    const auto before = fs::last_write_time(userRad);
+
+    const auto r = f.run();
+    ASSERT_TRUE(r.succeeded) << r.error;
+
+    std::vector<std::string> names;
+    for (const auto &e : fs::directory_iterator(f.input.parent_path()))
+        names.push_back(e.path().filename().string());
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names, (std::vector<std::string>{"model-lod.rad", "model.spz"})) << "nothing added to the dataset folder";
+    std::ifstream in(userRad, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, "the user's own file");
+    EXPECT_EQ(fs::last_write_time(userRad), before);
+    EXPECT_EQ(fs::file_size(f.outRad), 3u) << "the stale output is replaced by what build-lod wrote";
+}
+
+// build-lod skips an input that ends in "-lod.spz" or "-lod.rad", and takes the extension from the
+// last dot of the whole path: the staged name does not depend on the name of the dataset file
+TEST(BuildLodRunner, aDatasetFileIsStagedUnderOurNameWhateverItIsCalled) {
+    for (const char *name : {"scene-lod.spz", "scene-lod.rad", "a?b#c.ply", "100% done.splat", "dir.with.dots/noext.ply"}) {
+        BuildLodFixture f(std::string("runner_buildlod_names_") + std::to_string(std::hash<std::string>()(name) % 100000));
+        f.input = f.ta.getPath(std::string("in/") + name);
+        touch(f.input, "splat");
+        const auto r = f.run();
+        ASSERT_TRUE(r.succeeded) << name << ": " << r.error;
+        EXPECT_EQ(f.given.stem(), "source") << name;
+        EXPECT_EQ(f.given.extension(), f.input.extension()) << name;
+        EXPECT_EQ(f.given.string().find_first_of("?#%"), std::string::npos) << name;
+    }
+}
+
+// The staged file is the dataset file itself, linked or copied: the tool reads its content
+TEST(BuildLodRunner, theStagedInputHasTheContentOfTheDatasetFile) {
+    BuildLodFixture f("runner_buildlod_content");
+    touch(f.input, "the splats");
+    std::string seen;
+    f.fake.effect = [&](const FakeProcessRunner::Call &call) {
+        std::ifstream in(call.args.at(0), std::ios::binary);
+        seen.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        touch(buildLodOutputOf(call.args.at(0)), "rad");
     };
-    f.run();
-    EXPECT_FALSE(staleAtLaunch);
+    ASSERT_TRUE(f.run().succeeded);
+    EXPECT_EQ(seen, "the splats");
+    EXPECT_TRUE(fs::exists(f.input)) << "the dataset file stays";
+}
+
+// The scratch folder sits in the build temp folder, which is published as is: nothing but the
+// RAD remains there, whether the tool worked, failed or wrote nothing
+TEST(BuildLodRunner, theOutputFolderHoldsOnlyTheRadWhateverHappened) {
+    BuildLodFixture f("runner_buildlod_scratch");
+    const auto remaining = [&] {
+        std::vector<std::string> names;
+        for (const auto &e : fs::directory_iterator(f.outRad.parent_path()))
+            names.push_back(e.path().filename().string());
+        return names;
+    };
+
+    ASSERT_TRUE(f.run().succeeded);
+    EXPECT_EQ(remaining(), std::vector<std::string>{"model.rad"});
+
+    fs::remove(f.outRad);
+    f.fake.result = FakeProcessRunner::exited(101, "panic");
+    EXPECT_FALSE(f.run().succeeded);
+    EXPECT_TRUE(remaining().empty());
+
+    f.fake.result = FakeProcessRunner::succeeded();
+    f.fake.effect = nullptr;
+    EXPECT_FALSE(f.run().succeeded);
+    EXPECT_TRUE(remaining().empty());
+
+    f.fake.effect = [](const FakeProcessRunner::Call &) { throw CanceledException("canceled"); };
+    EXPECT_THROW(f.run(), CanceledException);
+    EXPECT_TRUE(remaining().empty()) << "a canceled child leaves nothing either";
+}
+
+// build-lod exits 0 after a decode failure and says why on its output: the error carries it
+TEST(BuildLodRunner, anExitZeroWithoutOutputCarriesWhatTheToolPrinted) {
+    BuildLodFixture f("runner_buildlod_reason");
+    f.fake.effect = nullptr;
+    f.fake.result = FakeProcessRunner::exited(0, "*** Processing: x\nDecoding failed: invalid splats");
+    auto r = f.run();
+    EXPECT_FALSE(r.succeeded);
+    EXPECT_NE(r.error.find("Decoding failed: invalid splats"), std::string::npos) << r.error;
+
+    // an empty RAD is no output either
+    f.fake.effect = [&](const FakeProcessRunner::Call &call) { touch(buildLodOutputOf(call.args.at(0)), ""); };
+    r = f.run();
+    EXPECT_FALSE(r.succeeded);
+    EXPECT_NE(r.error.find("Decoding failed: invalid splats"), std::string::npos) << r.error;
+    EXPECT_NE(r.error.find("is empty"), std::string::npos) << r.error;
+    EXPECT_FALSE(fs::exists(f.outRad));
+}
+
+TEST(BuildLodRunner, theChildHoldsACpuTokenWhileItRuns) {
+    BuildLodFixture f("runner_buildlod_tokens");
+    const ScopedProcessConfig pool(R"({"cpuPoolSize": 16})");
+    const auto before = parallel::cpuTokensInUse();
+    size_t heldWhileRunning = 0;
+    f.fake.effect = [&](const FakeProcessRunner::Call &call) {
+        heldWhileRunning = parallel::cpuTokensInUse() - before;
+        touch(buildLodOutputOf(call.args.at(0)), "rad");
+    };
+    ASSERT_TRUE(f.run().succeeded);
+    EXPECT_EQ(heldWhileRunning, 1u);
+    EXPECT_EQ(parallel::cpuTokensInUse(), before) << "given back";
+}
+
+// ------------------------------------------------------------------------ tool_run_support
+
+TEST(ToolRunSupport, anExitZeroWithoutOutputIsAnErrorWithTheTailOfTheOutput) {
+    TestArea ta("runner_support_nooutput", true);
+    FakeProcessRunner fake;
+    const fs::path out = ta.getPath("out/result.bin");
+    const tools::ToolRun run{"sometool", fakeTool(ta, "bin/sometool"), {"a"}, process::Options(), out, 40};
+    fake.result = FakeProcessRunner::exited(0, std::string(200, 'x') + "\nthe reason it printed");
+
+    auto outcome = tools::runToolProducingFile(run, fake);
+    EXPECT_FALSE(outcome.result.succeeded);
+    EXPECT_FALSE(outcome.result.timedOut);
+    EXPECT_EQ(outcome.result.error.rfind("sometool reported success but expected output is missing: " + io::toUtf8(out), 0), 0u)
+        << outcome.result.error;
+    EXPECT_NE(outcome.result.error.find("the reason it printed"), std::string::npos) << outcome.result.error;
+    EXPECT_EQ(outcome.result.error.find(std::string(100, 'x')), std::string::npos) << "only the tail";
+    EXPECT_TRUE(outcome.process.success()) << "the caller can still read how the child ended";
+
+    touch(out, "");
+    outcome = tools::runToolProducingFile(run, fake);
+    EXPECT_FALSE(outcome.result.succeeded);
+    EXPECT_NE(outcome.result.error.find("the reason it printed"), std::string::npos) << outcome.result.error;
+
+    fs::remove(out);
+    fs::create_directories(out);
+    outcome = tools::runToolProducingFile(run, fake);
+    EXPECT_FALSE(outcome.result.succeeded) << "a folder is no output";
+}
+
+TEST(ToolRunSupport, aNonEmptyOutputSucceedsAndAFailedChildKeepsItsOwnError) {
+    TestArea ta("runner_support_ok", true);
+    FakeProcessRunner fake;
+    const fs::path out = ta.getPath("out/result.bin");
+    const tools::ToolRun run{"sometool", fakeTool(ta, "bin/sometool"), {}, process::Options(), out, 100};
+    fake.effect = [&](const FakeProcessRunner::Call &) { touch(out, "data"); };
+    EXPECT_TRUE(tools::runToolProducingFile(run, fake).result.succeeded);
+
+    fake.result = FakeProcessRunner::exited(7, "boom");
+    auto outcome = tools::runToolProducingFile(run, fake);
+    EXPECT_EQ(outcome.result.error, "sometool exited with code 7: boom");
+    EXPECT_EQ(outcome.process.exitCode, 7);
+
+    fake.result = FakeProcessRunner::timedOutAfterIdle();
+    EXPECT_TRUE(tools::runToolProducingFile(run, fake).result.timedOut);
 }
 
 TEST(BuildLodRunner, aMissingToolOrInputNeverStartsAChild) {
