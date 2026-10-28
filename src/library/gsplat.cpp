@@ -55,21 +55,14 @@ namespace ddb
         }
 
         // Local-space sidecar for deterministic camera framing in the viewer (the streamed .rad has
-        // no resident splats at init time): the bounding box, and which way is up. The box is computed
-        // by streaming the .rad centres: exact, bounded memory, and in the same coordinate space the
-        // viewer renders. The sidecar is optional (the viewer frames the scene without it): a .rad
-        // whose centres cannot be decoded, or a file that cannot be written, is logged and the build
-        // still delivers its model.rad.
-        void writeBoundsSidecar(const fs::path &rad, const fs::path &boundsFile)
+        // no resident splats at init time): the bounding box, and which way is up. The sidecar is
+        // optional (the viewer frames the scene without it): one that cannot be written is logged and
+        // the build still delivers its model.rad.
+        void writeSidecar(const fs::path &rad, const fs::path &boundsFile, const std::array<double, 3> &boundsMin,
+                          const std::array<double, 3> &boundsMax)
         {
             try
             {
-                std::array<double, 3> boundsMin, boundsMax;
-                if (!computeRadBounds(rad, boundsMin, boundsMax))
-                {
-                    LOGW << "Skipping " << io::toUtf8(boundsFile) << ": no centres decoded from " << io::toUtf8(rad);
-                    return;
-                }
                 json j;
                 j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
                 j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
@@ -80,6 +73,52 @@ namespace ddb
             {
                 LOGW << "Skipping " << io::toUtf8(boundsFile) << ": " << e.what();
             }
+        }
+
+        // The sidecar of a model.rad build-lod made. The box is computed by streaming the .rad centres:
+        // exact, bounded memory, and in the same coordinate space the viewer renders. A .rad whose
+        // centres cannot be decoded is logged and the build still delivers its model.rad.
+        void writeBoundsSidecar(const fs::path &rad, const fs::path &boundsFile)
+        {
+            try
+            {
+                std::array<double, 3> boundsMin, boundsMax;
+                if (!computeRadBounds(rad, boundsMin, boundsMax))
+                {
+                    LOGW << "Skipping " << io::toUtf8(boundsFile) << ": no centres decoded from " << io::toUtf8(rad);
+                    return;
+                }
+                writeSidecar(rad, boundsFile, boundsMin, boundsMax);
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Skipping " << io::toUtf8(boundsFile) << ": " << e.what();
+            }
+        }
+
+        // A .rad upload is already what a build makes, so it is checked and published as model.rad
+        // without build-lod: the reader walks the header and every chunk's centres (a file it cannot
+        // read is refused here, not served to a viewer that cannot read it either). The file is hard
+        // linked into the folder, or copied where links are not possible; the dataset file is not touched.
+        void publishRad(const std::string &input, const fs::path &source, const fs::path &outdir)
+        {
+            std::array<double, 3> boundsMin, boundsMax;
+            bool any = false;
+            try
+            {
+                any = computeRadBounds(source, boundsMin, boundsMax);
+            }
+            catch (const AppException &e)
+            {
+                throw AppException("Cannot build the Gaussian splat " + input + ": it is not a RAD file this can read (" +
+                                   e.what() + ")");
+            }
+            if (!any)
+                throw AppException("Cannot build the Gaussian splat " + input + ": the RAD file holds no splats");
+
+            const fs::path rad = outdir / GsplatRadFileName;
+            io::hardlinkSafe(source, rad);
+            writeSidecar(rad, outdir / GsplatBoundsFileName, boundsMin, boundsMax);
         }
 
         // Splat count and SH degree of a .ply, from its header
@@ -152,6 +191,12 @@ namespace ddb
         assureBuildableSplatSource(input);
 
         io::assureFolderExists(io::fromUtf8(outdir));
+
+        if (splatFormatOf(io::fromUtf8(input)) == SplatFormat::Rad)
+        {
+            publishRad(input, io::fromUtf8(input), io::fromUtf8(outdir));
+            return;
+        }
 
         // build-lod is a mandatory dependency: model.rad is the sole delivery artifact (streamed
         // by the viewer, and decoded on demand to render thumbnails). Run it directly on the

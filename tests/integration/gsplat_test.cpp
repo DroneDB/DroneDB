@@ -1622,20 +1622,6 @@ TEST(gsplat, aSogBundleIsDetectedBuiltAndThumbnailed) {
     EXPECT_TRUE(isWebp(thumb));
 }
 
-// A .rad is what a build writes: as a source it is refused with the formats that are accepted, before
-// anything is looked for or written
-TEST(gsplat, aRadIsNotABuildSource) {
-    TestArea ta(TEST_NAME);
-    const fs::path rad = ta.getPath("scene.rad");
-    { std::ofstream o(rad.string(), std::ios::binary); o << "RAD0"; }
-    const fs::path outdir = ta.getPath("gsplat_out");
-
-    const std::string failure = buildFailure(rad, outdir);
-    EXPECT_NE(failure.find(".ply, .splat, .spz, .ksplat or .sog"), std::string::npos) << failure;
-    EXPECT_FALSE(fs::exists(outdir));
-    EXPECT_NE(ddb::fingerprint(rad), EntryType::GaussianSplat) << "and not an entry type by its extension yet";
-}
-
 // A vertex count that does not fit in 32 bits (an unsigned long is 32 bits on Windows) is kept whole
 TEST(gsplat, aPlyWithMoreThan2To32VerticesKeepsItsCount) {
     TestArea ta(TEST_NAME);
@@ -1761,6 +1747,145 @@ TEST(gsplat, theStacAssetOfASplatHasTheMediaTypeOfTheFormatTable) {
         ASSERT_TRUE(item["assets"].contains(name)) << item.dump();
         EXPECT_EQ(item["assets"][name]["type"], GsplatMediaType) << name;
     }
+}
+
+// A .rad is what a build makes: an upload of one is a splat that is checked and published as it is,
+// without build-lod (WebODM tasks produce a splats.rad), so it builds with no build-lod at all
+TEST(gsplat, aRadUploadIsPublishedWithoutBuildLod) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 400, 1);
+
+    // A RAD as a trainer delivers it, made here by build-lod
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the RAD upload test");
+    const fs::path made = ta.getFolder("made");
+    ddb::buildGsplat(ply.string(), made.string());
+    const fs::path upload = ta.getPath("splats.rad");
+    fs::copy_file(made / GsplatRadFileName, upload);
+    const std::string content = readText(upload);
+
+    // build-lod is not there, or does not work when it is: it is not launched
+    const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
+    BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
+    ASSERT_FALSE(ddb::buildlod::isBuildLodAvailable());
+    EXPECT_EQ(ddb::fingerprint(upload), EntryType::GaussianSplat);
+
+    const fs::path outdir = ta.getPath("published");
+    ASSERT_NO_THROW(ddb::buildGsplat(upload.string(), outdir.string()));
+
+    // The folder holds the model and its sidecar, nothing else; the model is the file as it came
+    EXPECT_EQ(namesIn(outdir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
+    EXPECT_EQ(readText(outdir / GsplatRadFileName), content);
+    EXPECT_EQ(readText(upload), content) << "the dataset file is not touched";
+
+    // The sidecar is that of any build: the box, and which way is up
+    const json bounds = json::parse(readText(outdir / GsplatBoundsFileName));
+    ASSERT_TRUE(bounds.contains("min") && bounds.contains("max"));
+    EXPECT_EQ(bounds["max"].size(), 3u);
+    EXPECT_TRUE(bounds.contains("up") && bounds.contains("upConfidence") && bounds.contains("upSource"));
+    std::array<double, 3> bmin{}, bmax{};
+    ASSERT_TRUE(ddb::computeRadBounds(upload, bmin, bmax));
+    for (int k = 0; k < 3; ++k) {
+        EXPECT_DOUBLE_EQ(bounds["min"][k].get<double>(), bmin[k]);
+        EXPECT_DOUBLE_EQ(bounds["max"][k].get<double>(), bmax[k]);
+    }
+
+#ifndef _WIN32
+    // And a build-lod that is there and must not be called
+    const fs::path called = ta.getPath("build-lod-called");
+    const auto tool = testtools::writeFakeTool(ta, "build-lod", "touch '" + called.string() + "'\nexit 1\n");
+    BuildLodEnvRestorer fake("DDB_BUILDLOD_PATH", tool.string().c_str());
+    ASSERT_TRUE(ddb::buildlod::isBuildLodAvailable());
+    const fs::path second = ta.getPath("published_again");
+    EXPECT_NO_THROW(ddb::buildGsplat(upload.string(), second.string()));
+    EXPECT_FALSE(fs::exists(called)) << "build-lod was launched for a .rad";
+    EXPECT_TRUE(isRad(second / GsplatRadFileName));
+#endif
+}
+
+// A .rad that is not one fails the build with the reason, and nothing is published
+TEST(gsplat, aCorruptRadFailsTheBuildWithTheReason) {
+    TestArea ta(TEST_NAME);
+    const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
+    BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
+
+    const std::string header = std::string("RAD0") + std::string("\x02\0\0\0", 4);
+    const std::vector<std::pair<std::string, std::string>> corrupt = {
+        {"magic.rad", "PK\x03\x04 this is a ZIP"},
+        {"empty_meta.rad", header + "{}\0\0\0\0\0\0"},
+        {"truncated.rad", "RAD0"},
+        {"meta_beyond_file.rad", std::string("RAD0") + std::string("\xf0\xff\xff\xff", 4) + "{}"},
+    };
+    for (const auto& [name, bytes] : corrupt) {
+        SCOPED_TRACE(name);
+        const fs::path rad = ta.getPath(name);
+        writeBytes(rad, bytes);
+        const fs::path outdir = ta.getPath("out_" + name);
+        const std::string failure = buildFailure(rad, outdir);
+        EXPECT_NE(failure.find("Cannot build the Gaussian splat"), std::string::npos) << failure;
+        EXPECT_NE(failure.find("RAD"), std::string::npos) << failure;
+        EXPECT_FALSE(fs::exists(outdir / GsplatRadFileName));
+        EXPECT_FALSE(fs::exists(outdir / GsplatBoundsFileName));
+    }
+}
+
+// The pipeline: a .rad of a dataset is a GaussianSplat entry and builds as the others do
+TEST(gsplat, aRadOfADatasetIsAnEntryThatBuildsWithoutBuildLod) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 200, 1);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the RAD upload pipeline test");
+    const fs::path made = ta.getFolder("made");
+    ddb::buildGsplat(ply.string(), made.string());
+
+    const fs::path dsFolder = ta.getFolder("ds");
+    const fs::path rad = dsFolder / "splats.rad";
+    fs::copy_file(made / GsplatRadFileName, rad);
+
+    const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
+    BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
+
+    ddb::initIndex(dsFolder.string());
+    auto db = ddb::open(dsFolder.string(), true);
+    ddb::addToIndex(db.get(), {rad.string()});
+    Entry e;
+    ASSERT_TRUE(loadEntry(db.get(), "splats.rad", e));
+    EXPECT_EQ(e.type, EntryType::GaussianSplat);
+    EXPECT_TRUE(ddb::isBuildable(db.get(), "splats.rad"));
+
+    ddb::build(db.get(), "splats.rad", "", false);
+    EXPECT_TRUE(ddb::isBuildComplete(db.get(), "splats.rad"));
+    const fs::path gsplatDir = fs::path(db->buildDirectory()) / e.hash / "gsplat";
+    EXPECT_EQ(namesIn(gsplatDir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
+}
+
+// A RAD whose splats are readable but whose orientation cannot be decoded still publishes, with a
+// bounding box and no up vector: the estimate is optional like the rest of the sidecar
+TEST(gsplat, aRadWhoseUpCannotBeEstimatedStillPublishesItsBounds) {
+    TestArea ta(TEST_NAME);
+    const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
+    BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
+
+    // Two splats at (1,2,5) and (3,4,7); the orientation uses an encoding nothing reads
+    const float centres[6] = {1, 3, 2, 4, 5, 7};
+    const std::string payload = std::string(reinterpret_cast<const char*>(centres), sizeof(centres)) + std::string(6, '\0');
+    json meta = {{"count", 2},
+                 {"properties", json::array({{{"property", "center"}, {"encoding", "f32"}, {"offset", 0}, {"bytes", 24}},
+                                             {{"property", "orientation"}, {"encoding", "s8"}, {"offset", 24}, {"bytes", 6}}})}};
+    const auto pad8 = [](std::string v) { v.resize((v.size() + 7u) & ~size_t(7), '\0'); return v; };
+    const auto le = [](uint64_t v, size_t n) { return std::string(reinterpret_cast<const char*>(&v), n); };
+    const std::string chunk = "RADC" + le(meta.dump().size(), 4) + pad8(meta.dump()) + le(payload.size(), 8) + payload;
+    const json header = {{"chunks", json::array({{{"offset", 0}, {"bytes", chunk.size()}}})}};
+    const fs::path rad = ta.getPath("odd.rad");
+    writeBytes(rad, "RAD0" + le(header.dump().size(), 4) + pad8(header.dump()) + chunk);
+
+    const fs::path outdir = ta.getPath("out");
+    ASSERT_NO_THROW(ddb::buildGsplat(rad.string(), outdir.string()));
+    EXPECT_TRUE(isRad(outdir / GsplatRadFileName));
+    const json bounds = json::parse(readText(outdir / GsplatBoundsFileName));
+    EXPECT_EQ(bounds["min"], (json::array({1.0, 2.0, 5.0})));
+    EXPECT_EQ(bounds["max"], (json::array({3.0, 4.0, 7.0})));
+    EXPECT_FALSE(bounds.contains("up"));
 }
 
 } // namespace

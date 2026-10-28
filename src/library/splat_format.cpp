@@ -59,8 +59,10 @@ namespace ddb
             // A single-file ZIP bundle build-lod reads. No metadata: the count is in a meta.json
             // inside the ZIP, which indexing does not open
             {SplatFormat::Sog, "sog", stages({SplatStage::Detect, SplatStage::Build}), GsplatMediaType},
-            // What a build writes; as an upload it is not accepted as a source yet
-            {SplatFormat::Rad, "rad", stages({SplatStage::Thumbnail}), GsplatMediaType},
+            // What a build writes, and what a trainer can deliver as it is (WebODM tasks make a
+            // splats.rad): an upload is checked and published without build-lod
+            {SplatFormat::Rad, "rad", stages({SplatStage::Detect, SplatStage::Build, SplatStage::Thumbnail}),
+             GsplatMediaType},
         }};
 
         const SplatFormatRow *rowOf(SplatFormat format)

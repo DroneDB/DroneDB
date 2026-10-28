@@ -40,7 +40,9 @@ namespace ddb
 
     // Builds the Gaussian Splat delivery artifacts from a splat source (a format SplatStage::Build
     // names) into `outdir`: `<outdir>/model.rad` (RAD container) and `<outdir>/bounds.json`
-    // (bounding box). build-lod is mandatory: throws AppException if it is unavailable.
+    // (bounding box and up vector). build-lod is mandatory: throws AppException if it is unavailable.
+    // A .rad source is already a model.rad: it is validated with the RAD reader and linked or copied,
+    // without build-lod (a file the reader cannot read throws AppException with the reason).
     void buildGsplat(const std::string &input, const std::string &outdir);
 
 } // namespace ddb

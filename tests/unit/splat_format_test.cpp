@@ -65,8 +65,9 @@ TEST(splatFormat, TheStagesEachFormatIsAcceptedForArePinned) {
         {SplatFormat::Ksplat, true, true, true, false, false},
         // Build input with no metadata reader: the splat count is inside the ZIP
         {SplatFormat::Sog, true, false, true, false, false},
-        // What a build writes: a thumbnail source, not yet an upload that is a splat
-        {SplatFormat::Rad, false, false, false, true, false},
+        // What a build writes, and a splat as an upload: published as it is, without build-lod; no
+        // metadata reader
+        {SplatFormat::Rad, true, false, true, true, false},
         {SplatFormat::Unknown, false, false, false, false, false}};
     for (const auto& r : rows) {
         SCOPED_TRACE(static_cast<int>(r.format));
@@ -81,14 +82,14 @@ TEST(splatFormat, TheStagesEachFormatIsAcceptedForArePinned) {
 }
 
 TEST(splatFormat, TheExtensionListsComeFromTheTableInItsOrder) {
-    EXPECT_EQ(splatExtensions(SplatStage::Detect), (Extensions{"splat", "spz", "ksplat", "sog"}));
+    EXPECT_EQ(splatExtensions(SplatStage::Detect), (Extensions{"splat", "spz", "ksplat", "sog", "rad"}));
     EXPECT_EQ(splatExtensions(SplatStage::Metadata), (Extensions{"ply", "splat", "spz", "ksplat"}));
-    EXPECT_EQ(splatExtensions(SplatStage::Build), (Extensions{"ply", "splat", "spz", "ksplat", "sog"}));
+    EXPECT_EQ(splatExtensions(SplatStage::Build), (Extensions{"ply", "splat", "spz", "ksplat", "sog", "rad"}));
     EXPECT_EQ(splatExtensions(SplatStage::Thumbnail), (Extensions{"spz", "rad"}));
     EXPECT_EQ(splatExtensions(SplatStage::Convert), (Extensions{"ply", "splat", "spz"}));
 
     EXPECT_EQ(splatExtensionsText(SplatStage::Convert), ".ply, .splat or .spz");
-    EXPECT_EQ(splatExtensionsText(SplatStage::Build), ".ply, .splat, .spz, .ksplat or .sog");
+    EXPECT_EQ(splatExtensionsText(SplatStage::Build), ".ply, .splat, .spz, .ksplat, .sog or .rad");
     EXPECT_EQ(splatExtensionsText(SplatStage::Thumbnail), ".spz or .rad");
 }
 
