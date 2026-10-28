@@ -7,6 +7,7 @@
 #include "entry.h"
 #include "fs.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -41,13 +42,29 @@ namespace ddb
                                  const fs::path &outImagePath,
                                  uint8_t **outBuffer, int *outBufferSize,
                                  uint64_t pointBudget = 0);
-    // Thumbnails of a Gaussian Splat, from a .spz file or from the level-of-detail .rad artifact
+    // What a Gaussian Splat thumbnail drew, for the tests and tools that look into the renderer
+    struct SplatThumbStats
+    {
+        size_t splats = 0;           // read, with a finite position and some opacity
+        size_t framed = 0;           // the subject: the splats the camera is aimed at and fitted to
+        bool enclosed = false;       // a room: seen from higher up, with its top and its near side cut away
+        size_t drawn = 0;            // projected into the picture
+        size_t cutAway = 0;          // between the camera and the subject, far behind it, in the sky above it or
+                                     // under its ground; the top and the near side of a room
+        size_t culledOversized = 0;  // a footprint too wide for the picture
+        size_t pixelBufferBytes = 0; // the buffers that grow with the picture, beyond the picture itself
+    };
+
+    // Thumbnails of a Gaussian Splat, from a .spz file or from the level-of-detail .rad artifact.
+    // thumbSize is at most 4096 (InvalidArgsException); `stats`, when given, says what was drawn.
     void generateSplatThumb(const fs::path &spzPath, int thumbSize,
                             const fs::path &outImagePath,
-                            uint8_t **outBuffer, int *outBufferSize);
+                            uint8_t **outBuffer, int *outBufferSize,
+                            SplatThumbStats *stats = nullptr);
     void generateSplatThumbFromRad(const fs::path &radPath, int thumbSize,
                                    const fs::path &outImagePath,
-                                   uint8_t **outBuffer, int *outBufferSize);
+                                   uint8_t **outBuffer, int *outBufferSize,
+                                   SplatThumbStats *stats = nullptr);
     void cleanupThumbsUserCache();
 
 }

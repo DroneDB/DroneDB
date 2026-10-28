@@ -30,9 +30,9 @@ namespace ddb
         // RAD aligns sub-sections to 8 bytes.
         inline uint64_t roundUp8(uint64_t n) { return (n + 7u) & ~static_cast<uint64_t>(7u); }
 
-        // build-lod writes chunks of 65536 splats. A chunk that declares more than 64 times that is
-        // not one: the count sizes the buffers of the decode, and it comes from the file.
-        constexpr size_t kMaxSplatsPerChunk = size_t(1) << 22;
+        // A chunk that declares more than 64 times the splats build-lod writes in one is not one: the
+        // count sizes the buffers of the decode, and it comes from the file.
+        constexpr size_t kMaxSplatsPerChunk = RadChunkSplats * 64;
 
         inline uint32_t readU32LE(const uint8_t *p)
         {

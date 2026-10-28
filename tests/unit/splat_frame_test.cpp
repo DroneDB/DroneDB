@@ -304,4 +304,35 @@ TEST(splatFrame, theSidecarMembersAreNamedAsTheViewersReadThem) {
     EXPECT_STREQ(splatUpSourceName(SplatUpSource::Pca), "pca");
 }
 
+// The principal axes of weighted points: the widest first, unit vectors, the mean weighted
+TEST(splatFrame, principalAxesAreTheWidestFirst) {
+    std::mt19937 rng(3);
+    std::normal_distribution<double> wide(0.0, 10.0), middle(0.0, 3.0), thin(0.0, 0.5);
+    std::vector<std::array<double, 3>> points;
+    std::vector<double> weights;
+    // Widest along y, then z, thinnest along x, around (1, 2, 3)
+    for (int i = 0; i < 4000; ++i) {
+        points.push_back({1.0 + thin(rng), 2.0 + wide(rng), 3.0 + middle(rng)});
+        weights.push_back(1.0);
+    }
+    const SplatAxes axes = principalAxes(points, weights);
+    EXPECT_GT(std::abs(axes.axes[0][1]), 0.99);
+    EXPECT_GT(std::abs(axes.axes[1][2]), 0.99);
+    EXPECT_GT(std::abs(axes.axes[2][0]), 0.99);
+    EXPECT_GT(axes.variances[0], axes.variances[1]);
+    EXPECT_GT(axes.variances[1], axes.variances[2]);
+    EXPECT_NEAR(axes.variances[0], 100.0, 10.0);
+    for (const auto& axis : axes.axes)
+        EXPECT_NEAR(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2], 1.0, 1e-9);
+    EXPECT_NEAR(axes.mean[0], 1.0, 0.1);
+
+    // A point of all the weight is the mean
+    points.push_back({100.0, 100.0, 100.0});
+    weights.assign(weights.size(), 0.0);
+    weights.push_back(1.0);
+    const SplatAxes heavy = principalAxes(points, weights);
+    EXPECT_NEAR(heavy.mean[0], 100.0, 1e-9);
+    EXPECT_NEAR(heavy.variances[0], 0.0, 1e-9);
+}
+
 }  // namespace

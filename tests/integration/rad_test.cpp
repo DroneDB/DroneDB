@@ -18,6 +18,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -551,11 +552,14 @@ fs::path writeSplats(TestArea& ta, const std::string& name, const std::vector<Sp
          propertyOf("orientation", "f32", planar([](const SplatSpec& s, int d) { return s.rotationXyz[d]; }, 3))});
 }
 
-// The corners of a square of 20 around the origin, as dots: they make the frame
+// The corners of a square of 40 around the origin, as dots: they make the frame, wide enough for the
+// splats of the tests to be a small part of the picture (a splat wider than an eighth of it is a blur,
+// and is not drawn). A scene of so few splats has no up vector of its own: it stands on the viewer's
+// default, -Y, and is seen from above it.
 std::vector<SplatSpec> frameCorners() {
     std::vector<SplatSpec> corners;
-    for (const float x : {-10.0f, 10.0f})
-        for (const float y : {-10.0f, 10.0f})
+    for (const float x : {-20.0f, 20.0f})
+        for (const float y : {-20.0f, 20.0f})
             corners.push_back({{x, y, 0}, {1, 1, 1}, 1.0f});
     return corners;
 }
@@ -588,39 +592,85 @@ Picture pictureOf(TestArea& ta, const fs::path& rad, int size = 160) {
     return decodePicture(image);
 }
 
-// A splat is drawn as the ellipse it is: long along the axis of its larger scale, and turned with it
+// The red pixels as a shape: how many, how much longer than wide (the ratio of their spreads along
+// their principal axes) and the angle of the longer axis in the picture, in degrees
+struct Shape {
+    size_t pixels = 0;
+    double elongation = 0.0;
+    double angle = 0.0;
+};
+
+Shape redShape(const Picture& picture) {
+    Shape shape;
+    double sx = 0, sy = 0;
+    std::vector<std::pair<int, int>> red;
+    for (int y = 0; y < picture.height; ++y)
+        for (int x = 0; x < picture.width; ++x) {
+            const uint8_t* p = picture.at(x, y);
+            if (p[3] > 128 && p[0] > 150 && p[1] < 110 && p[2] < 110) {
+                red.emplace_back(x, y);
+                sx += x;
+                sy += y;
+            }
+        }
+    shape.pixels = red.size();
+    if (red.empty())
+        return shape;
+    const double count = static_cast<double>(red.size());
+    const double mx = sx / count, my = sy / count;
+    double cxx = 0, cxy = 0, cyy = 0;
+    for (const auto& [x, y] : red) {
+        cxx += (x - mx) * (x - mx);
+        cxy += (x - mx) * (y - my);
+        cyy += (y - my) * (y - my);
+    }
+    const double mean = (cxx + cyy) / 2, spread = std::sqrt((cxx - cyy) * (cxx - cyy) / 4 + cxy * cxy);
+    shape.elongation = std::sqrt((mean + spread) / std::max(mean - spread, 1e-9));
+    shape.angle = 0.5 * std::atan2(2 * cxy, cxx - cyy) * 180.0 / 3.14159265358979323846;
+    return shape;
+}
+
+// The angle between two axes of the picture, in degrees from 0 to 90
+double degreesBetween(double a, double b) {
+    const double d = std::fmod(std::abs(a - b), 180.0);
+    return std::min(d, 180.0 - d);
+}
+
+// A splat is drawn as the ellipse it is: long along the axis of its larger scale, and turned with it.
+// (The picture is a three-quarter view: an axis of the scene is seen at a slant, so the shapes are
+// measured along their own axes, not along those of the picture.)
 TEST(rad, aSplatIsDrawnAsAnEllipseAlongItsScaledAxis) {
     TestArea ta(TEST_NAME);
     auto splats = frameCorners();
 
-    // Wide along x
+    // Long along x
     splats.push_back({{0, 0, 0}, {1, 0, 0}, 1.0f, {3.0f, 0.5f, 0.5f}});
-    const Box wide = redBox(pictureOf(ta, writeSplats(ta, "wide.rad", splats)));
-    ASSERT_GT(wide.x1, 0) << "the splat is in the picture";
-    EXPECT_GT(wide.width(), 3 * wide.height()) << wide.width() << " x " << wide.height();
+    const Shape alongX = redShape(pictureOf(ta, writeSplats(ta, "along_x.rad", splats)));
+    ASSERT_GT(alongX.pixels, 0u) << "the splat is in the picture";
+    EXPECT_GT(alongX.elongation, 3.0);
 
-    // The same splat turned 90 degrees about the line of sight: tall
+    // The same splat turned 90 degrees about z: long along y, the up the scene stands on
     splats.back().rotationXyz = {0, 0, 0.70710678f};
-    const Box tall = redBox(pictureOf(ta, writeSplats(ta, "tall.rad", splats)));
-    ASSERT_GT(tall.x1, 0);
-    EXPECT_GT(tall.height(), 3 * tall.width()) << tall.width() << " x " << tall.height();
+    const Shape alongY = redShape(pictureOf(ta, writeSplats(ta, "along_y.rad", splats)));
+    ASSERT_GT(alongY.pixels, 0u);
+    EXPECT_GT(alongY.elongation, 3.0);
+    EXPECT_GT(degreesBetween(alongX.angle, alongY.angle), 30.0) << alongX.angle << " and " << alongY.angle;
+    EXPECT_LT(degreesBetween(alongY.angle, 90.0), 10.0) << "up is up the picture: " << alongY.angle;
 
     // A round splat is round, and a splat with no extent is a dot, not a disc of a size of its own
     splats.back() = {{0, 0, 0}, {1, 0, 0}, 1.0f, {1.5f, 1.5f, 1.5f}};
-    const Box round = redBox(pictureOf(ta, writeSplats(ta, "round.rad", splats)));
-    ASSERT_GT(round.x1, 0);
-    EXPECT_NEAR(static_cast<double>(round.width()) / round.height(), 1.0, 0.2);
-    EXPECT_GT(round.width(), 2 * wide.height());
+    const Shape round = redShape(pictureOf(ta, writeSplats(ta, "round.rad", splats)));
+    ASSERT_GT(round.pixels, 0u);
+    EXPECT_LT(round.elongation, 1.3);
+    EXPECT_GT(round.pixels, alongX.pixels);
     splats.back() = {{0, 0, 0}, {1, 0, 0}, 1.0f, {0, 0, 0}};
-    const Box dot = redBox(pictureOf(ta, writeSplats(ta, "dot.rad", splats)));
-    EXPECT_LT(dot.width(), round.width() / 3);
+    EXPECT_LT(redShape(pictureOf(ta, writeSplats(ta, "dot.rad", splats))).pixels, round.pixels / 9);
 }
 
-// Splats are composited from the far one to the near one: the opaque splat in front hides the one
-// behind it, whatever order the file lists them in
+// The opaque splat in front hides the one behind it, whatever order the file lists them in
 TEST(rad, aSplatInFrontHidesTheOneBehind) {
     TestArea ta(TEST_NAME);
-    // The scene is flat along z, the shortest axis, which the picture looks along from its top
+    // The camera looks down on the scene from above its up, -Y: the higher splat (lower y) is in front
     const SplatSpec red = {{0, 0, 0}, {1, 0, 0}, 1.0f, {2, 2, 2}};
     const SplatSpec green = {{0, 0, 0}, {0, 1, 0}, 1.0f, {2, 2, 2}};
     const auto centre = [](const Picture& picture) { return picture.at(picture.width / 2, picture.height / 2); };
@@ -629,7 +679,7 @@ TEST(rad, aSplatInFrontHidesTheOneBehind) {
         for (const bool redFirst : {true, false}) {
             auto splats = frameCorners();
             SplatSpec a = red, b = green;
-            (redInFront ? a : b).centre[2] = 1.0f;
+            (redInFront ? a : b).centre[1] = -1.0f;
             if (redFirst) { splats.push_back(a); splats.push_back(b); }
             else { splats.push_back(b); splats.push_back(a); }
 
@@ -670,8 +720,154 @@ TEST(rad, aTransparentSplatLeavesNoTrace) {
     EXPECT_EQ(redBox(pictureOf(ta, writeSplats(ta, "invisible.rad", splats))).x1, -1);
 }
 
-// The tile buffers take 20 bytes a pixel: a size no one asks for in good faith is refused, before the
-// file is read
+// ---------------------------------------------------------------------------
+// The view: the subject, not the floaters; rooms opened; blurs left out
+// ---------------------------------------------------------------------------
+
+// A deterministic cloud of `count` splats spread evenly in the box [lo, hi]
+std::vector<SplatSpec> splatsIn(std::mt19937& rng, size_t count, Centre lo, Centre hi, std::array<float, 3> colour,
+                                float scale) {
+    std::vector<SplatSpec> splats;
+    for (size_t i = 0; i < count; ++i) {
+        SplatSpec splat{{0, 0, 0}, colour, 0.9f, {scale, scale, scale}};
+        for (int k = 0; k < 3; ++k)
+            splat.centre[k] = std::uniform_real_distribution<float>(lo[k], hi[k])(rng);
+        splats.push_back(splat);
+    }
+    return splats;
+}
+
+SplatThumbStats statsOf(TestArea& ta, const fs::path& rad, int size = 160) {
+    SplatThumbStats stats;
+    generateSplatThumbFromRad(rad, size, ta.getPath(rad.stem().string() + "_stats.webp"), nullptr, nullptr, &stats);
+    return stats;
+}
+
+// The picture is aimed at the subject, the dense part of the scene: floaters scattered far around it
+// (5% of the splats, more than the outermost splats any frame leaves out) leave the subject where it
+// was in the picture and about as large. A frame fitted to all but the outermost 2% of the splats, as
+// the picture had, shrank the subject to a few pixels.
+TEST(rad, floatersDoNotChangeTheFrame) {
+    TestArea ta(TEST_NAME);
+    std::mt19937 rng(7);
+    const auto subject = splatsIn(rng, 2000, {-4, -1, -4}, {4, 1, 4}, {1, 0, 0}, 0.15f);
+    auto withFloaters = subject;
+    for (const auto& floater : splatsIn(rng, 105, {-100, -100, -100}, {100, 100, 100}, {1, 1, 1}, 0.15f))
+        withFloaters.push_back(floater);
+
+    const Box clean = redBox(pictureOf(ta, writeSplats(ta, "clean.rad", subject)));
+    const Box floating = redBox(pictureOf(ta, writeSplats(ta, "floaters.rad", withFloaters)));
+    ASSERT_GT(clean.x1, 0);
+    ASSERT_GT(floating.x1, 0) << "the subject is in the picture";
+    EXPECT_GT(clean.width(), 80) << "the subject fills the picture";
+    EXPECT_NEAR(floating.width(), clean.width(), 0.15 * clean.width());
+    EXPECT_NEAR(floating.height(), clean.height(), 0.15 * clean.height());
+    EXPECT_NEAR(floating.x0 + floating.x1, clean.x0 + clean.x1, 0.1 * 2 * 160);
+    EXPECT_NEAR(floating.y0 + floating.y1, clean.y0 + clean.y1, 0.1 * 2 * 160);
+}
+
+// Splats are composited front to back, and a pixel is done once almost nothing behind it shows: the
+// layers behind it are not painted, and the colour is the one compositing all of them gives (each
+// layer's colour times its alpha times what the layers in front of it let through), within the
+// rounding of the picture. Eleven layers of 0.75 opacity, red, green and blue in turn, one above the
+// other along the up the camera looks down: what shows after seven of them is less than 1e-4.
+TEST(rad, frontToBackCompositingEqualsCompositingEveryLayer) {
+    TestArea ta(TEST_NAME);
+    const std::array<std::array<float, 3>, 3> colours = {{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};
+    constexpr int Layers = 11;
+    constexpr float Opacity = 0.75f;
+    auto splats = frameCorners();
+    for (int k = 0; k < Layers; ++k)
+        splats.push_back({{0, -0.02f * static_cast<float>(k), 0}, colours[k % 3], Opacity, {2, 2, 2}});
+
+    // The highest layer is the nearest
+    std::array<double, 3> expected{};
+    double through = 1.0;
+    for (int k = Layers - 1; k >= 0; --k) {
+        for (int c = 0; c < 3; ++c)
+            expected[c] += through * Opacity * colours[k % 3][c];
+        through *= 1.0 - Opacity;
+    }
+    ASSERT_LT(std::pow(1.0 - Opacity, 7), 1e-4) << "the layers behind the 7th are not painted";
+
+    const Picture picture = pictureOf(ta, writeSplats(ta, "layers.rad", splats), 400);
+    const uint8_t* p = picture.at(picture.width / 2, picture.height / 2);
+    EXPECT_GT(p[3], 250);
+    for (int c = 0; c < 3; ++c)
+        EXPECT_NEAR(p[c], expected[c] / (1.0 - through) * 255.0, 6.0) << "channel " << c;
+}
+
+// A splat whose footprint is wider than an eighth of the picture is a blur, not a part of the scene:
+// it is not drawn, and the splat it would cover shows
+TEST(rad, aSplatTooWideForThePictureIsLeftOut) {
+    TestArea ta(TEST_NAME);
+    auto splats = frameCorners();
+    splats.push_back({{0, 0, 0}, {1, 0, 0}, 1.0f, {2, 2, 2}});
+    const SplatSpec blur = {{0, -0.5f, 0}, {0, 1, 0}, 1.0f, {30, 30, 30}}; // in front of the red one
+    splats.push_back(blur);
+    const fs::path rad = writeSplats(ta, "blur.rad", splats);
+
+    const SplatThumbStats stats = statsOf(ta, rad);
+    EXPECT_EQ(stats.culledOversized, 1u);
+    const Picture picture = pictureOf(ta, rad);
+    const uint8_t* p = picture.at(picture.width / 2, picture.height / 2);
+    EXPECT_GT(p[0], 200);
+    EXPECT_LT(p[1], 80);
+
+    // A smaller one is drawn, and hides the red one
+    splats.back().scale = {2, 2, 2};
+    const Picture covered = pictureOf(ta, writeSplats(ta, "small.rad", splats));
+    EXPECT_GT(covered.at(covered.width / 2, covered.height / 2)[1], 200);
+}
+
+// A room is seen from outside and above, with its ceiling cut away, so what stands in it shows; a
+// subject in the open air is not cut so
+TEST(rad, aRoomIsOpenedFromAbove) {
+    TestArea ta(TEST_NAME);
+    std::mt19937 rng(11);
+    const std::array<float, 3> grey = {0.5f, 0.5f, 0.5f};
+    // The floor at y = 0, the ceiling at y = -3 (up is -Y), the walls around 10 x 10
+    std::vector<SplatSpec> room;
+    for (const auto& part : {splatsIn(rng, 600, {-5, 0, -5}, {5, 0, 5}, grey, 0.2f),
+                             splatsIn(rng, 600, {-5, -3, -5}, {5, -3, 5}, grey, 0.2f),
+                             splatsIn(rng, 200, {-5, -3, -5}, {-5, 0, 5}, grey, 0.2f),
+                             splatsIn(rng, 200, {5, -3, -5}, {5, 0, 5}, grey, 0.2f),
+                             splatsIn(rng, 200, {-5, -3, -5}, {5, 0, -5}, grey, 0.2f),
+                             splatsIn(rng, 200, {-5, -3, 5}, {5, 0, 5}, grey, 0.2f),
+                             splatsIn(rng, 100, {-0.5f, -2, -0.5f}, {0.5f, -1, 0.5f}, {1, 0, 0}, 0.1f)})
+        room.insert(room.end(), part.begin(), part.end());
+    const fs::path rad = writeSplats(ta, "room.rad", room);
+
+    const SplatThumbStats stats = statsOf(ta, rad);
+    EXPECT_TRUE(stats.enclosed);
+    EXPECT_GT(stats.cutAway, 300u) << "the ceiling is cut away";
+    EXPECT_GT(redBox(pictureOf(ta, rad)).x1, 0) << "what stands in the room shows";
+
+    // Without its ceiling and walls it is a subject on the ground, in the open air
+    std::vector<SplatSpec> open(room.begin(), room.begin() + 600);
+    open.insert(open.end(), room.end() - 100, room.end());
+    EXPECT_FALSE(statsOf(ta, writeSplats(ta, "open.rad", open)).enclosed);
+}
+
+// The buffers of the compositing do not grow with the picture beyond a few bytes a pixel: the splats
+// are composited a tile at a time, so only the picture itself is as large as the picture
+TEST(rad, theCompositingNeedsNoBufferAsLargeAsThePicture) {
+    TestArea ta(TEST_NAME);
+    auto splats = frameCorners();
+    splats.push_back({{0, 0, 0}, {1, 0, 0}, 1.0f, {2, 2, 2}});
+    const fs::path rad = writeSplats(ta, "buffers.rad", splats);
+    for (const int size : {64, 1024}) {
+        SCOPED_TRACE(size);
+        const SplatThumbStats stats = statsOf(ta, rad, size);
+        const size_t pixels = static_cast<size_t>(size) * static_cast<size_t>(size);
+        EXPECT_GT(stats.pixelBufferBytes, 0u);
+        EXPECT_LE(stats.pixelBufferBytes, 8 * pixels);
+    }
+    // At a size where a buffer of a float a pixel would be 4 MiB, the tiles take a fraction of a byte a pixel
+    EXPECT_LT(statsOf(ta, rad, 1024).pixelBufferBytes, 1024u * 1024u / 4u);
+}
+
+// A size no one asks for in good faith is refused, before the file is read
 TEST(rad, aThumbnailLargerThanTheCapIsRefused) {
     TestArea ta(TEST_NAME);
     const fs::path rad = writeCentres(ta, "scene.rad", {{0, 0, 0}, {10, 0, 0}, {0, 10, 0}});

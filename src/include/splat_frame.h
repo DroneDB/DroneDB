@@ -76,6 +76,17 @@ namespace ddb
                             bool georeferenced = false);
     SplatUp estimateSplatUp(const RadCoarseSplats &splats, bool georeferenced = false);
 
+    // The principal axes of points weighted by `weights` (one each, none negative): their weighted mean,
+    // the variances along the axes (the widest first) and the axes themselves, unit vectors in the same
+    // order. The PCA estimateSplatUp falls back on; a thumbnail uses it to tell a room from the open air.
+    struct SplatAxes
+    {
+        std::array<double, 3> mean{};
+        std::array<double, 3> variances{};
+        std::array<std::array<double, 3>, 3> axes{};
+    };
+    SplatAxes principalAxes(const std::vector<std::array<double, 3>> &points, const std::vector<double> &weights);
+
 } // namespace ddb
 
 #endif // SPLAT_FRAME_H

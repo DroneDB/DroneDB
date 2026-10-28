@@ -515,4 +515,20 @@ namespace ddb
         return estimateSplatUp(splats.positions, splats.opacities, georeferenced);
     }
 
+    SplatAxes principalAxes(const std::vector<std::array<double, 3>> &points, const std::vector<double> &weights)
+    {
+        Points weighted;
+        weighted.p = points;
+        weighted.w = weights;
+        weighted.w.resize(points.size(), 1.0);
+        const Spread spread = spreadOf(weighted, nullptr);
+
+        SplatAxes result;
+        result.mean = spread.mean;
+        result.variances = spread.values;
+        for (int c = 0; c < 3; ++c)
+            result.axes[c] = axisOf(spread, c);
+        return result;
+    }
+
 } // namespace ddb

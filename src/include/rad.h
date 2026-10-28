@@ -38,10 +38,13 @@ namespace ddb
         std::vector<float> rotations; // count * 4
     };
 
-    // The chunks a preview is made of: the thumbnail renders them, and the up vector of the scene is
-    // estimated from them (readRadCoarseSplats with onlyTheCut). The first 65536 splats are the
-    // coarsest picture; at 4 times that a scene is recognisable and a thumbnail is still made in a
-    // fraction of a second.
+    // The splats of a chunk, as build-lod writes them (the last chunk of a file may hold fewer)
+    constexpr size_t RadChunkSplats = 65536;
+
+    // The chunks the up vector of a scene is estimated from (readRadCoarseSplats with onlyTheCut), at
+    // build time for bounds.json and by the thumbnail, so both stand the scene the same way. The first
+    // chunk is the coarsest picture of the scene; at 4 times that its ground is clear. A thumbnail
+    // reads at least these, and more for a larger picture.
     constexpr int RadPreviewChunks = 4;
 
     // True when the path ends with the canonical .rad delivery extension.
