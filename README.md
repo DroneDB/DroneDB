@@ -20,7 +20,7 @@
 - **Geospatial Analysis** - Flight path visualization, EXIF metadata extraction, dataset partitioning, and STAC catalog support
 - **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Cloud-Optimized Point Clouds (COPC)
 - **Cloud Sync** - Push and pull datasets to/from DroneDB Hub for collaboration
-- **Format Support** - Orthophotos (GeoTIFF, COG, JPEG 2000), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, STL, glTF/GLB, OGC 3D Tiles), Gaussian Splats (PLY, SPLAT, SPZ), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG, GPX), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
+- **Format Support** - Orthophotos (GeoTIFF, COG, JPEG 2000), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, STL, glTF/GLB, OGC 3D Tiles), Gaussian Splats (PLY, SPLAT, SPZ, KSPLAT, SOG), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG, GPX), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
 - **Cross-Platform** - Works on Windows and Linux
 
 ---
@@ -82,7 +82,8 @@ ddb cog output.tif input.tif
 # Generate OGC 3D Tiles from a 3D model (requires Obj2Tiles binary)
 ddb 3dtiles model.obj ./3dtiles
 
-# Convert Gaussian Splat to compressed .spz format
+# Convert a Gaussian Splat to a compressed .spz file for other tools
+# (ddb build makes the streamed model.rad for the Hub viewer)
 ddb gsplat input.ply output.spz
 
 # Share your dataset to DroneDB Hub
@@ -106,7 +107,7 @@ ddb share . --tag myproject/dataset
 | `copc` | Create Cloud-Optimized Point Clouds |
 | `bm3d` | Create bm3d multiresolution 3D model format |
 | `3dtiles` | Generate OGC 3D Tiles (tileset.json + b3dm) from OBJ/STL/glTF/GLB models |
-| `gsplat` | Convert Gaussian Splat to compressed .spz format |
+| `gsplat` | Convert a Gaussian Splat (PLY, SPLAT, SPZ) to a compressed .spz file for other tools; `build` makes the streamed RAD |
 | `stac` | Export as STAC catalog |
 | `clone` | Clone a remote repository |
 | `push` / `pull` | Sync with DroneDB Hub |
@@ -143,7 +144,7 @@ DroneDB uses **vcpkg** for dependency management and CMake for building.
 - **CMake 3.21+**
 - **Python 3.x**
 - **Git**
-- **Rust toolchain** (`cargo`, required for Gaussian Splat LOD support)
+- **Rust toolchain** (`cargo`, required to build `build-lod`, which Gaussian Splat builds need)
 - **Visual Studio 2019+** (Windows only, with C++ desktop development workload)
 
 ### Quick Build
@@ -200,7 +201,7 @@ After successful build, find executables in the `build/` directory:
 - **ddb.dll** - Core library
 - **ddbtest.exe** - Test suite
 - **untwine.exe** - COPC converter (optional, see below)
-- **build-lod.exe** - Gaussian Splat LOD producer (required for Gaussian Splat support)
+- **build-lod.exe** - Gaussian Splat LOD producer (required: a Gaussian Splat build fails without it)
 
 #### Untwine COPC (optional)
 
@@ -219,7 +220,7 @@ If the submodule is not present, DroneDB falls back to the built-in PDAL `writer
 
 #### build-lod (Gaussian Splat LOD producer)
 
-If the `vendor/spark` git submodule is initialised, the build script automatically compiles [Spark's `build-lod`](https://github.com/sparkjsdev/spark) Rust CLI and places `build-lod.exe` next to `ddbcmd.exe`. This binary is required for Gaussian Splat LOD streaming.
+If the `vendor/spark` git submodule is initialised, the build script automatically compiles [Spark's `build-lod`](https://github.com/sparkjsdev/spark) Rust CLI and places `build-lod.exe` next to `ddbcmd.exe`. This binary is required: it produces the streamed `model.rad` of every Gaussian Splat.
 
 > **Prerequisite:** A Rust toolchain (`cargo`) must be installed. Download it from [rustup.rs](https://rustup.rs).
 
@@ -230,7 +231,7 @@ git submodule update --init vendor/spark
 .\full-build-win.ps1          # or -BuildType Release
 ```
 
-If `build-lod.exe` is missing, Gaussian Splat builds are deferred: `ddb build` reports build-lod as a missing dependency until it is available.
+If `build-lod.exe` is missing, a Gaussian Splat build fails until the tool is installed (place it next to `ddbcmd.exe` or set `DDB_BUILDLOD_PATH`).
 
 #### Troubleshooting
 
@@ -270,7 +271,7 @@ After a successful build, executables are placed in `build/`:
 - **ddbcmd** / **libddb.so** - CLI tool and core library
 - **ddbtest** - Test suite
 - **untwine** - COPC accelerator (optional, see below)
-- **build-lod** - Gaussian Splat LOD producer (required for Gaussian Splat support)
+- **build-lod** - Gaussian Splat LOD producer (required: a Gaussian Splat build fails without it)
 
 #### Untwine COPC Accelerator (optional)
 
@@ -287,7 +288,7 @@ A build failure in the Untwine step is **non-blocking** - DroneDB falls back to 
 
 #### build-lod (Gaussian Splat LOD producer)
 
-Same logic as on Windows: if the `vendor/spark` submodule is present, the script compiles [Spark's `build-lod`](https://github.com/sparkjsdev/spark) via `cargo` and copies the resulting binary next to `ddbcmd`. This binary is required for Gaussian Splat LOD streaming.
+Same logic as on Windows: if the `vendor/spark` submodule is present, the script compiles [Spark's `build-lod`](https://github.com/sparkjsdev/spark) via `cargo` and copies the resulting binary next to `ddbcmd`. This binary is required: it produces the streamed `model.rad` of every Gaussian Splat.
 
 > **Prerequisite:** A Rust toolchain (`cargo`) must be installed. Download it from [rustup.rs](https://rustup.rs).
 
@@ -298,7 +299,7 @@ git submodule update --init vendor/spark
 ./full-build-linux.sh          # or Debug
 ```
 
-If `build-lod` is missing, Gaussian Splat builds are deferred: `ddb build` reports build-lod as a missing dependency until it is available.
+If `build-lod` is missing, a Gaussian Splat build fails until the tool is installed (place it next to `ddbcmd` or set `DDB_BUILDLOD_PATH`).
 
 ### Docker Build
 
