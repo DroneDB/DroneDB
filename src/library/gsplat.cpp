@@ -236,8 +236,8 @@ namespace ddb
 
         // build-lod is a mandatory dependency: model.rad is the sole delivery artifact (streamed
         // by the viewer, and decoded on demand to render thumbnails). It runs on the source splat
-        // itself (staged under a name of ours), with no intermediate .spz, except a v4 SPZ, which
-        // is transcoded to v3 first, read and decoded whole in memory.
+        // itself (staged under a name of ours), with no intermediate .spz: it reads every SPZ
+        // version, the gzip container of v1-3 and the NGSP/ZSTD container of v4.
         // A missing external tool fails the build (it would never appear by uploading
         // files). After the tool is installed, the next full build picks the entry up.
         if (!buildlod::isBuildLodAvailable())
@@ -245,18 +245,7 @@ namespace ddb
                 "Building Gaussian Splats requires the build-lod tool, which was not found "
                 "(set DDB_BUILDLOD_PATH or place build-lod next to the DroneDB executable)");
 
-        // build-lod reads gzip SPZ (v1-3) only: a NGSP (v4) upload is rewritten as v3 in a
-        // scratch folder beside outdir (which is published as it is), gone when this returns
-        const fs::path source = io::fromUtf8(input);
-        io::ScopedTempDir transcoded;
-        fs::path lodInput = source;
-        if (splatFormatOf(source) == SplatFormat::Spz && sniffSpzContainer(source) == SpzContainer::Ngsp)
-        {
-            transcoded = io::ScopedTempDir::createBeside(io::fromUtf8(outdir), "spz-v3-");
-            lodInput = transcoded.path() / "source.spz";
-            transcodeSpzToV3(source, lodInput);
-        }
-
+        const fs::path lodInput = io::fromUtf8(input);
         const fs::path outRad = io::fromUtf8(outdir) / GsplatRadFileName;
         // Its silent steps grow with the number of splats: a large splat gets a longer idle limit
         process::Options lodOptions;

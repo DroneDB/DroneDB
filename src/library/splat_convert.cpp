@@ -26,10 +26,10 @@ namespace ddb
 {
     namespace
     {
-        // SPZ file-format version written for the delivery artifact. The web viewer (Spark)
-        // only understands the gzip-based SPZ versions (1-3); version 4 switched to a ZSTD
-        // per-stream container ("NGSP") that Spark cannot decode (it reports "Invalid gzip
-        // header"). Version 3 keeps the same smallest-three quaternion precision as v4, so
+        // SPZ file-format version written for the delivery artifact. Version 4 switched to a ZSTD
+        // per-stream container ("NGSP") that only readers of version 4 decode (Spark before 2.4.0
+        // reports "Invalid gzip header"), while every SPZ reader reads the gzip-based versions
+        // (1-3). Version 3 keeps the same smallest-three quaternion precision as v4, so
         // visual quality is unchanged - only the compression container differs (gzip vs zstd).
         constexpr uint32_t kDeliverySpzVersion = 3;
 

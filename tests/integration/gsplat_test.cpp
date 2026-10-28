@@ -856,8 +856,8 @@ TEST(gsplat, aForcedRebuildRemovesTheExportAndAnotherOneIsMadeAgain) {
     DDBReleaseConnections(dataset.string().c_str(), nullptr);
 }
 
-// A v4 (NGSP) SPZ cannot be read by build-lod: the build transcodes it to v3 first, in a scratch
-// folder beside the one that is published, and gone after the build
+// build-lod reads a v4 (NGSP/ZSTD) SPZ as it is: the build runs it on the upload, which it does not
+// rewrite, and leaves nothing beside the folder it publishes
 TEST(gsplat, buildAcceptsAV4Spz) {
     TestArea ta(TEST_NAME);
     REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping v4 build assertions");
@@ -1417,7 +1417,7 @@ TEST(gsplat, convertV4SpzTranscodesToV3) {
     const fs::path out = ta.getPath("out.spz");
     ddb::convertToSpz(v4.string(), out.string());
 
-    EXPECT_TRUE(isGzip(out)) << "v4/NGSP must be transcoded to gzip-based v3 for the Spark viewer";
+    EXPECT_TRUE(isGzip(out)) << "v4/NGSP must be transcoded to gzip-based v3, which every SPZ reader reads";
     EXPECT_TRUE(ddb::looksLikeSplat(out));
 
     GaussianSplatInfo srcInfo;

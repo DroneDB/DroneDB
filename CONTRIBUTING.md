@@ -91,9 +91,10 @@ This project adheres to the [Contributor Covenant](CONDUCT.md). By participating
   which every SPZ reader reads (`kDeliverySpzVersion` in `splat_convert.cpp`). After the
   bump, check the CI gsplat test count shows **0 skipped**.
 - **vendor/spark** (build-lod producer): policy is to pin to a release tag matching Hub's
-  `@sparkjsdev/spark` npm version, bumping both in the same release cycle. Current
-  exception: commit `750812d` (v2.1.0+15) is pinned on purpose because v2.1.0 lacks the
-  #359 SH clamp fix — move to the next tag once it is released. CI warns on non-tag pins.
+  `@sparkjsdev/spark` npm version, bumping both in the same release cycle. CI warns on
+  non-tag pins. build-lod reads every SPZ version (gzip v1-3 and NGSP/ZSTD v4) since
+  v2.4.0, so a v4 upload is built as it is: a spark pin older than v2.4.0 fails
+  `gsplat.buildAcceptsAV4Spz`.
 - If the **"Verify Spark RAD format pin"** CI step fails: the spark RAD writer
   (`rust/spark-lib/src/rad.rs`) changed since the last review. Review encoding handling in
   `src/library/rad.cpp` before merging, then refresh the pin file with the command printed
