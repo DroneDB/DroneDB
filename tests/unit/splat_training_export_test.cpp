@@ -600,6 +600,58 @@ namespace
         EXPECT_DOUBLE_EQ(georef->offset[0], 576705.0);
     }
 
+    // The CRS and the offset of the export are those of coords.txt, whatever sidecar sits beside it: a
+    // georef.json there (an earlier export put into the project, a hand-made one) is read by the
+    // search for the georeference of a file, which comes first to it
+    TEST(SplatTrainingExport, takesTheGeorefOfCoordsTxtNotOfASiblingGeorefJson)
+    {
+        Exported e(TEST_NAME);
+        e.write();
+        const fs::path georefFolder = e.project / "odm_georeferencing";
+        const fs::path sibling = georefFolder / "georef.json";
+        {
+            std::ofstream out(sibling);
+            out << R"({"crs": "EPSG:32633", "offset": [1.0, 2.0, 3.0]})";
+        }
+
+        // The premise: the search of a file in that folder does find the sibling first
+        const auto searched = detectLocalFrameGeoref(io::toUtf8(georefFolder / "coords.txt"));
+        ASSERT_TRUE(searched.has_value());
+        ASSERT_EQ(searched->crs, "EPSG:32633");
+
+        const auto coords = parseOdmCoords(io::toUtf8(georefFolder / "coords.txt"));
+        ASSERT_TRUE(coords.has_value());
+        EXPECT_EQ(coords->crs, "EPSG:32615");
+
+        e.run();
+        std::ifstream sidecarFile(e.out / "georef.json");
+        const auto sidecar = json::parse(sidecarFile);
+        EXPECT_EQ(sidecar["crs"], "EPSG:32615");
+        EXPECT_EQ(sidecar["offset"], (json{576705.0, 5188170.0, 0.0}));
+    }
+
+    TEST(SplatTrainingExport, aFileThatIsNotCoordsTxtIsNoOdmGeoref)
+    {
+        TestArea area(TEST_NAME, true);
+        EXPECT_FALSE(parseOdmCoords(io::toUtf8(area.getPath("missing.txt"))).has_value());
+
+        const fs::path oneLine = area.getPath("one-line.txt");
+        {
+            std::ofstream out(oneLine);
+            out << "WGS84 UTM 15N\n";
+        }
+        EXPECT_FALSE(parseOdmCoords(io::toUtf8(oneLine)).has_value());
+
+        // A georef.json is read by the search for a georeference, not as an ODM file
+        const fs::path sidecarJson = area.getPath("georef.json");
+        {
+            std::ofstream out(sidecarJson);
+            out << R"({"crs": "EPSG:32615", "offset": [1, 2]})";
+        }
+        EXPECT_FALSE(parseOdmCoords(io::toUtf8(sidecarJson)).has_value());
+        EXPECT_TRUE(detectLocalFrameGeoref(io::toUtf8(sidecarJson)).has_value());
+    }
+
     // ---- The images ----
 
     TEST(SplatTrainingExport, linksTheOriginalImagesWhenNoSizeIsAsked)

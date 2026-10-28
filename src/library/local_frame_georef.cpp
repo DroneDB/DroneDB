@@ -290,6 +290,19 @@ namespace ddb
         return std::nullopt;
     }
 
+    std::optional<LocalFrameGeoref> parseOdmCoords(const std::string &coordsFile)
+    {
+        try
+        {
+            return georefOfOdmCoords(io::fromUtf8(coordsFile));
+        }
+        catch (const std::exception &e)
+        {
+            LOGD << "Could not parse " << coordsFile << ": " << e.what();
+            return std::nullopt;
+        }
+    }
+
     std::optional<LocalFrameGeoref> detectLocalFrameGeoref(const std::string &inputFile)
     {
         const fs::path file = io::fromUtf8(inputFile);

@@ -97,6 +97,16 @@ namespace ddb
     std::optional<LocalFrameGeoref> detectLocalFrameGeoref(const std::string &inputFile);
 
     /**
+     * @brief The georeferencing of an ODM `coords.txt` file, and of nothing else.
+     *
+     * Reads the file named, without the search of detectLocalFrameGeoref: a `georef.json` or a
+     * `reference_lla.json` next to it does not take its place. The result is the projected kind;
+     * std::nullopt when the file is missing, is not "CRS line, then offset line", or its CRS is not a
+     * projected one GDAL knows.
+     */
+    std::optional<LocalFrameGeoref> parseOdmCoords(const std::string &coordsFile);
+
+    /**
      * @brief The WGS84 position of the origin of the local frame.
      *
      * Enu: its origin. Projected: the offset point converted from the CRS. Throws AppException when

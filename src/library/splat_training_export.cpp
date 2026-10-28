@@ -1099,10 +1099,11 @@ namespace ddb
                    "\n";
         }
 
-        // The ODM georeference of the project: its coords.txt, as detectLocalFrameGeoref reads it
+        // The ODM georeference of the project: its coords.txt and nothing else, so a georef.json beside
+        // it (an earlier export, a hand-made one) cannot take its place
         LocalFrameGeoref odmGeoref(const fs::path &coords)
         {
-            const auto georef = detectLocalFrameGeoref(io::toUtf8(coords));
+            const auto georef = parseOdmCoords(io::toUtf8(coords));
             if (!georef || georef->kind != LocalFrameGeoref::Kind::Projected)
                 throw AppException("Cannot read the CRS and the offset of the project from " + io::toUtf8(coords) +
                                            ": its first line is the CRS (\"WGS84 UTM 15N\") and its second the "
