@@ -145,6 +145,10 @@ class CountingProbe : public BuildProbe {
         calls["isComplete"]++;
         return BuildProbe::isComplete(handler, root);
     }
+    std::string version(const fs::path& file) const override {
+        calls["version"]++;
+        return BuildProbe::version(file);
+    }
 };
 
 TEST(BuildManifest, StatesAndExistingArtifacts) {
@@ -235,8 +239,9 @@ TEST(BuildManifest, AgreesWithGetBuildStatus) {
 
 // The probe budget: no filesystem query for an entry that is not buildable; for a
 // buildable one, the build root listing and the pending marker read, a lock probe only when a
-// lock file exists, one query per existing artifact folder, and at most the completeness check
-// getBuildStatus() makes (none for a building or pending entry, or a missing build root)
+// lock file exists, one query per existing artifact folder, one version per existing artifact,
+// and at most the completeness check getBuildStatus() makes (none for a building or pending
+// entry, or a missing build root)
 TEST(BuildManifest, ProbeBudget) {
     ManifestFixture fx(TEST_NAME);
     BuildLock liveBuild((fx.build / H_BUSY / "cog").string());
@@ -270,7 +275,9 @@ TEST(BuildManifest, ProbeBudget) {
         if (b.state == BuildState::Building || b.state == BuildState::Pending) {
             EXPECT_EQ(probe.calls["isComplete"], 0);
         }
-        EXPECT_LE(probe.total() - probe.calls["isComplete"], 2 + folders + lock);
+        const int versions = static_cast<int>(b.artifacts.size());
+        EXPECT_EQ(probe.calls["version"], versions) << "one version per existing artifact";
+        EXPECT_LE(probe.total() - probe.calls["isComplete"], 2 + folders + lock + versions);
     }
 
     // A never-built entry: its build root listing and its marker read, nothing else
@@ -317,17 +324,20 @@ TEST(BuildManifest, Json) {
     EXPECT_EQ(cog["root"], io::toUtf8(fx.build / H_COG));
     EXPECT_TRUE(cog["lastAttempt"].is_null());
     EXPECT_TRUE(cog["retryAfter"].is_null());
-    EXPECT_EQ(cog["artifacts"],
-              json::parse(R"([{"role": "raster.cog", "path": "cog/cog.tif", "kind": "file",
+    json expectedCog = json::parse(R"([{"role": "raster.cog", "path": "cog/cog.tif", "kind": "file",
                   "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
-                  "downloadName": "cog.tif"}])"));
+                  "downloadName": "cog.tif"}])");
+    expectedCog[0]["version"] = buildFileVersion(fx.build / H_COG / "cog" / "cog.tif");
+    EXPECT_EQ(cog["artifacts"], expectedCog);
 
     // A legacy artifact names the role it stands in for; no other artifact has the member
     const json legacy = getBuildArtifactsJson(fx.db.get(), {"old.laz"});
-    EXPECT_EQ(legacy[0]["build"]["artifacts"],
-              json::parse(R"([{"role": "pointcloud.ept", "path": "ept", "kind": "dir",
+    json expectedLegacy = json::parse(R"([{"role": "pointcloud.ept", "path": "ept", "kind": "dir",
                   "mediaType": "application/json", "index": "ept.json", "legacy": true,
-                  "fallbackFor": "pointcloud.copc"}])"));
+                  "fallbackFor": "pointcloud.copc"}])");
+    // The version of a directory is the one of its index
+    expectedLegacy[0]["version"] = buildFileVersion(fx.build / H_EPT / "ept" / "ept.json");
+    EXPECT_EQ(legacy[0]["build"]["artifacts"], expectedLegacy);
 
     EXPECT_EQ(out[1]["build"]["state"], "pending");
     EXPECT_EQ(out[1]["build"]["lastAttempt"], 1700000000);
@@ -451,8 +461,21 @@ TEST(BuildManifest, RealBuildsMatchTheManifest) {
             const ResolvedBuildFile resolved = resolveBuildFile(fx.db.get(), build["hash"].get<std::string>(), file);
             EXPECT_TRUE(fileExistsAndNonEmpty(resolved.path)) << file;
             EXPECT_EQ(resolved.mediaType, a["mediaType"].get<std::string>()) << file;
+            EXPECT_EQ(resolved.version, a["version"].get<std::string>()) << file;
         }
         EXPECT_EQ(found, expected[i]);
+    }
+
+    // A forced rebuild publishes new files under the same hash: every artifact gets a new version
+    buildAll(fx.db.get(), "", true);
+    const json rebuilt = getBuildArtifactsJson(fx.db.get(), {"ortho.tif", "layer.geojson"});
+    for (size_t i = 0; i < out.size(); i++) {
+        SCOPED_TRACE(out[i]["path"].get<std::string>());
+        EXPECT_EQ(rebuilt[i]["build"]["hash"], out[i]["build"]["hash"]);
+        ASSERT_EQ(rebuilt[i]["build"]["artifacts"].size(), out[i]["build"]["artifacts"].size());
+        for (size_t j = 0; j < out[i]["build"]["artifacts"].size(); j++)
+            EXPECT_NE(rebuilt[i]["build"]["artifacts"][j]["version"], out[i]["build"]["artifacts"][j]["version"])
+                << out[i]["build"]["artifacts"][j]["role"];
     }
 }
 
@@ -517,12 +540,15 @@ TEST(BuildManifest, ResolveBuildFile) {
     EXPECT_EQ(resolve(H_SPLAT, "gsplat/export.spz").mediaType, GsplatMediaType)
         << "the .spz of an export is served like the other files of a build";
 
-    // {"path", "mediaType"}, the type left out when the file declares none
+    // {"path", "mediaType", "version"}, the type left out when the file declares none; the version
+    // is the artifact's, so a tile of a directory has the version of its index
     EXPECT_EQ(resolve(H_SPLAT, "gsplat/model.rad").toJson(),
               (json{{"path", io::toUtf8(fx.build / H_SPLAT / "gsplat" / "model.rad")},
-                    {"mediaType", GsplatMediaType}}));
+                    {"mediaType", GsplatMediaType},
+                    {"version", buildFileVersion(fx.build / H_SPLAT / "gsplat" / "model.rad")}}));
     EXPECT_EQ(resolve(H_ROADS, "mvt/0/0/0.pbf").toJson(),
-              (json{{"path", io::toUtf8(fx.build / H_ROADS / "mvt" / "0" / "0" / "0.pbf")}}));
+              (json{{"path", io::toUtf8(fx.build / H_ROADS / "mvt" / "0" / "0" / "0.pbf")},
+                    {"version", buildFileVersion(fx.build / H_ROADS / "mvt" / "metadata.json")}}));
 
     // Malformed: InvalidArgs (DDBERR_INVALIDARGS)
     for (const auto* path : {"../ortho.tif", "cog/../../x", "/etc/passwd", "C:\\x", "", "./", "cog/.ddb/x"})
@@ -536,6 +562,44 @@ TEST(BuildManifest, ResolveBuildFile) {
     EXPECT_THROW(resolveBuildFile(fx.db.get(), H_DSM, "cog/cog.tif"), EntryNotFoundException);
     EXPECT_THROW(resolveBuildFile(fx.db.get(), std::string(64, '0'), "cog/cog.tif"), EntryNotFoundException);
     EXPECT_THROW(resolveBuildFile(fx.db.get(), H_ROADS, "mvt"), EntryNotFoundException) << "a folder is no file";
+}
+
+// The version of an artifact identifies the bytes of the file a client opens: the build object
+// and DDBResolveBuildFile give the same one, for every file of a directory too, and it changes
+// when a build rewrites or replaces the file under the same hash
+TEST(BuildManifest, ArtifactVersionsFollowTheOpenedFile) {
+    ManifestFixture fx(TEST_NAME);
+    const auto listed = [&](const std::string& path, size_t i) {
+        return getBuildArtifactsJson(fx.db.get(), {path})[0]["build"]["artifacts"][i]["version"].get<std::string>();
+    };
+    const auto resolved = [&](const std::string& hash, const std::string& path) {
+        return resolveBuildFile(fx.db.get(), hash, path).version;
+    };
+
+    const std::string rad = listed("splat.spz", 0);
+    const std::string bounds = listed("splat.spz", 1);
+    EXPECT_FALSE(rad.empty());
+    EXPECT_EQ(rad.find_first_not_of("0123456789abcdef"), std::string::npos) << rad << ": lowercase hex";
+    EXPECT_NE(rad, bounds) << "each artifact has its own version";
+    EXPECT_EQ(resolved(H_SPLAT, "gsplat/model.rad"), rad);
+    EXPECT_EQ(resolved(H_SPLAT, "gsplat/bounds.json"), bounds);
+
+    const std::string mvt = listed("roads.shp", 1);
+    EXPECT_EQ(resolved(H_ROADS, "mvt/metadata.json"), mvt);
+    EXPECT_EQ(resolved(H_ROADS, "mvt/0/0/0.pbf"), mvt) << "a tile has the version of its directory";
+
+    // A rebuild replaces the file (a new one renamed over the folder): same hash, new version
+    const fs::path radFile = fx.build / H_SPLAT / "gsplat" / "model.rad";
+    fs::remove(radFile);
+    writeFile(radFile, "rebuilt");
+    EXPECT_NE(listed("splat.spz", 0), rad);
+    EXPECT_EQ(resolved(H_SPLAT, "gsplat/model.rad"), listed("splat.spz", 0));
+    EXPECT_EQ(listed("splat.spz", 1), bounds) << "the other artifacts keep theirs";
+
+    // A rewritten index gives the whole directory a new version
+    writeFile(fx.build / H_ROADS / "mvt" / "metadata.json", R"({"rebuilt": true})");
+    EXPECT_NE(listed("roads.shp", 1), mvt);
+    EXPECT_EQ(resolved(H_ROADS, "mvt/0/0/0.pbf"), listed("roads.shp", 1));
 }
 
 #ifndef WIN32

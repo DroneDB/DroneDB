@@ -298,7 +298,7 @@ namespace
             fixture("build-artifacts",
                     "DDBBuild(<root>, \"ortho.tif\"), then DDBGetBuildArtifacts(<root>, [\"ortho.tif\", "
                     "\"layer.geojson\", \"cloud.las\", \"a.txt\", \"sub\", \"missing.tif\"])",
-                    "build-artifacts.schema.json"),
+                    "build-artifacts.schema.json", {"version"}),
             artifacts);
 
         DDBListEntriesOptions options{sizeof(DDBListEntriesOptions), true, false, true, 0};
@@ -307,7 +307,7 @@ namespace
             fixture("list-entries-ex",
                     "DDBBuild(<root>, \"ortho.tif\"), then DDBListEntriesEx(<root>, \"\", \"\", \"\", "
                     "{recursive=true, withDetails=false, withBuild=true})",
-                    "list-entries-ex.schema.json"),
+                    "list-entries-ex.schema.json", {"version"}),
             contract::takeJson(out));
 
         const std::string hash = artifacts[0]["hash"].get<std::string>();
@@ -316,7 +316,7 @@ namespace
             fixture("resolve-build-file",
                     "DDBBuild(<root>, \"ortho.tif\"), then DDBResolveBuildFile(<root>, <hash of ortho.tif>, "
                     "\"cog/cog.tif\")",
-                    "build-file.schema.json"),
+                    "build-file.schema.json", {"version"}),
             contract::takeJson(out));
 
         // A second dataset with ortho.tif only: the build travels with the file
@@ -328,7 +328,7 @@ namespace
             fixture("copy-build-artifacts",
                     "DDBBuild(<root>, \"ortho.tif\"), then DDBCopyBuildArtifacts(<root>, <root2>, <hash of "
                     "ortho.tif>), <root2> a dataset with ortho.tif",
-                    "copy-build-artifacts.schema.json"),
+                    "copy-build-artifacts.schema.json", {"version"}),
             contract::takeJson(out));
         DDBReleaseConnections(r2.c_str(), nullptr);
     }

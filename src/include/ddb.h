@@ -895,7 +895,8 @@ extern "C"
      *                    build, not legacy and not something to render; a build of the entry
      *                    removes it (downloadable)
      *
-     * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?}
+     * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?,
+     *              "version"}
      *   path          relative to the build root ("root" below), '/'-separated; URLs append it
      *                 to ".../build/{hash}/" and DDBResolveBuildFile takes it
      *   kind          "file", or "dir" for a directory (index names its descriptor file; its
@@ -908,6 +909,14 @@ extern "C"
      *   fallbackFor   legacy artifacts only: the role this one stands in for ("pointcloud.copc"
      *                 for pointcloud.ept); the entry lists the legacy artifact or that role,
      *                 never both
+     *   version       identifies the bytes of the file a client opens (the file, or the index of
+     *                 a directory) as they are now: a short lowercase hex string that changes
+     *                 whenever a build rewrites or replaces that file, also under the same hash
+     *                 (a forced rebuild, a rebuild to a newer layout, a copy from another
+     *                 dataset). Opaque: compare it, never parse it. A host can put it in the URLs
+     *                 of the artifact and let clients keep what such a URL returns while it is
+     *                 the version DDBResolveBuildFile gives. Empty only when the file went away
+     *                 while it was read
      *
      * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
      *   {"buildable": bool, "source": string|null, "hash": string|null, "root": string|null,
@@ -983,10 +992,13 @@ extern "C"
     DDB_DLL DDBErr DDBGetBuildArtifacts(const char *ddbPath, const char **paths, int numPaths, char **output);
 
     /** A file of a build, checked (new in 2.0): it serves the ".../build/{hash}/{path}" URLs,
-     * tiles included. The output is a JSON object, {"path": "<absolute path>", "mediaType": "<type>"}:
+     * tiles included. The output is a JSON object,
+     * {"path": "<absolute path>", "mediaType": "<type>", "version": "<version>"}:
      * "mediaType" is the media type of the artifact (see DDBGetBuildArtifacts) when the file is
      * the one a client opens (a file artifact, or the index of a directory artifact), and is
-     * absent for any other file (the tiles of a directory artifact).
+     * absent for any other file (the tiles of a directory artifact); "version" is the version
+     * of the artifact the file belongs to, as DDBGetBuildArtifacts lists it now (the same for
+     * the index and the tiles of a directory artifact), absent only when it cannot be read.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param hash the hash of the build ("hash" of a build object): 64 hexadecimal characters
      * @param path the file, relative to the build root: an artifact's path, or a file below a

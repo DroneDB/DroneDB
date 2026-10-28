@@ -22,6 +22,8 @@
 #include "deppath.h"
 #include "entry_path.h"
 #include "exceptions.h"
+#include "fileversion.h"
+#include "hash.h"
 #include "logger.h"
 #include "mio.h"
 #include "raster_cache.h"
@@ -75,6 +77,7 @@ void to_json(json& j, const BuildArtifact& artifact) {
         j["legacy"] = true;
     if (!artifact.fallbackFor.empty())
         j["fallbackFor"] = artifact.fallbackFor;
+    j["version"] = artifact.version;
 }
 
 void to_json(json& j, const EntryBuild& build) {
@@ -145,6 +148,15 @@ bool BuildProbe::isLockHeld(const fs::path& outputFolder) const {
 
 bool BuildProbe::isComplete(const EntryHandler& handler, const fs::path& root) const {
     return handler.isComplete(root);
+}
+
+std::string BuildProbe::version(const fs::path& file) const {
+    return buildFileVersion(file);
+}
+
+std::string buildFileVersion(const fs::path& file) {
+    const std::string version = fileVersion(file);
+    return version.empty() ? std::string() : Hash::strCRC64(version);
 }
 
 const BuildProbe& filesystemBuildProbe() {
@@ -222,8 +234,10 @@ std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const 
     // output is served only while the role it stands in for is missing, whatever else exists
     std::vector<BuildArtifact> found;
     for (auto& a : artifacts)
-        if (a.legacy ? !has(a.fallbackFor) && lookup.exists(a) : has(a.role))
+        if (a.legacy ? !has(a.fallbackFor) && lookup.exists(a) : has(a.role)) {
+            a.version = probe.version(root / io::fromUtf8(a.openedPath()));
             found.push_back(std::move(a));
+        }
     return found;
 }
 
@@ -358,18 +372,16 @@ std::vector<const EntryHandler*> handlersOfHash(Database* db, const std::string&
     return handlers;
 }
 
-// How path ('/'-separated, normalized) relates to the artifacts of handler: nothing when it is
-// neither a file artifact nor below a directory artifact; otherwise the media type of the
-// artifact when path is the file a client opens (the file artifact, the index of a directory),
-// and an empty string for any other file below a directory artifact
-std::optional<std::string> mediaTypeInsideArtifact(const EntryHandler& handler, const std::string& path) {
-    for (const auto& a : handler.artifacts()) {
-        if (a.kind == ArtifactKind::File) {
-            if (path == a.path)
-                return a.mediaType;
-        } else if (path.size() > a.path.size() + 1 && path.starts_with(a.path) && path[a.path.size()] == '/') {
-            return path == a.path + "/" + a.index ? a.mediaType : std::string();
-        }
+// The artifact of handler that path ('/'-separated, normalized) lies in: the file artifact it
+// names, or the directory artifact it is below; nothing otherwise
+std::optional<BuildArtifact> artifactContaining(const EntryHandler& handler, const std::string& path) {
+    for (auto& a : handler.artifacts()) {
+        const bool inside = a.kind == ArtifactKind::File
+                                ? path == a.path
+                                : path.size() > a.path.size() + 1 && path.starts_with(a.path) &&
+                                      path[a.path.size()] == '/';
+        if (inside)
+            return std::move(a);
     }
     return std::nullopt;
 }
@@ -380,6 +392,8 @@ json ResolvedBuildFile::toJson() const {
     json j = {{"path", io::toUtf8(path)}};
     if (!mediaType.empty())
         j["mediaType"] = mediaType;
+    if (!version.empty())
+        j["version"] = version;
     return j;
 }
 
@@ -393,15 +407,20 @@ ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const 
     const auto handlers = handlersOfHash(db, hash);
     if (handlers.empty())
         throw EntryNotFoundException("No entry has the build hash " + hash);
-    std::optional<std::string> mediaType;
+    // The artifact of the first handler that names the file as the one a client opens, else of
+    // the first that holds it inside a directory artifact
+    std::optional<BuildArtifact> artifact;
     for (const EntryHandler* handler : handlers) {
-        const auto found = mediaTypeInsideArtifact(*handler, normalized.path);
-        // The type of the first handler that names the file; one that only holds it inside a
-        // directory artifact says nothing
-        if (found && (!mediaType || mediaType->empty()))
-            mediaType = found;
+        auto found = artifactContaining(*handler, normalized.path);
+        if (!found)
+            continue;
+        const bool opens = normalized.path == found->openedPath();
+        if (!artifact || opens)
+            artifact = std::move(found);
+        if (opens)
+            break;
     }
-    if (!mediaType)
+    if (!artifact)
         throw EntryNotFoundException("'" + normalized.path + "' is not a build artifact of " + hash);
 
     const fs::path root = fs::absolute(db->buildDirectory() / hash);
@@ -420,7 +439,10 @@ ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const 
     if (fileError || rootError || !deppath::isInside(realFile, realRoot))
         throw EntryNotFoundException("Build file '" + normalized.path + "' of " + hash +
                                      " resolves outside its build folder");
-    return {file, *mediaType};
+    // The version the build object lists for the artifact: what a URL of any of its files names
+    const bool opened = normalized.path == artifact->openedPath();
+    return {file, opened ? artifact->mediaType : std::string(),
+            buildFileVersion((root / io::fromUtf8(artifact->openedPath())).make_preferred())};
 }
 
 // ---- Copy --------------------------------------------------------------------------------------

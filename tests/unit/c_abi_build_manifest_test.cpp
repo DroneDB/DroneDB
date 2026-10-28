@@ -130,11 +130,16 @@ namespace
                          out);
 
         ASSERT_DDB_OK(DDBResolveBuildFile(r, H_COG.c_str(), "cog/cog.tif", &out));
-        // A JSON object: the path, and the media type of the artifact the file is
+        // A JSON object: the path, the media type of the artifact the file is and its version,
+        // the one the build object lists
         const json resolved = json::parse(take(out));
         EXPECT_EQ(io::fromUtf8(resolved["path"].get<std::string>()), ds.build / H_COG / "cog" / "cog.tif");
         EXPECT_EQ(resolved["mediaType"], "image/tiff; application=geotiff; profile=cloud-optimized");
-        EXPECT_EQ(resolved.size(), 2u);
+        const char *paths[] = {"ortho.tif"};
+        ASSERT_DDB_OK(DDBGetBuildArtifacts(r, paths, 1, &out));
+        const json listed = json::parse(take(out));
+        EXPECT_EQ(resolved["version"], listed[0]["build"]["artifacts"][0]["version"]);
+        EXPECT_EQ(resolved.size(), 3u);
     }
 
     TEST(CAbiBuildManifest, CopyBuildArtifacts)

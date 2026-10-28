@@ -148,7 +148,8 @@
         "role",
         "path",
         "kind",
-        "mediaType"
+        "mediaType",
+        "version"
       ],
       "additionalProperties": false,
       "properties": {
@@ -191,6 +192,10 @@
           "type": "string",
           "pattern": "^[a-z0-9]+\\.[a-z0-9]+$",
           "description": "Legacy artifacts only: the role this one stands in for; listed only while that role is not"
+        },
+        "version": {
+          "type": "string",
+          "description": "Identifies the bytes of the file a client opens (the file, the index of a directory) as they are now: lowercase hex that changes whenever a build rewrites or replaces that file, also under the same hash; opaque. Empty only when the file went away while it was read"
         }
       }
     }

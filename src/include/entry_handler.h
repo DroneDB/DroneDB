@@ -58,6 +58,10 @@ struct BuildArtifact {
     // Legacy artifacts only (required for them): the role this one stands in for. It is served
     // only while an artifact of that role does not exist, so an entry never lists both
     std::string fallbackFor;
+    // Of an artifact that exists (existingArtifacts()): identifies the bytes of the file a client
+    // opens (openedPath()) as they are now, so it changes whenever a build rewrites it, also under
+    // the same entry hash. Opaque; empty in the manifest of a type
+    std::string version;
 
     // Not an aggregate on purpose: an artifact is made by file(), directory() and legacyFor(), so a
     // member added later has its default in one place instead of in every list of artifacts, and a
@@ -84,6 +88,9 @@ struct BuildArtifact {
 
     // The top-level folder of the artifact in the build root: the first component of path
     std::string folder() const { return path.substr(0, path.find('/')); }
+
+    // The file a client opens, relative to the build root: the file, or the index of a directory
+    std::string openedPath() const { return index.empty() ? path : path + "/" + index; }
 
     // This artifact as a leftover of an older layout that stands in for the role fallbackRole
     BuildArtifact legacyFor(std::string fallbackRole) const {

@@ -112,6 +112,8 @@ class BuildProbe {
     virtual bool isLockHeld(const fs::path& outputFolder) const;
     // handler.isComplete(root): the rule of isBuildComplete() and getBuildStatus()
     virtual bool isComplete(const EntryHandler& handler, const fs::path& root) const;
+    // buildFileVersion(file): the version of an artifact that exists
+    virtual std::string version(const fs::path& file) const;
 };
 
 // The real filesystem
@@ -125,6 +127,7 @@ const BuildProbe& filesystemBuildProbe();
 //   1 lock probe, only when "<subfolder>.building" exists;
 //   1 query per artifact folder that exists (a listing for file artifacts, the index file of
 //     a directory artifact), a legacy artifact only while the role it stands in for is missing;
+//   1 stat per artifact that exists, for its version (BuildArtifact::version);
 //   the completeness check of getBuildStatus(), only when the state is neither building nor
 //     pending and the build root exists.
 class BuildStateReader {
@@ -144,7 +147,8 @@ class BuildStateReader {
 
 // The artifacts of handler that exist under root, in manifest order: a file artifact when
 // its file exists, a directory artifact when its index file exists; a legacy artifact only
-// while the role it stands in for (fallbackFor) is missing. rootNames is the listing of root (probe.list(root)).
+// while the role it stands in for (fallbackFor) is missing. Each has its version (probe.version of
+// its openedPath()). rootNames is the listing of root (probe.list(root)).
 std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const fs::path& root,
                                              const std::vector<DirectoryName>& rootNames,
                                              const BuildProbe& probe);

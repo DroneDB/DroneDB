@@ -165,11 +165,21 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   not empty): no timer retries that build, adding one of the files releases it. It is the
   `awaitingFiles` of `DDBGetPendingBuildInfo`, and false without a marker, so a host reads the
   flag and does not derive it from `state` and `missingDependencies`.
+* `version` identifies the bytes of the file a client opens (the file, or the index of a
+  directory) as they are now: lowercase hex, from the file's modification time, size and, on
+  POSIX, device and inode, so it changes whenever a build rewrites or replaces that file under
+  the same hash (a forced rebuild, a rebuild to a newer layout, a copy). It is opaque: a host
+  compares it and never parses it. A host can put it in the URLs of an artifact and let clients
+  keep what such a URL returns without asking again while `DDBResolveBuildFile` still reports
+  it.
 
-`DDBResolveBuildFile` returns a JSON object, `{"path": "<absolute path>", "mediaType": "<type>"}`:
-`mediaType` is the one of the manifest when the file is a declared artifact (a file artifact, or
-the index of a directory artifact) and is absent for any other file of a directory artifact (its
-tiles). The path sits under the `<root>` placeholder in the fixture.
+`DDBResolveBuildFile` returns a JSON object,
+`{"path": "<absolute path>", "mediaType": "<type>", "version": "<version>"}`: `mediaType` is the
+one of the manifest when the file is a declared artifact (a file artifact, or the index of a
+directory artifact) and is absent for any other file of a directory artifact (its tiles);
+`version` is the current version of the artifact the file belongs to, the one the build object
+lists (the tiles of a directory have the version of its index). The path sits under the `<root>`
+placeholder in the fixture.
 
 ## Path vectors
 
@@ -217,6 +227,7 @@ normalised output keeps the JSON types, so it still matches its schema.
 | volatile keys `id` (`"<volatile>"`) and `mtime` (0) | meta items, meta dump | a new random UUID and the current time on every write |
 | volatile keys `lastAttempt` and `retryAfter`: value 0 | `pending-build-info`, `build-artifacts-pending` | the time of the build attempt, and the retry time derived from it (the tests check `retryAfter` = `lastAttempt` + 60 before normalising) |
 | volatile key `version`: `"<volatile>"` | `capabilities` | the library version and git commit of the build |
+| volatile key `version`: `"<volatile>"` | `build-artifacts`, `list-entries-ex`, `resolve-build-file`, `copy-build-artifacts` | the version of an artifact comes from the modification time (and, on POSIX, the inode) of the file the build wrote |
 | `<cache>` placeholder, volatile key `hardwareThreads`: value 0 | `effective-config` | the cache folder is a temporary folder; the cores of the machine |
 | sorted by `path`, `key`, `data` | `meta-dump` | libddb orders the dump by `id`, a random UUID |
 
@@ -442,3 +453,13 @@ Registry has to adopt first.
   without a marker). The fixture of the deferred `roads.shp` has `"awaitingFiles": true`, the
   other build objects `false`. Registry's exact-JSON adapter tests of these outputs need the
   field before Registry moves to a libddb build that has it.
+
+* 2026-10-28: an artifact of the build object (`build-artifacts`, `list-entries-ex`) and of
+  `copy-build-artifacts` gains `version` (additive, string, required), and `resolve-build-file`
+  gains `version` (additive, string, present when it can be read): the version of the artifact,
+  from the file a client opens (the file, or the index of a directory), which changes whenever a
+  build rewrites or replaces that file under the same hash. The resolved version of a file is the
+  one of its artifact, so the index and the tiles of a directory share it. The value differs
+  from run to run and is normalised to `"<volatile>"` in these fixtures; `build-artifacts-pending`
+  lists no artifact and did not change. Registry's exact-JSON adapter tests of these outputs need
+  the field before Registry moves to a libddb build that has it.

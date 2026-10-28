@@ -5,7 +5,9 @@
     "placeholders": [
       "<root>"
     ],
-    "volatileKeys": []
+    "volatileKeys": [
+      "version"
+    ]
   },
   "output": [
     {
@@ -16,7 +18,8 @@
             "kind": "file",
             "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
             "path": "cog/cog.tif",
-            "role": "raster.cog"
+            "role": "raster.cog",
+            "version": "<volatile>"
           }
         ],
         "awaitingFiles": false,

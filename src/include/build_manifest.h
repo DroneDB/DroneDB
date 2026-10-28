@@ -63,7 +63,8 @@ struct EntryBuild {
     std::vector<BuildArtifact> artifacts;
 };
 
-// {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?}
+// {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?,
+// "version"}: an artifact that exists
 void to_json(json& j, const BuildArtifact& artifact);
 // {"buildable", "source", "hash", "root", "state", "missingDependencies", "awaitingFiles",
 // "lastAttempt", "retryAfter", "artifacts"}; source, hash, root, lastAttempt and retryAfter are null when they
@@ -82,20 +83,28 @@ json getBuildArtifactsJson(Database* db, const std::vector<std::string>& paths);
 // withBuild. Serialized entry by entry: the listing is never held as one JSON document.
 std::string listEntriesJson(Database* db, const EntryQuery& query, bool withBuild);
 
+// The version of an artifact (BuildArtifact::version) from the file a client opens: a short
+// hex digest of fileVersion(file) (modification time, size and, on POSIX, device and inode),
+// so a build that rewrites or replaces the file changes it; empty when the file does not exist
+std::string buildFileVersion(const fs::path& file);
+
 // DDBResolveBuildFile: a file of a build and the type it is served as
 struct ResolvedBuildFile {
     fs::path path;           // absolute
     std::string mediaType;   // of the artifact when path is the file a client opens (a file
                              // artifact, the index of a directory); empty for any other file
                              // (the tiles of a directory artifact)
+    std::string version;     // the version of the artifact the file belongs to, as the build
+                             // object lists it (the same for every file of a directory artifact)
 
-    // {"path": "<absolute path, UTF-8>", "mediaType": "<type>"}; "mediaType" is absent when empty
+    // {"path": "<absolute path, UTF-8>", "mediaType": "<type>", "version": "<version>"};
+    // "mediaType" and "version" are absent when empty
     json toJson() const;
 };
 
 // The file at relativePath ('/'-separated) in the build root of hash, when relativePath lies
 // inside one of the artifacts of an entry with that hash (a file artifact itself, or a file
-// below a directory artifact).
+// below a directory artifact), with the version of that artifact.
 // Throws InvalidArgsException when hash is not a SHA-256 hex string or relativePath breaks the
 // dataset path rules (normalizeEntryPath: absolute, "..", empty, invalid UTF-8, ...);
 // EntryNotFoundException when no entry has that hash, the path is not inside one of its
