@@ -404,6 +404,10 @@ namespace ddb
         if (fmt == SplatFormat::Unknown)
             throw InvalidArgsException("Unsupported Gaussian Splat format: " + input);
 
+        // The output replaces what is at its path: the input must not be it ("x.spz" converted
+        // to the default "x.spz"), or the conversion would overwrite the file it converts
+        io::assureDistinctOutput(io::fromUtf8(input), io::fromUtf8(output));
+
         const fs::path parentDir = io::fromUtf8(output).parent_path();
         if (!parentDir.empty())
             io::assureFolderExists(parentDir);
@@ -416,7 +420,10 @@ namespace ddb
             // NGSP/ZSTD SPZ (v4) must be transcoded to v3 so the Spark viewer can decode it.
             if (isGzipSpz(io::fromUtf8(input)))
             {
-                io::copy(io::fromUtf8(input), io::fromUtf8(output));
+                const auto bytes = io::readAllBytes(io::fromUtf8(input));
+                io::writeFileAtomic(io::fromUtf8(output),
+                                    std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size()),
+                                    ".spz file");
                 return;
             }
 

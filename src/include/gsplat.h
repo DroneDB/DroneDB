@@ -52,7 +52,9 @@ namespace ddb
     // (.ply | .splat | .spz). Returns false if the file cannot be interpreted.
     bool getGaussianSplatInfo(const std::string &filename, GaussianSplatInfo &info);
 
-    // Converts a splat source (.ply | .splat | .spz) into a single .spz file.
+    // Converts a splat source (.ply | .splat | .spz) into a single .spz file. The output is
+    // written whole or not at all (a temporary file renamed onto it), and it must not be the input
+    // (InvalidArgsException).
     // Throws AppException on failure, including for formats that require an external
     // tool that is not available (e.g. .ksplat needs splat-transform).
     void convertToSpz(const std::string &input, const std::string &output);

@@ -461,6 +461,43 @@ TEST(CliCommands, infoWritesOnlyTheJsonToStdout) {
     EXPECT_EQ(outcome.out.find_last_not_of(" \r\n"), outcome.out.rfind(']'));
 }
 
+// ddb gsplat x.spz with no output path used to convert x.spz to the default x.spz, replacing the
+// file it reads; the same path, written another way, is the same file
+TEST(CliCommands, gsplatNeverOverwritesItsInput) {
+    TestArea ta("cli_gsplat_same_path", true);
+    const auto spz = ta.getPath("scene.spz");
+    const std::string content = std::string("\x1f\x8b", 2) + "an spz that is not to be touched";
+    { std::ofstream out(spz, std::ios::binary); out << content; }
+    auto readBack = [&] {
+        std::ifstream in(spz, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+
+    const std::vector<std::vector<std::string>> cases = {
+        {spz.string()},                                      // the default output is the input
+        {spz.string(), spz.string()},                        // the same path given
+        {spz.string(), (ta.getPath("sub") / ".." / "scene.spz").string()},  // the same file by another path
+        {"-o", spz.string(), spz.string()},
+    };
+    for (const auto &args : cases) {
+        auto command = CommandRegistry::builtin().create("gsplat");
+        const auto outcome = execute(*command, args);
+        EXPECT_EQ(outcome.code, EXIT_FAILURE) << args.size();
+        EXPECT_TRUE(outcome.out.empty()) << outcome.out;
+        EXPECT_NE(outcome.err.find("is the input file"), std::string::npos) << outcome.err;
+        EXPECT_NE(outcome.err.find("choose a different output path"), std::string::npos) << outcome.err;
+        EXPECT_EQ(readBack(), content) << "the input was written to";
+    }
+
+    // Another extension converts to the default output next to it
+    const auto splat = ta.getPath("other.splat");
+    { std::ofstream out(splat, std::ios::binary); out << std::string(64, '\1'); }
+    auto command = CommandRegistry::builtin().create("gsplat");
+    const auto outcome = execute(*command, {splat.string()});
+    EXPECT_EQ(outcome.code, EXIT_SUCCESS) << outcome.err;
+    EXPECT_TRUE(std::filesystem::exists(ta.getPath("other.spz")));
+}
+
 // A DEM-less raster is enough: the command must get as far as opening the file. It never did:
 // the defaults of --min and --max were the text "nan", which cxxopts cannot parse as a double
 TEST(CliCommands, contourReachesItsWorkInsteadOfFailingToParseItsDefaults) {

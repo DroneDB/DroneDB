@@ -190,6 +190,11 @@ std::uintmax_t fileSize(const fs::path& p) {
     return ec ? 0 : s;
 }
 
+std::string readText(const fs::path& p) {
+    std::ifstream in(p.string(), std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
 // True when the file starts with the gzip magic (0x1F 0x8B), i.e. a legacy SPZ v1-3.
 // The Spark web viewer only decodes gzip-based SPZ, so the delivery artifact must be gzip.
 bool isGzip(const fs::path& p) {
@@ -567,6 +572,43 @@ TEST(gsplat, convertPlyToSpz) {
     ASSERT_TRUE(ddb::getGaussianSplatInfo(spz.string(), info));
     EXPECT_EQ(info.splatCount, 100u);
     EXPECT_EQ(info.shDegree, 1);
+}
+
+// A conversion replaces its output in one step, and never replaces its input
+TEST(gsplat, convertToSpzWritesItsOutputAtomicallyAndNeverOverItsInput) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 20, 1);
+    const fs::path spz = ta.getPath("scene.spz");
+    ddb::convertToSpz(ply.string(), spz.string());
+    const std::string before = readText(spz);
+    ASSERT_FALSE(before.empty());
+
+    // The input is not the output, however the path is written
+    for (const fs::path& same : {spz, ta.getPath("sub") / ".." / "scene.spz"}) {
+        try {
+            ddb::convertToSpz(spz.string(), same.string());
+            ADD_FAILURE() << "converted " << same << " onto itself";
+        } catch (const InvalidArgsException& e) {
+            EXPECT_NE(std::string(e.what()).find("choose a different output path"), std::string::npos) << e.what();
+        }
+        EXPECT_EQ(readText(spz), before) << "the input was written to";
+    }
+
+    // An output that is replaced is replaced whole; one that cannot be is left as it was, with no
+    // part of the new file beside it (here the output path is a folder)
+    const fs::path other = ta.getPath("other.spz");
+    { std::ofstream(other.string(), std::ios::binary) << "the previous output"; }
+    ddb::convertToSpz(ply.string(), other.string());
+    EXPECT_EQ(readText(other), before);
+
+    const fs::path folder = ta.getFolder("out.spz");
+    EXPECT_THROW(ddb::convertToSpz(ply.string(), folder.string()), AppException);
+    EXPECT_TRUE(fs::is_directory(folder));
+    EXPECT_THROW(ddb::convertToSpz(spz.string(), folder.string()), AppException);
+    EXPECT_EQ(namesIn(ta.getFolder("")), (std::vector<std::string>{"other.spz", "out.spz", "scene.ply", "scene.spz"}))
+        << "no temporary file is left";
+    EXPECT_TRUE(namesIn(folder).empty());
 }
 
 TEST(gsplat, convertSplatBinaryToSpz) {

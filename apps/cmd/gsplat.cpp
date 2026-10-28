@@ -20,7 +20,7 @@ namespace cmd
     .custom_help("gsplat input.{ply|splat|spz} [output.spz]")
     .add_options()
     ("i,input", "Gaussian Splat file to convert (.ply, .splat or .spz)", cxxopts::value<std::string>());
-    cmd::addOutputOption(opts, "Output .spz file");
+    cmd::addOutputOption(opts, "Output .spz file (default: the input with the .spz extension; a .spz input needs another path)");
         // clang-format on
         opts.parse_positional({"input", "output"});
     }
@@ -45,6 +45,8 @@ namespace cmd
         else
             output = ddb::io::toUtf8(ddb::io::fromUtf8(input).replace_extension(".spz"));
 
+        // A .spz input with no output path defaults to itself: convertToSpz refuses an output that
+        // is its input, with the message that asks for another path
         ddb::convertToSpz(input, output);
         std::cout << output << std::endl;
         return EXIT_SUCCESS;
