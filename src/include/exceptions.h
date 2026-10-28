@@ -142,12 +142,12 @@ namespace ddb
         BuildDepMissingException(const std::string &message, const std::vector<std::string> &missingDeps) :
             AppException(message), missingDependencies(missingDeps) {}
 
-        // lookupPaths: further absolute paths (UTF-8) the builder looked in, any of which would
+        // otherPaths: further absolute paths (UTF-8) the builder looked in, any of which would
         // satisfy one of the missing dependencies (an OBJ texture is also looked for in the OBJ's
         // folder)
         BuildDepMissingException(const std::string &message, const std::vector<std::string> &missingDeps,
-                                 const std::vector<std::string> &lookupPaths) :
-            AppException(message), missingDependencies(missingDeps), lookupPaths(lookupPaths) {}
+                                 const std::vector<std::string> &otherPaths) :
+            AppException(message), missingDependencies(missingDeps), lookupPaths(otherPaths) {}
 
         // Names relative to the folder of the source file
         const std::vector<std::string>& getMissingDependencies() const {
