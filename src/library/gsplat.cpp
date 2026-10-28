@@ -203,9 +203,9 @@ namespace ddb
         }
 
         // build-lod is a mandatory dependency: model.rad is the sole delivery artifact (streamed
-        // by the viewer, and decoded on demand to render thumbnails). Run it directly on the
-        // source splat so no intermediate .spz is materialized - memory stays bounded even for
-        // multi-gigabyte inputs, since build-lod reads the file in chunks.
+        // by the viewer, and decoded on demand to render thumbnails). It runs on the source splat
+        // itself (staged under a name of ours), with no intermediate .spz, except a v4 SPZ, which
+        // is transcoded to v3 first, read and decoded whole in memory.
         // A missing external tool fails the build (it would never appear by uploading
         // files). After the tool is installed, the next full build picks the entry up.
         if (!buildlod::isBuildLodAvailable())

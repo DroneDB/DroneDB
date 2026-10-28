@@ -189,6 +189,7 @@ namespace ddb
 
     void transcodeSpzToV3(const fs::path &input, const fs::path &output)
     {
+        // SPZ has no streaming reader: the file is read, and its splats decoded, whole in memory
         spz::UnpackOptions unpack;
         spz::GaussianCloud cloud = spz::loadSpz(io::readAllBytes(input), unpack);
         if (cloud.numPoints <= 0)
