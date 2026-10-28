@@ -32,6 +32,13 @@ struct SplatPreviewInput {
     std::string sourceLabel;
 };
 
+// A splat whose position is NaN or infinite has no place in the thumbnail: it takes no part in
+// the frame, and is not drawn (the conversion of its position to a pixel would be undefined)
+bool hasFinitePosition(const std::vector<float>& positions, size_t i) {
+    return std::isfinite(positions[i * 3]) && std::isfinite(positions[i * 3 + 1]) &&
+           std::isfinite(positions[i * 3 + 2]);
+}
+
 // How the scene lands in the thumbnail: the plane perpendicular to its flattest axis (so aerial
 // scenes naturally render top-down), scaled and centred in the tile
 struct PreviewFrame {
@@ -51,12 +58,17 @@ PreviewFrame previewFrame(const std::vector<float>& positions, size_t n, int til
     double mx[3] = {std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest(),
                     std::numeric_limits<double>::lowest()};
     for (size_t i = 0; i < n; ++i) {
+        if (!hasFinitePosition(positions, i))
+            continue;
         for (int k = 0; k < 3; ++k) {
             const double v = static_cast<double>(positions[i * 3 + k]);
             mn[k] = std::min(mn[k], v);
             mx[k] = std::max(mx[k], v);
         }
     }
+
+    if (mn[0] > mx[0])
+        throw AppException("Gaussian Splat has no finite position; cannot render thumbnail");
 
     const double extent[3] = {mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]};
 
@@ -71,7 +83,7 @@ PreviewFrame previewFrame(const std::vector<float>& positions, size_t n, int til
     const double uExtent = extent[frame.uAxis];
     const double vExtent = extent[frame.vAxis];
     if (uExtent <= 0.0 && vExtent <= 0.0)
-        throw GDALException("Gaussian Splat has zero planar extent; cannot render thumbnail");
+        throw AppException("Gaussian Splat has zero planar extent; cannot render thumbnail");
 
     // Fit the (u, v) extent into the tile preserving aspect ratio, with a 1px margin.
     const double drawable = static_cast<double>(tileSize - 1);
@@ -85,9 +97,20 @@ PreviewFrame previewFrame(const std::vector<float>& positions, size_t n, int til
     return frame;
 }
 
+// The largest thumbnail rendered from a splat: the tile buffers take 8 bytes a pixel (RGB, alpha
+// and the depth of the pixel), 128 MiB at this size
+constexpr int MaxSplatThumbSize = 4096;
+
+void assureSplatThumbSize(int thumbSize) {
+    if (thumbSize <= 0 || thumbSize > MaxSplatThumbSize)
+        throw InvalidArgsException("thumbSize must be between 1 and " + std::to_string(MaxSplatThumbSize) +
+                                   " for a Gaussian Splat, got " + std::to_string(thumbSize));
+}
+
 // Shared orthographic rasteriser for Gaussian Splat previews. The scene is projected onto the
-// plane of its frame and depth-sorted with a simple z-buffer. The output size honours
-// thumbSize at request time - nothing is precomputed at build time.
+// plane of its frame and drawn with a z-buffer: the splat nearest along the depth axis (the
+// highest, on an aerial scene) wins each pixel, in no particular order of drawing. The output size
+// honours thumbSize at request time - nothing is precomputed at build time.
 void rasterizeSplatPreview(const SplatPreviewInput& cloud,
                            int thumbSize,
                            const fs::path& outImagePath,
@@ -98,7 +121,7 @@ void rasterizeSplatPreview(const SplatPreviewInput& cloud,
     const std::vector<float>& opacities = cloud.opacities;
     const size_t n = cloud.count;
     if (n == 0 || positions.size() < n * 3)
-        throw InvalidArgsException("No splats to render in " + cloud.sourceLabel);
+        throw AppException("No splats to render in " + cloud.sourceLabel);
 
     const PreviewFrame frame = previewFrame(positions, n, thumbSize);
     const double* mn = frame.mn;
@@ -114,8 +137,11 @@ void rasterizeSplatPreview(const SplatPreviewInput& cloud,
     std::vector<uint8_t> alphaBuffer(wSize, 0);
     std::vector<float> zBuffer(wSize, std::numeric_limits<float>::lowest());
 
+    // A NaN colour (a value that is not a number has no byte) is black
     const auto toByte = [](double v) -> uint8_t {
-        return static_cast<uint8_t>(std::lround(std::min(std::max(v, 0.0), 1.0) * 255.0));
+        if (!(v > 0.0))
+            return 0;
+        return static_cast<uint8_t>(std::lround(std::min(v, 1.0) * 255.0));
     };
 
     // Point radius scales with thumbnail size so larger previews keep visual density.
@@ -123,11 +149,12 @@ void rasterizeSplatPreview(const SplatPreviewInput& cloud,
     const int radius = std::max(1, std::min(8, static_cast<int>(std::lround(static_cast<double>(tileSize) / 256.0))));
     const int radiusSq = radius * radius;
 
-    size_t rendered = 0;
+    // Pixels painted (a splat paints several, and a pixel repainted by a nearer splat counts again)
+    size_t paintedPixels = 0;
     for (size_t i = 0; i < n; ++i) {
-        // Opacities are already activated; skip near-transparent splats.
+        // Opacities are already activated; skip near-transparent splats (and a NaN opacity).
         const double opacity = (i < opacities.size()) ? static_cast<double>(opacities[i]) : 1.0;
-        if (opacity < 0.02)
+        if (!(opacity >= 0.02) || !hasFinitePosition(positions, i))
             continue;
 
         const double u = static_cast<double>(positions[i * 3 + uAxis]);
@@ -167,13 +194,13 @@ void rasterizeSplatPreview(const SplatPreviewInput& cloud,
                 buffer[1 * wSize + idx] = bg;
                 buffer[2 * wSize + idx] = bb;
                 alphaBuffer[idx] = 255;
-                ++rendered;
+                ++paintedPixels;
             }
         }
     }
 
-    if (rendered == 0)
-        throw GDALException("No splats projected into the thumbnail frame");
+    if (paintedPixels == 0)
+        throw AppException("No splats projected into the thumbnail frame");
 
     RasterImage image(tileSize, tileSize, 3, false);
     image.color = std::move(buffer);
@@ -191,17 +218,19 @@ void generateSplatThumb(const fs::path& spzPath,
                         const fs::path& outImagePath,
                         uint8_t** outBuffer,
                         int* outBufferSize) {
+    assureSplatThumbSize(thumbSize);
+
     spz::GaussianCloud cloud;
     try {
         spz::UnpackOptions unpack;
-        cloud = spz::loadSpz(io::readAllBytes(spzPath), unpack); // not the file name overload (gsplat.cpp)
+        cloud = spz::loadSpz(io::readAllBytes(spzPath), unpack); // not the file name overload (mio.h, "Path encoding")
     } catch (const std::exception& e) {
         throw AppException(std::string("Cannot decode .spz for thumbnail: ") + e.what());
     }
 
     const size_t n = static_cast<size_t>(std::max(cloud.numPoints, 0));
     if (n == 0 || cloud.positions.size() < n * 3)
-        throw InvalidArgsException("No splats to render in " + io::toUtf8(spzPath));
+        throw AppException("No splats to render in " + io::toUtf8(spzPath));
 
     // Convert SPZ-native attributes to display space: SH DC term -> RGB, logit -> opacity.
     std::vector<float> colors(n * 3, 0.5f);
@@ -228,6 +257,8 @@ void generateSplatThumbFromRad(const fs::path& radPath,
                                const fs::path& outImagePath,
                                uint8_t** outBuffer,
                                int* outBufferSize) {
+    assureSplatThumbSize(thumbSize);
+
     RadCoarseSplats splats;
     try {
         splats = readRadCoarseSplats(radPath, /*maxChunks=*/2);

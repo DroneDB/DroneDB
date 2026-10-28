@@ -5,9 +5,13 @@
 // The RAD reader on files of our own making: the sizes a RAD declares (its metadata, its chunks, their
 // properties, the splats of a chunk, what a compressed property inflates to) come from the file, so
 // each of them is checked against what the file holds before a buffer is made or a read is done.
+// The thumbnail rendered from such a file is tested here too: the splats that RAD makes up are the
+// ones (NaN, infinite) no exporter would write.
 
 #include <zlib.h>
 
+#include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -21,6 +25,7 @@
 #include "rad.h"
 #include "test.h"
 #include "testarea.h"
+#include "thumbs.h"
 
 namespace {
 
@@ -223,6 +228,88 @@ TEST(rad, aMetadataValueOfTheWrongTypeIsAnAppException) {
     expectRefused(writeSingleChunk(ta, "wrong_type.rad",
                                    {{"count", 2}, {"properties", json::array({{{"property", 5}}})}}, twoCentres()),
                   "invalid chunk property");
+}
+
+// ---------------------------------------------------------------------------
+// The thumbnail of a RAD
+// ---------------------------------------------------------------------------
+
+using Centre = std::array<float, 3>;
+
+// A RAD of the given splat centres (planar f32, as twoCentres()); colour and opacity default
+fs::path writeCentres(TestArea& ta, const std::string& name, const std::vector<Centre>& centres) {
+    std::string payload;
+    for (int axis = 0; axis < 3; ++axis)
+        for (const auto& c : centres)
+            payload.append(reinterpret_cast<const char*>(&c[axis]), sizeof(float));
+    return writeSingleChunk(
+        ta, name, {{"count", centres.size()}, {"properties", json::array({centreProperty(payload.size())})}},
+        payload);
+}
+
+std::string thumbnailOf(const fs::path& rad, const fs::path& image, int size = 64) {
+    generateSplatThumbFromRad(rad, size, image, nullptr, nullptr);
+    std::ifstream in(image.string(), std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+// A splat at NaN or infinity has no pixel: it is left out of the frame and not drawn, so the file
+// with such splats renders as the file without them (the conversion of its position to a pixel was
+// undefined, and an infinite one made the whole frame infinite)
+TEST(rad, aSplatWithoutAFinitePositionIsLeftOutOfTheThumbnail) {
+    TestArea ta(TEST_NAME);
+    const std::vector<Centre> good = {{0, 0, 0}, {10, 0, 0.5f}, {0, 10, 0}, {10, 10, 0.5f}, {5, 5, 0.2f}};
+    std::vector<Centre> withBad = good;
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    withBad.push_back({nan, 3, 0});
+    withBad.push_back({4, inf, 0});
+    withBad.push_back({4, 4, -inf});
+
+    const std::string clean = thumbnailOf(writeCentres(ta, "good.rad", good), ta.getPath("good.webp"));
+    const std::string dirty = thumbnailOf(writeCentres(ta, "bad.rad", withBad), ta.getPath("bad.webp"));
+    ASSERT_FALSE(clean.empty());
+    EXPECT_EQ(clean, dirty);
+}
+
+// Failures of the data are AppExceptions, not the GDAL errors of a library that is not involved
+TEST(rad, aThumbnailThatCannotBeRenderedFailsWithAnAppExceptionOfItsOwn) {
+    TestArea ta(TEST_NAME);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const auto failure = [&](const std::string& name, const std::vector<Centre>& centres) {
+        try {
+            generateSplatThumbFromRad(writeCentres(ta, name, centres), 64, ta.getPath(name + ".webp"), nullptr,
+                                      nullptr);
+        } catch (const GDALException&) {
+            ADD_FAILURE() << name << ": a GDALException for a failure that is not GDAL's";
+        } catch (const AppException& e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+
+    // All splats at one point: no extent to draw; none of them finite: no frame at all
+    EXPECT_NE(failure("point.rad", {{1, 2, 3}, {1, 2, 3}}).find("zero planar extent"), std::string::npos);
+    EXPECT_NE(failure("nan.rad", {{nan, 0, 0}, {0, nan, 0}}).find("no finite position"), std::string::npos);
+}
+
+// The tile buffers take 8 bytes a pixel: a size no one asks for in good faith is refused, before the
+// file is read
+TEST(rad, aThumbnailLargerThanTheCapIsRefused) {
+    TestArea ta(TEST_NAME);
+    const fs::path rad = writeCentres(ta, "scene.rad", {{0, 0, 0}, {10, 0, 0}, {0, 10, 0}});
+    for (const int size : {0, -1, 4097, 100000, std::numeric_limits<int>::max()}) {
+        SCOPED_TRACE(size);
+        EXPECT_THROW(generateSplatThumbFromRad(rad, size, ta.getPath("big.webp"), nullptr, nullptr),
+                     InvalidArgsException);
+        EXPECT_FALSE(fs::exists(ta.getPath("big.webp")));
+    }
+    // Refused before the file is opened, so a file that is not there is not what it reports
+    EXPECT_THROW(generateSplatThumbFromRad(ta.getPath("missing.rad"), 5000, ta.getPath("big.webp"), nullptr, nullptr),
+                 InvalidArgsException);
+
+    // A size within the cap renders
+    EXPECT_NO_THROW(generateSplatThumbFromRad(rad, 512, ta.getPath("ok.webp"), nullptr, nullptr));
 }
 
 } // namespace

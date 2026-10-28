@@ -30,7 +30,7 @@ namespace ddb
         size_t count = 0;
         std::vector<float> positions; // count * 3, in the RAD's local coordinate space
         std::vector<float> colors;    // count * 3, display RGB in [0,1]
-        std::vector<float> opacities; // count, activated opacity (clamped to >= 0)
+        std::vector<float> opacities; // count, activated opacity
     };
 
     // True when the path ends with the canonical .rad delivery extension.

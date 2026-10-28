@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "rad.h"
 
+#include <bit>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -12,6 +13,9 @@
 #include "exceptions.h"
 #include "json.h"
 #include "mio.h"
+
+// The f32 properties are read as the bytes are on disk, little-endian
+static_assert(std::endian::native == std::endian::little, "the RAD reader assumes a little-endian host");
 
 namespace ddb
 {
@@ -464,7 +468,6 @@ namespace ddb
             if (chunk.count == 0)
                 continue;
 
-            const size_t baseIdx = result.count;
             result.count += chunk.count;
             result.positions.insert(result.positions.end(), chunk.centers.begin(), chunk.centers.end());
 
@@ -479,8 +482,6 @@ namespace ddb
                 result.opacities.insert(result.opacities.end(), chunk.opacities.begin(), chunk.opacities.end());
             else
                 result.opacities.resize(result.count, 1.0f);
-
-            (void)baseIdx;
         }
 
         if (result.count == 0)
