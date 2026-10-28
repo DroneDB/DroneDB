@@ -40,17 +40,13 @@ namespace ddb
                 throw AppException("Cannot build the Gaussian splat " + input + ": " + problem);
         }
 
-        // The splats a scene's up is estimated from: the coarse chunks of the RAD, the same two the
-        // thumbnail renders
-        constexpr int UpEstimateChunks = 2;
-
         // The up vector of the scene, for the sidecar; an estimate that cannot be made is logged and
         // leaves the bounding box alone
         void addUpEstimate(const fs::path &rad, json &sidecar)
         {
             try
             {
-                sidecar.update(json(estimateSplatUp(readRadCoarseSplats(rad, UpEstimateChunks))));
+                sidecar.update(json(estimateSplatUp(readRadCoarseSplats(rad, RadPreviewChunks, /*onlyTheCut=*/true))));
             }
             catch (const std::exception &e)
             {

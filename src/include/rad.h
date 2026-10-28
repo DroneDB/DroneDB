@@ -38,13 +38,24 @@ namespace ddb
         std::vector<float> rotations; // count * 4
     };
 
+    // The chunks a preview is made of: the thumbnail renders them, and the up vector of the scene is
+    // estimated from them (readRadCoarseSplats with onlyTheCut). The first 65536 splats are the
+    // coarsest picture; at 4 times that a scene is recognisable and a thumbnail is still made in a
+    // fraction of a second.
+    constexpr int RadPreviewChunks = 4;
+
     // True when the path ends with the canonical .rad delivery extension.
     bool isRadPath(const std::string &filename);
 
     // Decodes up to `maxChunks` leading chunks (coarsest first) of a single-file RAD
     // into display-space splats suitable for rendering a preview. Throws AppException
     // on a malformed or unreadable file.
-    RadCoarseSplats readRadCoarseSplats(const fs::path &radPath, int maxChunks = 1);
+    //
+    // The splats of a level-of-detail tree overlap: each is the merged image of the finer splats that
+    // refine it. With `onlyTheCut` the splats refined by others in the chunks read are left out, so
+    // what comes back is the finest picture of the scene those chunks hold, each region once. (A
+    // file without a tree has no splat refined by another.)
+    RadCoarseSplats readRadCoarseSplats(const fs::path &radPath, int maxChunks = 1, bool onlyTheCut = false);
 
     // Computes the axis-aligned bounding box of every splat centre in the RAD by
     // streaming each chunk's `center` property (bounded memory, exact, in the RAD's

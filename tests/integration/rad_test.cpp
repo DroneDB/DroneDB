@@ -8,8 +8,10 @@
 // The thumbnail rendered from such a file is tested here too: the splats that RAD makes up are the
 // ones (NaN, infinite) no exporter would write.
 
+#include <gdal.h>
 #include <zlib.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -462,7 +464,185 @@ TEST(rad, aThumbnailThatCannotBeRenderedFailsWithAnAppExceptionOfItsOwn) {
     EXPECT_NE(failure("nan.rad", {{nan, 0, 0}, {0, nan, 0}}).find("no finite position"), std::string::npos);
 }
 
-// The tile buffers take 8 bytes a pixel: a size no one asks for in good faith is refused, before the
+// ---------------------------------------------------------------------------
+// The picture of the splats: Gaussian footprints, composited back to front
+// ---------------------------------------------------------------------------
+
+struct Picture {
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> rgba;
+    const uint8_t* at(int x, int y) const { return &rgba[(static_cast<size_t>(y) * width + x) * 4]; }
+};
+
+Picture decodePicture(const fs::path& image) {
+    Picture picture;
+    GDALDatasetH ds = GDALOpen(image.string().c_str(), GA_ReadOnly);
+    EXPECT_NE(ds, nullptr) << image;
+    if (ds == nullptr)
+        return picture;
+    picture.width = GDALGetRasterXSize(ds);
+    picture.height = GDALGetRasterYSize(ds);
+    const int bands = GDALGetRasterCount(ds);
+    picture.rgba.assign(static_cast<size_t>(picture.width) * picture.height * 4, 255);
+    std::vector<uint8_t> plane(static_cast<size_t>(picture.width) * picture.height);
+    for (int b = 0; b < std::min(bands, 4); ++b) {
+        EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(ds, b + 1), GF_Read, 0, 0, picture.width, picture.height, plane.data(),
+                               picture.width, picture.height, GDT_Byte, 0, 0),
+                  CE_None);
+        for (size_t i = 0; i < plane.size(); ++i)
+            picture.rgba[i * 4 + b] = plane[i];
+    }
+    GDALClose(ds);
+    return picture;
+}
+
+struct SplatSpec {
+    Centre centre;
+    std::array<float, 3> colour;
+    float opacity;
+    std::array<float, 3> scale = {0, 0, 0};
+    std::array<float, 3> rotationXyz = {0, 0, 0}; // w completes the unit quaternion
+};
+
+// A RAD of these splats: centre, colour, opacity, scale and rotation as f32
+fs::path writeSplats(TestArea& ta, const std::string& name, const std::vector<SplatSpec>& splats) {
+    const auto planar = [&](auto member, int dims) {
+        std::vector<float> values;
+        for (int d = 0; d < dims; ++d)
+            for (const auto& splat : splats)
+                values.push_back(member(splat, d));
+        return floatsOf(values);
+    };
+    return writeProperties(
+        ta, name, splats.size(),
+        {propertyOf("center", "f32", planar([](const SplatSpec& s, int d) { return s.centre[d]; }, 3)),
+         propertyOf("rgb", "f32", planar([](const SplatSpec& s, int d) { return s.colour[d]; }, 3)),
+         propertyOf("alpha", "f32", planar([](const SplatSpec& s, int) { return s.opacity; }, 1)),
+         propertyOf("scales", "f32", planar([](const SplatSpec& s, int d) { return s.scale[d]; }, 3)),
+         propertyOf("orientation", "f32", planar([](const SplatSpec& s, int d) { return s.rotationXyz[d]; }, 3))});
+}
+
+// The corners of a square of 20 around the origin, as dots: they make the frame
+std::vector<SplatSpec> frameCorners() {
+    std::vector<SplatSpec> corners;
+    for (const float x : {-10.0f, 10.0f})
+        for (const float y : {-10.0f, 10.0f})
+            corners.push_back({{x, y, 0}, {1, 1, 1}, 1.0f});
+    return corners;
+}
+
+// The box of the pixels that are clearly red
+struct Box {
+    int x0 = 1 << 30, y0 = 1 << 30, x1 = -1, y1 = -1;
+    int width() const { return x1 - x0 + 1; }
+    int height() const { return y1 - y0 + 1; }
+};
+
+Box redBox(const Picture& picture) {
+    Box box;
+    for (int y = 0; y < picture.height; ++y)
+        for (int x = 0; x < picture.width; ++x) {
+            const uint8_t* p = picture.at(x, y);
+            if (p[3] > 128 && p[0] > 150 && p[1] < 110 && p[2] < 110) {
+                box.x0 = std::min(box.x0, x);
+                box.x1 = std::max(box.x1, x);
+                box.y0 = std::min(box.y0, y);
+                box.y1 = std::max(box.y1, y);
+            }
+        }
+    return box;
+}
+
+Picture pictureOf(TestArea& ta, const fs::path& rad, int size = 160) {
+    const fs::path image = ta.getPath(rad.stem().string() + ".webp");
+    generateSplatThumbFromRad(rad, size, image, nullptr, nullptr);
+    return decodePicture(image);
+}
+
+// A splat is drawn as the ellipse it is: long along the axis of its larger scale, and turned with it
+TEST(rad, aSplatIsDrawnAsAnEllipseAlongItsScaledAxis) {
+    TestArea ta(TEST_NAME);
+    auto splats = frameCorners();
+
+    // Wide along x
+    splats.push_back({{0, 0, 0}, {1, 0, 0}, 1.0f, {3.0f, 0.5f, 0.5f}});
+    const Box wide = redBox(pictureOf(ta, writeSplats(ta, "wide.rad", splats)));
+    ASSERT_GT(wide.x1, 0) << "the splat is in the picture";
+    EXPECT_GT(wide.width(), 3 * wide.height()) << wide.width() << " x " << wide.height();
+
+    // The same splat turned 90 degrees about the line of sight: tall
+    splats.back().rotationXyz = {0, 0, 0.70710678f};
+    const Box tall = redBox(pictureOf(ta, writeSplats(ta, "tall.rad", splats)));
+    ASSERT_GT(tall.x1, 0);
+    EXPECT_GT(tall.height(), 3 * tall.width()) << tall.width() << " x " << tall.height();
+
+    // A round splat is round, and a splat with no extent is a dot, not a disc of a size of its own
+    splats.back() = {{0, 0, 0}, {1, 0, 0}, 1.0f, {1.5f, 1.5f, 1.5f}};
+    const Box round = redBox(pictureOf(ta, writeSplats(ta, "round.rad", splats)));
+    ASSERT_GT(round.x1, 0);
+    EXPECT_NEAR(static_cast<double>(round.width()) / round.height(), 1.0, 0.2);
+    EXPECT_GT(round.width(), 2 * wide.height());
+    splats.back() = {{0, 0, 0}, {1, 0, 0}, 1.0f, {0, 0, 0}};
+    const Box dot = redBox(pictureOf(ta, writeSplats(ta, "dot.rad", splats)));
+    EXPECT_LT(dot.width(), round.width() / 3);
+}
+
+// Splats are composited from the far one to the near one: the opaque splat in front hides the one
+// behind it, whatever order the file lists them in
+TEST(rad, aSplatInFrontHidesTheOneBehind) {
+    TestArea ta(TEST_NAME);
+    // The scene is flat along z, the shortest axis, which the picture looks along from its top
+    const SplatSpec red = {{0, 0, 0}, {1, 0, 0}, 1.0f, {2, 2, 2}};
+    const SplatSpec green = {{0, 0, 0}, {0, 1, 0}, 1.0f, {2, 2, 2}};
+    const auto centre = [](const Picture& picture) { return picture.at(picture.width / 2, picture.height / 2); };
+
+    for (const bool redInFront : {true, false}) {
+        for (const bool redFirst : {true, false}) {
+            auto splats = frameCorners();
+            SplatSpec a = red, b = green;
+            (redInFront ? a : b).centre[2] = 1.0f;
+            if (redFirst) { splats.push_back(a); splats.push_back(b); }
+            else { splats.push_back(b); splats.push_back(a); }
+
+            const Picture picture = pictureOf(ta, writeSplats(ta, "order.rad", splats));
+            const uint8_t* p = centre(picture);
+            SCOPED_TRACE(std::string(redInFront ? "red" : "green") + " in front, " + (redFirst ? "red" : "green") + " first");
+            if (redInFront) {
+                EXPECT_GT(p[0], 200);
+                EXPECT_LT(p[1], 80);
+            } else {
+                EXPECT_GT(p[1], 200);
+                EXPECT_LT(p[0], 80);
+            }
+        }
+    }
+}
+
+// The picture is as large as it is asked to be
+TEST(rad, theThumbnailHasTheSizeAskedFor) {
+    TestArea ta(TEST_NAME);
+    auto splats = frameCorners();
+    splats.push_back({{0, 0, 0}, {1, 0, 0}, 1.0f, {2, 2, 2}});
+    const fs::path rad = writeSplats(ta, "sized.rad", splats);
+    for (const int size : {1, 64, 200, 513}) {
+        const fs::path image = ta.getPath("sized_" + std::to_string(size) + ".webp");
+        generateSplatThumbFromRad(rad, size, image, nullptr, nullptr);
+        const Picture picture = decodePicture(image);
+        EXPECT_EQ(picture.width, size);
+        EXPECT_EQ(picture.height, size);
+    }
+}
+
+// A splat with no opacity is not drawn
+TEST(rad, aTransparentSplatLeavesNoTrace) {
+    TestArea ta(TEST_NAME);
+    auto splats = frameCorners();
+    splats.push_back({{0, 0, 0}, {1, 0, 0}, 0.0f, {2, 2, 2}});
+    EXPECT_EQ(redBox(pictureOf(ta, writeSplats(ta, "invisible.rad", splats))).x1, -1);
+}
+
+// The tile buffers take 20 bytes a pixel: a size no one asks for in good faith is refused, before the
 // file is read
 TEST(rad, aThumbnailLargerThanTheCapIsRefused) {
     TestArea ta(TEST_NAME);

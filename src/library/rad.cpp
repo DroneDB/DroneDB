@@ -280,6 +280,24 @@ namespace ddb
             return out;
         }
 
+        // The unsigned integers of the tree properties (u16 and u32, planar like the others)
+        std::vector<uint32_t> decodeUnsigned(const std::vector<uint8_t> &d, const std::string &encoding, size_t count)
+        {
+            if (encoding != "u16" && encoding != "u32")
+                throw AppException("RAD: unsupported encoding for a level-of-detail tree: " + encoding);
+            const size_t width = encoding == "u16" ? 2 : 4;
+            if (d.size() < count * width)
+                throw AppException("RAD: property payload too small for encoding " + encoding);
+            std::vector<uint32_t> out(count);
+            for (size_t i = 0; i < count; ++i)
+            {
+                uint32_t v = 0;
+                std::memcpy(&v, d.data() + i * width, width); // little-endian, as the host
+                out[i] = v;
+            }
+            return out;
+        }
+
         std::vector<float> decodeOrientation(const std::vector<uint8_t> &raw, const std::string &encoding,
                                              size_t count)
         {
@@ -437,6 +455,7 @@ namespace ddb
         {
             bool appearance = false; // rgb and alpha
             bool shape = false;      // scales and orientation
+            bool tree = false;       // the child counts and starts of a level-of-detail tree
         };
 
         struct DecodedChunk
@@ -447,6 +466,8 @@ namespace ddb
             std::vector<float> opacities; // count     (empty when not requested / absent)
             std::vector<float> scales;    // count * 3 (empty when not requested / absent)
             std::vector<float> rotations; // count * 4, x y z w (empty when not requested / absent)
+            std::vector<uint32_t> childCounts; // count: the splats that refine each one (empty when not requested / absent)
+            std::vector<uint32_t> childStarts; // count: the index in the file of the first of them
         };
 
         // Decodes one chunk: its centres, and the attributes `wanted` names.
@@ -510,8 +531,11 @@ namespace ddb
                     const bool isAlpha = name == "alpha";
                     const bool isScales = name == "scales";
                     const bool isOrientation = name == "orientation";
+                    const bool isChildCount = name == "child_count";
+                    const bool isChildStart = name == "child_start";
                     if (!isCenter && !(wanted.appearance && (isRgb || isAlpha)) &&
-                        !(wanted.shape && (isScales || isOrientation)))
+                        !(wanted.shape && (isScales || isOrientation)) &&
+                        !(wanted.tree && (isChildCount || isChildStart)))
                         continue;
 
                     const std::string encoding = p.value("encoding", std::string());
@@ -532,7 +556,7 @@ namespace ddb
                     if (compression == "gz")
                     {
                         // 4 bytes is the widest value of the encodings: nothing declared is larger
-                        const int dims = isAlpha ? 1 : 3;
+                        const int dims = isChildCount || isChildStart || isAlpha ? 1 : 3;
                         raw = inflateRaw(buf.data() + dataStart, static_cast<size_t>(bytes),
                                          static_cast<size_t>(dims) * out.count * 4);
                     }
@@ -549,8 +573,12 @@ namespace ddb
                         out.opacities = decodeProperty(raw, encoding, 1, out.count, range);
                     else if (isScales)
                         out.scales = decodeProperty(raw, encoding, 3, out.count, range);
-                    else
+                    else if (isOrientation)
                         out.rotations = decodeOrientation(raw, encoding, out.count);
+                    else if (isChildCount)
+                        out.childCounts = decodeUnsigned(raw, encoding, out.count);
+                    else
+                        out.childStarts = decodeUnsigned(raw, encoding, out.count);
                 }
             }
             catch (const json::exception &e)
@@ -570,7 +598,46 @@ namespace ddb
         return io::Path(io::fromUtf8(filename)).checkExtension({"rad"});
     }
 
-    RadCoarseSplats readRadCoarseSplats(const fs::path &radPath, int maxChunks)
+    namespace
+    {
+        // A splat of a level-of-detail tree is the merged image of the splats that refine it (its
+        // children: childCount of them from childStart, in the whole file). Drawn together they paint
+        // a region twice, the blurred parent under its sharper children. Of the splats read, the cut
+        // keeps those no read splat refines: the finest picture of the scene the chunks hold, each
+        // region once.
+        void keepTheCut(RadCoarseSplats &splats, const std::vector<uint32_t> &childCounts,
+                        const std::vector<uint32_t> &childStarts)
+        {
+            size_t kept = 0;
+            for (size_t i = 0; i < splats.count; ++i)
+            {
+                const bool refined = childCounts[i] > 0 && childStarts[i] < splats.count;
+                if (refined)
+                    continue;
+                if (kept != i)
+                {
+                    std::copy_n(splats.positions.begin() + static_cast<std::ptrdiff_t>(i * 3), 3,
+                                splats.positions.begin() + static_cast<std::ptrdiff_t>(kept * 3));
+                    std::copy_n(splats.colors.begin() + static_cast<std::ptrdiff_t>(i * 3), 3,
+                                splats.colors.begin() + static_cast<std::ptrdiff_t>(kept * 3));
+                    splats.opacities[kept] = splats.opacities[i];
+                    std::copy_n(splats.scales.begin() + static_cast<std::ptrdiff_t>(i * 3), 3,
+                                splats.scales.begin() + static_cast<std::ptrdiff_t>(kept * 3));
+                    std::copy_n(splats.rotations.begin() + static_cast<std::ptrdiff_t>(i * 4), 4,
+                                splats.rotations.begin() + static_cast<std::ptrdiff_t>(kept * 4));
+                }
+                ++kept;
+            }
+            splats.count = kept;
+            splats.positions.resize(kept * 3);
+            splats.colors.resize(kept * 3);
+            splats.opacities.resize(kept);
+            splats.scales.resize(kept * 3);
+            splats.rotations.resize(kept * 4);
+        }
+    } // namespace
+
+    RadCoarseSplats readRadCoarseSplats(const fs::path &radPath, int maxChunks, bool onlyTheCut)
     {
         std::ifstream in(radPath, std::ios::binary);
         if (!in.good())
@@ -579,13 +646,24 @@ namespace ddb
         const RadHeader header = readHeader(in, io::toUtf8(radPath));
 
         RadCoarseSplats result;
+        // The tree of the splats read, when the cut is wanted: where the children of each splat are
+        std::vector<uint32_t> childCounts, childStarts;
         const int limit = maxChunks <= 0 ? static_cast<int>(header.chunks.size())
                                          : std::min<int>(maxChunks, static_cast<int>(header.chunks.size()));
         for (int i = 0; i < limit; ++i)
         {
-            DecodedChunk chunk = decodeChunk(in, header, header.chunks[i], io::toUtf8(radPath), RadAttributes{true, true});
+            DecodedChunk chunk = decodeChunk(in, header, header.chunks[i], io::toUtf8(radPath), RadAttributes{true, true, onlyTheCut});
             if (chunk.count == 0)
                 continue;
+
+            if (onlyTheCut)
+            {
+                // A chunk without a tree has leaves only
+                chunk.childCounts.resize(chunk.count, 0);
+                chunk.childStarts.resize(chunk.count, 0);
+                childCounts.insert(childCounts.end(), chunk.childCounts.begin(), chunk.childCounts.end());
+                childStarts.insert(childStarts.end(), chunk.childStarts.begin(), chunk.childStarts.end());
+            }
 
             result.count += chunk.count;
             result.positions.insert(result.positions.end(), chunk.centers.begin(), chunk.centers.end());
@@ -617,6 +695,8 @@ namespace ddb
 
         if (result.count == 0)
             throw AppException("RAD: no splats decoded from " + io::toUtf8(radPath));
+        if (onlyTheCut)
+            keepTheCut(result, childCounts, childStarts);
         return result;
     }
 
