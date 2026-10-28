@@ -90,6 +90,10 @@ constexpr const char* GsplatMediaType = "application/octet-stream";
 // paged .rad path: a streamed mesh has no resident splats (hence no computable bounds) when
 // it first initializes, so client-side auto-framing cannot work without this hint.
 constexpr const char* GsplatBoundsFileName = "bounds.json";
+// The .spz that an export for other tools makes on demand (exportSplatSpz): not a build output, so
+// no build writes it, no completeness check reads it, and the next build of the entry (which
+// publishes gsplat/ whole) removes it.
+constexpr const char* GsplatExportFileName = "export.spz";
 // Thumbnails are generated on demand from the .rad (or a legacy .spz) at request time - no
 // build-time thumbnail artifact is produced. The name is what tests check a build does not write.
 constexpr const char* GsplatThumbFileName = "thumbnail.webp";

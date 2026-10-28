@@ -149,10 +149,11 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   `pointcloud.copc` `application/vnd.laszip+copc`, `vector.gpkg`
   `application/geopackage+sqlite3` (the IANA registration), `model.bm3d`
   `application/vnd.dronedb.bm3d`, `model.nexus`, `gsplat.lod`,
-  `gsplat.spz` `application/octet-stream`, the JSON artifacts and directory indexes
+  `gsplat.spz`, `gsplat.export` `application/octet-stream`, the JSON artifacts and directory indexes
   `application/json`.
-* `downloadName` is set for the three artifacts a download offers today: `cog.tif`,
-  `cloud.copc.laz`, `source.gpkg`.
+* `downloadName` is set for the artifacts a download offers: `cog.tif`, `cloud.copc.laz`,
+  `source.gpkg`, and for a Gaussian splat `model.rad` (`gsplat.lod`), `model.spz` (the legacy
+  `gsplat.spz`) and `export.spz` (`gsplat.export`).
 * `state` reads the build lock without reclaiming it (`BuildLock::isHeld`), so a listing never
   changes the dataset.
 * `retryAfter` is the Unix second from which a pending build is retried by `DDBBuild` with
@@ -393,3 +394,13 @@ Registry has to adopt first.
   `DDBERR_CANCELED` when
   the token is canceled or the progress callback returns non-zero. `capabilities` lists the export in
   `symbols` and in `cancellable`; no other fixture changed.
+
+* 2026-10-28: a Gaussian splat has a new artifact role, `gsplat.export` (`gsplat/export.spz`,
+  `application/octet-stream`, `downloadName` `export.spz`): the splat as one `.spz` file for other
+  tools, made on demand and never by a build. It is listed (last) only while the file exists, is not
+  `legacy` and has no `fallbackFor`, is not part of the completeness of a build (`complete` still
+  means `gsplat/model.rad`), and goes with `gsplat/` when the entry is built again. The artifacts
+  `gsplat.lod` and `gsplat.spz` gain a `downloadName` (`model.rad`, `model.spz`), so a host that
+  offers the first artifact with a `downloadName` as the download of an entry (Registry's
+  `build-artifact`) serves a splat. The `entry-types` fixture lists the new role; no other fixture
+  changed (none lists a splat build).

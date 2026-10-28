@@ -484,6 +484,9 @@ TEST(BuildManifest, ResolveBuildFile) {
     EXPECT_EQ(resolve(H_ROADS, "mvt/0/0/0.pbf").mediaType, "");
     EXPECT_EQ(resolve(H_SPLAT, "gsplat/model.rad").mediaType, GsplatMediaType);
     EXPECT_EQ(resolve(H_SPLAT, "gsplat/bounds.json").mediaType, "application/json");
+    writeFile(fx.build / H_SPLAT / "gsplat" / "export.spz", "x");
+    EXPECT_EQ(resolve(H_SPLAT, "gsplat/export.spz").mediaType, GsplatMediaType)
+        << "the .spz of an export is served like the other files of a build";
 
     // {"path", "mediaType"}, the type left out when the file declares none
     EXPECT_EQ(resolve(H_SPLAT, "gsplat/model.rad").toJson(),
@@ -721,6 +724,41 @@ TEST(BuildManifest, AnOldSplatBuildIsListedAsLegacyUntilItsRadExists) {
     found = listed();
     ASSERT_EQ(found.size(), 1u);
     EXPECT_EQ(found[0].role, "gsplat.lod");
+}
+
+// The .spz of an export for other tools is listed while it exists, next to model.rad and model.spz of
+// an old build, and the cleanup of superseded outputs removes the old model.spz but not the export
+TEST(BuildManifest, AnExportedSplatIsListedWhileItExistsAndCleanupLeavesIt) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path root = ta.getFolder("hash");
+    const EntryHandler& handler = entryHandler(EntryType::GaussianSplat);
+    const auto listed = [&] {
+        std::vector<std::string> found;
+        const auto names = filesystemBuildProbe().list(root);
+        for (const auto& a : existingArtifacts(handler, root, *names, filesystemBuildProbe()))
+            found.push_back(a.role);
+        return found;
+    };
+    using Roles = std::vector<std::string>;
+
+    writeFile(root / "gsplat" / "model.rad", "x");
+    EXPECT_EQ(listed(), (Roles{"gsplat.lod"}));
+    writeFile(root / "gsplat" / "export.spz", "x");
+    EXPECT_EQ(listed(), (Roles{"gsplat.lod", "gsplat.export"}));
+
+    // An old model.spz next to model.rad is removed alone: the export and the model stay
+    writeFile(root / "gsplat" / "model.spz", "x");
+    removeSupersededArtifacts(handler, root, filesystemBuildProbe());
+    EXPECT_FALSE(fs::exists(root / "gsplat" / "model.spz"));
+    EXPECT_TRUE(fs::exists(root / "gsplat" / "export.spz"));
+    EXPECT_TRUE(fs::exists(root / "gsplat" / "model.rad"));
+    EXPECT_EQ(listed(), (Roles{"gsplat.lod", "gsplat.export"}));
+
+    // An export is no model: without model.rad the build is not complete, and the export does not
+    // stand in for it
+    fs::remove(root / "gsplat" / "model.rad");
+    EXPECT_FALSE(handler.isComplete(root));
+    EXPECT_EQ(listed(), (Roles{"gsplat.export"}));
 }
 
 // The legacy Nexus file of a model is served while bm3d/ is missing, with the 3D Tiles it also

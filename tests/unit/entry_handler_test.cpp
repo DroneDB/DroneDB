@@ -171,7 +171,8 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
         {EntryType::GaussianSplat,
          {Row{"gsplat.lod", "gsplat/model.rad", ArtifactKind::File, "", false},
           Row{"gsplat.spz", "gsplat/model.spz", ArtifactKind::File, "", true},
-          Row{"gsplat.bounds", "gsplat/bounds.json", ArtifactKind::File, "", false}}},
+          Row{"gsplat.bounds", "gsplat/bounds.json", ArtifactKind::File, "", false},
+          Row{"gsplat.export", "gsplat/export.spz", ArtifactKind::File, "", false}}},
         {EntryType::Tiles3D,
          {Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}}};
 
@@ -236,13 +237,29 @@ TEST(entryHandler, LegacyArtifactsNameTheRoleTheyStandInFor) {
     // The SPZ of a splat built before the RAD layout stands in for model.rad only: bounds.json is
     // current whichever layout built it
     const auto& splat = entryHandler(EntryType::GaussianSplat).artifacts();
-    ASSERT_EQ(splat.size(), 3u);
+    ASSERT_EQ(splat.size(), 4u);
     EXPECT_EQ(splat[0].role, "gsplat.lod");
     EXPECT_FALSE(splat[0].legacy);
     EXPECT_EQ(splat[1].role, "gsplat.spz");
     EXPECT_EQ(splat[1].fallbackFor, "gsplat.lod");
     EXPECT_EQ(splat[2].role, "gsplat.bounds");
     EXPECT_FALSE(splat[2].legacy);
+    // The .spz an export makes for other tools stands in for nothing: it is no legacy artifact, so
+    // it never replaces model.rad and the cleanup of superseded outputs never removes it
+    EXPECT_EQ(splat[3].role, "gsplat.export");
+    EXPECT_FALSE(splat[3].legacy);
+    EXPECT_TRUE(splat[3].fallbackFor.empty());
+}
+
+// The artifacts a download offers: the file names a host sends them under
+TEST(entryHandler, SplatArtifactsAreDownloadable) {
+    std::map<std::string, std::string> names;
+    for (const auto& a : entryHandler(EntryType::GaussianSplat).artifacts())
+        names[a.role] = a.downloadName;
+    EXPECT_EQ(names, (std::map<std::string, std::string>{{"gsplat.lod", "model.rad"},
+                                                         {"gsplat.spz", "model.spz"},
+                                                         {"gsplat.bounds", ""},
+                                                         {"gsplat.export", "export.spz"}}));
 }
 
 TEST(entryHandler, SidecarRulesArePinned) {
@@ -282,6 +299,9 @@ TEST(entryHandler, CompletenessRules) {
 
     // Gaussian Splat: model.rad; Tiles3D: tileset.json
     writeFile(base / "gsplat" / "model.spz", "x");
+    EXPECT_FALSE(complete(EntryType::GaussianSplat));
+    // The .spz of an export for other tools is not a build: it completes nothing
+    writeFile(base / "gsplat" / "export.spz", "x");
     EXPECT_FALSE(complete(EntryType::GaussianSplat));
     writeFile(base / "gsplat" / "model.rad", "x");
     EXPECT_TRUE(complete(EntryType::GaussianSplat));

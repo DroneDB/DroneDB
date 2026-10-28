@@ -875,10 +875,15 @@ extern "C"
      *   model.nexus      Nexus multiresolution mesh of models built before bm3d: legacy, listed
      *                    only while model.bm3d is missing
      *   model.3dtiles    OGC 3D Tiles of a Model or a .3tz: a directory, its index tileset.json
-     *   gsplat.lod       level-of-detail Gaussian Splat (Spark RAD, streamed with range requests)
+     *   gsplat.lod       level-of-detail Gaussian Splat (Spark RAD, streamed with range requests;
+     *                    downloadable)
      *   gsplat.spz       Gaussian Splat in SPZ: legacy, written by builds before gsplat.lod, listed
-     *                    only while gsplat.lod is missing
+     *                    only while gsplat.lod is missing (downloadable)
      *   gsplat.bounds    local bounding box of a splat (JSON)
+     *   gsplat.export    the splat as one .spz file for other tools, made on demand and never by a
+     *                    build: listed only while it exists, not part of the completeness of a
+     *                    build, not legacy and not something to render; a build of the entry
+     *                    removes it (downloadable)
      *
      * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?}
      *   path          relative to the build root ("root" below), '/'-separated; URLs append it

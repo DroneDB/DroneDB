@@ -151,7 +151,8 @@
       "roles": [
         "gsplat.lod",
         "gsplat.spz",
-        "gsplat.bounds"
+        "gsplat.bounds",
+        "gsplat.export"
       ],
       "sidecarExtensions": [],
       "thumbnail": "build"

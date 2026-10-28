@@ -81,14 +81,20 @@ class GaussianSplatEntryHandler : public EntryHandler {
 
     std::vector<BuildArtifact> artifacts() const override {
         return {BuildArtifact::file("gsplat.lod", artifactPath(GsplatBuildSubfolder, GsplatRadFileName),
-                                    GsplatMediaType),
+                                    GsplatMediaType, GsplatRadFileName),
                 // Written by builds before the RAD layout; read when present, listed only while
                 // model.rad is missing, removed alone (not gsplat/) once model.rad exists
                 BuildArtifact::file("gsplat.spz", artifactPath(GsplatBuildSubfolder, GsplatFileName),
-                                    GsplatMediaType)
+                                    GsplatMediaType, GsplatFileName)
                     .legacyFor("gsplat.lod"),
                 BuildArtifact::file("gsplat.bounds", artifactPath(GsplatBuildSubfolder, GsplatBoundsFileName),
-                                    "application/json")};
+                                    "application/json"),
+                // Made on demand by exportSplatSpz, never by a build: listed only while it exists, it
+                // is no render role and not part of completeness, and the next build removes it with
+                // the rest of gsplat/. Not legacy: it stands in for nothing, so it never replaces
+                // model.rad and cleanup never touches it
+                BuildArtifact::file("gsplat.export", artifactPath(GsplatBuildSubfolder, GsplatExportFileName),
+                                    GsplatMediaType, GsplatExportFileName)};
     }
 
     bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {
