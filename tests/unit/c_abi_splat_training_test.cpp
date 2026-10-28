@@ -71,6 +71,27 @@ namespace
         return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
     }
 
+    // The files under folder this process holds open (Linux, which lists them in /proc/self/fd;
+    // elsewhere none are reported)
+    std::vector<std::string> openFilesUnder(const fs::path &folder)
+    {
+        std::vector<std::string> open;
+#ifdef __linux__
+        const std::string prefix = fs::weakly_canonical(folder).string() + "/";
+        std::error_code ec;
+        for (const auto &fd : fs::directory_iterator("/proc/self/fd", ec))
+        {
+            std::error_code linkError;
+            const std::string target = fs::read_symlink(fd.path(), linkError).string();
+            if (!linkError && target.starts_with(prefix))
+                open.push_back(target);
+        }
+#else
+        (void)folder;
+#endif
+        return open;
+    }
+
     TEST(CAbiSplatTraining, exportsTheProjectOfAFolderOfTheDataset)
     {
         Dataset d(TEST_NAME);
@@ -111,11 +132,16 @@ namespace
         std::string text;
         ASSERT_DDB_OK(d.exportFolder("odm", R"({"maxImageSize": 64, "maxPoints": 2})", text));
         EXPECT_LE(json::parse(text)["points"].get<int>(), 2);
+        EXPECT_EQ(openFilesUnder(d.out), std::vector<std::string>())
+            << "a file of the export left open could be neither replaced nor removed on Windows";
 
-        const auto ds = adoptDataset(GDALOpen((d.out / "images" / "a.JPG").string().c_str(), GA_ReadOnly));
-        ASSERT_TRUE(ds);
-        EXPECT_EQ(GDALGetRasterXSize(datasetHandle(ds)), 64);
-        EXPECT_EQ(GDALGetRasterYSize(datasetHandle(ds)), 48);
+        {
+            // Closed before the next export, which removes the output folder
+            const auto ds = adoptDataset(GDALOpen((d.out / "images" / "a.JPG").string().c_str(), GA_ReadOnly));
+            ASSERT_TRUE(ds);
+            EXPECT_EQ(GDALGetRasterXSize(datasetHandle(ds)), 64);
+            EXPECT_EQ(GDALGetRasterYSize(datasetHandle(ds)), 48);
+        }
 
         for (const char *none : {"", "{}"})
             ASSERT_DDB_OK(d.exportFolder("odm", none, text)) << none;
