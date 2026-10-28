@@ -170,7 +170,7 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
           Row{"vector.local", "vec/local.json", ArtifactKind::File, "", false}}},
         {EntryType::GaussianSplat,
          {Row{"gsplat.lod", "gsplat/model.rad", ArtifactKind::File, "", false},
-          Row{"gsplat.spz", "gsplat/model.spz", ArtifactKind::File, "", false},
+          Row{"gsplat.spz", "gsplat/model.spz", ArtifactKind::File, "", true},
           Row{"gsplat.bounds", "gsplat/bounds.json", ArtifactKind::File, "", false}}},
         {EntryType::Tiles3D,
          {Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}}};
@@ -232,6 +232,17 @@ TEST(entryHandler, LegacyArtifactsNameTheRoleTheyStandInFor) {
     EXPECT_EQ(model[1].fallbackFor, "model.bm3d");
     EXPECT_EQ(model[2].role, "model.3dtiles");
     EXPECT_FALSE(model[2].legacy);
+
+    // The SPZ of a splat built before the RAD layout stands in for model.rad only: bounds.json is
+    // current whichever layout built it
+    const auto& splat = entryHandler(EntryType::GaussianSplat).artifacts();
+    ASSERT_EQ(splat.size(), 3u);
+    EXPECT_EQ(splat[0].role, "gsplat.lod");
+    EXPECT_FALSE(splat[0].legacy);
+    EXPECT_EQ(splat[1].role, "gsplat.spz");
+    EXPECT_EQ(splat[1].fallbackFor, "gsplat.lod");
+    EXPECT_EQ(splat[2].role, "gsplat.bounds");
+    EXPECT_FALSE(splat[2].legacy);
 }
 
 TEST(entryHandler, SidecarRulesArePinned) {

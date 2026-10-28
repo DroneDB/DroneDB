@@ -352,3 +352,9 @@ Registry has to adopt first.
   is listed while that role is missing, as before for a point cloud; the rule no longer depends
   on whether other current artifacts of the type exist. No fixture changed (none lists a legacy
   artifact).
+
+* 2026-10-28: the artifact `gsplat.spz` is legacy (`"fallbackFor": "gsplat.lod"`): a splat build
+  made before the RAD layout lists it while `gsplat.lod` is missing, and a build that publishes
+  `gsplat/model.rad` removes `gsplat/model.spz` alone (the folder is shared). The roles of
+  `entry-types` and every fixture are unchanged: none of them lists the `legacy` or `fallbackFor`
+  of an artifact for this type.

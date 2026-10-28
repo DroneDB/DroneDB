@@ -682,6 +682,30 @@ TEST(BuildManifest, SupersededLegacyOutputInTheFolderOfACurrentOneLeavesTheCurre
     EXPECT_TRUE(fs::exists(root / "shared" / "new.txt"));
 }
 
+// A splat built before the RAD layout is listed with its model.spz, flagged legacy; once the
+// model.rad is there, the model.spz is not listed any more
+TEST(BuildManifest, AnOldSplatBuildIsListedAsLegacyUntilItsRadExists) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path root = ta.getFolder("hash");
+    const EntryHandler& handler = entryHandler(EntryType::GaussianSplat);
+    const auto listed = [&] {
+        const auto names = filesystemBuildProbe().list(root);
+        return existingArtifacts(handler, root, *names, filesystemBuildProbe());
+    };
+
+    writeFile(root / "gsplat" / "model.spz", "x");
+    auto found = listed();
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].role, "gsplat.spz");
+    EXPECT_TRUE(found[0].legacy);
+    EXPECT_EQ(found[0].fallbackFor, "gsplat.lod");
+
+    writeFile(root / "gsplat" / "model.rad", "x");
+    found = listed();
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].role, "gsplat.lod");
+}
+
 // The legacy Nexus file of a model is served while bm3d/ is missing, with the 3D Tiles it also
 // has, and never next to model.bm3d
 TEST(BuildManifest, LegacyNexusFileIsServedOnlyWhileBm3dIsMissing) {

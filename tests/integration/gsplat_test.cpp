@@ -1406,4 +1406,42 @@ TEST(gsplat, buildPipelineIntegration) {
     EXPECT_EQ(namesIn(gsplatDir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
 }
 
+// A build made before the RAD layout left gsplat/model.spz; gsplat/ also holds the model.rad that
+// replaces it, so the cleanup that follows a build removes that file alone and never the folder
+TEST(gsplat, aBuildRemovesAnOldModelSpzAndKeepsTheModelRadBesideIt) {
+    TestArea ta(TEST_NAME, true);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; Gaussian Splat builds require it");
+
+    const fs::path dsFolder = ta.getFolder("");
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 80, 1);
+    ddb::initIndex(dsFolder.string());
+    auto db = ddb::open(dsFolder.string(), true);
+    ddb::addToIndex(db.get(), {ply.string()});
+    const auto rel = fs::relative(ply, dsFolder).string();
+    Entry e;
+    ASSERT_TRUE(loadEntry(db.get(), rel, e));
+
+    const fs::path gsplatDir = fs::path(db->buildDirectory()) / e.hash / "gsplat";
+    const auto expectCurrentOutput = [&] {
+        EXPECT_TRUE(isRad(gsplatDir / GsplatRadFileName)) << "model.rad survives the cleanup";
+        EXPECT_TRUE(fs::exists(gsplatDir / GsplatBoundsFileName));
+        EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
+    };
+
+    ddb::build(db.get(), rel, "", false);
+    expectCurrentOutput();
+
+    // The output of an older build is still there when the entry is built again: the output
+    // is complete, the build is skipped and the old model.spz is cleaned up
+    {
+        std::ofstream((gsplatDir / GsplatFileName).string(), std::ios::binary) << "old SPZ";
+    }
+    ASSERT_TRUE(fs::exists(gsplatDir / GsplatFileName));
+    ddb::build(db.get(), rel, "", false);
+    EXPECT_FALSE(fs::exists(gsplatDir / GsplatFileName)) << "the superseded model.spz is removed";
+    expectCurrentOutput();
+    EXPECT_EQ(namesIn(gsplatDir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
+}
+
 } // namespace

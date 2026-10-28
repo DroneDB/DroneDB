@@ -874,7 +874,8 @@ extern "C"
      *                    only while model.bm3d is missing
      *   model.3dtiles    OGC 3D Tiles of a Model or a .3tz: a directory, its index tileset.json
      *   gsplat.lod       level-of-detail Gaussian Splat (Spark RAD, streamed with range requests)
-     *   gsplat.spz       Gaussian Splat in SPZ
+     *   gsplat.spz       Gaussian Splat in SPZ: legacy, written by builds before gsplat.lod, listed
+     *                    only while gsplat.lod is missing
      *   gsplat.bounds    local bounding box of a splat (JSON)
      *
      * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?}
