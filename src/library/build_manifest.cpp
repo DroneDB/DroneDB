@@ -403,7 +403,9 @@ ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const 
         throw EntryNotFoundException("'" + normalized.path + "' is not a build artifact of " + hash);
 
     const fs::path root = fs::absolute(db->buildDirectory() / hash);
-    const fs::path file = root / io::fromUtf8(normalized.path);
+    // The request names the file with '/' (the separator of build URLs and of the manifest): the
+    // host serves the returned path as it is, so it is the native form, '\\' on Windows
+    const fs::path file = (root / io::fromUtf8(normalized.path)).make_preferred();
     std::error_code ec;
     if (!fs::is_regular_file(file, ec) || ec)
         throw EntryNotFoundException("Build file '" + normalized.path + "' of " + hash + " does not exist");
