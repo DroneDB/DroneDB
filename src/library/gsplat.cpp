@@ -14,6 +14,7 @@
 #include "rad.h"
 #include "splat_convert.h"
 #include "splat_format.h"
+#include "splat_frame.h"
 
 namespace ddb
 {
@@ -39,12 +40,30 @@ namespace ddb
                 throw AppException("Cannot build the Gaussian splat " + input + ": " + problem);
         }
 
-        // Local-space bounding box sidecar for deterministic camera framing in the viewer (the
-        // streamed .rad has no resident splats at init time). Computed by streaming the .rad
-        // centres: exact, bounded memory, and in the same coordinate space the viewer renders.
-        // The sidecar is optional (the viewer frames the scene without it): a .rad whose centres
-        // cannot be decoded, or a file that cannot be written, is logged and the build still
-        // delivers its model.rad.
+        // The splats a scene's up is estimated from: the coarse chunks of the RAD, the same two the
+        // thumbnail renders
+        constexpr int UpEstimateChunks = 2;
+
+        // The up vector of the scene, for the sidecar; an estimate that cannot be made is logged and
+        // leaves the bounding box alone
+        void addUpEstimate(const fs::path &rad, json &sidecar)
+        {
+            try
+            {
+                sidecar.update(json(estimateSplatUp(readRadCoarseSplats(rad, UpEstimateChunks))));
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "No up vector for " << io::toUtf8(rad) << ": " << e.what();
+            }
+        }
+
+        // Local-space sidecar for deterministic camera framing in the viewer (the streamed .rad has
+        // no resident splats at init time): the bounding box, and which way is up. The box is computed
+        // by streaming the .rad centres: exact, bounded memory, and in the same coordinate space the
+        // viewer renders. The sidecar is optional (the viewer frames the scene without it): a .rad
+        // whose centres cannot be decoded, or a file that cannot be written, is logged and the build
+        // still delivers its model.rad.
         void writeBoundsSidecar(const fs::path &rad, const fs::path &boundsFile)
         {
             try
@@ -58,6 +77,7 @@ namespace ddb
                 json j;
                 j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
                 j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
+                addUpEstimate(rad, j);
                 io::writeFileAtomic(boundsFile, j.dump(), "bounds file");
             }
             catch (const std::exception &e)

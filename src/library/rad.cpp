@@ -3,7 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "rad.h"
 
+#include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -214,8 +216,98 @@ namespace ddb
             return out;
         }
 
+        // Scales are stored as natural logarithms; the encoded 0 of ln_0r8 is a scale of exactly 0
+        // and 1..255 span [min, max] of the logarithm (spark-lib splat_encode.rs decode_scale8).
+        std::vector<float> decodeLn0R8(const std::vector<uint8_t> &d, int dims, size_t count, float mn, float mx)
+        {
+            std::vector<float> out(dims * count);
+            const float step = (mx - mn) / 254.0f;
+            for (size_t i = 0; i < count; ++i)
+                for (int dim = 0; dim < dims; ++dim)
+                {
+                    const uint8_t v = d[static_cast<size_t>(dim) * count + i];
+                    out[i * dims + dim] = v == 0 ? 0.0f : std::exp(mn + static_cast<float>(v - 1) * step);
+                }
+            return out;
+        }
+
+        std::vector<float> decodeLnF16(const std::vector<uint8_t> &d, int dims, size_t count)
+        {
+            std::vector<float> out = decodeF16(d, dims, count);
+            for (float &v : out)
+                v = std::exp(v);
+            return out;
+        }
+
+        // A rotation as 3 bytes: an octahedral-mapped axis (2 bytes) and the angle (1 byte), see
+        // spark-lib splat_encode.rs decode_quat_oct888. One quaternion (x, y, z, w) per splat.
+        std::vector<float> decodeQuatOct88R8(const std::vector<uint8_t> &d, size_t count)
+        {
+            constexpr float kPi = 3.14159265358979323846f;
+            std::vector<float> out(4 * count);
+            for (size_t i = 0; i < count; ++i)
+            {
+                float x = static_cast<float>(d[i * 3]) / 255.0f * 2.0f - 1.0f;
+                float y = static_cast<float>(d[i * 3 + 1]) / 255.0f * 2.0f - 1.0f;
+                const float z = 1.0f - std::abs(x) - std::abs(y);
+                const float t = std::max(-z, 0.0f);
+                x = x >= 0.0f ? x - t : x + t;
+                y = y >= 0.0f ? y - t : y + t;
+                const float length = std::sqrt(x * x + y * y + z * z);
+                const float halfTheta = static_cast<float>(d[i * 3 + 2]) / 255.0f * 0.5f * kPi;
+                const float s = std::sin(halfTheta) / length;
+                out[i * 4] = x * s;
+                out[i * 4 + 1] = y * s;
+                out[i * 4 + 2] = z * s;
+                out[i * 4 + 3] = std::cos(halfTheta);
+            }
+            return out;
+        }
+
+        // The (x, y, z) of the f32 and f16 encodings of an orientation, with w completing the unit
+        // quaternion
+        std::vector<float> quatFromXyz(const std::vector<float> &xyz, size_t count)
+        {
+            std::vector<float> out(4 * count);
+            for (size_t i = 0; i < count; ++i)
+            {
+                const float x = xyz[i * 3], y = xyz[i * 3 + 1], z = xyz[i * 3 + 2];
+                out[i * 4] = x;
+                out[i * 4 + 1] = y;
+                out[i * 4 + 2] = z;
+                out[i * 4 + 3] = std::sqrt(std::max(0.0f, 1.0f - x * x - y * y - z * z));
+            }
+            return out;
+        }
+
+        std::vector<float> decodeOrientation(const std::vector<uint8_t> &raw, const std::string &encoding,
+                                             size_t count)
+        {
+            if (encoding == "oct88r8")
+            {
+                if (raw.size() < 3 * count)
+                    throw AppException("RAD: property payload too small for encoding " + encoding);
+                return decodeQuatOct88R8(raw, count);
+            }
+            if (encoding == "f32" || encoding == "f16")
+            {
+                if (raw.size() < 3 * count * (encoding == "f32" ? 4u : 2u))
+                    throw AppException("RAD: property payload too small for encoding " + encoding);
+                return quatFromXyz(encoding == "f32" ? decodeF32(raw, 3, count) : decodeF16(raw, 3, count), count);
+            }
+            throw AppException("RAD: unsupported orientation encoding: " + encoding);
+        }
+
+        // The min and max a property declares for its range encodings
+        struct PropertyRange
+        {
+            float min = 0.0f;
+            float max = 1.0f;
+            bool declared = false;
+        };
+
         std::vector<float> decodeProperty(const std::vector<uint8_t> &raw, const std::string &encoding,
-                                          int dims, size_t count, float mn, float mx)
+                                          int dims, size_t count, const PropertyRange &range)
         {
             const size_t need = static_cast<size_t>(dims) * count;
             auto checkSize = [&](size_t perElem)
@@ -228,8 +320,17 @@ namespace ddb
             if (encoding == "f16_lebytes") { checkSize(2); return decodeF16LeBytes(raw, dims, count); }
             if (encoding == "f32") { checkSize(4); return decodeF32(raw, dims, count); }
             if (encoding == "f16") { checkSize(2); return decodeF16(raw, dims, count); }
-            if (encoding == "r8") { checkSize(1); return decodeR8(raw, dims, count, mn, mx); }
-            if (encoding == "r8_delta") { checkSize(1); return decodeR8Delta(raw, dims, count, mn, mx); }
+            if (encoding == "r8") { checkSize(1); return decodeR8(raw, dims, count, range.min, range.max); }
+            if (encoding == "r8_delta") { checkSize(1); return decodeR8Delta(raw, dims, count, range.min, range.max); }
+            if (encoding == "ln_f16") { checkSize(2); return decodeLnF16(raw, dims, count); }
+            if (encoding == "ln_0r8")
+            {
+                // The logarithms it spans are not guessable: a property without them is not read
+                if (!range.declared)
+                    throw AppException("RAD: property of encoding ln_0r8 has no min and max");
+                checkSize(1);
+                return decodeLn0R8(raw, dims, count, range.min, range.max);
+            }
 
             throw AppException("RAD: unsupported encoding for preview/bounds: " + encoding);
         }
@@ -331,17 +432,26 @@ namespace ddb
             return header;
         }
 
+        // What a chunk is read for: the centres are always decoded
+        struct RadAttributes
+        {
+            bool appearance = false; // rgb and alpha
+            bool shape = false;      // scales and orientation
+        };
+
         struct DecodedChunk
         {
             size_t count = 0;
             std::vector<float> centers;   // count * 3
             std::vector<float> colors;    // count * 3 (empty when not requested / absent)
             std::vector<float> opacities; // count     (empty when not requested / absent)
+            std::vector<float> scales;    // count * 3 (empty when not requested / absent)
+            std::vector<float> rotations; // count * 4, x y z w (empty when not requested / absent)
         };
 
-        // Decodes one chunk. `centers` is always produced; colours/opacities only when wantColor.
+        // Decodes one chunk: its centres, and the attributes `wanted` names.
         DecodedChunk decodeChunk(std::ifstream &in, const RadHeader &header, const RadChunkRef &ref,
-                                 const std::string &path, bool wantColor)
+                                 const std::string &path, const RadAttributes &wanted)
         {
             if (ref.bytes < 16)
                 throw AppException("RAD: chunk too small in " + path);
@@ -398,14 +508,19 @@ namespace ddb
                     const bool isCenter = name == "center";
                     const bool isRgb = name == "rgb";
                     const bool isAlpha = name == "alpha";
-                    if (!isCenter && !(wantColor && (isRgb || isAlpha)))
+                    const bool isScales = name == "scales";
+                    const bool isOrientation = name == "orientation";
+                    if (!isCenter && !(wanted.appearance && (isRgb || isAlpha)) &&
+                        !(wanted.shape && (isScales || isOrientation)))
                         continue;
 
                     const std::string encoding = p.value("encoding", std::string());
                     const uint64_t offset = unsignedField(p, "offset", path);
                     const uint64_t bytes = unsignedField(p, "bytes", path);
-                    const float mn = p.value("min", 0.0f);
-                    const float mx = p.value("max", 1.0f);
+                    PropertyRange range;
+                    range.min = p.value("min", 0.0f);
+                    range.max = p.value("max", 1.0f);
+                    range.declared = p.contains("min") && p.contains("max");
                     const std::string compression = p.value("compression", std::string());
 
                     if (!fitsWithin(payloadStart, offset, buf.size()) ||
@@ -417,7 +532,7 @@ namespace ddb
                     if (compression == "gz")
                     {
                         // 4 bytes is the widest value of the encodings: nothing declared is larger
-                        const int dims = isCenter ? 3 : (isRgb ? 3 : 1);
+                        const int dims = isAlpha ? 1 : 3;
                         raw = inflateRaw(buf.data() + dataStart, static_cast<size_t>(bytes),
                                          static_cast<size_t>(dims) * out.count * 4);
                     }
@@ -427,11 +542,15 @@ namespace ddb
                     }
 
                     if (isCenter)
-                        out.centers = decodeProperty(raw, encoding, 3, out.count, mn, mx);
+                        out.centers = decodeProperty(raw, encoding, 3, out.count, range);
                     else if (isRgb)
-                        out.colors = decodeProperty(raw, encoding, 3, out.count, mn, mx);
+                        out.colors = decodeProperty(raw, encoding, 3, out.count, range);
                     else if (isAlpha)
-                        out.opacities = decodeProperty(raw, encoding, 1, out.count, mn, mx);
+                        out.opacities = decodeProperty(raw, encoding, 1, out.count, range);
+                    else if (isScales)
+                        out.scales = decodeProperty(raw, encoding, 3, out.count, range);
+                    else
+                        out.rotations = decodeOrientation(raw, encoding, out.count);
                 }
             }
             catch (const json::exception &e)
@@ -464,7 +583,7 @@ namespace ddb
                                          : std::min<int>(maxChunks, static_cast<int>(header.chunks.size()));
         for (int i = 0; i < limit; ++i)
         {
-            DecodedChunk chunk = decodeChunk(in, header, header.chunks[i], io::toUtf8(radPath), /*wantColor=*/true);
+            DecodedChunk chunk = decodeChunk(in, header, header.chunks[i], io::toUtf8(radPath), RadAttributes{true, true});
             if (chunk.count == 0)
                 continue;
 
@@ -482,6 +601,18 @@ namespace ddb
                 result.opacities.insert(result.opacities.end(), chunk.opacities.begin(), chunk.opacities.end());
             else
                 result.opacities.resize(result.count, 1.0f);
+
+            // A chunk without a shape is a set of points: scale 0 and no rotation
+            if (chunk.scales.size() == chunk.count * 3)
+                result.scales.insert(result.scales.end(), chunk.scales.begin(), chunk.scales.end());
+            else
+                result.scales.resize(result.count * 3, 0.0f);
+
+            if (chunk.rotations.size() == chunk.count * 4)
+                result.rotations.insert(result.rotations.end(), chunk.rotations.begin(), chunk.rotations.end());
+            else
+                for (size_t k = 0; k < chunk.count; ++k)
+                    result.rotations.insert(result.rotations.end(), {0.0f, 0.0f, 0.0f, 1.0f});
         }
 
         if (result.count == 0)
@@ -506,7 +637,7 @@ namespace ddb
         bool any = false;
         for (const auto &ref : header.chunks)
         {
-            DecodedChunk chunk = decodeChunk(in, header, ref, io::toUtf8(radPath), /*wantColor=*/false);
+            DecodedChunk chunk = decodeChunk(in, header, ref, io::toUtf8(radPath), RadAttributes{});
             for (size_t i = 0; i < chunk.count; ++i)
             {
                 for (int k = 0; k < 3; ++k)

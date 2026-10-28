@@ -231,6 +231,175 @@ TEST(rad, aMetadataValueOfTheWrongTypeIsAnAppException) {
 }
 
 // ---------------------------------------------------------------------------
+// The shape of the splats: scales and orientation
+// ---------------------------------------------------------------------------
+
+std::string floatsOf(const std::vector<float>& values) {
+    return std::string(reinterpret_cast<const char*>(values.data()), values.size() * sizeof(float));
+}
+
+std::string halvesOf(const std::vector<uint16_t>& values) {
+    return std::string(reinterpret_cast<const char*>(values.data()), values.size() * sizeof(uint16_t));
+}
+
+// One property of a chunk: its metadata, and its bytes
+struct Property {
+    json meta;
+    std::string payload;
+};
+
+Property propertyOf(const char* name, const char* encoding, const std::string& payload, json extra = json::object()) {
+    json meta = {{"property", name}, {"encoding", encoding}, {"bytes", payload.size()}};
+    meta.update(extra);
+    return {meta, payload};
+}
+
+// A file whose single chunk has these properties, one after the other
+fs::path writeProperties(TestArea& ta, const std::string& name, size_t count, const std::vector<Property>& properties) {
+    json metas = json::array();
+    std::string payload;
+    for (const auto& property : properties) {
+        json meta = property.meta;
+        meta["offset"] = payload.size();
+        metas.push_back(meta);
+        payload += property.payload;
+    }
+    return writeSingleChunk(ta, name, {{"count", count}, {"properties", metas}}, payload);
+}
+
+const Property twoCentresProperty = propertyOf("center", "f32", twoCentres());
+
+TEST(rad, theScalesOfASplatAreDecodedWhateverTheEncoding) {
+    TestArea ta(TEST_NAME);
+
+    // f32: the standard deviations as they are (planar: x of both splats, then y, then z)
+    {
+        const auto rad = writeProperties(
+            ta, "scales_f32.rad", 2,
+            {twoCentresProperty, propertyOf("scales", "f32", floatsOf({0.5f, 2.0f, 0.25f, 4.0f, 1.0f, 8.0f}))});
+        const RadCoarseSplats splats = readRadCoarseSplats(rad, 1);
+        ASSERT_EQ(splats.scales.size(), 6u);
+        const std::vector<float> expected = {0.5f, 0.25f, 1.0f, 2.0f, 4.0f, 8.0f}; // per splat: x y z
+        EXPECT_EQ(splats.scales, expected);
+    }
+
+    // ln_f16: the logarithm as a half float (0x3C00 is 1, 0x4000 is 2, 0xBC00 is -1, 0 is 0)
+    {
+        const auto rad = writeProperties(
+            ta, "scales_ln_f16.rad", 2,
+            {twoCentresProperty, propertyOf("scales", "ln_f16", halvesOf({0x0000, 0x3C00, 0xBC00, 0x4000, 0x0000, 0x0000}))});
+        const RadCoarseSplats splats = readRadCoarseSplats(rad, 1);
+        ASSERT_EQ(splats.scales.size(), 6u);
+        const std::vector<float> expected = {1.0f, std::exp(-1.0f), 1.0f, std::exp(1.0f), std::exp(2.0f), 1.0f};
+        for (size_t i = 0; i < expected.size(); ++i)
+            EXPECT_NEAR(splats.scales[i], expected[i], 1e-3f) << i;
+    }
+
+    // ln_0r8: 0 is a scale of 0, 1..255 span the logarithms min..max
+    {
+        const std::string bytes = {char(0), char(1), char(128), char(255), char(255), char(1)};
+        const auto rad = writeProperties(ta, "scales_ln_0r8.rad", 2,
+                                         {twoCentresProperty, propertyOf("scales", "ln_0r8", bytes, {{"min", -2.0}, {"max", 2.0}})});
+        const RadCoarseSplats splats = readRadCoarseSplats(rad, 1);
+        ASSERT_EQ(splats.scales.size(), 6u);
+        // splat 0: bytes 0, 128, 255 (x, y, z); splat 1: 1, 255, 1
+        EXPECT_EQ(splats.scales[0], 0.0f);
+        EXPECT_NEAR(splats.scales[1], 1.0f, 1e-4f);
+        EXPECT_NEAR(splats.scales[2], std::exp(2.0f), 1e-3f);
+        EXPECT_NEAR(splats.scales[3], std::exp(-2.0f), 1e-4f);
+        EXPECT_NEAR(splats.scales[4], std::exp(2.0f), 1e-3f);
+        EXPECT_NEAR(splats.scales[5], std::exp(-2.0f), 1e-4f);
+    }
+
+    // Its logarithms are not guessed when the property does not give them
+    EXPECT_THROW(readRadCoarseSplats(writeProperties(ta, "scales_no_range.rad", 2,
+                                                     {twoCentresProperty, propertyOf("scales", "ln_0r8", std::string(6, '\1'))}),
+                                     1),
+                 AppException);
+}
+
+TEST(rad, theOrientationOfASplatIsDecodedWhateverTheEncoding) {
+    TestArea ta(TEST_NAME);
+
+    // oct88r8: three bytes a splat, the axis (two octahedral coordinates) and the angle. Zero
+    // degrees is the identity whatever the axis; 255 is 180 degrees about it. Axis +z is the centre
+    // of the octahedron (127 is as close to it as a byte gets), +x its corner (255, 127).
+    {
+        const std::string bytes = {char(127), char(127), char(0),     // identity
+                                   char(127), char(127), char(255)};  // 180 degrees about +z
+        const auto rad = writeProperties(ta, "orientation_oct.rad", 2,
+                                         {twoCentresProperty, propertyOf("orientation", "oct88r8", bytes)});
+        const RadCoarseSplats splats = readRadCoarseSplats(rad, 1);
+        ASSERT_EQ(splats.rotations.size(), 8u);
+        EXPECT_NEAR(splats.rotations[3], 1.0f, 1e-5f);
+        EXPECT_NEAR(std::abs(splats.rotations[0]) + std::abs(splats.rotations[1]) + std::abs(splats.rotations[2]), 0.0f, 1e-5f);
+        EXPECT_NEAR(splats.rotations[4], 0.0f, 0.02f);
+        EXPECT_NEAR(splats.rotations[5], 0.0f, 0.02f);
+        EXPECT_NEAR(splats.rotations[6], 1.0f, 0.02f);
+        EXPECT_NEAR(splats.rotations[7], 0.0f, 0.02f);
+    }
+
+    // 90 degrees about +x (255, 127, angle byte 128 is 90.2 degrees)
+    {
+        const std::string bytes = {char(255), char(127), char(128), char(255), char(127), char(0)};
+        const auto rad = writeProperties(ta, "orientation_oct_x.rad", 2,
+                                         {twoCentresProperty, propertyOf("orientation", "oct88r8", bytes)});
+        const RadCoarseSplats splats = readRadCoarseSplats(rad, 1);
+        ASSERT_EQ(splats.rotations.size(), 8u);
+        const float half = 128.0f / 255.0f * 0.5f * 3.14159265f;
+        EXPECT_NEAR(splats.rotations[0], std::sin(half), 0.01f);
+        EXPECT_NEAR(splats.rotations[1], 0.0f, 0.01f);
+        EXPECT_NEAR(splats.rotations[2], 0.0f, 0.01f);
+        EXPECT_NEAR(splats.rotations[3], std::cos(half), 0.01f);
+        EXPECT_NEAR(splats.rotations[0] * splats.rotations[0] + splats.rotations[1] * splats.rotations[1] +
+                        splats.rotations[2] * splats.rotations[2] + splats.rotations[3] * splats.rotations[3],
+                    1.0f, 1e-3f) << "a unit quaternion";
+    }
+
+    // f32: x, y, z, and w to make a unit quaternion of them
+    {
+        const auto rad = writeProperties(
+            ta, "orientation_f32.rad", 2,
+            {twoCentresProperty, propertyOf("orientation", "f32", floatsOf({0.5f, 0.0f, 0.5f, 0.0f, 0.5f, 1.0f}))});
+        const RadCoarseSplats splats = readRadCoarseSplats(rad, 1);
+        const std::vector<float> expected = {0.5f, 0.5f, 0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 0.0f};
+        ASSERT_EQ(splats.rotations.size(), expected.size());
+        for (size_t i = 0; i < expected.size(); ++i)
+            EXPECT_NEAR(splats.rotations[i], expected[i], 1e-6f) << i;
+    }
+
+    // A property the reader does not know is refused, not read as something else
+    EXPECT_THROW(readRadCoarseSplats(writeProperties(ta, "orientation_unknown.rad", 2,
+                                                     {twoCentresProperty, propertyOf("orientation", "s8", std::string(6, '\0'))}),
+                                     1),
+                 AppException);
+}
+
+// A chunk made of points only: no extent, no rotation
+TEST(rad, aSplatWithoutAShapeHasNoExtentAndNoRotation) {
+    TestArea ta(TEST_NAME);
+    const RadCoarseSplats splats = readRadCoarseSplats(writeProperties(ta, "points.rad", 2, {twoCentresProperty}), 1);
+    EXPECT_EQ(splats.scales, std::vector<float>(6, 0.0f));
+    EXPECT_EQ(splats.rotations, (std::vector<float>{0, 0, 0, 1, 0, 0, 0, 1}));
+}
+
+// The shape is compressed like the other properties, and held to its declared size
+TEST(rad, aCompressedShapeIsInflatedWithinItsDeclaredSize) {
+    TestArea ta(TEST_NAME);
+    const std::string scales = floatsOf({0.5f, 2.0f, 0.25f, 4.0f, 1.0f, 8.0f});
+    const auto rad = writeProperties(
+        ta, "scales_gz.rad", 2,
+        {twoCentresProperty, propertyOf("scales", "f32", deflateRaw(scales), {{"compression", "gz"}})});
+    EXPECT_EQ(readRadCoarseSplats(rad, 1).scales.size(), 6u);
+
+    const std::string bomb = deflateRaw(std::string(64u * 1024u * 1024u, '\0'));
+    EXPECT_THROW(readRadCoarseSplats(writeProperties(ta, "scales_bomb.rad", 2,
+                                                     {twoCentresProperty, propertyOf("scales", "f32", bomb, {{"compression", "gz"}})}),
+                                     1),
+                 AppException);
+}
+
+// ---------------------------------------------------------------------------
 // The thumbnail of a RAD
 // ---------------------------------------------------------------------------
 

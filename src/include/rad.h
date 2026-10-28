@@ -19,8 +19,8 @@ namespace ddb
     // they can be decoded on their own to render a thumbnail - the direct analog of
     // reading only the coarse octree levels of a COPC point cloud.
     //
-    // Only the attributes needed for previews and bounds are decoded (center, rgb,
-    // alpha); scales / orientation / spherical harmonics are skipped.
+    // Only the attributes needed for previews, bounds and the orientation of the scene are
+    // decoded (center, rgb, alpha, scales, orientation); spherical harmonics are skipped.
 
     // A coarse splat set decoded from one or more RAD chunks. Colours are already in
     // display space (RGB in [0,1]) and opacities are activated (NOT logits), matching
@@ -31,6 +31,11 @@ namespace ddb
         std::vector<float> positions; // count * 3, in the RAD's local coordinate space
         std::vector<float> colors;    // count * 3, display RGB in [0,1]
         std::vector<float> opacities; // count, activated opacity
+        // The shape of each splat: the standard deviations along its own axes (linear, not the
+        // logarithm RAD stores; 0 for a splat of no extent) and the rotation of those axes as a unit
+        // quaternion x, y, z, w. A chunk without them yields scale 0 and the identity.
+        std::vector<float> scales;    // count * 3
+        std::vector<float> rotations; // count * 4
     };
 
     // True when the path ends with the canonical .rad delivery extension.

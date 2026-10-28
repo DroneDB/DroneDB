@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <algorithm>
+#include <cmath>
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
@@ -700,6 +701,17 @@ TEST(gsplat, buildOutputsArtifacts) {
     EXPECT_EQ(b["max"].size(), 3u);
     for (int k = 0; k < 3; ++k)
         EXPECT_LE(b["min"][k].get<double>(), b["max"][k].get<double>());
+
+    // Which way is up, estimated from the splats: a unit vector, how sure it is, and how it was found
+    ASSERT_TRUE(b.contains("up") && b.contains("upConfidence") && b.contains("upSource"));
+    ASSERT_EQ(b["up"].size(), 3u);
+    const double length = std::sqrt(std::pow(b["up"][0].get<double>(), 2) + std::pow(b["up"][1].get<double>(), 2) +
+                                    std::pow(b["up"][2].get<double>(), 2));
+    EXPECT_NEAR(length, 1.0, 1e-5);
+    EXPECT_GE(b["upConfidence"].get<double>(), 0.0);
+    EXPECT_LE(b["upConfidence"].get<double>(), 1.0);
+    const std::string source = b["upSource"].get<std::string>();
+    EXPECT_TRUE(source == "ground-plane" || source == "pca") << source;
 }
 
 // build-lod exits 0 after it refuses an input and only prints why: the error of the build says it
@@ -824,11 +836,37 @@ TEST(gsplat, radReaderAndOnTheFlyThumbnail) {
         EXPECT_LE(c, 1.02f);
     }
 
+    // So is the shape of each splat: a scale along each of its axes and a unit rotation
+    EXPECT_EQ(splats.scales.size(), splats.count * 3);
+    EXPECT_EQ(splats.rotations.size(), splats.count * 4);
+    for (const float scale : splats.scales) {
+        EXPECT_TRUE(std::isfinite(scale));
+        EXPECT_GE(scale, 0.0f);
+    }
+    for (size_t i = 0; i < splats.count; ++i) {
+        const float* q = &splats.rotations[i * 4];
+        EXPECT_NEAR(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3], 1.0f, 1e-3f) << "splat " << i;
+    }
+
     // Exact bounds across all chunks are well-formed and in the RAD coordinate space.
     std::array<double, 3> bmin{}, bmax{};
     ASSERT_TRUE(ddb::computeRadBounds(modelRad, bmin, bmax));
     for (int k = 0; k < 3; ++k)
         EXPECT_LE(bmin[k], bmax[k]);
+
+    // The finest chunks keep the splats of the input: scale exp(-3) on every axis (the fixture's
+    // log scale), turned by the identity. A scale or a rotation read wrongly cannot pass this.
+    const ddb::RadCoarseSplats all = ddb::readRadCoarseSplats(modelRad, /*maxChunks=*/0);
+    size_t asWritten = 0;
+    for (size_t i = 0; i < all.count; ++i) {
+        const float* s = &all.scales[i * 3];
+        const float* q = &all.rotations[i * 4];
+        const float expected = std::exp(-3.0f);
+        if (std::abs(s[0] - expected) < 0.1f * expected && std::abs(s[1] - expected) < 0.1f * expected &&
+            std::abs(s[2] - expected) < 0.1f * expected && std::abs(q[3]) > 0.99f)
+            ++asWritten;
+    }
+    EXPECT_GT(asWritten, 0u) << "no splat of the file has the scale and rotation the input gave";
 
     // On-the-fly thumbnail: generateThumb dispatches a .rad to the splat rasteriser.
     const fs::path thumb = ta.getPath("thumb.webp");
