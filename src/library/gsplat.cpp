@@ -42,17 +42,18 @@ namespace ddb
         };
 
         // SPZ's file name overloads open a std::string with the narrow code page on Windows
-        // (mio.h, "Path encoding"): the files are read and written here, through its buffer
-        // overloads. Same result as spz::saveSpz(cloud, options, filename).
+        // (mio.h, "Path encoding"): the file is written here, through its buffer overload and the
+        // atomic writer, so a reader (and the file a conversion replaces) sees the previous file or
+        // the whole new one, never a part. Same result as spz::saveSpz(cloud, options, filename).
+        // False when SPZ cannot encode the cloud; throws FSException when the file cannot be written.
         bool saveSpzFile(const spz::GaussianCloud &cloud, const spz::PackOptions &options, const fs::path &file)
         {
             std::vector<uint8_t> data;
             if (!spz::saveSpz(cloud, options, &data))
                 return false;
-            std::ofstream out(file, std::ios::binary | std::ios::out);
-            out.write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
-            out.close();
-            return out.good();
+            io::writeFileAtomic(file, std::string_view(reinterpret_cast<const char *>(data.data()), data.size()),
+                                ".spz file");
+            return true;
         }
 
         SplatFormat formatOf(const std::string &filename)
@@ -159,6 +160,33 @@ namespace ddb
             const std::string problem = plySplatBuildProblem(header);
             if (!problem.empty())
                 throw AppException("Cannot build the Gaussian splat " + input + ": " + problem);
+        }
+
+        // Local-space bounding box sidecar for deterministic camera framing in the viewer (the
+        // streamed .rad has no resident splats at init time). Computed by streaming the .rad
+        // centres: exact, bounded memory, and in the same coordinate space the viewer renders.
+        // The sidecar is optional (the viewer frames the scene without it): a .rad whose centres
+        // cannot be decoded, or a file that cannot be written, is logged and the build still
+        // delivers its model.rad.
+        void writeBoundsSidecar(const fs::path &rad, const fs::path &boundsFile)
+        {
+            try
+            {
+                std::array<double, 3> boundsMin, boundsMax;
+                if (!computeRadBounds(rad, boundsMin, boundsMax))
+                {
+                    LOGW << "Skipping " << io::toUtf8(boundsFile) << ": no centres decoded from " << io::toUtf8(rad);
+                    return;
+                }
+                json j;
+                j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
+                j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
+                io::writeFileAtomic(boundsFile, j.dump(), "bounds file");
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Skipping " << io::toUtf8(boundsFile) << ": " << e.what();
+            }
         }
 
         // Decode an antimatter15 .splat file into an SPZ GaussianCloud.
@@ -457,26 +485,7 @@ namespace ddb
             throw AppException("build-lod failed for " + input + ": " + lodResult.error);
         }
 
-        // Local-space bounding box sidecar for deterministic camera framing in the viewer (the
-        // streamed .rad has no resident splats at init time). Computed by streaming the .rad
-        // centres: exact, bounded memory, and in the same coordinate space the viewer renders.
-        std::array<double, 3> boundsMin, boundsMax;
-        if (computeRadBounds(outRad, boundsMin, boundsMax))
-        {
-            json j;
-            j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
-            j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
-            const fs::path boundsFile = io::fromUtf8(outdir) / GsplatBoundsFileName;
-            std::ofstream out(boundsFile, std::ios::binary);
-            if (out.good())
-                out << j.dump();
-            else
-                LOGD << "Could not write " << io::toUtf8(boundsFile);
-        }
-        else
-        {
-            LOGD << "Skipping bounds.json: no centres decoded from " << io::toUtf8(outRad);
-        }
+        writeBoundsSidecar(outRad, io::fromUtf8(outdir) / GsplatBoundsFileName);
     }
 
 } // namespace ddb

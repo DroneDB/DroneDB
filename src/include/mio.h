@@ -154,11 +154,11 @@ namespace ddb
         // part: into a sibling "<target><tempTag><rand16>", renamed onto target (replacing it, also
         // on Windows). The sibling is removed and the previous file kept on any failure (a full
         // disk included). `what` names the file in the FSException messages ("Cannot open <what>
-        // <path>"). ownerOnly: the file is readable and writable by its owner only (0600), also when
-        // target already existed with wider permissions; the sibling has that mode before any
-        // content is written to it. POSIX only: a Windows file keeps the access rights of its
+        // <path>"). The content is bytes, text or binary, written as is. ownerOnly: the file is
+        // readable and writable by its owner only (0600), also when target already existed with
+        // wider permissions; the sibling has that mode before any content is written to it. POSIX only: a Windows file keeps the access rights of its
         // folder (the user profile folders of the registry credentials are the owner's).
-        void writeFileAtomic(const fs::path &target, const std::string &content, const std::string &what,
+        void writeFileAtomic(const fs::path &target, std::string_view content, const std::string &what,
                              bool ownerOnly = false, const std::string &tempTag = ".tmp-");
 
         // Moves the file `from` to `to`, replacing `to`. Renames it when it is the only link to

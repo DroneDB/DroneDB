@@ -792,7 +792,7 @@ namespace ddb
             }
         }
 
-        void writeFileAtomic(const fs::path &target, const std::string &content, const std::string &what,
+        void writeFileAtomic(const fs::path &target, std::string_view content, const std::string &what,
                              bool ownerOnly, const std::string &tempTag)
         {
             const fs::path temporary = concat(target, tempTag + randomString(16));
@@ -821,7 +821,7 @@ namespace ddb
                 (void)ownerOnly;
 #endif
                 errno = 0;
-                out << content;
+                out.write(content.data(), static_cast<std::streamsize>(content.size()));
                 out.flush();
                 const int writeError = errno;
                 if (!out)

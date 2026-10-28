@@ -18,6 +18,7 @@
 #include "dbops.h"
 #include "ddb.h"
 #include "entry.h"
+#include "fake_model_tools.h"
 #include "exceptions.h"
 #include "gsplat.h"
 #include "buildlod_runner.h"
@@ -1030,6 +1031,42 @@ TEST(gsplat, buildRefusesASplatPlyBuildLodCannotReadBeforeLaunchingIt) {
     const fs::path good = ta.getPath("good.ply");
     writeSplatPly(good, 8, 0);
     expectMissingToolFailure([&] { ddb::buildGsplat(good.string(), outdir.string()); }, "build-lod");
+}
+
+// bounds.json is an optional sidecar (the viewer frames the scene without it): a model.rad whose
+// centres cannot be decoded, or a bounds.json that cannot be written, does not fail the build or
+// leave a part of the sidecar behind.
+TEST(gsplat, aFailureToWriteTheBoundsDoesNotFailTheBuild) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 80, 1);
+
+#ifndef _WIN32
+    {
+        // A build-lod that exits 0 with a .rad the reader cannot decode
+        const auto tool = testtools::writeFakeTool(
+            ta, "build-lod", "printf 'RAD0\\0\\0\\0\\0' > \"$(dirname \"$1\")/source-lod.rad\"\n");
+        BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", tool.string().c_str());
+        ASSERT_TRUE(ddb::buildlod::isBuildLodAvailable());
+
+        const fs::path outdir = ta.getFolder("undecodable");
+        EXPECT_NO_THROW(ddb::buildGsplat(ply.string(), outdir.string()));
+        EXPECT_TRUE(fs::exists(outdir / GsplatRadFileName)) << "the model.rad is delivered";
+        EXPECT_FALSE(fs::exists(outdir / GsplatBoundsFileName));
+        EXPECT_EQ(namesIn(outdir), (std::vector<std::string>{GsplatRadFileName}));
+    }
+#endif
+
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the unwritable bounds assertions");
+
+    // The name of bounds.json is taken by a folder
+    const fs::path outdir = ta.getFolder("unwritable");
+    fs::create_directory(outdir / GsplatBoundsFileName);
+    EXPECT_NO_THROW(ddb::buildGsplat(ply.string(), outdir.string()));
+    EXPECT_TRUE(isRad(outdir / GsplatRadFileName));
+    EXPECT_TRUE(fs::is_directory(outdir / GsplatBoundsFileName));
+    EXPECT_EQ(namesIn(outdir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}))
+        << "no temporary file of the failed write is left";
 }
 
 // A SuperSplat compressed PLY is a splat build-lod reads: the build gives a model.rad of its splats
