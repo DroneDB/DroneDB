@@ -464,6 +464,34 @@ TEST(rad, aThumbnailThatCannotBeRenderedFailsWithAnAppExceptionOfItsOwn) {
     EXPECT_NE(failure("nan.rad", {{nan, 0, 0}, {0, nan, 0}}).find("no finite position"), std::string::npos);
 }
 
+// The splats of a level-of-detail tree: 0 is refined by 1 and 2 (read), 3 by splats that are not
+// in the chunks read, 1, 2 and 4 are leaves
+TEST(rad, theCutLeavesOutTheSplatsThatOthersReadRefine) {
+    TestArea ta(TEST_NAME);
+    const auto u16 = [](const std::vector<uint16_t>& v) { return std::string(reinterpret_cast<const char*>(v.data()), v.size() * 2); };
+    const auto u32 = [](const std::vector<uint32_t>& v) { return std::string(reinterpret_cast<const char*>(v.data()), v.size() * 4); };
+    const auto rad = writeProperties(
+        ta, "tree.rad", 5,
+        {propertyOf("center", "f32", floatsOf({0, 1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})),
+         propertyOf("child_count", "u16", u16({2, 0, 0, 3, 0})),
+         propertyOf("child_start", "u32", u32({1, 0, 0, 100, 0}))});
+
+    const RadCoarseSplats all = readRadCoarseSplats(rad, 1);
+    EXPECT_EQ(all.count, 5u) << "without the cut every splat is read";
+
+    const RadCoarseSplats cut = readRadCoarseSplats(rad, 1, /*onlyTheCut=*/true);
+    ASSERT_EQ(cut.count, 4u);
+    EXPECT_EQ(cut.positions.size(), 12u);
+    EXPECT_EQ(cut.scales.size(), 12u);
+    EXPECT_EQ(cut.rotations.size(), 16u);
+    EXPECT_EQ(cut.opacities.size(), 4u);
+    const std::vector<float> kept = {cut.positions[0], cut.positions[3], cut.positions[6], cut.positions[9]};
+    EXPECT_EQ(kept, (std::vector<float>{1, 2, 3, 4}));
+
+    // A file without a tree has nothing refined
+    EXPECT_EQ(readRadCoarseSplats(writeProperties(ta, "flat.rad", 2, {twoCentresProperty}), 1, true).count, 2u);
+}
+
 // ---------------------------------------------------------------------------
 // The picture of the splats: Gaussian footprints, composited back to front
 // ---------------------------------------------------------------------------
