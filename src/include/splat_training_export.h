@@ -21,8 +21,12 @@ namespace ddb
         int maxImageSize = 0;
 
         /// Most points of the sparse model: the cloud is thinned on a 3D grid down to at most
-        /// this many. 0 writes none.
+        /// this many. 0 writes none; more than MaxPointsLimit is refused.
         size_t maxPoints = 100000;
+
+        /// The largest maxPoints: the grid that thins the cloud holds every point it keeps and a
+        /// cell for each (about 100 bytes a point), so the limit bounds its memory to about a GB.
+        static constexpr size_t MaxPointsLimit = 10000000;
 
         /// Called with the fraction done (0 to 1) and the phase ("cameras", "points", "images",
         /// "model"); returns true to cancel the export (CanceledException). Called one at a
@@ -67,11 +71,16 @@ namespace ddb
      * trainers start from random points). Most of the images looking straight down is warned
      * about: a splat trained from them is poor from any other angle.
      *
-     * A failed export may leave a partial @p outFolder.
+     * @p outFolder must not exist or be an empty folder, and must neither be, hold nor lie inside
+     * the project folder (links resolved): the export replaces the files it writes (an image of
+     * images/, georef.json), so it never writes where a file it did not make could be replaced, or
+     * where a georef.json would become the georeference of the files beside it. Run again, it
+     * needs a new or emptied folder. A failed export may leave a partial @p outFolder.
      * @throws AppException when an input of the project is missing (the message names the file) or
      * unusable, or when no image can be exported (the message gives the reasons);
      * InvalidArgsException when an argument is not usable (a folder that does not exist, an output
-     * that is the project, a negative size); CanceledException when canceled.
+     * that is a file, is not empty or overlaps the project, a negative size, more points than
+     * MaxPointsLimit); CanceledException when canceled.
      */
     SplatTrainingExportResult exportSplatTrainingData(const fs::path &odmProjectFolder, const fs::path &outFolder,
                                                       const SplatTrainingExportOptions &options = {});

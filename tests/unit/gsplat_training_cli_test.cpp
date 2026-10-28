@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -99,6 +100,40 @@ namespace
         EXPECT_TRUE(outcome.out.empty()) << outcome.out;
         EXPECT_NE(outcome.err.find("coords.txt"), std::string::npos) << outcome.err;
         EXPECT_EQ(outcome.err.find("Usage:"), std::string::npos) << "a missing file is not a usage error: " << outcome.err;
+    }
+
+    // `ddb gsplat --training-data . <project>` from a folder of photos would replace them with
+    // resized copies of the same name and leave a georef.json beside them
+    TEST(GsplatTrainingDataCli, refusesAFolderThatIsNotEmptyOrHoldsTheProjectAndChangesNothing)
+    {
+        TestArea area(TEST_NAME, true);
+        const auto project = testutils::writeOdmProject(area.getFolder("odm"), testutils::defaultOdmProject());
+        const auto photo = area.getPath("images") / "a.JPG";
+        testutils::writeTextFile(photo, "a photo");
+
+        for (const auto &out : {area.getFolder(), area.getFolder("images")})
+        {
+            SCOPED_TRACE(out.string());
+            const auto outcome = gsplat({"--training-data", out.string(), "--max-image-size", "64", project.string()});
+            EXPECT_EQ(outcome.code, EXIT_FAILURE);
+            EXPECT_TRUE(outcome.out.empty()) << outcome.out;
+            EXPECT_NE(outcome.err.find("choose a new"), std::string::npos) << outcome.err;
+        }
+
+        std::ifstream in(photo, std::ios::binary);
+        EXPECT_EQ(std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()), "a photo");
+        EXPECT_FALSE(std::filesystem::exists(area.getPath("georef.json")));
+        EXPECT_FALSE(std::filesystem::exists(area.getPath("sparse")));
+    }
+
+    TEST(GsplatTrainingDataCli, refusesMorePointsThanItsCap)
+    {
+        TestArea area(TEST_NAME, true);
+        const auto project = testutils::writeOdmProject(area.getFolder("odm"), testutils::defaultOdmProject());
+        const auto outcome = gsplat({"--training-data", area.getPath("out").string(), "--max-points", "10000001", project.string()});
+        EXPECT_EQ(outcome.code, EXIT_FAILURE);
+        EXPECT_NE(outcome.err.find("10000000"), std::string::npos) << outcome.err;
+        EXPECT_FALSE(std::filesystem::exists(area.getPath("out")));
     }
 
     TEST(GsplatTrainingDataCli, sizeAndPointsGoWithTrainingData)

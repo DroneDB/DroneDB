@@ -1165,7 +1165,7 @@ SplatTrainingExportOptions splatTrainingOptionsArg(const char* optionsJson) {
     };
     if (const auto size = wholeNumber("maxImageSize", 1u << 20))
         options.maxImageSize = static_cast<int>(*size);
-    if (const auto points = wholeNumber("maxPoints", 1u << 30))
+    if (const auto points = wholeNumber("maxPoints", SplatTrainingExportOptions::MaxPointsLimit))
         options.maxPoints = static_cast<size_t>(*points);
     return options;
 }
@@ -1198,8 +1198,15 @@ DDBErr DDBExportSplatTrainingData(const char* ddbPath, const char* folder, const
         if (!deppath::isInside(fs::weakly_canonical(project, ec), fs::weakly_canonical(root, ec)))
             throw InvalidArgsException("The folder '" + entryFolder + "' leads out of the dataset");
 
-        const SplatTrainingExportResult result =
-            exportSplatTrainingData(project, pathArg(outFolder), options);
+        // The training data never goes into the dataset: its images and georef.json would replace
+        // files of the dataset of the same name, and the georef.json would become the georeference
+        // of the models and splats beside it at the next index
+        const fs::path out = pathArg(outFolder);
+        if (io::isSamePath(out, root) || io::Path(root).isParentOf(out))
+            throw InvalidArgsException("The output folder " + io::toUtf8(out) +
+                                       " is in the dataset: the training data goes into a folder outside of it");
+
+        const SplatTrainingExportResult result = exportSplatTrainingData(project, out, options);
         return json{{"warnings", result.warnings}, {"images", result.images}, {"points", result.points}};
     });
 }

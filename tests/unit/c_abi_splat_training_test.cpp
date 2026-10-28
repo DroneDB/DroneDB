@@ -9,6 +9,8 @@
 // matter of splat_training_export_test.cpp.
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -43,17 +45,31 @@ namespace
             testutils::writeOdmProject(root / "odm", testutils::defaultOdmProject());
         }
 
+        // Exports into a fresh `out`: the export refuses a folder that already holds files
         DDBErr exportFolder(const char *folder, const char *options, std::string &json, DDBProgressCallback progress = nullptr,
                             void *userData = nullptr)
         {
+            fs::remove_all(out);
+            return exportTo(out, folder, options, json, progress, userData);
+        }
+
+        DDBErr exportTo(const fs::path &outFolder, const char *folder, const char *options, std::string &json,
+                        DDBProgressCallback progress = nullptr, void *userData = nullptr)
+        {
             char *output = nullptr;
-            const DDBErr code = DDBExportSplatTrainingData(root.string().c_str(), folder, out.string().c_str(), options,
+            const DDBErr code = DDBExportSplatTrainingData(root.string().c_str(), folder, outFolder.string().c_str(), options,
                                                            progress, userData, &output);
             json = output != nullptr ? output : "";
             DDBFree(output);
             return code;
         }
     };
+
+    std::string contentOf(const fs::path &file)
+    {
+        std::ifstream in(file, std::ios::binary);
+        return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    }
 
     TEST(CAbiSplatTraining, exportsTheProjectOfAFolderOfTheDataset)
     {
@@ -139,6 +155,70 @@ namespace
         EXPECT_EQ(d.exportFolder("odm", nullptr, text), DDBERR_EXCEPTION);
         EXPECT_NE(std::string(DDBGetLastError()).find("coords.txt"), std::string::npos) << DDBGetLastError();
         EXPECT_TRUE(text.empty());
+    }
+
+    TEST(CAbiSplatTraining, refusesAPointLimitAboveItsCap)
+    {
+        Dataset d(TEST_NAME);
+        std::string text;
+        EXPECT_EQ(d.exportFolder("odm", R"({"maxPoints": 10000001})", text), DDBERR_INVALIDARGS);
+        EXPECT_NE(std::string(DDBGetLastError()).find("10000000"), std::string::npos) << DDBGetLastError();
+        EXPECT_FALSE(fs::exists(d.out));
+        ASSERT_DDB_OK(d.exportFolder("odm", R"({"maxPoints": 10000000})", text));
+        EXPECT_EQ(json::parse(text)["points"], 4);
+    }
+
+    // Written into the dataset, the resized images would replace its photos of the same name and
+    // its georef.json would georeference the models beside it at the next index
+    TEST(CAbiSplatTraining, refusesAnOutputFolderInTheDatasetAndChangesNothing)
+    {
+        Dataset d(TEST_NAME);
+        const fs::path photo = d.root / "images" / "a.JPG";
+        fs::create_directories(photo.parent_path());
+        fs::copy_file(d.root / "odm" / "images" / "a.JPG", photo);
+        const std::string original = contentOf(photo);
+
+        std::string text;
+        const auto refused = [&](const fs::path &out) {
+            SCOPED_TRACE(out.string());
+            EXPECT_EQ(d.exportTo(out, "odm", R"({"maxImageSize": 64})", text), DDBERR_INVALIDARGS);
+            EXPECT_NE(std::string(DDBGetLastError()).find("in the dataset"), std::string::npos) << DDBGetLastError();
+            EXPECT_TRUE(text.empty());
+        };
+        refused(d.root);
+        refused(d.root / ".");
+        refused(d.root / "exports" / "training");
+        refused(d.root / ".." / d.root.filename() / "training");
+
+        // A link to a folder of the dataset is the dataset
+        std::error_code ec;
+        fs::create_directory_symlink(d.root, d.area.getPath("link"), ec);
+        if (!ec)
+            refused(d.area.getPath("link") / "training");
+
+        EXPECT_EQ(contentOf(photo), original) << "a photo of the dataset was replaced";
+        EXPECT_FALSE(fs::exists(d.root / "georef.json"));
+        EXPECT_FALSE(fs::exists(d.root / "sparse"));
+        EXPECT_FALSE(fs::exists(d.root / "exports"));
+        EXPECT_FALSE(fs::exists(d.root / "training"));
+    }
+
+    TEST(CAbiSplatTraining, refusesAnOutputFolderThatIsNotEmpty)
+    {
+        Dataset d(TEST_NAME);
+        fs::create_directories(d.out / "images");
+        testutils::writeTextFile(d.out / "images" / "a.JPG", "keep me");
+
+        std::string text;
+        EXPECT_EQ(d.exportTo(d.out, "odm", nullptr, text), DDBERR_INVALIDARGS);
+        EXPECT_NE(std::string(DDBGetLastError()).find("not empty"), std::string::npos) << DDBGetLastError();
+        EXPECT_EQ(contentOf(d.out / "images" / "a.JPG"), "keep me");
+        EXPECT_FALSE(fs::exists(d.out / "georef.json"));
+
+        // An empty one is fine
+        fs::remove_all(d.out);
+        fs::create_directories(d.out);
+        ASSERT_DDB_OK(d.exportTo(d.out, "odm", nullptr, text));
     }
 
     TEST(CAbiSplatTraining, refusesMissingArguments)

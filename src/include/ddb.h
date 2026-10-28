@@ -1021,19 +1021,22 @@ extern "C"
      * Brown cameras are exported as OPENCV (its missing third radial term is folded into k1 and
      * k2), perspective ones as RADIAL, fisheye_opencv ones as OPENCV_FISHEYE; an image of any other
      * model, or whose file is missing, is left out with a warning. It only reads the dataset;
-     * outFolder is a folder of the filesystem. A failed or canceled call may leave a partial
-     * outFolder. The call is cancellable (DDBSetThreadCancelToken).
+     * outFolder is a new or empty folder of the filesystem outside of the dataset, so that no file
+     * the export did not make is ever replaced (a second export needs a new or emptied folder). A
+     * failed or canceled call may leave a partial outFolder. The call is cancellable
+     * (DDBSetThreadCancelToken).
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param folder dataset-relative folder of the ODM project (an entry path, see "Entry paths";
      *        "", NULL and "." for the dataset root)
-     * @param outFolder filesystem folder to write (UTF-8), created if missing; it must not be the
-     *        project's folder
+     * @param outFolder filesystem folder to write (UTF-8), created if missing; it must be missing
+     *        or empty and outside of the dataset (links resolved)
      * @param optionsJson NULL, "" or "{}" for the defaults, else a JSON object with the members
      *          "maxImageSize"  whole number from 0, the longest side in pixels of the exported
      *                          images (a smaller image keeps its size); 0 (default) exports the
      *                          originals, linked or copied,
-     *          "maxPoints"     whole number from 0, the most points of points3D.bin, thinned on a
-     *                          3D grid (default 100000); 0 writes none.
+     *          "maxPoints"     whole number from 0 to 10000000, the most points of points3D.bin,
+     *                          thinned on a 3D grid (default 100000); 0 writes none. The grid
+     *                          holds the points it keeps, so the cap bounds its memory.
      *        A member that is not known, or not a whole number in range, is refused.
      * @param progress optional progress callback (may be NULL): the fraction done and the phase
      *        ("cameras", "points", "images", "model"); a non-zero return cancels the call
@@ -1043,8 +1046,9 @@ extern "C"
      *               {"warnings": [string], "images": number, "points": number}: what the user
      *               should know before training (images left out, an approximated lens, no point
      *               cloud, most images looking straight down), the images of the model and its points
-     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty or an
-     *         option is refused; DDBERR_NOTFOUND when folder is not in the dataset; DDBERR_EXCEPTION
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, an
+     *         option is refused or outFolder is in the dataset, is a file or is not empty;
+     *         DDBERR_NOTFOUND when folder is not in the dataset; DDBERR_EXCEPTION
      *         when a file of the project is missing or unusable (the message names it, coords.txt
      *         included) or no image can be exported (the message gives the reasons);
      *         DDBERR_CANCELED when canceled; DDBERR_BUSY on database contention */

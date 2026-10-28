@@ -388,7 +388,10 @@ Registry has to adopt first.
   data of a Gaussian splat (a COLMAP sparse model, the images and `georef.json`) from the ODM
   project that is in `folder` of the dataset. Its output is `{"warnings": [string], "images": n,
   "points": n}`; the options are `{"maxImageSize"?: n, "maxPoints"?: n}` (whole numbers from 0, 0 for
-  the originals and for no points). It returns `DDBERR_INVALIDARGS` for an option that is not usable,
+  the originals and for no points; `maxPoints` at most 10000000). `outFolder` must be missing or
+  empty and outside of the dataset, so the export never replaces a file it did not make. It returns
+  `DDBERR_INVALIDARGS` for an option that is not usable and for an `outFolder` in the dataset, that
+  is a file or that is not empty,
   `DDBERR_NOTFOUND` for a folder that is not in the dataset, `DDBERR_EXCEPTION` for a file of the
   project that is missing or unusable (the message names `coords.txt`, `cameras.json`... ) and
   `DDBERR_CANCELED` when

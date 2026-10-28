@@ -520,7 +520,8 @@ namespace
         EXPECT_GT(maxX, 30.0);
         EXPECT_GT(maxY, 30.0);
 
-        // A limit that is more than the cloud keeps it whole
+        // A limit that is more than the cloud keeps it whole (into a new folder: a used one is refused)
+        fs::remove_all(e.out);
         options.maxPoints = 100000;
         EXPECT_EQ(e.run(options).points, e.spec.points.size());
     }
@@ -892,6 +893,7 @@ namespace
         for (int i = 98; i < 100; ++i)
             e.spec.shots[i].rotation = i == 98 ? Vec3{3.14159265358979, 0, 0} : Vec3{1.6, 0, 0};
         e.write();
+        fs::remove_all(e.out); // a used output folder is refused
         EXPECT_TRUE(hasWarning(e.run(), "99% of the images look straight down"));
     }
 
@@ -939,6 +941,89 @@ namespace
         SplatTrainingExportOptions options;
         options.maxImageSize = -1;
         EXPECT_THROW(exportSplatTrainingData(e.project, e.out, options), InvalidArgsException);
+    }
+
+    std::string contentOf(const fs::path &file)
+    {
+        std::ifstream in(file, std::ios::binary);
+        return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    }
+
+    // Its images and georef.json replace files of the same name: a folder that overlaps the project
+    // would lose the project's images to resized copies and gain a georef.json beside its models
+    TEST(SplatTrainingExport, refusesAnOutputThatIsInOrHoldsTheProjectAndChangesNothing)
+    {
+        Exported e(TEST_NAME);
+        e.write();
+        const std::string original = contentOf(e.project / "images" / "a.JPG");
+        SplatTrainingExportOptions options;
+        options.maxImageSize = 64;
+
+        for (const fs::path &out : {e.project / "images" / "..", e.project / "training", e.project / "images",
+                                    e.project.parent_path(), e.project / ".." / ".."})
+        {
+            SCOPED_TRACE(out.string());
+            EXPECT_THROW(exportSplatTrainingData(e.project, out, options), InvalidArgsException);
+        }
+
+        // Through a link too
+        std::error_code ec;
+        fs::create_directory_symlink(e.project, e.area.getPath("link"), ec);
+        if (!ec)
+        {
+            EXPECT_THROW(exportSplatTrainingData(e.project, e.area.getPath("link") / "training", options),
+                         InvalidArgsException);
+        }
+
+        EXPECT_EQ(contentOf(e.project / "images" / "a.JPG"), original) << "an image of the project was replaced";
+        EXPECT_FALSE(fs::exists(e.project / "georef.json"));
+        EXPECT_FALSE(fs::exists(e.project / "training"));
+        EXPECT_FALSE(fs::exists(e.project.parent_path() / "georef.json"));
+    }
+
+    TEST(SplatTrainingExport, refusesAnOutputThatIsAFileOrNotEmptyAndReplacesNothing)
+    {
+        Exported e(TEST_NAME);
+        e.write();
+        writeTextFile(e.out / "images" / "a.JPG", "a photo of someone else");
+        writeTextFile(e.out / "georef.json", "{}");
+        SplatTrainingExportOptions options;
+        options.maxImageSize = 64;
+        try
+        {
+            e.run(options);
+            FAIL() << "no error";
+        }
+        catch (const InvalidArgsException &ex)
+        {
+            EXPECT_NE(std::string(ex.what()).find("not empty"), std::string::npos) << ex.what();
+        }
+        EXPECT_EQ(contentOf(e.out / "images" / "a.JPG"), "a photo of someone else");
+        EXPECT_EQ(contentOf(e.out / "georef.json"), "{}");
+        EXPECT_FALSE(fs::exists(e.out / "sparse"));
+
+        const fs::path file = e.area.getPath("file");
+        writeTextFile(file, "x");
+        EXPECT_THROW(exportSplatTrainingData(e.project, file, options), InvalidArgsException);
+        EXPECT_EQ(contentOf(file), "x");
+
+        // An empty folder is as good as a missing one
+        fs::remove_all(e.out);
+        fs::create_directories(e.out);
+        EXPECT_EQ(e.run(options).images, 2u);
+    }
+
+    TEST(SplatTrainingExport, refusesMorePointsThanItsCap)
+    {
+        Exported e(TEST_NAME);
+        e.write();
+        SplatTrainingExportOptions options;
+        options.maxPoints = SplatTrainingExportOptions::MaxPointsLimit + 1;
+        EXPECT_THROW(e.run(options), InvalidArgsException);
+        EXPECT_FALSE(fs::exists(e.out));
+
+        options.maxPoints = SplatTrainingExportOptions::MaxPointsLimit;
+        EXPECT_EQ(e.run(options).points, e.spec.points.size());
     }
 
     TEST(SplatTrainingExport, failsWhenNoImageCanBeExported)

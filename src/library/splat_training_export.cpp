@@ -1110,6 +1110,37 @@ namespace ddb
                                            "easting and northing of the offset");
             return *georef;
         }
+
+        // Whether p is folder or lies inside it, links resolved
+        bool isAtOrInside(const fs::path &p, const fs::path &folder)
+        {
+            return io::isSamePath(p, folder) || io::Path(folder).isParentOf(p);
+        }
+
+        // Refuses an output folder where the export could replace a file it did not make: the
+        // images it links or resizes and georef.json replace a file of the same name, and a
+        // georef.json becomes the georeference of every model and splat beside it. So the folder
+        // is new or empty and apart from the project (neither the project, in it nor holding it).
+        void assureUsableOutFolder(const fs::path &odmProjectFolder, const fs::path &outFolder)
+        {
+            if (isAtOrInside(outFolder, odmProjectFolder))
+                throw InvalidArgsException("The training data cannot be written into the ODM project folder " +
+                                           io::toUtf8(odmProjectFolder) + " or a folder in it: choose a new folder elsewhere");
+            if (isAtOrInside(odmProjectFolder, outFolder))
+                throw InvalidArgsException("The training data cannot be written into " + io::toUtf8(outFolder) +
+                                           ", which holds the ODM project: choose a new folder elsewhere");
+
+            std::error_code ec;
+            const auto status = fs::status(outFolder, ec);
+            if (!fs::exists(status))
+                return;
+            if (!fs::is_directory(status))
+                throw InvalidArgsException(io::toUtf8(outFolder) + " is not a folder: choose a new folder for the training data");
+            if (!fs::is_empty(outFolder, ec) || ec)
+                throw InvalidArgsException("The output folder " + io::toUtf8(outFolder) +
+                                           " is not empty: choose a new or empty folder for the training data, so "
+                                           "that no file in it is replaced");
+        }
     } // namespace
 
     SplatTrainingExportResult exportSplatTrainingData(const fs::path &odmProjectFolder, const fs::path &outFolder,
@@ -1117,12 +1148,15 @@ namespace ddb
     {
         if (options.maxImageSize < 0)
             throw InvalidArgsException("The maximum image size cannot be negative");
+        if (options.maxPoints > SplatTrainingExportOptions::MaxPointsLimit)
+            throw InvalidArgsException("The most points of the sparse model is " +
+                                       std::to_string(SplatTrainingExportOptions::MaxPointsLimit) + ", not " +
+                                       std::to_string(options.maxPoints));
 
         std::error_code ec;
         if (!fs::is_directory(odmProjectFolder, ec))
             throw InvalidArgsException(io::toUtf8(odmProjectFolder) + " is not a folder");
-        if (io::isSamePath(odmProjectFolder, outFolder))
-            throw InvalidArgsException("The training data cannot be written into the ODM project folder itself");
+        assureUsableOutFolder(odmProjectFolder, outFolder);
 
         // Everything it needs, before anything is written
         const fs::path coordsFile = requireFile(odmProjectFolder / "odm_georeferencing" / "coords.txt", "coords.txt");

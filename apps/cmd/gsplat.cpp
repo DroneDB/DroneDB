@@ -24,9 +24,9 @@ namespace cmd
     ("i,input", "Gaussian Splat file to convert (" + ddb::splatExtensionsText(ddb::SplatStage::Convert) + "), or with --training-data the ODM project folder", cxxopts::value<std::string>());
     cmd::addOutputOption(opts, "Output .spz file (default: the input with the .spz extension; a .spz input needs another path)");
     opts.add_options()
-    ("training-data", "Write the training data of a Gaussian splat from the outputs of an ODM project (cameras.json, odm_report/shots.geojson, images/, odm_georeferencing/coords.txt and its point cloud) into this folder: a COLMAP model (sparse/0), the images (images/) and georef.json, which makes a splat trained from it and put next to it georeferenced", cxxopts::value<std::string>())
+    ("training-data", "Write the training data of a Gaussian splat from the outputs of an ODM project (cameras.json, odm_report/shots.geojson, images/, odm_georeferencing/coords.txt and its point cloud) into this folder, which must be new or empty and apart from the project: a COLMAP model (sparse/0), the images (images/) and georef.json, which makes a splat trained from it and put next to it georeferenced", cxxopts::value<std::string>())
     ("max-image-size", "With --training-data: longest side in pixels of the exported images (default: the originals)", cxxopts::value<int>())
-    ("max-points", "With --training-data: most points of the sparse model", cxxopts::value<size_t>()->default_value(std::to_string(ddb::SplatTrainingExportOptions{}.maxPoints)));
+    ("max-points", "With --training-data: most points of the sparse model (at most " + std::to_string(ddb::SplatTrainingExportOptions::MaxPointsLimit) + ")", cxxopts::value<size_t>()->default_value(std::to_string(ddb::SplatTrainingExportOptions{}.maxPoints)));
         // clang-format on
         opts.parse_positional({"input", "output"});
     }
