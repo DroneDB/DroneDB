@@ -99,7 +99,11 @@ class GaussianSplatEntryHandler : public EntryHandler {
     // plain AppException if build-lod is unavailable: a missing tool is not a missing
     // dependency, so the build fails instead of staying pending.
     void build(const BuildContext& ctx) const override {
-        buildGsplat(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder));
+        // The georeference was found when the entry was indexed and is the only source of it
+        std::optional<LocalFrameGeoref> georef;
+        if (ctx.entry.properties.is_object() && ctx.entry.properties.contains("georef"))
+            georef = localFrameGeorefFromProperty(ctx.entry.properties["georef"]);
+        buildGsplat(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder), georef);
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::BuildArtifact; }

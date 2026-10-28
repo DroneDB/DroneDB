@@ -5,10 +5,12 @@
 #define GSPLAT_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "build_layout.h"
 #include "json_fwd.h"
+#include "local_frame_georef.h"
 
 namespace ddb
 {
@@ -41,9 +43,16 @@ namespace ddb
     // Builds the Gaussian Splat delivery artifacts from a splat source (a format SplatStage::Build
     // names) into `outdir`: `<outdir>/model.rad` (RAD container) and `<outdir>/bounds.json`
     // (bounding box and up vector). build-lod is mandatory: throws AppException if it is unavailable.
+    //
+    // bounds.json is {"min": [x, y, z], "max": [x, y, z], "up": [x, y, z], "upConfidence", "upSource"}
+    // in the frame of model.rad; "up" is the unit vector to the sky and may be missing. When the
+    // splat is `georef`erenced its frame is metric East/North/Up, so up is [0, 0, 1] with
+    // upConfidence 1 and upSource "georef" without any estimate, and "wgs84Footprint" is the GeoJSON
+    // Polygon geometry of the bounds on the Earth ({"type": "Polygon", "coordinates": [[[lon, lat], ...]]}).
     // A .rad source is already a model.rad: it is validated with the RAD reader and linked or copied,
     // without build-lod (a file the reader cannot read throws AppException with the reason).
-    void buildGsplat(const std::string &input, const std::string &outdir);
+    void buildGsplat(const std::string &input, const std::string &outdir,
+                     const std::optional<LocalFrameGeoref> &georef = std::nullopt);
 
 } // namespace ddb
 

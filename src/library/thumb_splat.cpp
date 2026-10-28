@@ -7,11 +7,15 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <limits>
+#include <optional>
 #include <tuple>
 #include <utility>
 
+#include "build_layout.h"
 #include "exceptions.h"
+#include "json.h"
 #include "mio.h"
 #include "parallel.h"
 #include "rad.h"
@@ -886,6 +890,22 @@ int thumbChunks(int thumbSize) {
     return std::clamp(static_cast<int>(std::ceil(wanted)), ViewChunks, MaxThumbChunks);
 }
 
+// The up vector of the model.rad of a build when the bounds.json beside it says the splat is
+// georeferenced: its frame is East/North/Up, whatever the splats look like, so the scene stands on +Z
+// without an estimate. A bounds.json that is missing or unreadable is no claim.
+std::optional<SplatUp> georeferencedUpOfRad(const fs::path& radPath) {
+    try {
+        std::ifstream in(radPath.parent_path() / GsplatBoundsFileName);
+        json bounds;
+        if (in.good() && (in >> bounds) && bounds.is_object() &&
+            bounds.value("upSource", "") == splatUpSourceName(SplatUpSource::Georef))
+            return estimateSplatUp(RadCoarseSplats(), /*georeferenced=*/true);
+    } catch (const std::exception&) {
+        // not a claim: the estimate stands
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 // Render an on-demand preview of a Gaussian Splat (.spz). Colours come from the spherical-harmonics
@@ -964,7 +984,8 @@ void generateSplatThumbFromRad(const fs::path& radPath,
                                  splats.count, io::toUtf8(radPath)};
     };
 
-    const SplatUp up = estimateSplatUp(read(RadPreviewChunks));
+    const std::optional<SplatUp> georeferencedUp = georeferencedUpOfRad(radPath);
+    const SplatUp up = georeferencedUp ? *georeferencedUp : estimateSplatUp(read(RadPreviewChunks));
     RadCoarseSplats splats = read(ViewChunks);
     std::vector<size_t> taking = participating(inputOf(splats));
     const SplatView view = chooseView(inputOf(splats), taking, up);

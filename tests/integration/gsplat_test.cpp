@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <array>
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <string>
 #include <vector>
@@ -25,6 +27,7 @@
 #include "fake_model_tools.h"
 #include "exceptions.h"
 #include "gsplat.h"
+#include "local_frame_georef.h"
 #include "buildlod_runner.h"
 #include "gtest/gtest.h"
 #include "load-spz.h"
@@ -67,8 +70,10 @@ int fRestCountForDegree(int shDegree) {
     }
 }
 
-// Write a minimal but valid binary-little-endian 3DGS PLY that SPZ can decode.
-void writeSplatPly(const fs::path& path, int n, int shDegree) {
+// Write a minimal but valid binary-little-endian 3DGS PLY that SPZ can decode. The splats are on a
+// flat grid, unless `position` says where splat i is.
+void writeSplatPly(const fs::path& path, int n, int shDegree,
+                   const std::function<std::array<float, 3>(int)>& position = nullptr) {
     const int fRest = fRestCountForDegree(shDegree);
 
     std::vector<std::string> props = {"x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2"};
@@ -97,6 +102,10 @@ void writeSplatPly(const fs::path& path, int n, int shDegree) {
         row[0] = static_cast<float>(i % 10);          // x
         row[1] = static_cast<float>(i / 10);          // y
         row[2] = static_cast<float>(i % 3) * 0.1f;    // z (flat -> top-down)
+        if (position) {
+            const std::array<float, 3> p = position(i);
+            std::copy(p.begin(), p.end(), row.begin());
+        }
         row[3] = 0.2f;                                // f_dc_0
         row[4] = 0.1f;                                // f_dc_1
         row[5] = -0.1f;                               // f_dc_2
@@ -1945,6 +1954,155 @@ TEST(gsplat, aRadWhoseUpCannotBeEstimatedStillPublishesItsBounds) {
     EXPECT_EQ(bounds["min"], (json::array({1.0, 2.0, 5.0})));
     EXPECT_EQ(bounds["max"], (json::array({3.0, 4.0, 7.0})));
     EXPECT_FALSE(bounds.contains("up"));
+}
+
+// ---------------------------------------------------------------------------
+// Georeferenced splats
+// ---------------------------------------------------------------------------
+
+// A scene whose ground is the XZ plane with the sky towards -Y (the frame of COLMAP and INRIA
+// scenes): nothing like a georeferenced frame, so an estimate of up comes out as -Y, not +Z
+void writeYDownGround(const fs::path& ply) {
+    writeSplatPly(ply, 4000, 1, [](int i) -> std::array<float, 3> {
+        if (i % 10 == 0) // things on the ground: a tail towards the sky
+            return {static_cast<float>(i % 40) * 0.5f, -static_cast<float>(i % 7) - 1.0f, static_cast<float>(i % 23)};
+        return {static_cast<float>(i % 80) * 0.25f, static_cast<float>(i % 3) * 0.01f, static_cast<float>(i / 80) * 0.4f};
+    });
+}
+
+const LocalFrameGeoref kBrightonGeoref = LocalFrameGeoref::projected("EPSG:32615", 576705, 5188170);
+
+// A georeferenced splat is upright by its frame and has a footprint on the Earth: bounds.json says
+// both, and the footprint is the bounding box converted from the CRS (the WGS84 values are those of
+// PROJ for (576705, 5188170) and (576714, 5188209))
+TEST(gsplat, aGeoreferencedBuildWritesUpAndTheWgs84Footprint) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 400, 1); // x 0..9, y 0..39
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the georeferenced build");
+
+    const fs::path outdir = ta.getFolder("georef_out");
+    ddb::buildGsplat(ply.string(), outdir.string(), kBrightonGeoref);
+
+    const json bounds = json::parse(readText(outdir / GsplatBoundsFileName));
+    EXPECT_EQ(bounds["up"], (json::array({0.0, 0.0, 1.0})));
+    EXPECT_EQ(bounds["upConfidence"], 1.0);
+    EXPECT_EQ(bounds["upSource"], "georef");
+
+    ASSERT_TRUE(bounds.contains("wgs84Footprint")) << bounds.dump();
+    const json& footprint = bounds["wgs84Footprint"];
+    EXPECT_EQ(footprint["type"], "Polygon");
+    ASSERT_EQ(footprint["coordinates"].size(), 1u);
+    const json& ring = footprint["coordinates"][0];
+    ASSERT_EQ(ring.size(), 5u);
+    EXPECT_EQ(ring[0], ring[4]);
+    // 1e-6 degrees is about 0.1 m: the box is that of the splats as the RAD stores them
+    EXPECT_NEAR(ring[0][0].get<double>(), -91.994009513, 1e-6);
+    EXPECT_NEAR(ring[0][1].get<double>(), 46.842651237, 1e-6);
+    EXPECT_NEAR(ring[1][0].get<double>(), -91.993891496, 1e-6);
+    EXPECT_NEAR(ring[1][1].get<double>(), 46.842650200, 1e-6);
+    EXPECT_NEAR(ring[2][0].get<double>(), -91.993884945, 1e-6);
+    EXPECT_NEAR(ring[2][1].get<double>(), 46.843001107, 1e-6);
+    EXPECT_NEAR(ring[3][0].get<double>(), -91.994002963, 1e-6);
+    EXPECT_NEAR(ring[3][1].get<double>(), 46.843002144, 1e-6);
+
+    // A RAD upload is published with the same sidecar
+    const fs::path published = ta.getFolder("georef_rad");
+    ddb::buildGsplat((outdir / GsplatRadFileName).string(), published.string(), kBrightonGeoref);
+    const json uploaded = json::parse(readText(published / GsplatBoundsFileName));
+    EXPECT_EQ(uploaded["upSource"], "georef");
+    EXPECT_EQ(uploaded["wgs84Footprint"], bounds["wgs84Footprint"]);
+
+    // ENU is the model's approximation around the origin
+    const fs::path enuOut = ta.getFolder("enu_out");
+    ddb::buildGsplat(ply.string(), enuOut.string(), LocalFrameGeoref::enu(46.842651237, -91.994009513, 0.0));
+    const json enu = json::parse(readText(enuOut / GsplatBoundsFileName));
+    EXPECT_EQ(enu["upSource"], "georef");
+    const json& enuRing = enu["wgs84Footprint"]["coordinates"][0];
+    EXPECT_NEAR(enuRing[0][0].get<double>(), -91.994009513, 1e-6);
+    EXPECT_NEAR(enuRing[2][1].get<double>(), 46.842651237 + 39.0 / 111320.0, 1e-6);
+}
+
+// Without a georeference the sidecar is what it was: an estimate, and no footprint
+TEST(gsplat, aBuildWithoutAGeoreferenceHasNoFootprint) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 400, 1);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the build");
+
+    const fs::path outdir = ta.getFolder("out");
+    ddb::buildGsplat(ply.string(), outdir.string());
+    const json bounds = json::parse(readText(outdir / GsplatBoundsFileName));
+    EXPECT_FALSE(bounds.contains("wgs84Footprint"));
+    EXPECT_NE(bounds.value("upSource", ""), "georef");
+}
+
+// The entry is the one source of the georeference: a splat indexed with a sidecar is built with it
+TEST(gsplat, aBuildOfAGeoreferencedEntryUsesItsGeoreference) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path dsFolder = ta.getFolder("");
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 400, 1);
+    {
+        std::ofstream sidecar(ta.getPath("georef.json").string());
+        sidecar << R"({"crs": "EPSG:32615", "offset": [576705, 5188170]})";
+    }
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the build");
+
+    ddb::initIndex(dsFolder.string());
+    auto db = ddb::open(dsFolder.string(), true);
+    ddb::addToIndex(db.get(), {ply.string()});
+    Entry e;
+    ASSERT_TRUE(loadEntry(db.get(), "scene.ply", e));
+    EXPECT_EQ(e.type, EntryType::GaussianSplat);
+    EXPECT_TRUE(e.properties["georeferenced"].get<bool>());
+    EXPECT_EQ(e.properties["georef"]["kind"], "projected");
+    EXPECT_EQ(e.point_geom.size(), 1);
+    EXPECT_EQ(e.polygon_geom.size(), 0) << "the footprint needs a build";
+
+    ddb::build(db.get(), "scene.ply", "", false);
+    const json bounds = json::parse(readText(fs::path(db->buildDirectory()) / e.hash / "gsplat" / GsplatBoundsFileName));
+    EXPECT_EQ(bounds["up"], (json::array({0.0, 0.0, 1.0})));
+    EXPECT_EQ(bounds["upSource"], "georef");
+    EXPECT_NEAR(bounds["wgs84Footprint"]["coordinates"][0][0][1].get<double>(), 46.842651237, 1e-6);
+}
+
+// The thumbnail stands a georeferenced splat on +Z, as bounds.json says, whatever its splats look
+// like; without that claim beside the model.rad it estimates, as it always did
+TEST(gsplat, theThumbnailOfAGeoreferencedSplatStandsOnZ) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeYDownGround(ply);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the thumbnail");
+
+    const fs::path estimated = ta.getFolder("estimated");
+    ddb::buildGsplat(ply.string(), estimated.string());
+    const json estimate = json::parse(readText(estimated / GsplatBoundsFileName));
+    // The premise: the scene is not upright in +Z, and the estimate knows
+    ASSERT_GE(estimate["upConfidence"].get<double>(), 0.6) << estimate.dump();
+    ASSERT_LT(estimate["up"][2].get<double>(), 0.5) << estimate.dump();
+
+    const fs::path georeferenced = ta.getFolder("georeferenced");
+    ddb::buildGsplat(ply.string(), georeferenced.string(), kBrightonGeoref);
+
+    const auto thumbnail = [&](const fs::path& folder, const std::string& name) {
+        const fs::path image = ta.getPath(name + ".webp");
+        generateSplatThumbFromRad(folder / GsplatRadFileName, 128, image, nullptr, nullptr);
+        return readText(image);
+    };
+
+    // The same model.rad with no bounds.json beside it is estimated, like the estimated build
+    const fs::path bare = ta.getFolder("bare");
+    fs::copy_file(georeferenced / GsplatRadFileName, bare / GsplatRadFileName);
+    const std::string standing = thumbnail(estimated, "estimated");
+    EXPECT_EQ(thumbnail(bare, "bare"), standing);
+
+    // A bounds.json that makes no claim does not change it
+    writeBytes(bare / GsplatBoundsFileName, R"({"min": [0, 0, 0], "max": [1, 1, 1]})");
+    EXPECT_EQ(thumbnail(bare, "unclaimed"), standing);
+
+    // The claim of a georeferenced build does
+    EXPECT_NE(thumbnail(georeferenced, "georeferenced"), standing);
 }
 
 } // namespace

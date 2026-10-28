@@ -8,6 +8,7 @@
 #include "buildlod_runner.h"
 #include "exceptions.h"
 #include "json.h"
+#include "local_frame_georef.h"
 #include "logger.h"
 #include "mio.h"
 #include "ply.h"
@@ -42,11 +43,15 @@ namespace ddb
 
         // The up vector of the scene, for the sidecar; an estimate that cannot be made is logged and
         // leaves the bounding box alone
-        void addUpEstimate(const fs::path &rad, json &sidecar)
+        void addUpEstimate(const fs::path &rad, json &sidecar, bool georeferenced)
         {
             try
             {
-                sidecar.update(json(estimateSplatUp(readRadCoarseSplats(rad, RadPreviewChunks, /*onlyTheCut=*/true))));
+                // A georeferenced scene is upright by definition: its splats are not read
+                const RadCoarseSplats splats = georeferenced
+                                                   ? RadCoarseSplats()
+                                                   : readRadCoarseSplats(rad, RadPreviewChunks, /*onlyTheCut=*/true);
+                sidecar.update(json(estimateSplatUp(splats, georeferenced)));
             }
             catch (const std::exception &e)
             {
@@ -54,19 +59,38 @@ namespace ddb
             }
         }
 
+        // The footprint of the bounding box on the Earth; one that cannot be made is logged and leaves
+        // the sidecar without it
+        void addFootprint(const LocalFrameGeoref &georef, const std::array<double, 3> &boundsMin,
+                          const std::array<double, 3> &boundsMax, json &sidecar)
+        {
+            try
+            {
+                sidecar["wgs84Footprint"] =
+                    localFrameFootprintGeometry(georef, LocalBounds{boundsMin[0], boundsMin[1], boundsMax[0], boundsMax[1]});
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "No footprint for the georeferenced splat: " << e.what();
+            }
+        }
+
         // Local-space sidecar for deterministic camera framing in the viewer (the streamed .rad has
-        // no resident splats at init time): the bounding box, and which way is up. The sidecar is
-        // optional (the viewer frames the scene without it): one that cannot be written is logged and
-        // the build still delivers its model.rad.
+        // no resident splats at init time): the bounding box, which way is up and, for a georeferenced
+        // splat, where the bounding box is on the Earth. The sidecar is optional (the viewer frames the
+        // scene without it): one that cannot be written is logged and the build still delivers its
+        // model.rad.
         void writeSidecar(const fs::path &rad, const fs::path &boundsFile, const std::array<double, 3> &boundsMin,
-                          const std::array<double, 3> &boundsMax)
+                          const std::array<double, 3> &boundsMax, const std::optional<LocalFrameGeoref> &georef)
         {
             try
             {
                 json j;
                 j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
                 j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
-                addUpEstimate(rad, j);
+                addUpEstimate(rad, j, georef.has_value());
+                if (georef.has_value())
+                    addFootprint(*georef, boundsMin, boundsMax, j);
                 io::writeFileAtomic(boundsFile, j.dump(), "bounds file");
             }
             catch (const std::exception &e)
@@ -78,7 +102,8 @@ namespace ddb
         // The sidecar of a model.rad build-lod made. The box is computed by streaming the .rad centres:
         // exact, bounded memory, and in the same coordinate space the viewer renders. A .rad whose
         // centres cannot be decoded is logged and the build still delivers its model.rad.
-        void writeBoundsSidecar(const fs::path &rad, const fs::path &boundsFile)
+        void writeBoundsSidecar(const fs::path &rad, const fs::path &boundsFile,
+                                const std::optional<LocalFrameGeoref> &georef)
         {
             try
             {
@@ -88,7 +113,7 @@ namespace ddb
                     LOGW << "Skipping " << io::toUtf8(boundsFile) << ": no centres decoded from " << io::toUtf8(rad);
                     return;
                 }
-                writeSidecar(rad, boundsFile, boundsMin, boundsMax);
+                writeSidecar(rad, boundsFile, boundsMin, boundsMax, georef);
             }
             catch (const std::exception &e)
             {
@@ -104,7 +129,8 @@ namespace ddb
         // without a build. The copy goes into the build's scratch folder, which is published by
         // renaming it whole, so no reader sees a part of it; a full disk fails the copy with its
         // code, for the build to be retried.
-        void publishRad(const std::string &input, const fs::path &source, const fs::path &outdir)
+        void publishRad(const std::string &input, const fs::path &source, const fs::path &outdir,
+                        const std::optional<LocalFrameGeoref> &georef)
         {
             std::array<double, 3> boundsMin, boundsMax;
             bool any = false;
@@ -122,7 +148,7 @@ namespace ddb
 
             const fs::path rad = outdir / GsplatRadFileName;
             io::copy(source, rad);
-            writeSidecar(rad, outdir / GsplatBoundsFileName, boundsMin, boundsMax);
+            writeSidecar(rad, outdir / GsplatBoundsFileName, boundsMin, boundsMax, georef);
         }
 
         // Splat count and SH degree of a .ply, from its header
@@ -190,7 +216,7 @@ namespace ddb
         }
     }
 
-    void buildGsplat(const std::string &input, const std::string &outdir)
+    void buildGsplat(const std::string &input, const std::string &outdir, const std::optional<LocalFrameGeoref> &georef)
     {
         assureBuildableSplatSource(input);
 
@@ -198,7 +224,7 @@ namespace ddb
 
         if (splatFormatOf(io::fromUtf8(input)) == SplatFormat::Rad)
         {
-            publishRad(input, io::fromUtf8(input), io::fromUtf8(outdir));
+            publishRad(input, io::fromUtf8(input), io::fromUtf8(outdir), georef);
             return;
         }
 
@@ -232,7 +258,7 @@ namespace ddb
             throw AppException("build-lod failed for " + input + ": " + lodResult.error);
         }
 
-        writeBoundsSidecar(outRad, io::fromUtf8(outdir) / GsplatBoundsFileName);
+        writeBoundsSidecar(outRad, io::fromUtf8(outdir) / GsplatBoundsFileName, georef);
     }
 
 } // namespace ddb
