@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// GaussianSplat entries: SPZ/SPLAT/KSPLAT (and splat-flavoured PLY), built into a
+// GaussianSplat entries: the formats of splat_format.h (and splat-flavoured PLY), built into a
 // level-of-detail RAD container with its bounds.
 
 #include "build_layout.h"
@@ -11,22 +11,22 @@
 #include "entry_handlers_builtin.h"
 #include "gsplat.h"
 #include "mio.h"
-#include "rad.h"
+#include "splat_format.h"
 #include "thumbs.h"
 
 namespace ddb {
 
 namespace {
 
-// On-demand thumbnails of the .rad artifact and of .spz files
+// On-demand thumbnails of the files the format table names for it: the .rad artifact and .spz files
 class SplatThumbnailGenerator : public ThumbnailGenerator {
   public:
     bool accepts(const fs::path& input) const override {
-        return isRadPath(io::toUtf8(input)) || isSpzPath(io::toUtf8(input));
+        return splatAccepts(input, SplatStage::Thumbnail);
     }
     void generate(const fs::path& input, int thumbSize, const fs::path& outImagePath, uint8_t** outBuffer,
                   int* outBufferSize) const override {
-        if (isRadPath(io::toUtf8(input)))
+        if (splatFormatOf(input) == SplatFormat::Rad)
             generateSplatThumbFromRad(input, thumbSize, outImagePath, outBuffer, outBufferSize);
         else
             generateSplatThumb(input, thumbSize, outImagePath, outBuffer, outBufferSize);
@@ -45,18 +45,13 @@ class GaussianSplatEntryHandler : public EntryHandler {
   public:
     GaussianSplatEntryHandler() : EntryHandler(EntryType::GaussianSplat, "GaussianSplat") {}
 
-    // Gaussian Splat binary formats (a splat-flavoured .ply is detected by the Model handler)
-    std::vector<std::string> extensions() const override { return {"spz", "splat", "ksplat"}; }
+    // The formats an extension alone makes a splat (a splat-flavoured .ply is detected by the
+    // Model handler, from its header)
+    std::vector<std::string> extensions() const override { return splatExtensions(SplatStage::Detect); }
 
-    // The extension is an explicit signal; a lightweight content check only logs a
-    // warning when the bytes look unexpected, never reclassifies the file.
-    EntryType detect(const fs::path& path, FingerprintContext& /*ctx*/) const override {
-        io::Path p(path);
-        if (p.checkExtension({"spz"}) && !looksLikeSpz(path)) {
-            LOGD << "File has .spz extension but no NGSP/gzip magic: " << io::toUtf8(path);
-        } else if (p.checkExtension({"splat"}) && !looksLikeSplatBinary(path)) {
-            LOGD << "File has .splat extension but size is not a multiple of 32: " << io::toUtf8(path);
-        }
+    // The extension is an explicit signal: the file is not read, and a broken one fails when it
+    // is built
+    EntryType detect(const fs::path& /*path*/, FingerprintContext& /*ctx*/) const override {
         return EntryType::GaussianSplat;
     }
 

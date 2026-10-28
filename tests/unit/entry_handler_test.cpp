@@ -400,7 +400,7 @@ TEST(entryHandler, ExtensionsArePinned) {
     const std::map<EntryType, std::vector<std::string>> expected = {
         {EntryType::Markdown, {"md"}},
         {EntryType::PointCloud, {"laz", "las", "e57", "pts", "xyz"}},
-        {EntryType::GaussianSplat, {"spz", "splat", "ksplat"}},
+        {EntryType::GaussianSplat, {"splat", "spz", "ksplat", "sog"}},
         {EntryType::Model, {"obj", "ply", "stl", "gltf", "glb"}},
         {EntryType::Tiles3D, {"3tz"}},
         {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx"}},
@@ -432,6 +432,7 @@ TEST(entryHandler, FingerprintByExtension) {
     EXPECT_EQ(fingerprint(file("roads.dbf")), EntryType::Generic);
     EXPECT_EQ(fingerprint(file("flight.GPX")), EntryType::Vector);
     EXPECT_EQ(fingerprint(file("splat.ksplat")), EntryType::GaussianSplat);
+    EXPECT_EQ(fingerprint(file("scene.SOG")), EntryType::GaussianSplat);
     EXPECT_EQ(fingerprint(file("noext")), EntryType::Generic);
     // Unreadable content: the Image handler falls back to Image, a broken .ply to Generic
     EXPECT_EQ(fingerprint(file("photo.png")), EntryType::Image);

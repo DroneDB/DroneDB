@@ -74,13 +74,15 @@ constexpr const char* VectorLocalFileName = "local.json";
 constexpr const char* TilesetFileName = "tileset.json";
 
 // Gaussian Splat. Mirrors the COPC/COG/BM3D conventions.
+// The .spz that builds before the RAD layout wrote: read when present (it is the legacy artifact
+// of the entry), never written by a build any more.
 constexpr const char* GsplatFileName = "model.spz";
 // Level-of-detail delivery artifact (Spark "RAD" container). Produced by the vendored
 // build-lod tool; streamed progressively by the viewer via HTTP range requests (paged: true).
-// This is the sole delivery artifact - the intermediate .spz is not kept after a successful build.
+// This is the sole delivery artifact of a build.
 constexpr const char* GsplatRadFileName = "model.rad";
-// The media type of the files of a Gaussian splat (.rad, .spz, .splat, .ksplat): none of the
-// formats has a registered one. The build manifest and STAC both name it from here, so a client
+// The media type of the files of a Gaussian splat (.rad, .spz, .splat, .ksplat, .sog): none of
+// the formats has a registered one. The build manifest and STAC both name it from here, so a client
 // reads one type for the same file wherever it asks.
 constexpr const char* GsplatMediaType = "application/octet-stream";
 // Tiny sidecar with the splat's local-space axis-aligned bounding box, written at build
@@ -88,10 +90,8 @@ constexpr const char* GsplatMediaType = "application/octet-stream";
 // paged .rad path: a streamed mesh has no resident splats (hence no computable bounds) when
 // it first initializes, so client-side auto-framing cannot work without this hint.
 constexpr const char* GsplatBoundsFileName = "bounds.json";
-// Thumbnail filename constant (kept for reference in test assertions).
-// Thumbnails are generated on demand from the .rad/.spz at request time - no build-time
-// thumbnail artifact is produced. The constant is used to verify that buildGsplat does
-// not write a thumbnail file alongside the delivery artifact.
+// Thumbnails are generated on demand from the .rad (or a legacy .spz) at request time - no
+// build-time thumbnail artifact is produced. The name is what tests check a build does not write.
 constexpr const char* GsplatThumbFileName = "thumbnail.webp";
 
 // Legacy Entwine Point Tiles (EPT), the point cloud output before COPC. Never written any

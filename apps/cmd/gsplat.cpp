@@ -6,20 +6,21 @@
 
 #include <iostream>
 
-#include "gsplat.h"
 #include "mio.h"
+#include "splat_convert.h"
+#include "splat_format.h"
+#include "stringutil.h"
 
 namespace cmd
 {
-
     void Gsplat::setOptions(cxxopts::Options &opts)
     {
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("gsplat input.{ply|splat|spz} [output.spz]")
+    .custom_help("gsplat input.{" + ddb::str::join(ddb::splatExtensions(ddb::SplatStage::Convert), "|") + "} [output.spz]")
     .add_options()
-    ("i,input", "Gaussian Splat file to convert (.ply, .splat or .spz)", cxxopts::value<std::string>());
+    ("i,input", "Gaussian Splat file to convert (" + ddb::splatExtensionsText(ddb::SplatStage::Convert) + ")", cxxopts::value<std::string>());
     cmd::addOutputOption(opts, "Output .spz file (default: the input with the .spz extension; a .spz input needs another path)");
         // clang-format on
         opts.parse_positional({"input", "output"});
@@ -27,7 +28,7 @@ namespace cmd
 
     std::string Gsplat::description()
     {
-        return "Convert a Gaussian Splat (.ply/.splat/.spz) to the compressed .spz format.";
+        return "Convert a Gaussian Splat (" + ddb::splatExtensionsText(ddb::SplatStage::Convert) + ") to the compressed .spz format.";
     }
 
     int Gsplat::run(cxxopts::ParseResult &opts)

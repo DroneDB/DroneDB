@@ -19,6 +19,7 @@
 #include <functional>
 #include <limits>
 #include "build_layout.h"
+#include "splat_format.h"
 #include "ddb.h"
 #include "entry_handler.h"
 #include "../../vendor/base64/base64.h"
@@ -92,9 +93,8 @@ namespace ddb
         if (ext == ".ply") return "application/x-ply";
         if (ext == ".pcd") return "application/x-pcd";
 
-        // Gaussian Splats
-        // The type the build manifest names for the files of a splat
-        if (ext == ".spz" || ext == ".splat" || ext == ".ksplat") return GsplatMediaType;
+        // Gaussian Splats, with the type the build manifest names for their files
+        if (const char *splatType = splatMediaType(splatFormatOfExtension(ext))) return splatType;
 
         // Video
         if (ext == ".mp4") return "video/mp4";

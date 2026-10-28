@@ -12,10 +12,11 @@
 #include "rad.h"
 #include "thumb_internal.h"
 
+#include "splat_math.h"
+
 // SPZ (vendored, MIT) - decode .spz to render an on-demand splat thumbnail.
 #include "load-spz.h"
 #include "splat-types.h"
-#include "gsplat.h"
 
 namespace ddb {
 
@@ -207,11 +208,10 @@ void generateSplatThumb(const fs::path& spzPath,
     std::vector<float> opacities(n, 0.0f);
     for (size_t i = 0; i < n; ++i) {
         const float logit = (i < cloud.alphas.size()) ? cloud.alphas[i] : 0.0f;
-        opacities[i] = 1.0f / (1.0f + std::exp(-logit));
+        opacities[i] = splat_math::sigmoid(logit);
         if (cloud.colors.size() >= (i + 1) * 3) {
             for (int c = 0; c < 3; ++c)
-                colors[i * 3 + c] =
-                    static_cast<float>(0.5 + SH_C0 * static_cast<double>(cloud.colors[i * 3 + c]));
+                colors[i * 3 + c] = splat_math::dcToColor(cloud.colors[i * 3 + c]);
         }
     }
 

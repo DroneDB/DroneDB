@@ -6,10 +6,13 @@
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <string>
 #include <vector>
+
+#include <zlib.h>
 #ifndef _WIN32
 #include <unistd.h> // geteuid
 #endif
@@ -26,6 +29,9 @@
 #include "load-spz.h"
 #include "ply.h"
 #include "rad.h"
+#include "stac.h"
+#include "splat_convert.h"
+#include "splat_format.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
@@ -517,19 +523,19 @@ TEST(gsplat, looksLikeHelpers) {
         const char magic[4] = {'N', 'G', 'S', 'P'};
         o.write(magic, sizeof(magic));
     }
-    EXPECT_TRUE(ddb::looksLikeSpz(spz));
+    EXPECT_TRUE(ddb::looksLikeSplat(spz));
 
     const fs::path notSpz = ta.getPath("bad.spz");
     { std::ofstream o(notSpz.string(), std::ios::binary); o << "junk"; }
-    EXPECT_FALSE(ddb::looksLikeSpz(notSpz));
+    EXPECT_FALSE(ddb::looksLikeSplat(notSpz));
 
     const fs::path splat = ta.getPath("ok.splat");
     writeSplatBinary(splat, 3);
-    EXPECT_TRUE(ddb::looksLikeSplatBinary(splat));
+    EXPECT_TRUE(ddb::looksLikeSplat(splat));
 
     const fs::path badSplat = ta.getPath("bad.splat");
     { std::ofstream o(badSplat.string(), std::ios::binary); o << "12345"; } // 5 bytes
-    EXPECT_FALSE(ddb::looksLikeSplatBinary(badSplat));
+    EXPECT_FALSE(ddb::looksLikeSplat(badSplat));
 }
 
 TEST(gsplat, getInfoPlyAndSplat) {
@@ -564,7 +570,7 @@ TEST(gsplat, convertPlyToSpz) {
 
     ASSERT_TRUE(fs::exists(spz));
     EXPECT_GT(fileSize(spz), 0u);
-    EXPECT_TRUE(ddb::looksLikeSpz(spz));
+    EXPECT_TRUE(ddb::looksLikeSplat(spz));
     // The delivery artifact must be gzip-based SPZ (v3) for the Spark viewer.
     EXPECT_TRUE(isGzip(spz)) << "convertToSpz must emit gzip-based SPZ v3, not NGSP/ZSTD v4";
 
@@ -620,7 +626,7 @@ TEST(gsplat, convertSplatBinaryToSpz) {
     ddb::convertToSpz(splat.string(), spz.string());
 
     ASSERT_TRUE(fs::exists(spz));
-    EXPECT_TRUE(ddb::looksLikeSpz(spz));
+    EXPECT_TRUE(ddb::looksLikeSplat(spz));
 
     GaussianSplatInfo info;
     ASSERT_TRUE(ddb::getGaussianSplatInfo(spz.string(), info));
@@ -1153,16 +1159,77 @@ TEST(gsplat, buildWithoutBuildLodFailsWithoutPending) {
     EXPECT_FALSE(ddb::isBuildPending(db.get()));
 }
 
-TEST(gsplat, ksplatRequiresExternalTool) {
+// A .ksplat is built by build-lod and read for its header; it is not converted to .spz, and the
+// refusal names the formats that are, not a tool that was never involved
+TEST(gsplat, ksplatIsNotConvertedToSpzAndTheMessageSaysWhichFormatsAre) {
     TestArea ta(TEST_NAME);
     const fs::path ksplat = ta.getPath("scene.ksplat");
     { std::ofstream o(ksplat.string(), std::ios::binary); o << "ksplatdata"; }
 
     const fs::path spz = ta.getPath("scene.spz");
-    // splat-transform is an external tool: its absence fails the conversion outright.
-    expectMissingToolFailure([&] { ddb::convertToSpz(ksplat.string(), spz.string()); },
-                             "splat-transform");
+    try {
+        ddb::convertToSpz(ksplat.string(), spz.string());
+        FAIL() << "a .ksplat must not be converted";
+    } catch (const InvalidArgsException& e) {
+        const std::string what = e.what();
+        EXPECT_EQ(what.find("splat-transform"), std::string::npos) << what;
+        EXPECT_NE(what.find(".ply, .splat or .spz"), std::string::npos) << what;
+    }
     EXPECT_FALSE(fs::exists(spz));
+}
+
+// A .ksplat header: version 0.1, the section count and splat count, then one 1024-byte header per
+// section whose SH degree sits at byte 40. Sections hold no data here: only the header is read.
+void writeKsplatHeader(const fs::path& path, uint32_t splats, const std::vector<uint16_t>& sectionShDegrees,
+                       uint8_t minor = 1) {
+    std::string header(4096 + sectionShDegrees.size() * 1024, '\0');
+    header[0] = 0;
+    header[1] = static_cast<char>(minor);
+    const uint32_t sections = static_cast<uint32_t>(sectionShDegrees.size());
+    std::memcpy(&header[4], &sections, sizeof(sections));
+    std::memcpy(&header[16], &splats, sizeof(splats));
+    for (size_t i = 0; i < sectionShDegrees.size(); ++i)
+        std::memcpy(&header[4096 + i * 1024 + 40], &sectionShDegrees[i], sizeof(uint16_t));
+    std::ofstream o(path.string(), std::ios::binary);
+    o.write(header.data(), static_cast<std::streamsize>(header.size()));
+}
+
+TEST(gsplat, ksplatMetadataIsReadFromItsHeader) {
+    TestArea ta(TEST_NAME);
+
+    // The SH degree of the file is the highest of its sections
+    const fs::path ksplat = ta.getPath("scene.ksplat");
+    writeKsplatHeader(ksplat, 123456, {1, 3, 2});
+    GaussianSplatInfo info;
+    ASSERT_TRUE(ddb::getGaussianSplatInfo(ksplat.string(), info));
+    EXPECT_EQ(info.splatCount, 123456u);
+    EXPECT_EQ(info.shDegree, 3);
+    EXPECT_TRUE(ddb::looksLikeSplat(ksplat));
+
+    // It is what the entry's properties carry
+    json j;
+    to_json(j, info);
+    EXPECT_EQ(j["splatCount"], 123456);
+    EXPECT_EQ(j["shDegree"], 3);
+
+    // Not a .ksplat: the entry stays a splat (the extension decides) with no metadata
+    const fs::path junk = ta.getPath("junk.ksplat");
+    { std::ofstream o(junk.string(), std::ios::binary); o << "anything"; }
+    EXPECT_FALSE(ddb::getGaussianSplatInfo(junk.string(), info));
+    EXPECT_FALSE(ddb::looksLikeSplat(junk));
+    EXPECT_EQ(ddb::fingerprint(junk), EntryType::GaussianSplat);
+
+    // A version this does not read, no splats, and sections the file is too short to hold
+    const fs::path oldVersion = ta.getPath("old.ksplat");
+    writeKsplatHeader(oldVersion, 10, {0}, /*minor=*/0);
+    EXPECT_FALSE(ddb::getGaussianSplatInfo(oldVersion.string(), info));
+    const fs::path empty = ta.getPath("empty.ksplat");
+    writeKsplatHeader(empty, 0, {0});
+    EXPECT_FALSE(ddb::getGaussianSplatInfo(empty.string(), info));
+    const fs::path cut = ta.getPath("cut.ksplat");
+    writeKsplatHeader(cut, 10, {0, 0, 0});
+    fs::resize_file(cut, 4096 + 1024);
+    EXPECT_FALSE(ddb::getGaussianSplatInfo(cut.string(), info));
 }
 
 TEST(gsplat, nonSplatPlyConversionThrows) {
@@ -1190,7 +1257,7 @@ TEST(gsplat, convertV4SpzTranscodesToV3) {
     ddb::convertToSpz(v4.string(), out.string());
 
     EXPECT_TRUE(isGzip(out)) << "v4/NGSP must be transcoded to gzip-based v3 for the Spark viewer";
-    EXPECT_TRUE(ddb::looksLikeSpz(out));
+    EXPECT_TRUE(ddb::looksLikeSplat(out));
 
     GaussianSplatInfo srcInfo;
     GaussianSplatInfo outInfo;
@@ -1269,13 +1336,13 @@ TEST(gsplat, spzPositionsRoundTrip) {
 }
 
 // Locks the CURRENT contract for half-truncated SPZ files: the vendored spz never throws on
-// corrupt input, it returns an empty cloud, so (src/library/gsplat.cpp convertToSpz/readSpzInfo):
+// corrupt input, it returns an empty cloud, so (convertToSpz, getGaussianSplatInfo):
 //  - gzip (v3): the gzip pass-through branch performs no validation and copies the broken
-//    bytes as-is; afterwards getGaussianSplatInfo fails because loadSpzPacked rejects the
-//    truncated deflate stream.
-//  - NGSP (v4): the transcode path throws AppException (nothing decoded), while
-//    getGaussianSplatInfo trusts the 13-byte NGSP header and still reports the stale splat
-//    count. Header-only data: any real decode of the truncated file fails, so it is safe.
+//    bytes as-is.
+//  - NGSP (v4): the transcode path throws AppException (nothing decoded).
+//  - Both: getGaussianSplatInfo reads the header alone (indexing must stay cheap), so it still
+//    reports the splat count the header declares. Any real decode of the truncated file fails,
+//    so nothing downstream takes the count for splats that can be read.
 TEST(gsplat, truncatedSpzRejected) {
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.getPath("scene.ply");
@@ -1304,8 +1371,12 @@ TEST(gsplat, truncatedSpzRejected) {
     ddb::convertToSpz(halfV3.string(), out3.string());
     EXPECT_EQ(fileSize(out3), fileSize(halfV3));
     GaussianSplatInfo info;
-    EXPECT_FALSE(ddb::getGaussianSplatInfo(halfV3.string(), info));
-    EXPECT_FALSE(ddb::getGaussianSplatInfo(out3.string(), info));
+    ASSERT_TRUE(ddb::getGaussianSplatInfo(halfV3.string(), info));
+    EXPECT_EQ(info.splatCount, 64u);
+    ASSERT_TRUE(ddb::getGaussianSplatInfo(out3.string(), info));
+    EXPECT_EQ(info.splatCount, 64u);
+    EXPECT_TRUE(spz::loadSpz(halfV3.string(), spz::UnpackOptions{}).positions.empty())
+        << "the truncated stream itself decodes to nothing";
 
     const fs::path out4 = ta.getPath("out4.spz");
     EXPECT_THROW(ddb::convertToSpz(halfV4.string(), out4.string()), AppException);
@@ -1442,6 +1513,216 @@ TEST(gsplat, aBuildRemovesAnOldModelSpzAndKeepsTheModelRadBesideIt) {
     EXPECT_FALSE(fs::exists(gsplatDir / GsplatFileName)) << "the superseded model.spz is removed";
     expectCurrentOutput();
     EXPECT_EQ(namesIn(gsplatDir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
+}
+
+// ---------------------------------------------------------------------------
+// Formats beyond the first three: .sog and .rad sources, the header-only readers
+// ---------------------------------------------------------------------------
+
+// A SOGS v2 bundle of four splats: a ZIP holding meta.json and five lossless 2x2 WebP images (means
+// in two bytes, scales, quaternions, colour and opacity). The one bytes-in-the-test fixture of a
+// format this repository has no writer for.
+void writeSogBundle(const fs::path& path) {
+    static const char* hex =
+    "504b0304140000000000411d5c5da4fa24d91a0100001a010000090000006d6574612e6a736f6e7b2276657273696f6e"
+    "223a20322c2022636f756e74223a20342c20226d65616e73223a207b2266696c6573223a205b226d65616e735f6c2e77"
+    "656270222c20226d65616e735f752e77656270225d2c20226d696e73223a205b2d312c202d312c202d315d2c20226d61"
+    "7873223a205b312c20312c20315d7d2c20227363616c6573223a207b2266696c6573223a205b227363616c65732e7765"
+    "6270225d2c2022636f6465626f6f6b223a205b2d342e305d7d2c20227175617473223a207b2266696c6573223a205b22"
+    "71756174732e77656270225d7d2c2022736830223a207b2266696c6573223a205b227368302e77656270225d2c202263"
+    "6f6465626f6f6b223a205b2d312e302c20302e302c20312e302c20322e305d7d7d504b0304140000000000411d5c5dcc"
+    "fad69d26000000260000000c0000006d65616e735f6c2e77656270524946461e000000574542505650384c110000002f"
+    "0140000007d0fffef7bfff8188e87f0000504b0304140000000000411d5c5d2fb0088938000000380000000c0000006d"
+    "65616e735f752e776562705249464630000000574542505650384c230000002f014000001f201048f166ab251048325b"
+    "6df4f99bffb8a10128091000451989e87f0c00504b0304140000000000411d5c5d3812562d22000000220000000b0000"
+    "007363616c65732e77656270524946461a000000574542505650384c0e0000002f01400000071011fd0f4444ff03504b"
+    "0304140000000000411d5c5de5c19eb826000000260000000a00000071756174732e77656270524946461e0000005745"
+    "42505650384c110000002f014000000750c00216b0ff8188e87f0000504b0304140000000000411d5c5d066712f83600"
+    "000036000000080000007368302e77656270524946462e000000574542505650384c210000002f014000101fa0206d03"
+    "66c7bfe6d898801118e4b84504640394a9c22ca2ffb10300504b01021403140000000000411d5c5da4fa24d91a010000"
+    "1a0100000900000000000000000000008001000000006d6574612e6a736f6e504b01021403140000000000411d5c5dcc"
+    "fad69d26000000260000000c00000000000000000000008001410100006d65616e735f6c2e77656270504b0102140314"
+    "0000000000411d5c5d2fb0088938000000380000000c00000000000000000000008001910100006d65616e735f752e77"
+    "656270504b01021403140000000000411d5c5d3812562d22000000220000000b00000000000000000000008001f30100"
+    "007363616c65732e77656270504b01021403140000000000411d5c5de5c19eb826000000260000000a00000000000000"
+    "0000000080013e02000071756174732e77656270504b01021403140000000000411d5c5d066712f83600000036000000"
+    "08000000000000000000000080018c0200007368302e77656270504b0506000000000600060052010000e80200000000";
+    std::string bytes;
+    for (const char* c = hex; *c != '\0'; c += 2)
+        bytes.push_back(static_cast<char>(std::stoi(std::string(c, 2), nullptr, 16)));
+    std::ofstream out(path.string(), std::ios::binary);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+// build-lod reads a single-file .sog: the entry is detected, built and thumbnailed like any splat,
+// and has no splat count because the count is inside the ZIP, which indexing does not open
+TEST(gsplat, aSogBundleIsDetectedBuiltAndThumbnailed) {
+    TestArea ta(TEST_NAME);
+    const fs::path sog = ta.getPath("scene.sog");
+    writeSogBundle(sog);
+
+    EXPECT_EQ(ddb::fingerprint(sog), EntryType::GaussianSplat);
+    EXPECT_TRUE(ddb::looksLikeSplat(sog));
+    GaussianSplatInfo info;
+    EXPECT_FALSE(ddb::getGaussianSplatInfo(sog.string(), info)) << "a .sog has no metadata reader";
+
+    // Not a ZIP: still a splat by its extension, but its content is not what it says
+    const fs::path junk = ta.getPath("junk.sog");
+    { std::ofstream o(junk.string(), std::ios::binary); o << "not a zip"; }
+    EXPECT_EQ(ddb::fingerprint(junk), EntryType::GaussianSplat);
+    EXPECT_FALSE(ddb::looksLikeSplat(junk));
+
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the .sog build");
+    const fs::path outdir = ta.getFolder("gsplat_out");
+    ddb::buildGsplat(sog.string(), outdir.string());
+    const fs::path modelRad = outdir / GsplatRadFileName;
+    ASSERT_TRUE(isRad(modelRad)) << "build-lod turns the bundle into model.rad";
+    EXPECT_EQ(namesIn(outdir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
+
+    const fs::path thumb = ta.getPath("thumb.webp");
+    ddb::generateThumb(modelRad, 128, thumb, true);
+    EXPECT_TRUE(isWebp(thumb));
+}
+
+// A .rad is what a build writes: as a source it is refused with the formats that are accepted, before
+// anything is looked for or written
+TEST(gsplat, aRadIsNotABuildSource) {
+    TestArea ta(TEST_NAME);
+    const fs::path rad = ta.getPath("scene.rad");
+    { std::ofstream o(rad.string(), std::ios::binary); o << "RAD0"; }
+    const fs::path outdir = ta.getPath("gsplat_out");
+
+    const std::string failure = buildFailure(rad, outdir);
+    EXPECT_NE(failure.find(".ply, .splat, .spz, .ksplat or .sog"), std::string::npos) << failure;
+    EXPECT_FALSE(fs::exists(outdir));
+    EXPECT_NE(ddb::fingerprint(rad), EntryType::GaussianSplat) << "and not an entry type by its extension yet";
+}
+
+// A vertex count that does not fit in 32 bits (an unsigned long is 32 bits on Windows) is kept whole
+TEST(gsplat, aPlyWithMoreThan2To32VerticesKeepsItsCount) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("huge.ply");
+    auto lines = splatHeaderLines();
+    lines[1] = "element vertex 5000000000";
+    writeHeaderOnlyPly(ply, lines);
+
+    PlyInfo plyInfo;
+    ASSERT_TRUE(ddb::getPlyInfo(ply, plyInfo));
+    EXPECT_EQ(plyInfo.vertexCount, uint64_t{5000000000});
+
+    GaussianSplatInfo info;
+    ASSERT_TRUE(ddb::getGaussianSplatInfo(ply.string(), info));
+    EXPECT_EQ(info.splatCount, uint64_t{5000000000});
+}
+
+// SPZ keeps the number of splats in an int32_t: more are refused with the count, not wrapped
+TEST(gsplat, aSplatCountSpzCannotHoldIsRefused) {
+    EXPECT_EQ(ddb::spzPointCount(0, "a.splat"), 0);
+    EXPECT_EQ(ddb::spzPointCount(INT32_MAX, "a.splat"), INT32_MAX);
+    try {
+        ddb::spzPointCount(uint64_t{INT32_MAX} + 1, "big.splat");
+        FAIL() << "2^31 splats do not fit";
+    } catch (const AppException& e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("big.splat"), std::string::npos) << what;
+        EXPECT_NE(what.find("2147483648"), std::string::npos) << what;
+        EXPECT_NE(what.find("2147483647"), std::string::npos) << what;
+    }
+}
+
+std::string gzipOf(const std::string& data) {
+    z_stream strm{};
+    EXPECT_EQ(deflateInit2(&strm, Z_BEST_COMPRESSION, Z_DEFLATED, 16 + MAX_WBITS, 8, Z_DEFAULT_STRATEGY), Z_OK);
+    std::string out;
+    strm.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(data.data()));
+    strm.avail_in = static_cast<uInt>(data.size());
+    char buffer[64 * 1024];
+    int ret;
+    do {
+        strm.next_out = reinterpret_cast<Bytef*>(buffer);
+        strm.avail_out = sizeof(buffer);
+        ret = deflate(&strm, Z_FINISH);
+        out.append(buffer, sizeof(buffer) - strm.avail_out);
+    } while (ret != Z_STREAM_END);
+    deflateEnd(&strm);
+    return out;
+}
+
+// The 16-byte header of a legacy SPZ: magic, version, splat count, SH degree, fractional bits, flags
+std::string spzHeaderBytes(uint32_t version, uint32_t splats, uint8_t shDegree) {
+    std::string h("NGSP", 4);
+    h.append(reinterpret_cast<const char*>(&version), 4);
+    h.append(reinterpret_cast<const char*>(&splats), 4);
+    h.push_back(static_cast<char>(shDegree));
+    h.append(3, '\0');
+    return h;
+}
+
+void writeBytes(const fs::path& path, const std::string& bytes) {
+    std::ofstream out(path.string(), std::ios::binary);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+// Indexing reads the header of a legacy SPZ, never its splats: only the first 16 bytes of the gzip
+// stream are inflated. A stream cut off right after its start still yields the header (a reader that
+// inflates the whole file cannot), and a body that is not a splat stream is never looked at.
+TEST(gsplat, aLegacySpzHeaderIsReadWithoutInflatingTheFile) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 300, 2);
+    const fs::path legacy = ta.getPath("legacy.spz");
+    ASSERT_TRUE(writeSpzVersion(ply, legacy, 3));
+    ASSERT_TRUE(isGzip(legacy));
+    const std::string whole = readText(legacy);
+    ASSERT_GT(whole.size(), 400u);
+
+    // Cut short after the first few hundred bytes: the splats cannot be decoded, the header can
+    const fs::path cut = ta.getPath("cut.spz");
+    writeBytes(cut, whole.substr(0, 200));
+    ASSERT_TRUE(spz::loadSpz(cut.string(), spz::UnpackOptions{}).positions.empty());
+    GaussianSplatInfo info;
+    ASSERT_TRUE(ddb::getGaussianSplatInfo(cut.string(), info));
+    EXPECT_EQ(info.splatCount, 300u);
+    EXPECT_EQ(info.shDegree, 2);
+
+    // A header followed by far more than a test wants to inflate: 64 MiB of zeros, tens of
+    // KiB of gzip. The count is the header's, the file is not looked at past it.
+    const fs::path big = ta.getPath("big.spz");
+    writeBytes(big, gzipOf(spzHeaderBytes(3, 7, 1) + std::string(size_t{64} << 20, '\0')));
+    ASSERT_TRUE(ddb::getGaussianSplatInfo(big.string(), info));
+    EXPECT_EQ(info.splatCount, 7u);
+    EXPECT_EQ(info.shDegree, 1);
+    SpzHeader header;
+    ASSERT_TRUE(ddb::readSpzHeader(big, header));
+    EXPECT_EQ(header.container, SpzContainer::Gzip);
+    EXPECT_EQ(header.version, 3u);
+
+    // A gzip stream that is not an SPZ, one with no splats, and one too short for a header
+    const fs::path notSpz = ta.getPath("gzip.spz");
+    writeBytes(notSpz, gzipOf("this is a gzip file but not a splat"));
+    EXPECT_FALSE(ddb::getGaussianSplatInfo(notSpz.string(), info));
+    const fs::path none = ta.getPath("none.spz");
+    writeBytes(none, gzipOf(spzHeaderBytes(3, 0, 0)));
+    EXPECT_FALSE(ddb::getGaussianSplatInfo(none.string(), info));
+    const fs::path tiny = ta.getPath("tiny.spz");
+    writeBytes(tiny, gzipOf("NGSP"));
+    EXPECT_FALSE(ddb::getGaussianSplatInfo(tiny.string(), info));
+}
+
+// The STAC data asset of a splat has the media type the format table (and the build manifest) names
+TEST(gsplat, theStacAssetOfASplatHasTheMediaTypeOfTheFormatTable) {
+    TestArea ta(TEST_NAME, true);
+    writeSplatBinary(ta.getFolder() / "scene.splat", 4);
+    writeSogBundle(ta.getFolder() / "bundle.sog");
+    ddb::initIndex(ta.getFolder().string());
+    auto db = ddb::open(ta.getFolder().string(), true);
+    ddb::addToIndex(db.get(), {(ta.getFolder() / "scene.splat").string(), (ta.getFolder() / "bundle.sog").string()});
+
+    for (const char* name : {"scene.splat", "bundle.sog"}) {
+        const auto item = ddb::generateStac(ta.getFolder().string(), name);
+        ASSERT_TRUE(item["assets"].contains(name)) << item.dump();
+        EXPECT_EQ(item["assets"][name]["type"], GsplatMediaType) << name;
+    }
 }
 
 } // namespace

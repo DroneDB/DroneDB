@@ -4,65 +4,43 @@
 #ifndef GSPLAT_H
 #define GSPLAT_H
 
-#include <array>
+#include <cstdint>
 #include <string>
-#include <vector>
 
-#include "basicgeometry.h"
 #include "build_layout.h"
-#include "fs.h"
 #include "json_fwd.h"
 
 namespace ddb
 {
     // The Gaussian Splat artifact names (GsplatBuildSubfolder, GsplatRadFileName,
-    // GsplatBoundsFileName, ...) are in build_layout.h.
+    // GsplatBoundsFileName, ...) are in build_layout.h; the formats a splat can be in, in
+    // splat_format.h.
 
-    // Web LOD delivery profile: bhatt-lod ("quality")
-    // with full spherical harmonics (degree 3) so the streamed .rad preserves the look of the
-    // source and can be served as the SOLE delivery artifact (the .spz is dropped after build).
-    // Single-file RAD so Registry can serve it with HTTP range requests.
+    // The delivery profile: bhatt-lod ("quality") with full spherical harmonics (degree 3), so the
+    // streamed .rad keeps the look of the source and is the sole delivery artifact (build-lod
+    // reads the source directly; no .spz is made). Single-file RAD so Registry can serve it with
+    // HTTP range requests.
     constexpr int GsplatRadMaxSh = 3;
 
-    // Standard spherical-harmonics DC -> RGB factor (Y_0^0 normalization constant).
-    constexpr double SH_C0 = 0.2820947917738781;
-
-    // Lightweight metadata about a Gaussian Splat source or artifact. Populated from the
-    // file header where possible (no full decode), so it stays cheap during indexing.
+    // Lightweight metadata about a Gaussian Splat source. Populated from the file header (no full
+    // decode), so it stays cheap during indexing.
     struct GaussianSplatInfo
     {
-        size_t splatCount = 0;
+        uint64_t splatCount = 0;
         int shDegree = 0;
-        // PLY property names, when the source is a .ply (empty for other formats).
-        std::vector<std::string> dimensions;
-
     };
 
     /// The properties of a Gaussian splat entry: {"splatCount", "shDegree"}
     void to_json(json &j, const GaussianSplatInfo &info);
 
-    // True when the path ends with the canonical .spz delivery extension.
-    bool isSpzPath(const std::string &filename);
-
-    // Content sanity checks used by detection. They never throw and tolerate I/O errors.
-    bool looksLikeSpz(const fs::path &path);         // NGSP magic (v4) or gzip magic (legacy)
-    bool looksLikeSplatBinary(const fs::path &path); // size > 0 and multiple of 32 bytes
-
-    // Reads lightweight metadata (splat count + SH degree) from a splat source
-    // (.ply | .splat | .spz). Returns false if the file cannot be interpreted.
+    // Reads the splat count and SH degree of a splat source from its header. Returns false when
+    // the format has no metadata reader (SplatStage::Metadata in splat_format.h: .sog and .rad
+    // have none, so their entries carry no splatCount) or the file cannot be interpreted.
     bool getGaussianSplatInfo(const std::string &filename, GaussianSplatInfo &info);
 
-    // Converts a splat source (.ply | .splat | .spz) into a single .spz file. The output is
-    // written whole or not at all (a temporary file renamed onto it), and it must not be the input
-    // (InvalidArgsException).
-    // Throws AppException on failure, including for formats that require an external
-    // tool that is not available (e.g. .ksplat needs splat-transform).
-    void convertToSpz(const std::string &input, const std::string &output);
-
-    // Builds the Gaussian Splat delivery artifacts from a splat source into `outdir`.
-    // Requires the build-lod tool; throws AppException if it is unavailable.
-    // Produces `<outdir>/model.rad` (RAD container) and `<outdir>/bounds.json` (bounding box).
-    // The intermediate .spz is not kept after a successful build.
+    // Builds the Gaussian Splat delivery artifacts from a splat source (a format SplatStage::Build
+    // names) into `outdir`: `<outdir>/model.rad` (RAD container) and `<outdir>/bounds.json`
+    // (bounding box). build-lod is mandatory: throws AppException if it is unavailable.
     void buildGsplat(const std::string &input, const std::string &outdir);
 
 } // namespace ddb
