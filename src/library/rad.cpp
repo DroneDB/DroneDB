@@ -22,7 +22,11 @@ namespace ddb
         constexpr uint32_t kRadChunkMagic = 0x43444152; // 'RADC'
 
         // RAD aligns sub-sections to 8 bytes.
-        inline size_t roundUp8(size_t n) { return (n + 7u) & ~static_cast<size_t>(7u); }
+        inline uint64_t roundUp8(uint64_t n) { return (n + 7u) & ~static_cast<uint64_t>(7u); }
+
+        // build-lod writes chunks of 65536 splats. A chunk that declares more than 64 times that is
+        // not one: the count sizes the buffers of the decode, and it comes from the file.
+        constexpr size_t kMaxSplatsPerChunk = size_t(1) << 22;
 
         inline uint32_t readU32LE(const uint8_t *p)
         {
@@ -72,15 +76,20 @@ namespace ddb
         }
 
         // Raw DEFLATE (no zlib/gzip header) - miniz_oxide `compress_to_vec`, used by RAD ("gz").
-        std::vector<uint8_t> inflateRaw(const uint8_t *data, size_t size, size_t expectedHint)
+        // The output is at most `maxOutput` bytes (the size the chunk declares for the property):
+        // a stream that inflates to more is refused instead of filling the memory.
+        std::vector<uint8_t> inflateRaw(const uint8_t *data, size_t size, size_t maxOutput)
         {
+            if (size > std::numeric_limits<uInt>::max())
+                throw AppException("RAD: compressed property of " + std::to_string(size) + " bytes is too large");
+
             z_stream strm{};
             // windowBits = -15 selects raw deflate (no header / no checksum).
             if (inflateInit2(&strm, -MAX_WBITS) != Z_OK)
                 throw AppException("RAD: failed to initialize raw inflate");
 
             std::vector<uint8_t> out;
-            out.reserve(expectedHint > 0 ? expectedHint : size * 4);
+            out.reserve(std::min(maxOutput, size * 4));
             strm.next_in = const_cast<Bytef *>(reinterpret_cast<const Bytef *>(data));
             strm.avail_in = static_cast<uInt>(size);
 
@@ -96,7 +105,14 @@ namespace ddb
                     inflateEnd(&strm);
                     throw AppException("RAD: raw inflate failed (zlib code " + std::to_string(ret) + ")");
                 }
-                out.insert(out.end(), buffer, buffer + (sizeof(buffer) - strm.avail_out));
+                const size_t produced = sizeof(buffer) - strm.avail_out;
+                if (produced > maxOutput - out.size())
+                {
+                    inflateEnd(&strm);
+                    throw AppException("RAD: compressed property inflates to more than its declared " +
+                                       std::to_string(maxOutput) + " bytes");
+                }
+                out.insert(out.end(), buffer, buffer + produced);
             } while (ret != Z_STREAM_END);
 
             inflateEnd(&strm);
@@ -223,11 +239,39 @@ namespace ddb
         struct RadHeader
         {
             std::vector<RadChunkRef> chunks;
+            uint64_t fileSize = 0; // the chunks are read from the file: what they declare is checked against it
         };
+
+        // The unsigned integer `key` of a JSON object (0 when it is absent). The numbers of a RAD
+        // size reads and buffers, so a negative, fractional or non numeric one is refused rather
+        // than converted.
+        uint64_t unsignedField(const json &object, const char *key, const std::string &path)
+        {
+            const auto it = object.find(key);
+            if (it == object.end() || it->is_null())
+                return 0;
+            if (!it->is_number_unsigned() && !(it->is_number_integer() && it->get<int64_t>() >= 0))
+                throw AppException(std::string("RAD: '") + key + "' is not an unsigned integer in " + path);
+            return it->get<uint64_t>();
+        }
+
+        // Whether [offset, offset + bytes) lies inside `limit` bytes; written so that the sum is never formed
+        bool fitsWithin(uint64_t offset, uint64_t bytes, uint64_t limit)
+        {
+            return offset <= limit && bytes <= limit - offset;
+        }
 
         // Reads and validates the RAD file header, returning the absolute file offsets of all chunks.
         RadHeader readHeader(std::ifstream &in, const std::string &path)
         {
+            in.seekg(0, std::ios::end);
+            const std::streamoff end = in.tellg();
+            in.seekg(0, std::ios::beg);
+            if (end < 0 || !in.good())
+                throw AppException("RAD: cannot read " + path);
+            RadHeader header;
+            header.fileSize = static_cast<uint64_t>(end);
+
             uint8_t hb[8];
             in.read(reinterpret_cast<char *>(hb), 8);
             if (!in.good())
@@ -236,6 +280,10 @@ namespace ddb
                 throw AppException("RAD: bad magic (not a .rad file): " + path);
 
             const uint32_t metaLen = readU32LE(hb + 4);
+            if (!fitsWithin(8, metaLen, header.fileSize))
+                throw AppException("RAD: the header declares " + std::to_string(metaLen) +
+                                   " bytes of metadata but " + path + " holds " + std::to_string(header.fileSize) +
+                                   " bytes");
             std::string metaStr(metaLen, '\0');
             in.read(metaStr.data(), metaLen);
             if (!in.good())
@@ -252,20 +300,28 @@ namespace ddb
             }
 
             const uint64_t chunksStart = 8u + roundUp8(metaLen);
-            RadHeader header;
-            if (!meta.contains("chunks") || !meta["chunks"].is_array())
+            if (!meta.is_object() || !meta.contains("chunks") || !meta["chunks"].is_array())
                 throw AppException("RAD: header has no chunks array");
 
             for (const auto &c : meta["chunks"])
             {
+                if (!c.is_object())
+                    throw AppException("RAD: a chunk entry of the header is not an object in " + path);
                 // Single-file RADs use in-file offsets; chunked RADs reference external .radc
                 // files which this minimal reader does not support.
                 if (c.contains("filename") && !c["filename"].is_null())
                     throw AppException("RAD: chunked (.radc) files are not supported by this reader");
 
+                const uint64_t offset = unsignedField(c, "offset", path);
                 RadChunkRef ref;
-                ref.fileOffset = chunksStart + c.value("offset", static_cast<uint64_t>(0));
-                ref.bytes = c.value("bytes", static_cast<uint64_t>(0));
+                ref.bytes = unsignedField(c, "bytes", path);
+                // The chunk is read from the file: it has to lie in it
+                if (!fitsWithin(chunksStart, offset, header.fileSize) ||
+                    !fitsWithin(chunksStart + offset, ref.bytes, header.fileSize))
+                    throw AppException("RAD: the chunk of " + std::to_string(ref.bytes) + " bytes at offset " +
+                                       std::to_string(offset) + " is beyond the end of " + path + " (" +
+                                       std::to_string(header.fileSize) + " bytes)");
+                ref.fileOffset = chunksStart + offset;
                 header.chunks.push_back(ref);
             }
             return header;
@@ -280,13 +336,16 @@ namespace ddb
         };
 
         // Decodes one chunk. `centers` is always produced; colours/opacities only when wantColor.
-        DecodedChunk decodeChunk(std::ifstream &in, const RadChunkRef &ref, const std::string &path,
-                                 bool wantColor)
+        DecodedChunk decodeChunk(std::ifstream &in, const RadHeader &header, const RadChunkRef &ref,
+                                 const std::string &path, bool wantColor)
         {
             if (ref.bytes < 16)
                 throw AppException("RAD: chunk too small in " + path);
+            // readHeader checked it; the buffer is allocated from what the file declares
+            if (!fitsWithin(ref.fileOffset, ref.bytes, header.fileSize))
+                throw AppException("RAD: chunk is beyond the end of " + path);
 
-            std::vector<uint8_t> buf(ref.bytes);
+            std::vector<uint8_t> buf(static_cast<size_t>(ref.bytes));
             in.seekg(static_cast<std::streamoff>(ref.fileOffset), std::ios::beg);
             in.read(reinterpret_cast<char *>(buf.data()), static_cast<std::streamsize>(ref.bytes));
             if (!in.good())
@@ -295,8 +354,8 @@ namespace ddb
             if (readU32LE(buf.data()) != kRadChunkMagic)
                 throw AppException("RAD: bad chunk magic in " + path);
             const uint32_t cmetaLen = readU32LE(buf.data() + 4);
-            const size_t cmetaStart = 8;
-            if (cmetaStart + cmetaLen > buf.size())
+            const uint64_t cmetaStart = 8;
+            if (!fitsWithin(cmetaStart, cmetaLen, buf.size()))
                 throw AppException("RAD: chunk meta out of range in " + path);
 
             json cmeta;
@@ -308,54 +367,72 @@ namespace ddb
             {
                 throw AppException(std::string("RAD: invalid chunk JSON: ") + e.what());
             }
+            if (!cmeta.is_object())
+                throw AppException("RAD: chunk meta is not an object in " + path);
 
             DecodedChunk out;
-            out.count = cmeta.value("count", static_cast<size_t>(0));
+            const uint64_t count = unsignedField(cmeta, "count", path);
+            if (count > kMaxSplatsPerChunk)
+                throw AppException("RAD: chunk declares " + std::to_string(count) + " splats in " + path +
+                                   " (at most " + std::to_string(kMaxSplatsPerChunk) + " are read)");
+            out.count = static_cast<size_t>(count);
             if (out.count == 0)
                 return out;
 
-            const size_t payloadStart = 8u + roundUp8(cmetaLen) + 8u; // + u64 payloadBytes field
+            const uint64_t payloadStart = 8u + roundUp8(cmetaLen) + 8u; // + u64 payloadBytes field
 
             if (!cmeta.contains("properties") || !cmeta["properties"].is_array())
                 throw AppException("RAD: chunk has no properties array");
 
-            for (const auto &p : cmeta["properties"])
+            try
             {
-                const std::string name = p.value("property", std::string());
-                const bool isCenter = name == "center";
-                const bool isRgb = name == "rgb";
-                const bool isAlpha = name == "alpha";
-                if (!isCenter && !(wantColor && (isRgb || isAlpha)))
-                    continue;
-
-                const std::string encoding = p.value("encoding", std::string());
-                const uint64_t offset = p.value("offset", static_cast<uint64_t>(0));
-                const uint64_t bytes = p.value("bytes", static_cast<uint64_t>(0));
-                const float mn = p.value("min", 0.0f);
-                const float mx = p.value("max", 1.0f);
-                const std::string compression = p.value("compression", std::string());
-
-                const size_t dataStart = payloadStart + offset;
-                if (dataStart + bytes > buf.size())
-                    throw AppException("RAD: property '" + name + "' out of range in " + path);
-
-                std::vector<uint8_t> raw;
-                if (compression == "gz")
+                for (const auto &p : cmeta["properties"])
                 {
-                    const int dims = isCenter ? 3 : (isRgb ? 3 : 1);
-                    raw = inflateRaw(buf.data() + dataStart, bytes, static_cast<size_t>(dims) * out.count * 4);
-                }
-                else
-                {
-                    raw.assign(buf.begin() + dataStart, buf.begin() + dataStart + bytes);
-                }
+                    if (!p.is_object())
+                        throw AppException("RAD: a chunk property is not an object in " + path);
+                    const std::string name = p.value("property", std::string());
+                    const bool isCenter = name == "center";
+                    const bool isRgb = name == "rgb";
+                    const bool isAlpha = name == "alpha";
+                    if (!isCenter && !(wantColor && (isRgb || isAlpha)))
+                        continue;
 
-                if (isCenter)
-                    out.centers = decodeProperty(raw, encoding, 3, out.count, mn, mx);
-                else if (isRgb)
-                    out.colors = decodeProperty(raw, encoding, 3, out.count, mn, mx);
-                else if (isAlpha)
-                    out.opacities = decodeProperty(raw, encoding, 1, out.count, mn, mx);
+                    const std::string encoding = p.value("encoding", std::string());
+                    const uint64_t offset = unsignedField(p, "offset", path);
+                    const uint64_t bytes = unsignedField(p, "bytes", path);
+                    const float mn = p.value("min", 0.0f);
+                    const float mx = p.value("max", 1.0f);
+                    const std::string compression = p.value("compression", std::string());
+
+                    if (!fitsWithin(payloadStart, offset, buf.size()) ||
+                        !fitsWithin(payloadStart + offset, bytes, buf.size()))
+                        throw AppException("RAD: property '" + name + "' out of range in " + path);
+                    const size_t dataStart = static_cast<size_t>(payloadStart + offset);
+
+                    std::vector<uint8_t> raw;
+                    if (compression == "gz")
+                    {
+                        // 4 bytes is the widest value of the encodings: nothing declared is larger
+                        const int dims = isCenter ? 3 : (isRgb ? 3 : 1);
+                        raw = inflateRaw(buf.data() + dataStart, static_cast<size_t>(bytes),
+                                         static_cast<size_t>(dims) * out.count * 4);
+                    }
+                    else
+                    {
+                        raw.assign(buf.begin() + dataStart, buf.begin() + dataStart + static_cast<size_t>(bytes));
+                    }
+
+                    if (isCenter)
+                        out.centers = decodeProperty(raw, encoding, 3, out.count, mn, mx);
+                    else if (isRgb)
+                        out.colors = decodeProperty(raw, encoding, 3, out.count, mn, mx);
+                    else if (isAlpha)
+                        out.opacities = decodeProperty(raw, encoding, 1, out.count, mn, mx);
+                }
+            }
+            catch (const json::exception &e)
+            {
+                throw AppException(std::string("RAD: invalid chunk property in ") + path + ": " + e.what());
             }
 
             if (out.centers.size() < out.count * 3)
@@ -383,7 +460,7 @@ namespace ddb
                                          : std::min<int>(maxChunks, static_cast<int>(header.chunks.size()));
         for (int i = 0; i < limit; ++i)
         {
-            DecodedChunk chunk = decodeChunk(in, header.chunks[i], io::toUtf8(radPath), /*wantColor=*/true);
+            DecodedChunk chunk = decodeChunk(in, header, header.chunks[i], io::toUtf8(radPath), /*wantColor=*/true);
             if (chunk.count == 0)
                 continue;
 
@@ -428,7 +505,7 @@ namespace ddb
         bool any = false;
         for (const auto &ref : header.chunks)
         {
-            DecodedChunk chunk = decodeChunk(in, ref, io::toUtf8(radPath), /*wantColor=*/false);
+            DecodedChunk chunk = decodeChunk(in, header, ref, io::toUtf8(radPath), /*wantColor=*/false);
             for (size_t i = 0; i < chunk.count; ++i)
             {
                 for (int k = 0; k < 3; ++k)

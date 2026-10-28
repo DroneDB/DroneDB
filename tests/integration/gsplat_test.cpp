@@ -944,11 +944,8 @@ TEST(gsplat, malformedRadThrows) {
     }
     EXPECT_TRUE(isRad(half)) << "the surviving prefix keeps the RAD0 magic";
 
-    // computeRadBounds streams the centers of EVERY chunk, so the truncated tail chunk can
-    // never be skipped: the payload read must hit end-of-file and throw
-    // (src/library/rad.cpp, decodeChunk 'cannot read chunk payload'). A half-file may still
-    // contain chunk 0 whole, so the all-chunk path - not a single-chunk preview read - is the
-    // deterministic assertion for truncation.
+    // The header of the half file still lists every chunk, and a chunk that lies beyond the end
+    // of the file is refused when the header is read (src/library/rad.cpp, readHeader).
     std::array<double, 3> hmin{}, hmax{};
     EXPECT_THROW(ddb::computeRadBounds(half, hmin, hmax), AppException);
 }
