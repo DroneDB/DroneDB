@@ -7,8 +7,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
+#ifndef _WIN32
+#include <unistd.h> // geteuid
+#endif
 
 #include "build.h"
 #include "dbops.h"
@@ -202,6 +206,48 @@ bool isRad(const fs::path& p) {
     char m[4] = {0};
     in.read(m, 4);
     return in.gcount() == 4 && m[0] == 'R' && m[1] == 'A' && m[2] == 'D' && m[3] == '0';
+}
+
+// Names in a folder, sorted.
+std::vector<std::string> namesIn(const fs::path& dir) {
+    std::vector<std::string> names;
+    for (const auto& e : fs::directory_iterator(dir))
+        names.push_back(e.path().filename().string());
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+// A splat PLY whose x of the first splat is NaN: build-lod refuses it after decoding it.
+void writeNanSplatPly(const fs::path& path) {
+    writeSplatPly(path, 40, 0);
+    std::fstream f(path.string(), std::ios::in | std::ios::out | std::ios::binary);
+    const std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    const auto body = content.find("end_header\n") + std::string("end_header\n").size();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    f.seekp(static_cast<std::streamoff>(body));
+    f.write(reinterpret_cast<const char*>(&nan), sizeof(nan));
+}
+
+// The same splats as writeSplatPly(path, n, 0), in the ASCII PLY format that build-lod does not read.
+void writeAsciiSplatPly(const fs::path& path, int n) {
+    std::ofstream out(path.string(), std::ios::binary);
+    out << "ply\nformat ascii 1.0\nelement vertex " << n << "\n";
+    for (const char* p : {"x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2",
+                          "rot_0", "rot_1", "rot_2", "rot_3"})
+        out << "property float " << p << "\n";
+    out << "end_header\n";
+    for (int i = 0; i < n; ++i)
+        out << i % 10 << " " << i / 10 << " 0 0.2 0.1 -0.1 5 -3 -3 -3 1 0 0 0\n";
+}
+
+// The text of the AppException that buildGsplat throws ("" when it does not throw).
+std::string buildFailure(const fs::path& input, const fs::path& outdir) {
+    try {
+        ddb::buildGsplat(input.string(), outdir.string());
+    } catch (const AppException& e) {
+        return e.what();
+    }
+    return std::string();
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +477,105 @@ TEST(gsplat, buildOutputsArtifacts) {
     EXPECT_EQ(b["max"].size(), 3u);
     for (int k = 0; k < 3; ++k)
         EXPECT_LE(b["min"][k].get<double>(), b["max"][k].get<double>());
+}
+
+// build-lod exits 0 after it refuses an input and only prints why: the error of the build says it
+TEST(gsplat, buildFailureNamesTheReasonBuildLodPrinted) {
+    TestArea ta(TEST_NAME);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping failure-reason assertions");
+
+    const fs::path nan = ta.getPath("nan.ply");
+    writeNanSplatPly(nan);
+    const std::string nanFailure = buildFailure(nan, ta.getFolder("out_nan"));
+    EXPECT_NE(nanFailure.find("build-lod failed for"), std::string::npos) << nanFailure;
+    EXPECT_NE(nanFailure.find("invalid splats"), std::string::npos) << nanFailure;
+
+    const fs::path ascii = ta.getPath("ascii.ply");
+    writeAsciiSplatPly(ascii, 40);
+    const std::string asciiFailure = buildFailure(ascii, ta.getFolder("out_ascii"));
+    EXPECT_NE(asciiFailure.find("Decoding failed: Unsupported PLY format: ascii"), std::string::npos) << asciiFailure;
+
+    EXPECT_FALSE(fs::exists(ta.getPath("out_nan/model.rad")));
+    EXPECT_TRUE(namesIn(ta.getPath("out_nan")).empty()) << "a failed build leaves nothing in the output folder";
+    EXPECT_EQ(namesIn(ta.getFolder("")).size(), 4u) << "and nothing beside the input";
+}
+
+// build-lod writes "<name>-lod.rad" beside its input and skips an input named "*-lod.spz": the
+// build stages the input in the output folder instead, so the dataset folder is never written to,
+// a user's own file there survives, a dataset that cannot be written to builds, and the folder that
+// is published holds the delivery files only.
+TEST(gsplat, buildLeavesTheDatasetFolderAloneAndPublishesOnlyItsOutputs) {
+    TestArea ta(TEST_NAME);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping staging assertions");
+
+    const fs::path dataset = ta.getFolder("dataset");
+    const fs::path ply = dataset / "scene.ply";
+    writeSplatPly(ply, 80, 1);
+    const fs::path other = dataset / "other.spz";
+    ASSERT_TRUE(writeSpzVersion(ply, other, 3));
+    const fs::path lodNamed = dataset / "scene-lod.spz";
+    ASSERT_TRUE(writeSpzVersion(ply, lodNamed, 3));
+    const fs::path userRad = dataset / "scene-lod.rad";
+    {
+        std::ofstream(userRad.string(), std::ios::binary) << "the user's own file";
+    }
+    const auto before = namesIn(dataset);
+
+    for (const fs::path& input : {ply, lodNamed}) {
+        const fs::path outdir = ta.getFolder("out_" + input.stem().string());
+        ddb::buildGsplat(input.string(), outdir.string());
+        EXPECT_EQ(namesIn(outdir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}))
+            << input.filename();
+        EXPECT_TRUE(isRad(outdir / GsplatRadFileName)) << input.filename();
+    }
+
+    EXPECT_EQ(namesIn(dataset), before) << "no file added or removed in the dataset folder";
+    std::ifstream in(userRad.string(), std::ios::binary);
+    EXPECT_EQ(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()), "the user's own file");
+
+#ifndef _WIN32
+    if (geteuid() != 0) {
+        fs::permissions(dataset, fs::perms::owner_read | fs::perms::owner_exec);
+        const fs::path outdir = ta.getFolder("out_readonly");
+        std::string failure;
+        try {
+            ddb::buildGsplat(ply.string(), outdir.string());
+        } catch (const AppException& e) {
+            failure = e.what();
+        }
+        fs::permissions(dataset, fs::perms::owner_all);
+        EXPECT_EQ(failure, "") << "a read-only dataset folder builds";
+        EXPECT_TRUE(isRad(outdir / GsplatRadFileName));
+    }
+#endif
+}
+
+// A v4 (NGSP) SPZ cannot be read by build-lod: the build transcodes it to v3 first, in a scratch
+// folder that is not published
+TEST(gsplat, buildAcceptsAV4Spz) {
+    TestArea ta(TEST_NAME);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping v4 build assertions");
+
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 64, 1);
+    const fs::path v4 = ta.getPath("scene_v4.spz");
+    ASSERT_TRUE(writeSpzVersion(ply, v4, 4));
+    ASSERT_EQ(magic4(v4), "NGSP");
+    const auto sourceBefore = fileSize(v4);
+
+    const fs::path outdir = ta.getFolder("out");
+    ddb::buildGsplat(v4.string(), outdir.string());
+
+    EXPECT_EQ(namesIn(outdir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
+    ASSERT_TRUE(isRad(outdir / GsplatRadFileName));
+    EXPECT_EQ(fileSize(v4), sourceBefore);
+    EXPECT_EQ(magic4(v4), "NGSP") << "the upload itself is not rewritten";
+
+    // the splats made it: the bounds are those of the 10 x 7 grid of the fixture
+    std::ifstream bin((outdir / GsplatBoundsFileName).string(), std::ios::binary);
+    const json b = json::parse(bin);
+    EXPECT_NEAR(b["max"][0].get<double>(), 9.0, 0.1);
+    EXPECT_NEAR(b["max"][1].get<double>(), 6.0, 0.1);
 }
 
 // The RAD reader decodes the coarse first chunk for on-the-fly previews, and generateThumb
@@ -964,6 +1109,8 @@ TEST(gsplat, buildPipelineIntegration) {
     EXPECT_FALSE(fs::exists(gsplatDir / GsplatFileName)) << "no intermediate model.spz is kept";
     EXPECT_FALSE(fs::exists(gsplatDir / GsplatThumbFileName))
         << "thumbnails are rendered on demand from the .rad, not at build time";
+    // the build temp folder is published as is: no staged input or scratch folder in it
+    EXPECT_EQ(namesIn(gsplatDir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
 }
 
 } // namespace

@@ -129,6 +129,22 @@ namespace ddb
             }
         }
 
+        // Rewrites a NGSP/ZSTD SPZ (v4) as the gzip-based version the viewer and build-lod read
+        // (kDeliverySpzVersion). The quaternion precision is the same, so the splats do not change.
+        void transcodeSpzToV3(const fs::path &input, const fs::path &output)
+        {
+            spz::UnpackOptions unpack;
+            spz::GaussianCloud cloud = spz::loadSpz(io::readAllBytes(input), unpack);
+            if (cloud.numPoints <= 0)
+                throw AppException("No splats decoded from: " + io::toUtf8(input));
+
+            spz::PackOptions pack;
+            pack.version = kDeliverySpzVersion;
+            applyShBitsFromEnv(pack);
+            if (!saveSpzFile(cloud, pack, output))
+                throw AppException("Failed to transcode .spz to viewer-compatible version: " + io::toUtf8(output));
+        }
+
         // Decode an antimatter15 .splat file into an SPZ GaussianCloud.
         //
         // Layout (32 bytes per primitive):
@@ -360,16 +376,7 @@ namespace ddb
                 return;
             }
 
-            spz::UnpackOptions unpack;
-            spz::GaussianCloud cloud = spz::loadSpz(io::readAllBytes(io::fromUtf8(input)), unpack);
-            if (cloud.numPoints <= 0)
-                throw AppException("No splats decoded from: " + input);
-
-            spz::PackOptions pack;
-            pack.version = kDeliverySpzVersion;
-            applyShBitsFromEnv(pack);
-            if (!saveSpzFile(cloud, pack, io::fromUtf8(output)))
-                throw AppException("Failed to transcode .spz to viewer-compatible version: " + output);
+            transcodeSpzToV3(io::fromUtf8(input), io::fromUtf8(output));
             return;
         }
 
@@ -413,8 +420,20 @@ namespace ddb
                 "Building Gaussian Splats requires the build-lod tool, which was not found "
                 "(set DDB_BUILDLOD_PATH or place build-lod next to the DroneDB executable)");
 
+        // build-lod reads gzip SPZ (v1-3) only: a NGSP (v4) upload is rewritten as v3 in a
+        // scratch folder that is gone when this function returns, before the folder is published
+        const fs::path source = io::fromUtf8(input);
+        io::ScopedTempDir transcoded;
+        fs::path lodInput = source;
+        if (formatOf(input) == SplatFormat::Spz && looksLikeSpz(source) && !isGzipSpz(source))
+        {
+            transcoded = io::ScopedTempDir::create(io::fromUtf8(outdir), ".spz-v3-");
+            lodInput = transcoded.path() / "source.spz";
+            transcodeSpzToV3(source, lodInput);
+        }
+
         const fs::path outRad = io::fromUtf8(outdir) / GsplatRadFileName;
-        const auto lodResult = buildlod::runBuildLodResult({io::fromUtf8(input), outRad, /*quality=*/true, GsplatRadMaxSh});
+        const auto lodResult = buildlod::runBuildLodResult({lodInput, outRad, /*quality=*/true, GsplatRadMaxSh});
         if (!lodResult.succeeded) {
             lodResult.throwIfRetryable("build-lod failed for " + input + ": ");
             throw AppException("build-lod failed for " + input + ": " + lodResult.error);
