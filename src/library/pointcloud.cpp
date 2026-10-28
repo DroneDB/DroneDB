@@ -536,7 +536,7 @@ bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int po
         else {
             info.bounds.clear();
             info.polyBounds.clear();
-            info.pointCount = plyInfo.vertexCount;
+            info.pointCount = static_cast<size_t>(plyInfo.vertexCount);
             info.dimensions = plyInfo.dimensions;
             return true;
         }

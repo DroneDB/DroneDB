@@ -163,7 +163,7 @@ namespace ddb
 
     struct PlyInfo
     {
-        unsigned long vertexCount;
+        uint64_t vertexCount;
         bool isMesh;
         bool hasTextures;
         // True when the vertex element carries 3D Gaussian Splat attributes

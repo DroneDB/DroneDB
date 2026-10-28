@@ -529,7 +529,7 @@ namespace ddb
         for (const auto &e : h.elements)
         {
             if (e.name == "vertex")
-                info.vertexCount = static_cast<unsigned long>(e.count);
+                info.vertexCount = e.count;
             else if (e.name == "face")
                 info.isMesh = true;
             for (const auto &p : e.properties)
