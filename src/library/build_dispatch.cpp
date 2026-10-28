@@ -9,8 +9,9 @@
 #include "randomutil.h"
 
 #include <cstdlib>
-#include <fstream>
+#include <functional>
 #include <optional>
+#include <vector>
 
 #include "build_internal.h"
 #include "build_layout.h"
@@ -54,6 +55,19 @@ void ensureSufficientDiskSpace(const fs::path& dir) {
 
 namespace {
 
+std::function<void()>& missingDependencyHook() {
+    static std::function<void()> hook;
+    return hook;
+}
+
+}  // namespace
+
+void setMissingDependencyHookForTesting(std::function<void()> hook) {
+    missingDependencyHook() = std::move(hook);
+}
+
+namespace {
+
 // One build attempt of an entry under the lock of its output: the pending marker as the attempt
 // found it, the scratch folder, and what to do with both when the attempt ends. run() is the
 // attempt; fail() is called from a catch block with whatever it threw.
@@ -73,12 +87,10 @@ class BuildAttempt {
         try {
             wasPending_ = fs::is_regular_file(pendFile_);
             if (wasPending_) {
-                std::ifstream pending(pendFile_, std::ios::binary);
-                if (!pending.is_open())
+                const auto pending = readPendingMarker(pendFile_);
+                if (!pending)
                     throw FSException("Cannot read pending marker " + io::toUtf8(pendFile_));
-                std::string timestamp;
-                std::getline(pending, timestamp);
-                pendingDependencyLines_.assign(std::istreambuf_iterator<char>(pending), {});
+                pendingDependencies_ = pending->missingDependencies;
             }
 
             // An interrupted publish (Model: 3D Tiles swap) is repaired under the
@@ -97,7 +109,7 @@ class BuildAttempt {
             }
 
             if (wasPending_)
-                replacePendingMarker(pendFile_, pendingDependencyLines_);
+                restorePending();
             // Both preflight and scratch creation are inside the classified attempt.
             ensureSufficientDiskSpace(baseOutputPath_);
             io::assureFolderExists(io::fromUtf8(tempFolder_));
@@ -141,10 +153,17 @@ class BuildAttempt {
         } catch (const BuildDepMissingException& ex) {
             // Deferred success refreshes dependencies relative to the dataset root.
             // Atomic replacement also protects an existing marker if the disk is full.
-            std::string dependencies;
+            // A dependency may land on disk after the builder checked it and before the marker
+            // below exists: the add of that file then finds no marker to release.
+            // writePendingMarker() checks the disk again after its write (exactly where the
+            // builder looked), and the add writes the file before it indexes it and releases, so
+            // every interleaving ends with the marker released.
+            std::vector<std::string> dependencies;
             for (const auto& dep : ex.getMissingDependencies())
-                dependencies += deppath::toDatasetRelative(target_.path, dep) + "\n";
-            replacePendingMarker(pendFile_, dependencies);
+                dependencies.push_back(deppath::toDatasetRelative(target_.path, dep));
+            if (const auto& hook = missingDependencyHook())
+                hook();
+            writePendingMarker(pendFile_, dependencies, {db_->rootDirectory(), {}, ex.getLookupPaths()});
             cleanupTemporary();
             throw;
         } catch (const BuildInProgressException&) {
@@ -209,9 +228,15 @@ class BuildAttempt {
         }
     }
 
+    // Writes back the marker as the attempt found it (with a fresh time). It may await files
+    // that arrived since: released then, as in the BuildDepMissingException branch of fail()
+    void restorePending() {
+        writePendingMarker(pendFile_, pendingDependencies_, {db_->rootDirectory(), {target_.path}, {}});
+    }
+
     void retainPending() {
         if (wasPending_)
-            replacePendingMarker(pendFile_, pendingDependencyLines_);
+            restorePending();
         cleanupTemporary();
     }
 
@@ -231,7 +256,7 @@ class BuildAttempt {
     const fs::path pendFile_;
     const std::string tempFolder_;
     bool wasPending_ = false;
-    std::string pendingDependencyLines_;
+    std::vector<std::string> pendingDependencies_;
 };
 
 }  // namespace

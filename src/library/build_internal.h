@@ -89,6 +89,11 @@ struct PendingMarker {
     time_t lastAttempt = 0;
     // Dependency names still missing at that attempt (dataset-relative, see PendingBuildInfo)
     std::vector<std::string> missingDependencies;
+
+    // A build that waits for files the dataset lacks: no timer retries it (buildPending()
+    // without force skips it); adding one of those files releases it
+    // (releasePendingBuildsAwaiting())
+    bool awaitsFiles() const { return !missingDependencies.empty(); }
 };
 
 // The filesystem queries of a build state read, one virtual call each, so a test can count
@@ -159,6 +164,11 @@ void removeSupersededArtifacts(const EntryHandler& handler,
 void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force,
                    const BuildOptions& options = {});
 
+// Test seam: when set, a build attempt whose builder found dependencies missing calls it before
+// it writes the pending marker (the window in which a dependency may arrive unseen by both the
+// builder and the release on add). Empty outside tests; set it only while no build runs.
+void setMissingDependencyHookForTesting(std::function<void()> hook);
+
 // Throws RetryableBuildException(LowDiskSpace) when the filesystem of dir has less free space
 // than the free-disk floor (ProcessConfig::minFreeDiskMb: DDBConfigure "minFreeDiskMb", else
 // DDB_MIN_FREE_DISK_MB, else 512 MiB; 0 disables the check) before a build or a copy of build
@@ -185,6 +195,61 @@ constexpr time_t pendingRetryAfter(time_t lastAttempt) {
 // lines, through an atomic rename of a sibling. A failed write or rename is
 // logged and returns false; the previous marker is then kept.
 bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines);
+
+// Rewrites the marker at pendingPath in its released form: timestamp 0 and no dependency, so the
+// build is due at once and awaits no file. Atomic like replacePendingMarker(); a failed write is
+// logged and returns false, the previous marker is then kept.
+bool releasePendingMarker(const fs::path& pendingPath);
+
+// Where the dependency names of a marker of a build are looked for on disk
+struct PendingDependencyLookup {
+    // The dataset root: a name resolved against it is the form markers hold
+    fs::path datasetRoot;
+    // Dataset-relative paths of the entries the build is of, for names of an older marker,
+    // which may be relative to the folder of the source file: such a name is also resolved
+    // against the folder of each. Empty for the names a builder has just reported.
+    std::vector<std::string> sourcePaths;
+    // Further absolute paths (UTF-8) a builder looked in (BuildDepMissingException::getLookupPaths)
+    std::vector<std::string> extraPaths;
+};
+
+// True when a regular file exists at a path that may satisfy one of the dependency names (see
+// PendingDependencyLookup). For the names a builder has just reported it must look exactly where
+// the builder looked: a file it finds and the builder does not would release a build that the
+// builder defers again, retried forever. Names of an older marker are looked for in both forms:
+// a false positive there costs one retry, after which the builder reports exact names.
+// Never throws (a name it cannot resolve does not exist).
+bool pendingDependencyExists(const std::vector<std::string>& names, const PendingDependencyLookup& where);
+
+// Writes the marker at pendingPath (replacePendingMarker()) with the dependency names and then,
+// when one of them exists on disk already, its released form. The order is what keeps a build
+// from waiting for a file that arrived while it was being written: an add writes the file to
+// disk before it indexes it and releases the markers that wait for it, and this checks the disk
+// only after its own write, so either the add sees the awaiting marker or this sees the file.
+// Returns false when the first write fails (the previous marker is kept).
+bool writePendingMarker(const fs::path& pendingPath, const std::vector<std::string>& dependencies,
+                        const PendingDependencyLookup& where);
+
+// Releases the marker at pendingPath when dependencies (the names it holds) is not empty and one
+// of them exists on disk (pendingDependencyExists()): the check that follows every write of a
+// marker that may await files.
+void releasePendingMarkerIfSatisfied(const fs::path& pendingPath, const std::vector<std::string>& dependencies,
+                                     const PendingDependencyLookup& where);
+
+// Releases (releasePendingMarker()) every marker of db that awaits one of the files at filePaths
+// (dataset-relative paths of files just indexed: added, updated or moved there). A dependency
+// matches by file name, case-insensitively, wherever its folder is: markers of older versions
+// hold names relative to the source file's folder, and a name that never matches would leave a
+// build waiting forever, while a false match only costs one retry. Lists the build directory
+// once per call and does nothing more when it has no marker. Best effort: it runs after the
+// index change is committed, so failures are logged and never thrown.
+void releasePendingBuildsAwaiting(Database* db, const std::vector<std::string>& filePaths);
+
+// Releases (releasePendingMarker()) the marker at pendingPath, a marker of db, when it awaits a
+// file of the same name as a file db indexes already (the rule of releasePendingBuildsAwaiting():
+// file name, any folder, ignoring case): for a marker that arrives after the add of its file, as
+// one copied from another dataset does. Never throws: failures are logged.
+void releasePendingMarkerIfIndexed(Database* db, const fs::path& pendingPath);
 
 // Replaces the marker at to with a copy of the marker at from (its timestamp and dependency
 // lines), through the same atomic rename as replacePendingMarker(). Throws FSException when

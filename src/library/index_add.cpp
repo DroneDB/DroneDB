@@ -8,6 +8,7 @@
 #include "index_internal.h"
 
 #include "build.h"
+#include "build_internal.h"
 #include "cad.h"
 #include "entry_handler.h"
 #include "entry_path.h"
@@ -499,6 +500,21 @@ namespace ddb
 
     namespace {
 
+    // What follows a committed add of entries (added or updated): the main files of an added .prj
+    // are refreshed, and the builds that await one of the added files are released
+    void afterEntriesIndexed(Database *db, const fs::path &directory,
+                             const std::vector<std::pair<Entry, bool>> &entries, size_t first = 0) {
+        std::vector<std::string> prjPaths;
+        std::vector<std::string> filePaths;
+        for (size_t i = first; i < entries.size(); i++) {
+            const Entry &e = entries[i].first;
+            if (isPrjPath(e.path)) prjPaths.push_back(e.path);
+            if (e.type != EntryType::Directory) filePaths.push_back(e.path);
+        }
+        refreshPrjMains(db, directory, prjPaths, false);
+        releasePendingBuildsAwaiting(db, filePaths);
+    }
+
     // addToIndex() with optional trusted hashes (see computeAddEntries)
     void addPathsToIndex(Database *db, const std::vector<std::string> &paths, const KnownHashes *knownHashes,
                          AddCallback callback)
@@ -514,11 +530,7 @@ namespace ddb
         const auto planned = planAddCandidates(db, pathList, directory);
         const auto batch = computeAddEntries(planned, directory, /*stopOnError=*/true, knownHashes);
         const auto committed = commitAddEntries(db, batch.computed, directory, callback);
-
-        std::vector<std::string> prjPaths;
-        for (const auto &a : committed.accepted)
-            if (isPrjPath(a.first.path)) prjPaths.push_back(a.first.path);
-        refreshPrjMains(db, directory, prjPaths, false);
+        afterEntriesIndexed(db, directory, committed.accepted);
     }
 
     } // namespace
@@ -569,10 +581,7 @@ namespace ddb
             result.errors.push_back({relPath.generic(), "CONFLICT", "File kept changing during indexing"});
         }
 
-        std::vector<std::string> prjPaths;
-        for (size_t i = firstNewEntry; i < result.entries.size(); i++)
-            if (isPrjPath(result.entries[i].first.path)) prjPaths.push_back(result.entries[i].first.path);
-        refreshPrjMains(db, directory, prjPaths, false);
+        afterEntriesIndexed(db, directory, result.entries, firstNewEntry);
     }
 
     void addToIndexEx(Database *db, const std::vector<std::string> &paths,

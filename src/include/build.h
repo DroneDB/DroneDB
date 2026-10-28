@@ -45,9 +45,12 @@ namespace ddb
 
     /**
      * @brief Retry every deferred build (one per "<hash>.pending" marker in the build
-     * directory). A retry is a full build attempt of the entry: the dependency names in
-     * the marker are informational and are not matched against the index. Entries
-     * attempted less than 60 seconds ago are skipped unless @p force is set. Errors are
+     * directory) that a retry can progress. A build that awaits files (its marker lists
+     * missing dependencies) is skipped unless @p force is set: no timer retries it, adding
+     * one of those files to the index (add, move, delta) releases it, and it is retried
+     * by the next call. A retry is a full build attempt of the entry: the dependency names
+     * in the marker are not matched against the index. Entries attempted less than 60
+     * seconds ago are skipped unless @p force is set. Errors are
      * logged, never thrown: missing dependencies refresh the marker. Low disk space,
      * identifiable ENOSPC and primary-tool idle timeout preserve an existing marker;
      * permanent failures and complete builds consume it. Lock contention leaves it
@@ -59,6 +62,14 @@ namespace ddb
      */
     void buildPending(Database *db, const std::string &outputPath, bool force = false,
                       const BuildOptions &options = {});
+
+    /**
+     * @brief True when the database has a deferred build that a retry can progress: a
+     * "<hash>.pending" marker that awaits no file (a transient failure, or a build released
+     * by the add of a file it waited for). A build that only awaits missing files does not
+     * count: a host has nothing to retry until one of them is added. getPendingBuildInfo()
+     * still lists it (awaitingFiles).
+     */
     bool isBuildPending(Database *db);
 
     /**
@@ -82,7 +93,12 @@ namespace ddb
         time_t lastAttempt = 0;
         /// First Unix second at which buildPending() (without force) retries this build:
         /// lastAttempt + the retry backoff (60 s). Due when the current time is at or past it.
+        /// Applies only when awaitingFiles is false.
         time_t retryAfter = 0;
+        /// The build waits for files the dataset lacks (missingDependencies is not empty): no
+        /// timer retries it; adding a file of one of those names releases it (awaitingFiles
+        /// becomes false, due at once)
+        bool awaitingFiles = false;
     };
 
     /**
@@ -97,7 +113,7 @@ namespace ddb
      */
     std::vector<PendingBuildInfo> getPendingBuildInfo(Database *db);
 
-    /// {"hash", "path", "missingDependencies", "lastAttempt", "retryAfter"}: an element of the
+    /// {"hash", "path", "missingDependencies", "lastAttempt", "retryAfter", "awaitingFiles"}: an element of the
     /// output of DDBGetPendingBuildInfo (tests/contract/schemas/pending-build-info.schema.json)
     void to_json(json &j, const PendingBuildInfo &info);
 

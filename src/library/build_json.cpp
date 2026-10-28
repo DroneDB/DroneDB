@@ -13,7 +13,8 @@ void to_json(json& j, const PendingBuildInfo& info) {
              {"path", info.path},
              {"missingDependencies", info.missingDependencies},
              {"lastAttempt", info.lastAttempt},
-             {"retryAfter", info.retryAfter}};
+             {"retryAfter", info.retryAfter},
+             {"awaitingFiles", info.awaitingFiles}};
 }
 
 void to_json(json& j, const BuildStatus& status) {

@@ -126,10 +126,11 @@ TEST_F(GetPendingBuildInfoTest, OnlyTopLevelHashMarkersCount) {
     const auto hash = indexedHash(vectorPath);
     const fs::path buildDir = db->buildDirectory();
 
-    writePendingFile(buildDir / hash, hash, "0", {"nested.dbf"});
-    writePendingFile(buildDir / "sub" / "deeper", hash, "0", {"deeper.dbf"});
-    writePendingFile(buildDir, "notahash", "0", {"x.dbf"});
-    writePendingFile(buildDir, hash.substr(0, 63), "0", {"short.dbf"});
+    // Without dependencies: isBuildPending() would count any of them it collected
+    writePendingFile(buildDir / hash, hash, "0", {});
+    writePendingFile(buildDir / "sub" / "deeper", hash, "0", {});
+    writePendingFile(buildDir, "notahash", "0", {});
+    writePendingFile(buildDir, hash.substr(0, 63), "0", {});
     fs::create_directories(buildDir / (hash + "x.pending"));  // a directory, not a marker
 
     EXPECT_TRUE(ddb::getPendingBuildInfo(db.get()).empty());
@@ -141,6 +142,28 @@ TEST_F(GetPendingBuildInfoTest, OnlyTopLevelHashMarkersCount) {
     EXPECT_EQ(pending[0].hash, hash);
     ASSERT_EQ(pending[0].missingDependencies.size(), 1u);
     EXPECT_EQ(pending[0].missingDependencies[0], "layer.dbf");
+    EXPECT_FALSE(ddb::isBuildPending(db.get())) << "it awaits a file";
+
+    writePendingFile(buildDir, hash, "0", {});
+    EXPECT_TRUE(ddb::isBuildPending(db.get()));
+}
+
+// awaitingFiles is true exactly when the marker lists missing dependencies; both kinds are
+// listed, only the other kind counts for isBuildPending()
+TEST_F(GetPendingBuildInfoTest, AwaitingFilesWhenDependenciesAreListed) {
+    const auto hash = indexedHash(vectorPath);
+    writePendingFile(db->buildDirectory(), hash, "1721612345", {"layer.dbf"});
+    auto pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_TRUE(pending[0].awaitingFiles);
+    EXPECT_FALSE(ddb::isBuildPending(db.get()));
+
+    writePendingFile(db->buildDirectory(), hash, "1721612345", {});
+    pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_FALSE(pending[0].awaitingFiles);
+    EXPECT_TRUE(pending[0].missingDependencies.empty());
+    EXPECT_EQ(pending[0].retryAfter, 1721612345 + 60);
     EXPECT_TRUE(ddb::isBuildPending(db.get()));
 }
 
@@ -170,14 +193,14 @@ TEST_F(GetPendingBuildInfoTest, DoesNotTriggerBuildOrApplyBackoff) {
     EXPECT_EQ(pending[0].missingDependencies.size(), 1u);
 }
 
-// retryAfter is when buildPending() retries: not before it, and at it. layer.shp still lacks its
-// .shx, so a retry defers it again and refreshes the marker.
+// retryAfter is when buildPending() retries a build that awaits no file: not before it, and at
+// it. layer.shp still lacks its .shx, so a retry defers it again and refreshes the marker.
 TEST_F(GetPendingBuildInfoTest, RetryAfterTellsWhenBuildPendingRetries) {
     const auto hash = indexedHash(vectorPath);
 
     // Attempted 10 s ago: the retry is 50 s away, and buildPending() leaves the marker alone
     const time_t recent = ddb::currentUnixTimestamp() - 10;
-    writePendingFile(db->buildDirectory(), hash, std::to_string(recent), {"old.dbf"});
+    writePendingFile(db->buildDirectory(), hash, std::to_string(recent), {});
     auto pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].retryAfter, recent + 60);
@@ -186,11 +209,11 @@ TEST_F(GetPendingBuildInfoTest, RetryAfterTellsWhenBuildPendingRetries) {
     pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].lastAttempt, recent) << "retried before retryAfter";
-    EXPECT_EQ(pending[0].missingDependencies, std::vector<std::string>{"old.dbf"});
+    EXPECT_TRUE(pending[0].missingDependencies.empty());
 
     // Attempted exactly the backoff ago: retryAfter has come, and buildPending() retries
     const time_t due = ddb::currentUnixTimestamp() - 60;
-    writePendingFile(db->buildDirectory(), hash, std::to_string(due), {"old.dbf"});
+    writePendingFile(db->buildDirectory(), hash, std::to_string(due), {});
     pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].retryAfter, due + 60);
@@ -202,6 +225,7 @@ TEST_F(GetPendingBuildInfoTest, RetryAfterTellsWhenBuildPendingRetries) {
     EXPECT_GE(pending[0].lastAttempt, beforeRetry) << "not retried at retryAfter";
     EXPECT_EQ(pending[0].missingDependencies, std::vector<std::string>{"layer.shx"});
     EXPECT_EQ(pending[0].retryAfter, pending[0].lastAttempt + 60);
+    EXPECT_TRUE(pending[0].awaitingFiles);
 }
 
 // --- C API round-trip ---
@@ -225,6 +249,15 @@ TEST_F(GetPendingBuildInfoTest, CApiReturnsValidJson) {
     EXPECT_EQ(j[0]["retryAfter"].get<long long>(), 1721612405LL);
     ASSERT_TRUE(j[0]["missingDependencies"].is_array());
     EXPECT_EQ(j[0]["missingDependencies"][0].get<std::string>(), "layer.dbf");
+    ASSERT_TRUE(j[0]["awaitingFiles"].is_boolean());
+    EXPECT_TRUE(j[0]["awaitingFiles"].get<bool>());
+
+    writePendingFile(db->buildDirectory(), hash, "1721612345", {});
+    ASSERT_EQ(DDBGetPendingBuildInfo(dbPath.string().c_str(), &output), DDBERR_NONE);
+    const auto released = json::parse(std::string(output));
+    DDBFree(output);
+    ASSERT_EQ(released.size(), 1u);
+    EXPECT_FALSE(released[0]["awaitingFiles"].get<bool>());
 }
 
 TEST_F(GetPendingBuildInfoTest, CApiReturnsEmptyArrayWhenNothingPending) {

@@ -747,7 +747,9 @@ extern "C"
      * @param force rebuild if already existing (default false)
      * @param pendingOnly retry only pending (deferred) builds (default false). Each due
      *        entry (last attempt at least 60 s ago, or force) gets a full build attempt;
-     *        per-entry failures are logged, not returned.
+     *        per-entry failures are logged, not returned. A build that awaits missing files
+     *        is not due (unless force): adding one of those files (DDBAdd, DDBMoveEntry,
+     *        DDBApplyDelta) releases it, and the next call retries it.
      * @return DDBERR_NONE on success, DDBERR_BUILDDEPMISSING when a single-entry build is
      *         deferred because a companion file is missing (a ".pending" marker is
      *         written), an error otherwise. Missing external tools and dependency
@@ -807,9 +809,13 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBuildable);
 
-    /** IsBuildPending
+    /** IsBuildPending: whether DDBBuild with pendingOnly has work a retry can progress
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
-     * @param isBuildable if the entry is buildable
+     * @param isBuildPending set to true when at least one deferred build awaits no file (a
+     *        transient failure, or a build released by the add of a file it waited for);
+     *        false when there is none or every one only awaits missing files (those are
+     *        released when one of their files is added; DDBGetPendingBuildInfo lists them
+     *        with "awaitingFiles": true)
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildPending(const char *ddbPath, bool *isBuildPending);
 
@@ -821,11 +827,14 @@ extern "C"
      * @param output pointer to C-string where to store result (JSON array).
      *               Each element: { "hash": "...", "path": "...",
      *               "missingDependencies": ["..."], "lastAttempt": 1721612345,
-     *               "retryAfter": 1721612405 }
+     *               "retryAfter": 1721612405, "awaitingFiles": true }
      *               (caller must free with DDBFree). lastAttempt and retryAfter are Unix
      *               seconds: retryAfter is when DDBBuild with pendingOnly (and no force)
      *               retries the build, as in the build object of DDBGetBuildArtifacts (see
-     *               "Build manifest")
+     *               "Build manifest"). awaitingFiles is true when missingDependencies is not
+     *               empty: no timer retries such a build (retryAfter does not apply), adding
+     *               a file of one of those names (by file name, any folder, any case)
+     *               releases it, after which it is due at once and awaitingFiles is false
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetPendingBuildInfo(const char *ddbPath, char **output);
 
@@ -921,7 +930,9 @@ extern "C"
      *              copy of it). The retry is due when the current time is at or past it, so an
      *              unreadable marker time (lastAttempt 0) is due at once. Null exactly when
      *              lastAttempt is; a value, not a "due now" flag, so a listing stays the same
-     *              until the marker changes
+     *              until the marker changes. It applies only while missingDependencies is
+     *              empty: a build that awaits missing files is not retried by a timer, adding
+     *              one of them releases it (see DDBGetPendingBuildInfo, awaitingFiles)
      *   artifacts  the artifacts that exist (a directory when its index exists), in the order
      *              of the entry type, its primary output first: the file thumbnails and tiles
      *              are made from (raster.cog, pointcloud.copc or pointcloud.ept, vector.gpkg,
@@ -992,7 +1003,9 @@ extern "C"
      * entries with this hash (legacy ones included), each through a scratch folder renamed onto
      * the destination's, which it replaces; the destination's other files are left alone. Holds
      * the destination's build locks while it copies. The destination needs no entry with this
-     * hash yet.
+     * hash yet. A copied marker that awaits a file the destination indexes already (same file
+     * name, any folder, ignoring case: the rule of the release on add, see
+     * DDBGetPendingBuildInfo) is released, as the add of that file came before the copy.
      * @param sourceDdbPath path to the DroneDB database the build is copied from
      * @param destinationDdbPath path to the DroneDB database it is copied to (another dataset)
      * @param hash the hash of the build ("hash" of a build object)

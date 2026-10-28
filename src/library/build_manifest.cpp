@@ -501,8 +501,14 @@ json copyBuildArtifacts(Database* source, Database* destination, const std::stri
         }
         const fs::path sourceMarker = pendingMarkerPath(sourceRoot);
         std::error_code ec;
-        if (fs::is_regular_file(sourceMarker, ec) && !ec)
-            copyPendingMarker(sourceMarker, pendingMarkerPath(destinationRoot));
+        if (fs::is_regular_file(sourceMarker, ec) && !ec) {
+            const fs::path destinationMarker = pendingMarkerPath(destinationRoot);
+            copyPendingMarker(sourceMarker, destinationMarker);
+            // A transfer indexes its files in the destination before it copies the builds: the
+            // add of a file the marker awaits came first and released nothing. Checked after the
+            // copy, as a build attempt checks after its write, so a later add sees the marker
+            releasePendingMarkerIfIndexed(destination, destinationMarker);
+        }
     } catch (const FSException& ex) {
         if (ex.code() == std::errc::no_space_on_device)
             throw RetryableBuildException(ex.what(), RetryableBuildReason::NoSpaceOnDevice);

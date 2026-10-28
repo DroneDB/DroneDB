@@ -445,6 +445,7 @@ std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
 void validateDependencies(const std::string& objFile, const fs::path& datasetRoot) {
     const auto deps = collectObjDependencies(objFile, datasetRoot);
     std::vector<std::string> missingDeps;
+    std::vector<std::string> lookupPaths;
 
     for (const auto& d : deps) {
         bool found = false;
@@ -455,8 +456,11 @@ void validateDependencies(const std::string& objFile, const fs::path& datasetRoo
                 break;
             }
         }
-        if (!found)
+        if (!found) {
             missingDeps.push_back(d.name);
+            for (const auto& c : d.candidates)
+                lookupPaths.push_back(io::toUtf8(c));
+        }
     }
 
     if (!missingDeps.empty()) {
@@ -466,7 +470,7 @@ void validateDependencies(const std::string& objFile, const fs::path& datasetRoo
                 errorMessage += ", ";
             errorMessage += missingDeps[i];
         }
-        throw BuildDepMissingException(errorMessage, missingDeps);
+        throw BuildDepMissingException(errorMessage, missingDeps, lookupPaths);
     }
 }
 

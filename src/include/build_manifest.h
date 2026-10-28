@@ -103,7 +103,8 @@ ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const 
 // entries of source with that hash, legacy folders included) and its pending marker from the
 // build root of source to the one of destination, replacing what the destination had in
 // those folders. Returns {"hash", "artifacts": [...the existing artifacts of the destination
-// afterwards...], "pending": <the destination has a pending marker>}.
+// afterwards...], "pending": <the destination has a pending marker>}. A copied marker that awaits
+// a file the destination indexes already is released (releasePendingMarkerIfIndexed()).
 // Throws InvalidArgsException for an invalid hash or when both are the same dataset,
 // EntryNotFoundException when no entry of source has that hash, BuildInProgressException
 // when a build of hash runs in either dataset (nothing is copied), RetryableBuildException

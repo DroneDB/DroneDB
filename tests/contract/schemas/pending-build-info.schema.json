@@ -10,7 +10,8 @@
       "path",
       "missingDependencies",
       "lastAttempt",
-      "retryAfter"
+      "retryAfter",
+      "awaitingFiles"
     ],
     "additionalProperties": false,
     "properties": {
@@ -36,7 +37,11 @@
       "retryAfter": {
         "type": "integer",
         "minimum": 0,
-        "description": "When DDBBuild with pendingOnly (and no force) retries the build: lastAttempt + libddb's retry backoff, Unix epoch seconds (integer); due when now >= retryAfter"
+        "description": "When DDBBuild with pendingOnly (and no force) retries the build: lastAttempt + libddb's retry backoff, Unix epoch seconds (integer); due when now >= retryAfter. Applies only when awaitingFiles is false"
+      },
+      "awaitingFiles": {
+        "type": "boolean",
+        "description": "missingDependencies is not empty: no timer retries the build; adding a file of one of those names releases it (then false, due at once)"
       }
     }
   }

@@ -3,8 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // Pending-build recovery: a retry is a full build attempt, the
-// dependency names stored in ".pending" are dataset-root-relative and for
-// display only, and dependencies that can never be satisfied fail the build.
+// dependency names stored in ".pending" are dataset-root-relative, a build that
+// awaits files is retried only once one of them is added (never on a timer), and
+// dependencies that can never be satisfied fail the build.
 
 #include <cstdint>
 #include <chrono>
@@ -95,6 +96,20 @@ struct Dataset : IndexFixture {
         return {};
     }
 
+    // The marker of rel awaits files (getPendingBuildInfo awaitingFiles); false without marker
+    bool awaitingFiles(const std::string& rel) {
+        const auto hash = indexedHash(db.get(), rel);
+        for (const auto& p : ddb::getPendingBuildInfo(db.get()))
+            if (p.hash == hash)
+                return p.awaitingFiles;
+        return false;
+    }
+
+    // The marker of rel is in its released form: due at once, awaiting no file
+    bool released(const std::string& rel) {
+        return fs::exists(pendingFile(rel)) && markerContents(pendingFile(rel)) == "0\n";
+    }
+
     // Rewrites the timestamp of a ".pending" marker so the entry is past the backoff.
     void backdatePending(const std::string& rel, time_t secondsAgo = 900) {
         const fs::path p = pendingFile(rel);
@@ -148,8 +163,9 @@ void expectFailedWithoutPending(Dataset& ds, const std::string& rel, const std::
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
 }
 
-// OBJ + MTL + PNG whose companions arrive after the model: the pending state
-// clears through buildPending once they exist, and the bm3d output is built.
+// OBJ + MTL + PNG whose companions arrive after the model: each add releases the
+// marker, the next buildPending retries it at once (no backoff to wait for), and
+// the bm3d output is built once both exist.
 void runCompanionsArriveLater(const std::string& folder) {
     Dataset ds(TEST_NAME);
     const std::string prefix = folder.empty() ? "" : folder + "/";
@@ -160,20 +176,24 @@ void runCompanionsArriveLater(const std::string& folder) {
 
     expectDeferred(ds, obj);
     EXPECT_EQ(ds.pendingDeps(obj), std::vector<std::string>{prefix + "m.mtl"});
+    EXPECT_TRUE(ds.awaitingFiles(obj));
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get())) << "nothing a retry can progress";
 
-    // MTL arrives, texture still missing: still pending, now on the texture.
+    // MTL arrives, texture still missing: released, retried, pending again on the texture.
     writeFile(ds.path(prefix + "m.mtl"), mtlWithTexture("map_Kd tex.png"));
     ds.add({prefix + "m.mtl"});
-    ds.backdatePending(obj);
-    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_TRUE(ds.released(obj));
     EXPECT_TRUE(ddb::isBuildPending(ds.db.get()));
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
     EXPECT_EQ(ds.pendingDeps(obj), std::vector<std::string>{prefix + "tex.png"});
+    EXPECT_TRUE(ds.awaitingFiles(obj));
     EXPECT_FALSE(ddb::isBuildComplete(ds.db.get(), obj));
 
     // Texture arrives: the retry builds the model and clears the marker.
     writePng(ds.path(prefix + "tex.png"));
     ds.add({prefix + "tex.png"});
-    ds.backdatePending(obj);
+    EXPECT_TRUE(ds.released(obj));
     ddb::buildPending(ds.db.get(), "", false);
 
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
@@ -193,8 +213,9 @@ TEST(PendingBuild, ObjInNestedSubfolderClearsOnceCompanionsExist) {
     runCompanionsArriveLater("a/b");
 }
 
-// Markers written by older versions store names relative to the OBJ's folder.
-// They are informational: the retry rebuilds and re-validates on disk.
+// Markers written by older versions store names relative to the OBJ's folder: the
+// add of the file releases them all the same (by file name), and the retry
+// rebuilds and re-validates on disk.
 TEST(PendingBuild, OldFormatPendingClearsOnceDependencyExists) {
     Dataset ds(TEST_NAME);
     writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib m.mtl"));
@@ -202,14 +223,20 @@ TEST(PendingBuild, OldFormatPendingClearsOnceDependencyExists) {
     ds.add({"sub/m.obj", "sub/m.mtl"});
 
     ds.writePendingMarker("sub/m.obj", ddb::currentUnixTimestamp() - 900, {"tex/a.png"});
+    EXPECT_TRUE(ds.awaitingFiles("sub/m.obj"));
 
-    // Still missing: the retry rewrites the marker with the dataset-relative name.
+    // Awaits a file: no retry without force
     ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_EQ(ds.pendingDeps("sub/m.obj"), std::vector<std::string>{"tex/a.png"});
+
+    // Still missing: a forced retry rewrites the marker with the dataset-relative name.
+    ddb::buildPending(ds.db.get(), "", true);
     EXPECT_EQ(ds.pendingDeps("sub/m.obj"), std::vector<std::string>{"sub/tex/a.png"});
 
+    ds.writePendingMarker("sub/m.obj", ddb::currentUnixTimestamp() - 900, {"tex/a.png"});
     writePng(ds.path("sub/tex/a.png"));
     ds.add({"sub/tex/a.png"});
-    ds.backdatePending("sub/m.obj");
+    EXPECT_TRUE(ds.released("sub/m.obj"));
     ddb::buildPending(ds.db.get(), "", false);
 
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
@@ -217,7 +244,8 @@ TEST(PendingBuild, OldFormatPendingClearsOnceDependencyExists) {
     EXPECT_TRUE(ds.bm3dBuilt("sub/m.obj"));
 }
 
-// The retry backoff is 60 s since the last attempt; force bypasses it.
+// The retry backoff of a build that awaits no file is 60 s since the last attempt;
+// force bypasses it.
 TEST(PendingBuild, BackoffIsSixtySecondsAndForceBypassesIt) {
     Dataset ds(TEST_NAME);
     writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
@@ -226,7 +254,7 @@ TEST(PendingBuild, BackoffIsSixtySecondsAndForceBypassesIt) {
     ds.add({"m.obj", "m.mtl", "tex.png"});
 
     // Attempted 10 s ago: not due.
-    ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp() - 10, {"tex.png"});
+    ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp() - 10, {});
     ddb::buildPending(ds.db.get(), "", false);
     EXPECT_TRUE(fs::exists(ds.pendingFile("m.obj")));
     EXPECT_FALSE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
@@ -238,7 +266,7 @@ TEST(PendingBuild, BackoffIsSixtySecondsAndForceBypassesIt) {
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
 
     // A fresh marker is retried at once with force.
-    ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp(), {"tex.png"});
+    ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp(), {});
     ddb::buildPending(ds.db.get(), "", true);
     EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
@@ -256,8 +284,16 @@ TEST(PendingBuild, CompleteOutputConsumesPendingMarker) {
     ddb::build(ds.db.get(), "m.obj", "", false);
     ASSERT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
 
+    // A due marker that awaits no file
+    ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp() - 900, {});
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
+
+    // A marker that awaits a file is not retried, but an attempt consumes it
     ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp() - 900, {"not-indexed.png"});
     ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_TRUE(fs::exists(ds.pendingFile("m.obj")));
+    ddb::build(ds.db.get(), "m.obj", "", false);
 
     EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
@@ -491,7 +527,8 @@ void writeShapefile(const fs::path& shp) {
     GDALClose(ds);
 }
 
-// Sets up sub/layer.shp indexed and deferred because sub/layer.shx is missing.
+// Sets up sub/layer.shp indexed and deferred because sub/layer.shx is missing,
+// then adds sub/layer.shx, which releases the marker.
 void deferShapefileInSubfolder(Dataset& ds) {
     writeShapefile(ds.path("sub/layer.shp"));
     const fs::path shx = ds.path("sub/layer.shx");
@@ -505,13 +542,13 @@ void deferShapefileInSubfolder(Dataset& ds) {
 
     fs::rename(stash, shx);
     ds.add({"sub/layer.shx"});
+    EXPECT_TRUE(ds.released("sub/layer.shp"));
 }
 
 TEST(PendingBuild, ShapefileInSubfolderClearsViaBuildPending) {
     Dataset ds(TEST_NAME);
     deferShapefileInSubfolder(ds);
 
-    ds.backdatePending("sub/layer.shp");
     ddb::buildPending(ds.db.get(), "", false);
 
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
@@ -536,7 +573,7 @@ TEST(PendingBuild, ShapefileSidecarInSubfolderBuildsMainFile) {
     EXPECT_TRUE(fs::exists(out / "mvt" / "metadata.json"));
 }
 
-TEST(PendingBuild, VectorNoSpaceRetainsExistingPendingHintsAndFreshTimestamp) {
+TEST(PendingBuild, VectorNoSpaceRetainsReleasedPendingMarkerWithFreshTimestamp) {
     for (const std::string driver : {"MVT", "GPKG"})
         for (const bool onClose : {false, true}) {
             SCOPED_TRACE(driver + (onClose ? " close" : " translate"));
@@ -544,7 +581,6 @@ TEST(PendingBuild, VectorNoSpaceRetainsExistingPendingHintsAndFreshTimestamp) {
             // the Windows CreateDirectory limit (MAX_PATH - 12).
             Dataset ds("PendingBuild-VecNoSpace-" + driver + (onClose ? "-close" : "-translate"));
             deferShapefileInSubfolder(ds); // dependency was missing, then arrived
-            ds.backdatePending("sub/layer.shp");
             const auto before = ddb::currentUnixTimestamp();
             {
                 EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
@@ -555,7 +591,10 @@ TEST(PendingBuild, VectorNoSpaceRetainsExistingPendingHintsAndFreshTimestamp) {
             const auto pending = getPendingBuildInfo(ds.db.get());
             ASSERT_EQ(pending.size(), 1u);
             EXPECT_GE(pending[0].lastAttempt, before);
-            EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"sub/layer.shx"}));
+            // The add of the .shx released it: it awaits no file, a timer retries it
+            EXPECT_TRUE(pending[0].missingDependencies.empty());
+            EXPECT_FALSE(pending[0].awaitingFiles);
+            EXPECT_TRUE(isBuildPending(ds.db.get()));
             EXPECT_FALSE(isBuildComplete(ds.db.get(), "sub/layer.shp"));
             // The restored real driver can complete the same pending entry.
             ds.backdatePending("sub/layer.shp", 60);
@@ -605,6 +644,9 @@ TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_GE(pending[0].lastAttempt, before);
     EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"previous dependency hint"}));
+    // It still awaits that file: the failed attempt does not turn it into timer work
+    EXPECT_TRUE(pending[0].awaitingFiles);
+    EXPECT_FALSE(isBuildPending(ds.db.get()));
     EXPECT_FALSE(isBuildComplete(ds.db.get(), "sample.splat"));
     const fs::path output = ds.db->buildDirectory() / entry.hash;
     EXPECT_FALSE(fs::exists(output / "gsplat" / "model.rad"));
@@ -614,8 +656,7 @@ TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
         EnvVarGuard tool("DDB_BUILDLOD_PATH", realTool.string().c_str());
         EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
         buildlod::findBuildLodBinary(true);
-        ds.backdatePending("sample.splat", 60);
-        EXPECT_NO_THROW(buildPending(ds.db.get(), "", false));
+        EXPECT_NO_THROW(buildPending(ds.db.get(), "", true));
         EXPECT_FALSE(fs::exists(ds.pendingFile("sample.splat")));
         EXPECT_TRUE(isBuildComplete(ds.db.get(), "sample.splat"));
     }
@@ -673,8 +714,9 @@ TEST(PendingBuild, MaximumBuildLodDeadlineParsesAndLaunchesTool) {
     EXPECT_LT(std::chrono::steady_clock::now() - started, std::chrono::seconds(10));
 }
 
-// A pending primary failure stays visibly failed while its existing dependency
-// hints and refreshed timestamp let a delayed coordinator retry the same entry.
+// A pending primary failure stays visibly failed while its marker (released by the
+// add of the dependencies) and refreshed timestamp let a delayed coordinator retry
+// the same entry.
 TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
     Dataset ds(TEST_NAME);
     writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
@@ -683,7 +725,7 @@ TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
     writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
     writePng(ds.path("tex.png"));
     ds.add({"m.mtl", "tex.png"});
-    ds.backdatePending("m.obj");
+    EXPECT_TRUE(ds.released("m.obj"));
     const auto beforeAttempt = ddb::currentUnixTimestamp();
     {
         EnvVarGuard lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
@@ -694,7 +736,8 @@ TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
     const auto pending = ddb::getPendingBuildInfo(ds.db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_GE(pending[0].lastAttempt, beforeAttempt);
-    EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"m.mtl"}));
+    EXPECT_TRUE(pending[0].missingDependencies.empty());
+    EXPECT_FALSE(pending[0].awaitingFiles);
     EXPECT_FALSE(ds.bm3dBuilt("m.obj"));
 
     EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
@@ -769,5 +812,155 @@ TEST(PendingBuild, FailedAtomicTimestampReplacementPreservesOriginalMarker) {
     EXPECT_EQ(markerContents(ds.pendingFile("m.obj")), original);
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// Builds that await files
+// ---------------------------------------------------------------------------
+
+// Defers m.obj (at folder) because its MTL is missing; the MTL it names has no texture.
+void deferObjAwaitingMtl(Dataset& ds, const std::string& obj, const std::string& mtllib = "m.mtl") {
+    writeFile(ds.path(obj), objWithMtllib("mtllib " + mtllib));
+    ds.add({obj});
+    expectDeferred(ds, obj);
+    ASSERT_TRUE(ds.awaitingFiles(obj));
+}
+
+// A build that only awaits missing files is neither retried by buildPending (even
+// long past the backoff) nor counted by isBuildPending; force still retries it.
+TEST(PendingBuild, AwaitingMarkerIsNotRetriedNorCounted) {
+    Dataset ds(TEST_NAME);
+    deferObjAwaitingMtl(ds, "m.obj");
+    ds.backdatePending("m.obj", 3600);
+    const auto before = markerContents(ds.pendingFile("m.obj"));
+
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_EQ(markerContents(ds.pendingFile("m.obj")), before) << "not attempted";
+
+    const auto info = ddb::getPendingBuildInfo(ds.db.get());
+    ASSERT_EQ(info.size(), 1u);
+    EXPECT_TRUE(info[0].awaitingFiles);
+    EXPECT_EQ(info[0].missingDependencies, std::vector<std::string>{"m.mtl"});
+
+    ddb::buildPending(ds.db.get(), "", true);
+    EXPECT_NE(markerContents(ds.pendingFile("m.obj")), before) << "force attempts it";
+    EXPECT_TRUE(ds.awaitingFiles("m.obj"));
+}
+
+// A marker without dependencies (a transient failure, or a released one) is
+// counted and retried once due; beside it an awaiting marker is left alone.
+TEST(PendingBuild, TransientMarkerIsRetriedBesideAnAwaitingOne) {
+    Dataset ds(TEST_NAME);
+    deferObjAwaitingMtl(ds, "a/m.obj");
+    const auto awaiting = markerContents(ds.pendingFile("a/m.obj"));
+    // Another content than a/m.obj: one hash, one marker
+    writeFile(ds.path("b/m.obj"), objWithMtllib("mtllib b.mtl"));
+    writeFile(ds.path("b/b.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writePng(ds.path("b/tex.png"));
+    ds.add({"b/m.obj", "b/b.mtl", "b/tex.png"});
+    ds.writePendingMarker("b/m.obj", ddb::currentUnixTimestamp() - 900, {});
+
+    EXPECT_TRUE(ddb::isBuildPending(ds.db.get()));
+    EXPECT_FALSE(ds.awaitingFiles("b/m.obj"));
+    ddb::buildPending(ds.db.get(), "", false);
+
+    EXPECT_TRUE(ds.bm3dBuilt("b/m.obj"));
+    EXPECT_FALSE(fs::exists(ds.pendingFile("b/m.obj")));
+    EXPECT_EQ(markerContents(ds.pendingFile("a/m.obj")), awaiting);
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+}
+
+// The release matches the file name, case-insensitively, wherever the file lands:
+// a name the builder cannot use costs one retry, which defers the build again.
+TEST(PendingBuild, AddReleasesByFileNameIgnoringCaseAndFolder) {
+    Dataset ds(TEST_NAME);
+    deferObjAwaitingMtl(ds, "sub/m.obj", "Model.MTL");
+    EXPECT_EQ(ds.pendingDeps("sub/m.obj"), std::vector<std::string>{"sub/Model.MTL"});
+
+    writeFile(ds.path("elsewhere/model.mtl"), mtlWithTexture("map_Kd tex.png"));
+    ds.add({"elsewhere/model.mtl"});
+    EXPECT_TRUE(ds.released("sub/m.obj"));
+    EXPECT_TRUE(ddb::isBuildPending(ds.db.get()));
+
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_TRUE(ds.awaitingFiles("sub/m.obj")) << "still missing where the OBJ looks: deferred again";
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+}
+
+// Adding a file of another name, or a folder named like the dependency, leaves the
+// marker byte for byte as it was.
+TEST(PendingBuild, AddOfAnotherFileOrAFolderDoesNotRelease) {
+    Dataset ds(TEST_NAME);
+    deferObjAwaitingMtl(ds, "m.obj");
+    const auto before = markerContents(ds.pendingFile("m.obj"));
+
+    writeFile(ds.path("other.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("x/m.mtl/readme.txt"), "a folder named like the dependency");
+    ds.add({"other.mtl", "x"});
+
+    EXPECT_EQ(markerContents(ds.pendingFile("m.obj")), before);
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+}
+
+// addToIndexEx (DDBAddWithOptions) releases as addToIndex does.
+TEST(PendingBuild, AddWithOptionsReleases) {
+    Dataset ds(TEST_NAME);
+    deferObjAwaitingMtl(ds, "m.obj");
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    ddb::AddResult result;
+    ddb::addToIndexEx(ds.db.get(), {ds.path("m.mtl").string()}, ddb::AddOptions{}, result);
+    ASSERT_EQ(result.entries.size(), 1u);
+    EXPECT_TRUE(ds.released("m.obj"));
+}
+
+// Moving or renaming a file to the missing name releases the build, which then
+// builds; so does a folder moved to where the dependency is looked for.
+TEST(PendingBuild, MoveIntoTheMissingNameReleases) {
+    Dataset ds(TEST_NAME);
+    writePng(ds.path("tex.png"));
+    ds.add({"tex.png"});
+    deferObjAwaitingMtl(ds, "m.obj");
+    writeFile(ds.path("upload.mtl"), mtlWithTexture("map_Kd tex.png"));
+    ds.add({"upload.mtl"});
+    EXPECT_TRUE(ds.awaitingFiles("m.obj")) << "another name";
+
+    // As a host moves an entry: the file on disk first, then the index
+    fs::rename(ds.path("upload.mtl"), ds.path("m.mtl"));
+    ddb::moveEntry(ds.db.get(), "upload.mtl", "m.mtl");
+    EXPECT_TRUE(ds.released("m.obj"));
+
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_TRUE(ds.bm3dBuilt("m.obj"));
+    EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
+
+    // A folder: mats/n.mtl arrives as upload/n.mtl, then upload is moved to mats. The
+    // add already releases it (same file name), and the retry defers it again
+    deferObjAwaitingMtl(ds, "n.obj", "mats/n.mtl");
+    writeFile(ds.path("upload/n.mtl"), mtlWithTexture("map_Kd ../tex.png"));
+    ds.add({"upload"});
+    EXPECT_TRUE(ds.released("n.obj"));
+    ddb::buildPending(ds.db.get(), "", false);
+    ASSERT_TRUE(ds.awaitingFiles("n.obj"));
+    fs::rename(ds.path("upload"), ds.path("mats"));
+    ddb::moveEntry(ds.db.get(), "upload", "mats");
+    EXPECT_TRUE(ds.released("n.obj"));
+
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_TRUE(ds.bm3dBuilt("n.obj"));
+}
+
+// A marker that an attempt writes back as it found it (a transient failure) is
+// checked as well: its dependency is on disk by now, so it is released.
+TEST(PendingBuild, RetainedAwaitingMarkerIsReleasedWhenItsDependencyExists) {
+    Dataset ds(TEST_NAME);
+    deferObjAwaitingMtl(ds, "m.obj");
+    // On disk, never added (the add would have released it)
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    EXPECT_TRUE(ds.awaitingFiles("m.obj"));
+
+    EnvVarGuard lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
+    EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), RetryableBuildException);
+    EXPECT_TRUE(ds.released("m.obj"));
+}
 
 }  // namespace

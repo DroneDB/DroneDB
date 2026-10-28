@@ -6,6 +6,7 @@
 #include "index_internal.h"
 
 #include "build.h"
+#include "build_internal.h"
 #include "entry_filters.h"
 #include "entry_path.h"
 #include "exceptions.h"
@@ -422,6 +423,24 @@ namespace ddb
         return res;
     }
 
+    namespace
+    {
+
+        // The paths of the files below folder (folders excluded)
+        std::vector<std::string> listFilePaths(Database *db, const std::string &folder)
+        {
+            const auto descendants = buildPathPredicate(folder, true);
+            auto q = db->query("SELECT path FROM entries WHERE " + typeCondition("type", "!=", EntryType::Directory) +
+                               " AND (" + descendants.sql + ")");
+            bindPathPredicate(*q, descendants, 1);
+            std::vector<std::string> res;
+            while (q->fetch())
+                res.push_back(q->getText(0));
+            return res;
+        }
+
+    } // namespace
+
     void replacePath(Database *db, const std::string &source, const std::string &dest)
     {
 
@@ -535,6 +554,10 @@ namespace ddb
         }
 
         tx.commit();
+
+        // A file moved to a name a build waits for releases it, as an add does
+        releasePendingBuildsAwaiting(db, sourceEntry.type != EntryType::Directory ? std::vector<std::string>{dest}
+                                                                                   : listFilePaths(db, dest));
     }
 
 } // namespace ddb

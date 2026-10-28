@@ -419,3 +419,15 @@ Registry has to adopt first.
   build (or another export) of the entry holds the lock, `DDBERR_RETRYABLE` on a full disk and
   `DDBERR_CANCELED` when its cancel token is canceled. `capabilities` lists the export in `symbols` and
   in `cancellable`; no other fixture changed.
+
+* 2026-10-28: `pending-build-info` gains `awaitingFiles` (additive, boolean, required): true when
+  `missingDependencies` is not empty. Such a build is not retried by a timer: `DDBBuild` with
+  `pendingOnly` (and no `force`) skips it whatever `retryAfter` says, and `DDBIsBuildPending` does
+  not count it (it is true only when a deferred build awaits no file). Adding a file whose name
+  matches one of the missing dependencies (by file name, in any folder, ignoring case) through
+  `DDBAdd`, `DDBAddWithOptions`, `DDBAddWithHints`, `DDBMoveEntry` or `DDBApplyDelta` releases the
+  build: its marker loses its dependencies and its time (`lastAttempt` 0), so it is due at once and
+  `awaitingFiles` is false. `DDBCopyBuildArtifacts` releases a copied marker the same way when the
+  destination indexes such a file already. The fixture of the deferred `roads.shp` has `"awaitingFiles": true`; no
+  other fixture changed. Registry's exact-JSON adapter tests of this output need the field before
+  Registry moves to a libddb build that has it.

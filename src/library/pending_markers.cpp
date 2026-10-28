@@ -4,7 +4,7 @@
 
 // Pending markers: "<hash>.pending" records a build deferred until its missing
 // dependencies are uploaded. Writing (atomically), parsing and listing markers,
-// and retrying the deferred builds.
+// releasing those that await an added file, and retrying the deferred builds.
 
 #include "build.h"
 #include "timeutil.h"
@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <unordered_set>
 
 #include "build_internal.h"
 #include "build_layout.h"
@@ -21,6 +22,7 @@
 #include "exceptions.h"
 #include "index_sql.h"
 #include "mio.h"
+#include "stringutil.h"
 
 namespace ddb {
 
@@ -46,6 +48,60 @@ bool replacePendingMarker(const fs::path& pendingPath, const std::string& depend
              << "'; original marker retained: " << ex.what();
         return false;
     }
+}
+
+bool releasePendingMarker(const fs::path& pendingPath) {
+    try {
+        writeMarkerAtomically(pendingPath, "0\n");
+        return true;
+    } catch (const std::exception& ex) {
+        LOGW << "Cannot release pending marker '" << io::toUtf8(pendingPath)
+             << "'; original marker retained: " << ex.what();
+        return false;
+    }
+}
+
+bool pendingDependencyExists(const std::vector<std::string>& names, const PendingDependencyLookup& where) {
+    const auto isFile = [](const fs::path& p) {
+        std::error_code ec;
+        return fs::is_regular_file(p, ec) && !ec;
+    };
+    try {
+        for (const auto& name : names) {
+            const fs::path rel = io::fromUtf8(name);
+            if (isFile(where.datasetRoot / rel))
+                return true;
+            for (const auto& source : where.sourcePaths)
+                if (isFile(where.datasetRoot / io::fromUtf8(source).parent_path() / rel))
+                    return true;
+        }
+        for (const auto& p : where.extraPaths)
+            if (isFile(io::fromUtf8(p)))
+                return true;
+    } catch (const std::exception& ex) {
+        LOGD << "Cannot look for a pending dependency: " << ex.what();
+    }
+    return false;
+}
+
+bool writePendingMarker(const fs::path& pendingPath, const std::vector<std::string>& dependencies,
+                        const PendingDependencyLookup& where) {
+    std::string lines;
+    for (const auto& d : dependencies)
+        lines += d + "\n";
+    if (!replacePendingMarker(pendingPath, lines))
+        return false;
+    // After the write, never before it (see the declaration)
+    releasePendingMarkerIfSatisfied(pendingPath, dependencies, where);
+    return true;
+}
+
+void releasePendingMarkerIfSatisfied(const fs::path& pendingPath, const std::vector<std::string>& dependencies,
+                                     const PendingDependencyLookup& where) {
+    if (dependencies.empty() || !pendingDependencyExists(dependencies, where))
+        return;
+    LOGD << "A dependency of " << io::toUtf8(pendingPath) << " exists now, releasing it";
+    releasePendingMarker(pendingPath);
 }
 
 void copyPendingMarker(const fs::path& from, const fs::path& to) {
@@ -121,8 +177,9 @@ namespace {
 // the first line is a Unix timestamp of the last attempt, the following lines are missing
 // dependency names (one per line). Names are dataset-root-relative paths of companion files
 // (e.g. "sub/m.mtl", "sub/mats/tex.png"); markers written by older versions may hold names
-// relative to the source file's folder. They are informational only: a retry never matches
-// them against the index.
+// relative to the source file's folder. A marker that lists dependencies awaits files: no timer
+// retries it, adding a file of the same name releases it (the released form is "0" and no
+// dependency). A retry never matches the names against the index.
 
 // A marker that cannot be read counts as one with no timestamp and no dependency (the build is
 // due immediately), the historical, lenient behavior of buildPending().
@@ -164,10 +221,11 @@ std::vector<fs::path> collectPendingFiles(const fs::path& buildDir) {
 
 }  // namespace
 
-// Retries every deferred build whose retry is due (pendingRetryAfter(), build_internal.h; force
-// retries them all). A retry is a full build attempt: the dependency
-// names stored in ".pending" are for display only and are never matched against
-// the index (they used to be, which left models in subfolders pending forever).
+// Retries every deferred build whose retry is due (pendingRetryAfter(), build_internal.h) and that
+// awaits no file (PendingMarker::awaitsFiles(): an add of one of its files releases it, see
+// releasePendingBuildsAwaiting()); force retries them all. A retry is a full build attempt: the
+// dependency names stored in ".pending" are never matched against the index (they used to be,
+// which left models in subfolders pending forever); the release matches file names only.
 // Each builder validates its dependencies on disk first; one still missing
 // refreshes ".pending" (BuildDepMissingException, logged at debug). Classified
 // primary transient failures keep an existing marker and refresh its timestamp;
@@ -188,6 +246,12 @@ void buildPending(Database* db, const std::string& outputPath, bool force, const
     for (const auto& pendingPath : pendingFiles) {
         const auto hash = io::toUtf8(pendingPath.stem());
         const PendingMarker pending = parsePendingFile(pendingPath);
+
+        if (!force && pending.awaitsFiles()) {
+            LOGD << "Skipping build attempt for hash " << hash << " (awaits "
+                 << pending.missingDependencies.size() << " missing file(s))";
+            continue;
+        }
 
         const time_t now = currentUnixTimestamp();
         const time_t retryAfter = pendingRetryAfter(pending.lastAttempt);
@@ -234,9 +298,80 @@ void buildPending(Database* db, const std::string& outputPath, bool force, const
     }
 }
 
-// Same marker set as buildPending(): top-level "<hash>.pending" files only.
+// Same marker set as buildPending(): top-level "<hash>.pending" files only, and only those a
+// retry can progress (a marker that awaits files waits for an add, not for a retry).
 bool isBuildPending(Database* db) {
-    return !collectPendingFiles(db->buildDirectory()).empty();
+    for (const auto& pendingPath : collectPendingFiles(db->buildDirectory()))
+        if (!parsePendingFile(pendingPath).awaitsFiles())
+            return true;
+    return false;
+}
+
+namespace {
+
+// The file name of a dataset-relative path, lowercased (ASCII): the key a dependency name of a
+// marker and an added file match by
+std::string fileNameKey(const std::string& path) {
+    const size_t slash = path.find_last_of("/\\");
+    return str::toLowerCopy(slash == std::string::npos ? path : path.substr(slash + 1));
+}
+
+}  // namespace
+
+void releasePendingMarkerIfIndexed(Database* db, const fs::path& pendingPath) {
+    try {
+        const auto pending = readPendingMarker(pendingPath);
+        if (!pending || !pending->awaitsFiles())
+            return;
+        // lower() of SQLite folds ASCII only, as fileNameKey() does
+        const auto q = db->query("SELECT path FROM entries WHERE " +
+                                 typeCondition("type", "!=", EntryType::Directory) +
+                                 " AND (lower(path) = ?1 OR substr(lower(path), -length(?1) - 1) = '/' || ?1) LIMIT 1");
+        for (const auto& dep : pending->missingDependencies) {
+            q->bind(1, fileNameKey(dep));
+            const bool indexed = q->fetch();
+            q->reset();
+            if (!indexed)
+                continue;
+            LOGD << "Releasing pending build " << io::toUtf8(pendingPath.stem()) << ": " << dep
+                 << " is indexed already";
+            releasePendingMarker(pendingPath);
+            return;
+        }
+    } catch (const std::exception& ex) {
+        LOGW << "Cannot check the pending marker '" << io::toUtf8(pendingPath) << "' against the index: "
+             << ex.what();
+    }
+}
+
+void releasePendingBuildsAwaiting(Database* db, const std::vector<std::string>& filePaths) {
+    if (filePaths.empty())
+        return;
+    try {
+        const std::vector<fs::path> pendingFiles = collectPendingFiles(db->buildDirectory());
+        if (pendingFiles.empty())
+            return;
+
+        std::unordered_set<std::string> added;
+        for (const auto& p : filePaths)
+            added.insert(fileNameKey(p));
+
+        for (const auto& pendingPath : pendingFiles) {
+            const auto pending = readPendingMarker(pendingPath);
+            if (!pending || !pending->awaitsFiles())
+                continue;
+            for (const auto& dep : pending->missingDependencies) {
+                if (added.count(fileNameKey(dep)) == 0)
+                    continue;
+                LOGD << "Releasing pending build " << io::toUtf8(pendingPath.stem()) << ": " << dep
+                     << " may have been added";
+                releasePendingMarker(pendingPath);
+                break;
+            }
+        }
+    } catch (const std::exception& ex) {
+        LOGW << "Cannot release the pending builds that await added files: " << ex.what();
+    }
 }
 
 std::vector<PendingBuildInfo> getPendingBuildInfo(Database* db) {
@@ -257,6 +392,7 @@ std::vector<PendingBuildInfo> getPendingBuildInfo(Database* db) {
         info.missingDependencies = pending.missingDependencies;
         info.lastAttempt = pending.lastAttempt;
         info.retryAfter = pendingRetryAfter(pending.lastAttempt);
+        info.awaitingFiles = pending.awaitsFiles();
 
         result.push_back(std::move(info));
     }

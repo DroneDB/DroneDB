@@ -570,6 +570,33 @@ TEST(BuildManifest, CopyBuildArtifacts) {
     EXPECT_EQ(nothing["pending"], false);
 }
 
+// A transfer indexes its files in the destination before it copies the builds: a copied marker
+// that awaits a file the destination indexes already is released (by file name, in any folder,
+// ignoring case, as the add releases), or it would wait for an add that came before it
+TEST(BuildManifest, CopiedPendingMarkerIsReleasedWhenTheDestinationIndexesADependency) {
+    EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+    CopyFixture fx(TEST_NAME);
+    insertEntry(fx.destination.db.get(), "moved/pending.shp", H_PENDING, EntryType::Vector);
+    // Neither a missing name nor a file: a folder and another file name
+    insertEntry(fx.destination.db.get(), "moved/pending.shx", "", EntryType::Directory);
+    insertEntry(fx.destination.db.get(), "moved/other.dbf", std::string(64, 'c'), EntryType::Generic);
+
+    // Nothing of that name: the copy keeps the marker as it is
+    copyBuildArtifacts(fx.source.db.get(), fx.destination.db.get(), H_PENDING);
+    auto marker = readPendingMarker(fx.destinationBuild / (H_PENDING + ".pending"));
+    ASSERT_TRUE(marker.has_value());
+    EXPECT_TRUE(marker->awaitsFiles());
+    EXPECT_EQ(marker->lastAttempt, 1700000000);
+
+    // The transfer put the .dbf in another folder, under another case ("sub/pending.dbf" awaited)
+    insertEntry(fx.destination.db.get(), "moved/Pending.DBF", std::string(64, 'b'), EntryType::Generic);
+    copyBuildArtifacts(fx.source.db.get(), fx.destination.db.get(), H_PENDING);
+    marker = readPendingMarker(fx.destinationBuild / (H_PENDING + ".pending"));
+    ASSERT_TRUE(marker.has_value());
+    EXPECT_FALSE(marker->awaitsFiles());
+    EXPECT_EQ(marker->lastAttempt, 0);
+}
+
 // A legacy artifact is served while the role it stands in for is missing, not while the type has
 // no current artifact at all: a type with other current artifacts (an old model with its 3D
 // Tiles) must still list its legacy output
