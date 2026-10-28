@@ -129,7 +129,8 @@ extern "C"
      *   "errorReasons" every reason DDBGetLastErrorReason() returns, sorted
      *   "cancellable"  the exports whose work checks a cancel token (DDBSetThreadCancelToken)
      *                  while it runs, and stops with DDBERR_CANCELED when it is canceled;
-     *                  DDBExportRaster2 also stops when its DDBProgressCallback asks to
+     *                  DDBExportRaster2 and DDBExportSplatTrainingData also stop when their
+     *                  DDBProgressCallback asks to
      *   "symbols"      every exported DDB* function, sorted (ddb.symbols)
      * Fields are only ever added. The string is built once and owned by the library: it stays
      * valid for the life of the process and is the same pointer on every call and every thread;
@@ -256,12 +257,13 @@ extern "C"
      * progress of warps, translations, statistics and raster reads, SQLite statements, and
      * external tools (killed). DDBGetCapabilities() lists as "cancellable" the exports whose
      * work checks a token while it runs; any export may return DDBERR_CANCELED when a token is
-     * set and canceled, and no export returns it without one (but DDBExportRaster2, through its
-     * progress callback). DDBShutdown stops the work of every thread the same way, with
+     * set and canceled, and no export returns it without one (but DDBExportRaster2 and
+     * DDBExportSplatTrainingData, through their progress callback). DDBShutdown stops the work of every thread the same way, with
      * DDBERR_SHUTDOWN.
      * The cancellable exports are the render, tile and thumbnail paths, the exports of rasters
      * (export, mask, statistics and metadata, point and area values, profile, volume, stockpiles,
-     * contours), DDBBuild, DDBComputeDeltaLocals and DDBApplyDelta(Ex). A canceled call leaves
+     * contours), the training data of a splat (DDBExportSplatTrainingData), DDBBuild,
+     * DDBComputeDeltaLocals and DDBApplyDelta(Ex). A canceled call leaves
      * no half result: a raster output file is deleted, and DDBApplyDelta changes the dataset
      * whole or not at all (see there). */
 
@@ -1001,6 +1003,48 @@ extern "C"
      *         (DDBGetLastErrorReason); DDBERR_BUSY on database contention */
     DDB_DLL DDBErr DDBCopyBuildArtifacts(const char *sourceDdbPath, const char *destinationDdbPath, const char *hash,
                                          char **output);
+
+    /** Training data of a Gaussian splat from an ODM project (new in 2.0): the project's outputs
+     * uploaded to the dataset (cameras.json, odm_report/shots.geojson, images/,
+     * odm_georeferencing/coords.txt and its point cloud, odm_georeferenced_model.laz or
+     * odm_filterpoints/point_cloud.ply) become, in outFolder, a COLMAP sparse model
+     * (sparse/0/cameras.bin, images.bin, points3D.bin: binary, little-endian, in the project's
+     * projected CRS minus the offset of coords.txt, so in meters with the axes East, North and
+     * Up), the images (images/, linked or resized) and georef.json ({"crs": ..., "offset": [e, n, 0]}),
+     * which makes a splat trained from the model and uploaded next to that file georeferenced.
+     * Brown cameras are exported as OPENCV (its missing third radial term is folded into k1 and
+     * k2), perspective ones as RADIAL, fisheye_opencv ones as OPENCV_FISHEYE; an image of any other
+     * model, or whose file is missing, is left out with a warning. It only reads the dataset;
+     * outFolder is a folder of the filesystem. A failed or canceled call may leave a partial
+     * outFolder. The call is cancellable (DDBSetThreadCancelToken).
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param folder dataset-relative folder of the ODM project (an entry path, see "Entry paths";
+     *        "", NULL and "." for the dataset root)
+     * @param outFolder filesystem folder to write (UTF-8), created if missing; it must not be the
+     *        project's folder
+     * @param optionsJson NULL, "" or "{}" for the defaults, else a JSON object with the members
+     *          "maxImageSize"  whole number from 0, the longest side in pixels of the exported
+     *                          images (a smaller image keeps its size); 0 (default) exports the
+     *                          originals, linked or copied,
+     *          "maxPoints"     whole number from 0, the most points of points3D.bin, thinned on a
+     *                          3D grid (default 100000); 0 writes none.
+     *        A member that is not known, or not a whole number in range, is refused.
+     * @param progress optional progress callback (may be NULL): the fraction done and the phase
+     *        ("cameras", "points", "images", "model"); a non-zero return cancels the call
+     *        (DDBERR_CANCELED). Calls are one at a time, on the calling thread or one of its workers.
+     * @param progressUserData opaque pointer forwarded to the progress callback
+     * @param output pointer to C-string where to store the JSON object (free with DDBFree):
+     *               {"warnings": [string], "images": number, "points": number}: what the user
+     *               should know before training (images left out, an approximated lens, no point
+     *               cloud, most images looking straight down), the images of the model and its points
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty or an
+     *         option is refused; DDBERR_NOTFOUND when folder is not in the dataset; DDBERR_EXCEPTION
+     *         when a file of the project is missing or unusable (the message names it, coords.txt
+     *         included) or no image can be exported (the message gives the reasons);
+     *         DDBERR_CANCELED when canceled; DDBERR_BUSY on database contention */
+    DDB_DLL DDBErr DDBExportSplatTrainingData(const char *ddbPath, const char *folder, const char *outFolder,
+                                              const char *optionsJson, DDBProgressCallback progress,
+                                              void *progressUserData, char **output);
 
     /** Options for DDBListEntriesEx (new in 2.0). Set structSize to sizeof(DDBListEntriesOptions)
      * and every other field explicitly. A later version may append fields: a library that does not

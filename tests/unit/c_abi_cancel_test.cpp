@@ -45,6 +45,7 @@
 #include "gtest/gtest.h"
 #include "hash.h"
 #include "json.h"
+#include "odm_project_support.h"
 #include "parallel.h"
 #include "raster_test_utils.h"
 #include "test.h"
@@ -144,7 +145,7 @@ struct Inputs {
     fs::path raster5;  // the same with 5 bands (spectral indexes)
     fs::path dem;  // 1 band Float32, EPSG:4326, a conical mound, 80x80 at (10, 45), 0.0001 degrees
     fs::path source;   // where the files of the deltas wait
-    fs::path dataset;  // holds raster.tif
+    fs::path dataset;  // holds ortho.tif and an ODM project in odm/
     explicit Inputs(const std::string& name) : area(name, true) {
         testutils::GeoRasterSpec spec;
         raster = testutils::createGeoRaster(area.getPath("raster.tif"), spec);
@@ -168,6 +169,7 @@ struct Inputs {
         char* out = nullptr;
         EXPECT_EQ(DDBInit(dataset.string().c_str(), &out), DDBERR_NONE) << DDBGetLastError();
         DDBFree(out);
+        testutils::writeOdmProject(dataset / "odm", testutils::defaultOdmProject());
         const auto inDataset = dataset / "ortho.tif";
         fs::copy_file(raster, inDataset);
         const std::string path = inDataset.string();
@@ -185,6 +187,7 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
     const std::string dataset = in.dataset.string();
     const std::string out = in.area.getPath("out.tif").string();
     const std::string thumb = in.area.getPath("thumb.webp").string();
+    const std::string splatOut = in.area.getPath("splat-training-data").string();
     const auto withBuffer = [](const std::function<DDBErr(uint8_t**, int*)>& call) {
         uint8_t* buffer = nullptr;
         int size = 0;
@@ -283,6 +286,12 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
          [=] {
              return DDBExportRaster2(raster.c_str(), out.c_str(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0,
                                      nullptr, nullptr);
+         }},
+        {"DDBExportSplatTrainingData",
+         [=] {
+             return withString([&](char** text) {
+                 return DDBExportSplatTrainingData(dataset.c_str(), "odm", splatOut.c_str(), nullptr, nullptr, nullptr, text);
+             });
          }},
         {"DDBGenerateContours",
          [=] {

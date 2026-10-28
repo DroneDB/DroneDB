@@ -381,3 +381,15 @@ Registry has to adopt first.
   2026-10-25. The `bounds.json` of the built splat gains `up: [0, 0, 1]`, `upConfidence: 1` and
   `upSource: "georef"` and `wgs84Footprint`, a GeoJSON Polygon geometry (`[longitude, latitude]`
   ring) of its bounding box. `entry.schema.json` describes the two members; no fixture changed.
+
+* 2026-10-28: the export `DDBExportSplatTrainingData(ddbPath, folder, outFolder, optionsJson,
+  progress, progressUserData, output)` is new in 2.0.0 (ABI 2.0, no bump). It writes the training
+  data of a Gaussian splat (a COLMAP sparse model, the images and `georef.json`) from the ODM
+  project that is in `folder` of the dataset. Its output is `{"warnings": [string], "images": n,
+  "points": n}`; the options are `{"maxImageSize"?: n, "maxPoints"?: n}` (whole numbers from 0, 0 for
+  the originals and for no points). It returns `DDBERR_INVALIDARGS` for an option that is not usable,
+  `DDBERR_NOTFOUND` for a folder that is not in the dataset, `DDBERR_EXCEPTION` for a file of the
+  project that is missing or unusable (the message names `coords.txt`, `cameras.json`... ) and
+  `DDBERR_CANCELED` when
+  the token is canceled or the progress callback returns non-zero. `capabilities` lists the export in
+  `symbols` and in `cancellable`; no other fixture changed.

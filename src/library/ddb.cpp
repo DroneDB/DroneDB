@@ -37,6 +37,7 @@
 #include "cad.h"
 #include "delta.h"
 #include "delta_apply.h"
+#include "deppath.h"
 #include "entry.h"
 #include "entry_path.h"
 #include "entry_types.h"
@@ -62,6 +63,7 @@
 #include "raster_utils.h"
 #include "vector_query.h"
 #include "sensorprofile.h"
+#include "splat_training_export.h"
 #include "stac.h"
 #include "status.h"
 #include "syncmanager.h"
@@ -1130,6 +1132,74 @@ DDBErr DDBCopyBuildArtifacts(const char* sourceDdbPath, const char* destinationD
         const auto source = ddb::open(std::string(sourceDdbPath), false);
         const auto destination = ddb::open(std::string(destinationDdbPath), false);
         return copyBuildArtifacts(source.get(), destination.get(), hash);
+    });
+}
+
+// ------------------------------------------------------------------ splat training data
+
+namespace {
+
+// The options of DDBExportSplatTrainingData: NULL and "" are none; otherwise a JSON object whose
+// members, "maxImageSize" and "maxPoints", are whole numbers from 0 (not 2.0, true or "2")
+SplatTrainingExportOptions splatTrainingOptionsArg(const char* optionsJson) {
+    SplatTrainingExportOptions options;
+    if (optionsJson == nullptr || optionsJson[0] == '\0')
+        return options;
+    const json given = parseJsonArg(optionsJson);
+    if (!given.is_object())
+        throw InvalidArgsException("The training data options must be a JSON object");
+    rejectUnknownMembers(given, {"maxImageSize", "maxPoints"}, "training data option");
+
+    const auto wholeNumber = [&](const char* name, uint64_t limit) -> std::optional<uint64_t> {
+        const auto member = given.find(name);
+        if (member == given.end())
+            return std::nullopt;
+        const bool negative = member->is_number_integer() && !member->is_number_unsigned() && member->get<int64_t>() < 0;
+        if (!member->is_number_integer() || negative)
+            throw InvalidArgsException(std::string("\"") + name + "\" must be a whole number from 0");
+        const uint64_t value = member->get<uint64_t>();
+        if (value > limit)
+            throw InvalidArgsException(std::string("\"") + name + "\" is at most " + std::to_string(limit));
+        return value;
+    };
+    if (const auto size = wholeNumber("maxImageSize", 1u << 20))
+        options.maxImageSize = static_cast<int>(*size);
+    if (const auto points = wholeNumber("maxPoints", 1u << 30))
+        options.maxPoints = static_cast<size_t>(*points);
+    return options;
+}
+
+}  // namespace
+
+DDBErr DDBExportSplatTrainingData(const char* ddbPath, const char* folder, const char* outFolder,
+                                  const char* optionsJson, DDBProgressCallback progress, void* progressUserData,
+                                  char** output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireDdbPath(ddbPath);
+        requireText(outFolder, "No output folder provided");
+        requireOutput(output);
+        SplatTrainingExportOptions options = splatTrainingOptionsArg(optionsJson);
+        if (progress != nullptr) {
+            options.progress = [progress, progressUserData](double fraction, const char* phase) {
+                return progress(fraction, phase, progressUserData) != 0;
+            };
+        }
+        // NULL, "" and "." are the root of the dataset
+        const std::string entryFolder = optStr(folder) == "." ? std::string() : optEntryPathArg(folder, "folder");
+
+        const auto db = ddb::open(std::string(ddbPath), false);
+        const fs::path root = db->rootDirectory();
+        const fs::path project = entryFolder.empty() ? root : root / io::fromUtf8(entryFolder);
+        std::error_code ec;
+        if (!fs::is_directory(project, ec))
+            throw EntryNotFoundException("The folder '" + entryFolder + "' is not in the dataset");
+        // A link must not lead the export out of the dataset
+        if (!deppath::isInside(fs::weakly_canonical(project, ec), fs::weakly_canonical(root, ec)))
+            throw InvalidArgsException("The folder '" + entryFolder + "' leads out of the dataset");
+
+        const SplatTrainingExportResult result =
+            exportSplatTrainingData(project, pathArg(outFolder), options);
+        return json{{"warnings", result.warnings}, {"images", result.images}, {"points", result.points}};
     });
 }
 
