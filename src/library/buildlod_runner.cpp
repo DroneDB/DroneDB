@@ -133,7 +133,8 @@ namespace ddb
                 try
                 {
                     scratch = io::ScopedTempDir::createBeside(outputRad.parent_path(), "build-lod-");
-                    const fs::path file = scratch.path() / io::concat(fs::path(kStagedStem), io::toUtf8(input.extension()));
+                    fs::path file = scratch.path() / io::fromUtf8(kStagedStem);
+                    file += input.extension();
                     stageInput(input, file);
                     return file;
                 }
