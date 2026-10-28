@@ -98,8 +98,12 @@ namespace ddb
 
         // A .rad upload is already what a build makes, so it is checked and published as model.rad
         // without build-lod: the reader walks the header and every chunk's centres (a file it cannot
-        // read is refused here, not served to a viewer that cannot read it either). The file is hard
-        // linked into the folder, or copied where links are not possible; the dataset file is not touched.
+        // read is refused here, not served to a viewer that cannot read it either). The file is
+        // copied, as an optimized COG is: a hard link would share its data with the dataset file, and
+        // a rewrite of that file in place would change the published model.rad under its bounds.json
+        // without a build. The copy goes into the build's scratch folder, which is published by
+        // renaming it whole, so no reader sees a part of it; a full disk fails the copy with its
+        // code, for the build to be retried.
         void publishRad(const std::string &input, const fs::path &source, const fs::path &outdir)
         {
             std::array<double, 3> boundsMin, boundsMax;
@@ -117,7 +121,7 @@ namespace ddb
                 throw AppException("Cannot build the Gaussian splat " + input + ": the RAD file holds no splats");
 
             const fs::path rad = outdir / GsplatRadFileName;
-            io::hardlinkSafe(source, rad);
+            io::copy(source, rad);
             writeSidecar(rad, outdir / GsplatBoundsFileName, boundsMin, boundsMax);
         }
 

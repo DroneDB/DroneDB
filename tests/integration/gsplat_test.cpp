@@ -1778,6 +1778,17 @@ TEST(gsplat, aRadUploadIsPublishedWithoutBuildLod) {
     EXPECT_EQ(readText(outdir / GsplatRadFileName), content);
     EXPECT_EQ(readText(upload), content) << "the dataset file is not touched";
 
+    // The model is a copy, not a link: rewriting the dataset file in place leaves the build as it was
+    EXPECT_FALSE(fs::equivalent(upload, outdir / GsplatRadFileName));
+    EXPECT_EQ(fs::hard_link_count(upload), 1u);
+    {
+        std::fstream rewrite(upload.string(), std::ios::binary | std::ios::in | std::ios::out);
+        rewrite.write("JUNK", 4);
+    }
+    EXPECT_NE(readText(upload), content);
+    EXPECT_EQ(readText(outdir / GsplatRadFileName), content) << "the published model changed with the dataset file";
+    writeBytes(upload, content);
+
     // The sidecar is that of any build: the box, and which way is up
     const json bounds = json::parse(readText(outdir / GsplatBoundsFileName));
     ASSERT_TRUE(bounds.contains("min") && bounds.contains("max"));
