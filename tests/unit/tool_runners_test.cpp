@@ -1040,7 +1040,13 @@ TEST(BuildLodRunner, theDatasetFolderIsNeverWrittenToOrDeletedFrom) {
 // build-lod skips an input that ends in "-lod.spz" or "-lod.rad", and takes the extension from the
 // last dot of the whole path: the staged name does not depend on the name of the dataset file
 TEST(BuildLodRunner, aDatasetFileIsStagedUnderOurNameWhateverItIsCalled) {
-    for (const char *name : {"scene-lod.spz", "scene-lod.rad", "a?b#c.ply", "100% done.splat", "dir.with.dots/noext.ply", "SCENE.PLY"}) {
+    std::vector<std::string> names = {"scene-lod.spz", "scene-lod.rad", "a#b c.ply", "100% done.splat",
+                                      "dir.with.dots/noext.ply", "SCENE.PLY"};
+#ifndef _WIN32
+    // '?' cannot be in a file name on Windows, so no dataset file there has one
+    names.push_back("a?b#c.ply");
+#endif
+    for (const auto &name : names) {
         BuildLodFixture f(std::string("runner_buildlod_names_") + std::to_string(std::hash<std::string>()(name) % 100000));
         f.input = f.ta.getPath(std::string("in/") + name);
         touch(f.input, "splat");
