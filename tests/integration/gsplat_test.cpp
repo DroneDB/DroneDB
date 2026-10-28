@@ -2130,6 +2130,8 @@ TEST(gsplat, aBuildOfAGeoreferencedEntryUsesItsGeoreference) {
     const json bounds = json::parse(readText(fs::path(db->buildDirectory()) / e.hash / "gsplat" / GsplatBoundsFileName));
     EXPECT_EQ(bounds["up"], (json::array({0.0, 0.0, 1.0})));
     EXPECT_EQ(bounds["upSource"], "georef");
+    ASSERT_EQ(bounds["wgs84Footprint"]["coordinates"].size(), 1u);
+    ASSERT_EQ(bounds["wgs84Footprint"]["coordinates"][0].size(), 5u);
     EXPECT_NEAR(bounds["wgs84Footprint"]["coordinates"][0][0][1].get<double>(), 46.842651237, 1e-6);
 }
 

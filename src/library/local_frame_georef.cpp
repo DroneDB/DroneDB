@@ -35,12 +35,24 @@ namespace ddb
         }
 
         // The CRS of a projected georef. A definition never names a file or reaches the network: it comes
-        // from a sidecar next to a dataset file.
-        bool loadProjectedCrs(const std::string &definition, OGRSpatialReference &srs)
+        // from a sidecar next to a dataset file. One that cannot be read throws with the reason GDAL gave.
+        OGRSpatialReference projectedCrs(const std::string &definition)
         {
+            if (definition.empty())
+                throw AppException("The georeference names no coordinate system");
+
             const char *options[] = {"ALLOW_NETWORK_ACCESS=NO", "ALLOW_FILE_ACCESS=NO", nullptr};
-            return !definition.empty() && srs.SetFromUserInput(definition.c_str(), options) == OGRERR_NONE &&
-                   srs.IsProjected();
+            OGRSpatialReference srs;
+            CPLErrorReset();
+            if (srs.SetFromUserInput(definition.c_str(), options) != OGRERR_NONE)
+            {
+                const std::string reason = CPLGetLastErrorMsg();
+                throw AppException("Cannot read the coordinate system '" + definition + "'" +
+                                   (reason.empty() ? std::string() : ": " + reason));
+            }
+            if (!srs.IsProjected())
+                throw AppException("'" + definition + "' is not a projected coordinate system");
+            return srs;
         }
 
         OGRSpatialReference wgs84()
@@ -50,26 +62,25 @@ namespace ddb
             return srs;
         }
 
-        // Transformer from the CRS of a projected georef to WGS84 (x is longitude, y latitude)
-        CoordsTransformer toWgs84(const LocalFrameGeoref &georef)
-        {
-            OGRSpatialReference from;
-            if (!loadProjectedCrs(georef.crs, from))
-                throw AppException("'" + georef.crs + "' is not a projected coordinate system");
-            return CoordsTransformer(from, wgs84());
-        }
-
-        // Converts points in the CRS of a projected georef to WGS84, in place; false when any fails
-        bool projectedToWgs84(const LocalFrameGeoref &georef, size_t n, double *x, double *y, double *z)
+        // Converts points in the CRS of a projected georef to WGS84 (x is longitude, y latitude), in
+        // place. Points that cannot be converted throw with what they are and the reason, so that the
+        // caller that goes without the origin or the footprint can say why.
+        void projectedToWgs84(const LocalFrameGeoref &georef, const std::string &what, size_t n, double *x, double *y,
+                              double *z)
         {
             try
             {
-                return toWgs84(georef).tryTransform(n, x, y, z);
+                CoordsTransformer transformer(projectedCrs(georef.crs), wgs84());
+                CPLErrorReset();
+                if (!transformer.tryTransform(n, x, y, z))
+                {
+                    const std::string reason = CPLGetLastErrorMsg();
+                    throw AppException(reason.empty() ? "PROJ gave no reason" : reason);
+                }
             }
             catch (const std::exception &e)
             {
-                LOGD << "Cannot convert from " << georef.crs << " to WGS84: " << e.what();
-                return false;
+                throw AppException("Cannot convert " + what + " from " + georef.crs + " to WGS84: " + e.what());
             }
         }
 
@@ -359,8 +370,7 @@ namespace ddb
             return georef.origin;
 
         double x = georef.offset[0], y = georef.offset[1], z = georef.offset[2];
-        if (!projectedToWgs84(georef, 1, &x, &y, &z))
-            throw AppException("Cannot convert the offset of the georeference from " + georef.crs + " to WGS84");
+        projectedToWgs84(georef, "the offset of the georeference", 1, &x, &y, &z);
         return {y, x, z};
     }
 
@@ -376,8 +386,7 @@ namespace ddb
                 x[i] = georef.offset[0] + corners[i][0];
                 y[i] = georef.offset[1] + corners[i][1];
             }
-            if (!projectedToWgs84(georef, corners.size(), x.data(), y.data(), nullptr))
-                throw AppException("Cannot convert the footprint from " + georef.crs + " to WGS84");
+            projectedToWgs84(georef, "the footprint", corners.size(), x.data(), y.data(), nullptr);
             for (size_t i = 0; i < corners.size(); ++i)
                 corners[i] = {x[i], y[i]};
             return closedRing(corners);
@@ -395,8 +404,12 @@ namespace ddb
 
     json localFrameFootprintGeometry(const LocalFrameGeoref &georef, const LocalBounds &bounds)
     {
+        // The footprint is held by name: a loop over the points of the returned temporary depends on
+        // the lifetime of the temporary being extended through a member of its base class, which the
+        // MSVC build did not do: the vector was destroyed before the loop and the ring came out empty.
+        const BasicPolygonGeometry footprint = localFrameFootprint(georef, bounds);
         json ring = json::array();
-        for (const auto &p : localFrameFootprint(georef, bounds).points)
+        for (const auto &p : footprint.points)
             ring.push_back({p.x, p.y});
         return {{"type", "Polygon"}, {"coordinates", json::array({ring})}};
     }

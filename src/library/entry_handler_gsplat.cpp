@@ -47,7 +47,8 @@ void parseGaussianSplatMetadata(const fs::path &path, Entry &entry)
     // A splat trained in the frame of an ODM project (or of a model with a georeferencing sidecar) is
     // georeferenced: its origin is the point of the entry. The footprint needs the bounds of the
     // scene, which only the build knows, so it is not a polygon of the entry but the wgs84Footprint
-    // of bounds.json. Best-effort: a splat whose georeference cannot be used stays local.
+    // of bounds.json. Best-effort: a splat whose georeference cannot be used stays local, and says why
+    // in its warning property as a model does.
     try
     {
         if (const auto georef = detectLocalFrameGeoref(io::toUtf8(path)))
@@ -55,7 +56,8 @@ void parseGaussianSplatMetadata(const fs::path &path, Entry &entry)
     }
     catch (const std::exception &e)
     {
-        LOGD << "Splat georeference ignored for " << io::toUtf8(path) << ": " << e.what();
+        LOGW << "Splat georeference ignored for " << io::toUtf8(path) << ": " << e.what();
+        entry.properties["warning"] = std::string("georeference ignored: ") + e.what();
     }
 }
 

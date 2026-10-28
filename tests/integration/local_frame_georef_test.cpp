@@ -15,6 +15,7 @@
 #include "contract_fixtures.h"
 #include "ddb.h"
 #include "entry.h"
+#include "exceptions.h"
 #include "gdal_inc.h"
 #include "gtest/gtest.h"
 #include "json.h"
@@ -316,6 +317,61 @@ namespace
         EXPECT_NEAR(ring.points[0].y, -33.860155304, kTolerance);
         EXPECT_NEAR(ring.points[2].x, 151.207154359, kTolerance);
         EXPECT_NEAR(ring.points[2].y, -33.858383828, kTolerance);
+    }
+
+    // The footprint as GeoJSON is the ring of localFrameFootprint, point for point: the geometry
+    // used to be built while looping over the points of a temporary, which the MSVC build destroyed
+    // first and wrote an empty ring
+    TEST(localFrameGeoref, theFootprintGeometryHasThePointsOfTheFootprint)
+    {
+        for (const LocalFrameGeoref &g : {LocalFrameGeoref::projected("EPSG:32615", 576705, 5188170),
+                                          LocalFrameGeoref::enu(45.0, 9.0, 100.0)})
+        {
+            const LocalBounds bounds{-100, -50, 200, 150};
+            const BasicPolygonGeometry ring = localFrameFootprint(g, bounds);
+            const json geometry = localFrameFootprintGeometry(g, bounds);
+            ASSERT_EQ(geometry["coordinates"].size(), 1u);
+            const json &outer = geometry["coordinates"][0];
+            ASSERT_EQ(outer.size(), static_cast<size_t>(ring.size()));
+            for (size_t i = 0; i < outer.size(); ++i)
+                EXPECT_EQ(outer[i], (json::array({ring.points[i].x, ring.points[i].y}))) << i;
+        }
+    }
+
+    // A georeference that cannot be converted says what and why, for the warning of the caller that
+    // goes without its origin or footprint
+    TEST(localFrameGeoref, aConversionThatFailsSaysWhy)
+    {
+        const auto messageOf = [](const auto &convert) -> std::string {
+            try
+            {
+                convert();
+            }
+            catch (const AppException &e)
+            {
+                return e.what();
+            }
+            return "no exception";
+        };
+        const LocalBounds bounds{0, 0, 10, 10};
+
+        const std::string unreadable =
+            messageOf([&] { localFrameOrigin(LocalFrameGeoref::projected("nonsense", 576705, 5188170)); });
+        EXPECT_NE(unreadable.find("Cannot convert the offset of the georeference from nonsense to WGS84"),
+                  std::string::npos)
+            << unreadable;
+        EXPECT_NE(unreadable.find("Cannot read the coordinate system 'nonsense'"), std::string::npos) << unreadable;
+
+        const std::string geographic =
+            messageOf([&] { localFrameFootprint(LocalFrameGeoref::projected("EPSG:4326", 10, 20), bounds); });
+        EXPECT_NE(geographic.find("Cannot convert the footprint from EPSG:4326 to WGS84"), std::string::npos)
+            << geographic;
+        EXPECT_NE(geographic.find("'EPSG:4326' is not a projected coordinate system"), std::string::npos)
+            << geographic;
+
+        const std::string unnamed =
+            messageOf([&] { localFrameFootprintGeometry(LocalFrameGeoref::projected("", 10, 20), bounds); });
+        EXPECT_NE(unnamed.find("names no coordinate system"), std::string::npos) << unnamed;
     }
 
     // The ENU kind keeps the equirectangular footprint models have always had
