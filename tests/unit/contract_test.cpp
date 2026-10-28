@@ -312,14 +312,12 @@ namespace
 
         const std::string hash = artifacts[0]["hash"].get<std::string>();
         ASSERT_DDB_OK(DDBResolveBuildFile(r.c_str(), hash.c_str(), "cog/cog.tif", &out));
-        const std::string resolved = out;  // a path, not JSON
-        DDBFree(out);
         contract::expectMatchesFixture(
             fixture("resolve-build-file",
                     "DDBBuild(<root>, \"ortho.tif\"), then DDBResolveBuildFile(<root>, <hash of ortho.tif>, "
                     "\"cog/cog.tif\")",
                     "build-file.schema.json"),
-            json(resolved));
+            contract::takeJson(out));
 
         // A second dataset with ortho.tif only: the build travels with the file
         const fs::path root2 = ta->getFolder("dataset2");

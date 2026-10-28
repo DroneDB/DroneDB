@@ -68,11 +68,11 @@ class GaussianSplatEntryHandler : public EntryHandler {
 
     std::vector<BuildArtifact> artifacts() const override {
         return {BuildArtifact::file("gsplat.lod", artifactPath(GsplatBuildSubfolder, GsplatRadFileName),
-                                    "application/octet-stream"),
+                                    GsplatMediaType),
                 // Written by builds before the RAD layout; read when present, listed only while
                 // model.rad is missing, removed alone (not gsplat/) once model.rad exists
                 BuildArtifact::file("gsplat.spz", artifactPath(GsplatBuildSubfolder, GsplatFileName),
-                                    "application/octet-stream")
+                                    GsplatMediaType)
                     .legacyFor("gsplat.lod"),
                 BuildArtifact::file("gsplat.bounds", artifactPath(GsplatBuildSubfolder, GsplatBoundsFileName),
                                     "application/json")};

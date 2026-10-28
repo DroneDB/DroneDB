@@ -958,14 +958,17 @@ extern "C"
      *         contention; DDBERR_EXCEPTION otherwise (no database at ddbPath, ...) */
     DDB_DLL DDBErr DDBGetBuildArtifacts(const char *ddbPath, const char **paths, int numPaths, char **output);
 
-    /** The absolute path of a file of a build, checked (new in 2.0): it serves the
-     * ".../build/{hash}/{path}" URLs, tiles included.
+    /** A file of a build, checked (new in 2.0): it serves the ".../build/{hash}/{path}" URLs,
+     * tiles included. The output is a JSON object, {"path": "<absolute path>", "mediaType": "<type>"}:
+     * "mediaType" is the media type of the artifact (see DDBGetBuildArtifacts) when the file is
+     * the one a client opens (a file artifact, or the index of a directory artifact), and is
+     * absent for any other file (the tiles of a directory artifact).
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param hash the hash of the build ("hash" of a build object): 64 hexadecimal characters
      * @param path the file, relative to the build root: an artifact's path, or a file below a
      *             directory artifact ("mvt/3/4/2.pbf"). The dataset path rules apply
      *             (DDBNormalizePath: '/' or '\' separators, no "..", not absolute).
-     * @param outPath pointer to C-string where to store the absolute path (UTF-8, free with
+     * @param outPath pointer to C-string where to store the JSON object (UTF-8, free with
      *                DDBFree)
      * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, the
      *         hash is malformed or the path breaks the path rules (traversal, absolute, ...);

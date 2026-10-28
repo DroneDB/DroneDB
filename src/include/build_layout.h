@@ -79,6 +79,10 @@ constexpr const char* GsplatFileName = "model.spz";
 // build-lod tool; streamed progressively by the viewer via HTTP range requests (paged: true).
 // This is the sole delivery artifact - the intermediate .spz is not kept after a successful build.
 constexpr const char* GsplatRadFileName = "model.rad";
+// The media type of the files of a Gaussian splat (.rad, .spz, .splat, .ksplat): none of the
+// formats has a registered one. The build manifest and STAC both name it from here, so a client
+// reads one type for the same file wherever it asks.
+constexpr const char* GsplatMediaType = "application/octet-stream";
 // Tiny sidecar with the splat's local-space axis-aligned bounding box, written at build
 // time. The viewer uses it to frame the camera deterministically. This is essential for the
 // paged .rad path: a streamed mesh has no resident splats (hence no computable bounds) when

@@ -92,7 +92,7 @@ with ddb).
 | `build-artifacts` | `DDBBuild(<root>, "ortho.tif")`, then `DDBGetBuildArtifacts` of a built (COG), two buildable and not built, a non-buildable file, a folder and a missing path (see [Build manifest](#build-manifest)) | `build-artifacts` | - |
 | `build-artifacts-pending` | The `pending-build-info` dataset (`roads.shp` deferred), then `DDBGetBuildArtifacts(<root>, ["roads.shp"])` | `build-artifacts` | `lastAttempt`, `retryAfter` |
 | `list-entries-ex` | `DDBBuild(<root>, "ortho.tif")`, then `DDBListEntriesEx(<root>, "", "", "", {recursive=true, withDetails=false, withBuild=true})` | `list-entries-ex` | - |
-| `resolve-build-file` | `DDBResolveBuildFile(<root>, <hash of ortho.tif>, "cog/cog.tif")` after its build: a path, held as a JSON string | `build-file` | - |
+| `resolve-build-file` | `DDBResolveBuildFile(<root>, <hash of ortho.tif>, "cog/cog.tif")` after its build: an object with the absolute `path` and the artifact's `mediaType` | `build-file` | - |
 | `copy-build-artifacts` | `DDBCopyBuildArtifacts(<root>, <root2>, <hash of ortho.tif>)` after its build, `<root2>` a dataset with `ortho.tif` | `copy-build-artifacts` | - |
 | `entry-types` | `DDBGetEntryTypes()` (no dataset) | `entry-types` | - |
 | `capabilities` | `DDBGetCapabilities()` (no dataset): ABI version, error codes, error reasons, cancellable exports, the symbol manifest | `capabilities` | `version` |
@@ -161,8 +161,10 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   time is at or past it. `DDBGetPendingBuildInfo` reports the same value. A host compares it with
   its clock and keeps no copy of the backoff.
 
-`DDBResolveBuildFile` returns a plain string, not JSON: its fixture holds it as a JSON string
-under the `<root>` placeholder.
+`DDBResolveBuildFile` returns a JSON object, `{"path": "<absolute path>", "mediaType": "<type>"}`:
+`mediaType` is the one of the manifest when the file is a declared artifact (a file artifact, or
+the index of a directory artifact) and is absent for any other file of a directory artifact (its
+tiles). The path sits under the `<root>` placeholder in the fixture.
 
 ## Path vectors
 
@@ -358,3 +360,13 @@ Registry has to adopt first.
   `gsplat/model.rad` removes `gsplat/model.spz` alone (the folder is shared). The roles of
   `entry-types` and every fixture are unchanged: none of them lists the `legacy` or `fallbackFor`
   of an artifact for this type.
+
+* 2026-10-28: `DDBResolveBuildFile` returns an object `{"path", "mediaType"?}` instead of a plain
+  path string (still 2.0.0, ABI 2.0: the export is new in 2.0 and no release carries the string).
+  `mediaType` is the manifest's type of the artifact when the file is a file artifact or the index
+  of a directory artifact, and absent otherwise (tiles). A host that serves the file with the
+  manifest's type reads it from here and falls back to its own mapping when it is absent; a host
+  built for the string reads `path` when the output starts with `{`. `resolve-build-file` and its
+  schema `build-file.schema.json` changed; no other fixture did.
+  STAC names the `.spz`, `.splat` and `.ksplat` data asset `application/octet-stream`, the media
+  type of the manifest (it said `application/x-spz` for `.spz`).

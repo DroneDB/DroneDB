@@ -1115,7 +1115,7 @@ DDBErr DDBResolveBuildFile(const char* ddbPath, const char* hash, const char* pa
         requireOutput(outPath);
 
         const auto db = ddb::open(std::string(ddbPath), false);
-        return io::toUtf8(resolveBuildFile(db.get(), hash, path));
+        return resolveBuildFile(db.get(), hash, path).toJson().dump();
     });
 }
 

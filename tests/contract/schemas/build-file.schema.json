@@ -1,7 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb build file",
-  "description": "DDBResolveBuildFile (new in 2.0): the absolute path (UTF-8) of a file inside an artifact of a build. A plain string, not JSON; the fixture holds it as a JSON string.",
-  "type": "string",
-  "minLength": 1
+  "description": "DDBResolveBuildFile (new in 2.0): a file inside an artifact of a build. A host that reads a plain string (the first 2.0 builds) reads the path from the object when it is one.",
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The absolute path (UTF-8) of the file"
+    },
+    "mediaType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The media type of the artifact when the file is the one a client opens (a file artifact, the index of a directory artifact); absent for any other file of a directory artifact (its tiles)"
+    }
+  }
 }

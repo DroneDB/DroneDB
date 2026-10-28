@@ -419,8 +419,9 @@ TEST(BuildManifest, RealBuildsMatchTheManifest) {
             found.push_back(a["role"].get<std::string>());
             const std::string file = a["kind"] == "dir" ? a["path"].get<std::string>() + "/" + a["index"].get<std::string>()
                                                         : a["path"].get<std::string>();
-            const fs::path resolved = resolveBuildFile(fx.db.get(), build["hash"].get<std::string>(), file);
-            EXPECT_TRUE(fileExistsAndNonEmpty(resolved)) << file;
+            const ResolvedBuildFile resolved = resolveBuildFile(fx.db.get(), build["hash"].get<std::string>(), file);
+            EXPECT_TRUE(fileExistsAndNonEmpty(resolved.path)) << file;
+            EXPECT_EQ(resolved.mediaType, a["mediaType"].get<std::string>()) << file;
         }
         EXPECT_EQ(found, expected[i]);
     }
@@ -458,7 +459,7 @@ TEST(BuildManifest, FakeTypeAppearsInTheManifest) {
         const json out = getBuildArtifactsJson(fx.db.get(), {"a.ddbmanifestfake"});
         EXPECT_EQ(out[0]["build"]["state"], "complete");
         EXPECT_EQ(out[0]["build"]["artifacts"][0]["role"], "fake.out");
-        EXPECT_EQ(resolveBuildFile(fx.db.get(), hash, "fake/out.txt"), fx.build / hash / "fake" / "out.txt");
+        EXPECT_EQ(resolveBuildFile(fx.db.get(), hash, "fake/out.txt").path, fx.build / hash / "fake" / "out.txt");
     }
     EXPECT_TRUE(getBuildArtifactsJson(fx.db.get(), {"a.ddbmanifestfake"})[0]["build"]["artifacts"].empty());
 }
@@ -467,13 +468,29 @@ TEST(BuildManifest, FakeTypeAppearsInTheManifest) {
 
 TEST(BuildManifest, ResolveBuildFile) {
     ManifestFixture fx(TEST_NAME);
-    EXPECT_EQ(resolveBuildFile(fx.db.get(), H_COG, "cog/cog.tif"), fx.build / H_COG / "cog" / "cog.tif");
-    EXPECT_EQ(resolveBuildFile(fx.db.get(), H_ROADS, "mvt/0/0/0.pbf"),
-              fx.build / H_ROADS / "mvt" / "0" / "0" / "0.pbf");
-    EXPECT_EQ(resolveBuildFile(fx.db.get(), H_ROADS, "mvt\\metadata.json"),
-              fx.build / H_ROADS / "mvt" / "metadata.json");
-    EXPECT_EQ(resolveBuildFile(fx.db.get(), H_COPC, "ept/ept.json"), fx.build / H_COPC / "ept" / "ept.json")
+    const auto resolve = [&](const std::string& hash, const std::string& path) {
+        return resolveBuildFile(fx.db.get(), hash, path);
+    };
+    EXPECT_EQ(resolve(H_COG, "cog/cog.tif").path, fx.build / H_COG / "cog" / "cog.tif");
+    EXPECT_EQ(resolve(H_ROADS, "mvt/0/0/0.pbf").path, fx.build / H_ROADS / "mvt" / "0" / "0" / "0.pbf");
+    EXPECT_EQ(resolve(H_ROADS, "mvt\\metadata.json").path, fx.build / H_ROADS / "mvt" / "metadata.json");
+    EXPECT_EQ(resolve(H_COPC, "ept/ept.json").path, fx.build / H_COPC / "ept" / "ept.json")
         << "legacy artifacts are served";
+
+    // The media type of the manifest when the file is a declared artifact: a file artifact, or
+    // the index of a directory one; the other files of a directory (tiles) have none
+    EXPECT_EQ(resolve(H_COG, "cog/cog.tif").mediaType, "image/tiff; application=geotiff; profile=cloud-optimized");
+    EXPECT_EQ(resolve(H_ROADS, "mvt/metadata.json").mediaType, "application/json");
+    EXPECT_EQ(resolve(H_ROADS, "mvt/0/0/0.pbf").mediaType, "");
+    EXPECT_EQ(resolve(H_SPLAT, "gsplat/model.rad").mediaType, GsplatMediaType);
+    EXPECT_EQ(resolve(H_SPLAT, "gsplat/bounds.json").mediaType, "application/json");
+
+    // {"path", "mediaType"}, the type left out when the file declares none
+    EXPECT_EQ(resolve(H_SPLAT, "gsplat/model.rad").toJson(),
+              (json{{"path", io::toUtf8(fx.build / H_SPLAT / "gsplat" / "model.rad")},
+                    {"mediaType", GsplatMediaType}}));
+    EXPECT_EQ(resolve(H_ROADS, "mvt/0/0/0.pbf").toJson(),
+              (json{{"path", io::toUtf8(fx.build / H_ROADS / "mvt" / "0" / "0" / "0.pbf")}}));
 
     // Malformed: InvalidArgs (DDBERR_INVALIDARGS)
     for (const auto* path : {"../ortho.tif", "cog/../../x", "/etc/passwd", "C:\\x", "", "./", "cog/.ddb/x"})

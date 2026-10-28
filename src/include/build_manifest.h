@@ -79,14 +79,25 @@ json getBuildArtifactsJson(Database* db, const std::vector<std::string>& paths);
 // withBuild. Serialized entry by entry: the listing is never held as one JSON document.
 std::string listEntriesJson(Database* db, const EntryQuery& query, bool withBuild);
 
-// DDBResolveBuildFile: the absolute path of the file at relativePath ('/'-separated) in the
-// build root of hash, when relativePath lies inside one of the artifacts of an entry with
-// that hash (a file artifact itself, or a file below a directory artifact).
+// DDBResolveBuildFile: a file of a build and the type it is served as
+struct ResolvedBuildFile {
+    fs::path path;           // absolute
+    std::string mediaType;   // of the artifact when path is the file a client opens (a file
+                             // artifact, the index of a directory); empty for any other file
+                             // (the tiles of a directory artifact)
+
+    // {"path": "<absolute path, UTF-8>", "mediaType": "<type>"}; "mediaType" is absent when empty
+    json toJson() const;
+};
+
+// The file at relativePath ('/'-separated) in the build root of hash, when relativePath lies
+// inside one of the artifacts of an entry with that hash (a file artifact itself, or a file
+// below a directory artifact).
 // Throws InvalidArgsException when hash is not a SHA-256 hex string or relativePath breaks the
 // dataset path rules (normalizeEntryPath: absolute, "..", empty, invalid UTF-8, ...);
 // EntryNotFoundException when no entry has that hash, the path is not inside one of its
 // artifacts, the file does not exist, or it resolves (through a link) outside the build root.
-fs::path resolveBuildFile(Database* db, const std::string& hash, const std::string& relativePath);
+ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const std::string& relativePath);
 
 // DDBCopyBuildArtifacts: copies the artifact folders of hash (those of the types of the
 // entries of source with that hash, legacy folders included) and its pending marker from the

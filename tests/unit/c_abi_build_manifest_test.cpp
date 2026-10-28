@@ -130,7 +130,11 @@ namespace
                          out);
 
         ASSERT_DDB_OK(DDBResolveBuildFile(r, H_COG.c_str(), "cog/cog.tif", &out));
-        EXPECT_EQ(io::fromUtf8(take(out)), ds.build / H_COG / "cog" / "cog.tif");
+        // A JSON object: the path, and the media type of the artifact the file is
+        const json resolved = json::parse(take(out));
+        EXPECT_EQ(io::fromUtf8(resolved["path"].get<std::string>()), ds.build / H_COG / "cog" / "cog.tif");
+        EXPECT_EQ(resolved["mediaType"], "image/tiff; application=geotiff; profile=cloud-optimized");
+        EXPECT_EQ(resolved.size(), 2u);
     }
 
     TEST(CAbiBuildManifest, CopyBuildArtifacts)

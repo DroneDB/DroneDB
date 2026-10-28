@@ -474,7 +474,7 @@ TEST(Utf8Paths, datasetUnderANonAsciiFolderWithTheCLocale) {
     // The COG build of the GeoTIFF, in the build folder of the non-ASCII dataset
     ASSERT_DDB_OK(DDBBuild(folderUtf8.c_str(), rasterName.c_str(), nullptr, false, false));
     ASSERT_DDB_OK(DDBResolveBuildFile(folderUtf8.c_str(), rasterHash.c_str(), "cog/cog.tif", &out));
-    const fs::path cog = io::fromUtf8(take(out));
+    const fs::path cog = io::fromUtf8(json::parse(take(out))["path"].get<std::string>());
     ASSERT_TRUE(fs::exists(cog)) << io::toUtf8(cog);
     EXPECT_TRUE(fs::equivalent(cog, folder / ".ddb" / "build" / rasterHash / "cog" / "cog.tif"));
     EXPECT_GT(fs::file_size(cog), 0u);

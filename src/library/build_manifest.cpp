@@ -356,21 +356,32 @@ std::vector<const EntryHandler*> handlersOfHash(Database* db, const std::string&
     return handlers;
 }
 
-// path ('/'-separated, normalized) is a file artifact of handler or lies below one of its
-// directory artifacts
-bool isInsideArtifact(const EntryHandler& handler, const std::string& path) {
-    const auto artifacts = handler.artifacts();
-    return std::any_of(artifacts.begin(), artifacts.end(), [&](const BuildArtifact& a) {
-        if (a.kind == ArtifactKind::File)
-            return path == a.path;
-        return path.size() > a.path.size() + 1 && path.starts_with(a.path) &&
-               path[a.path.size()] == '/';
-    });
+// How path ('/'-separated, normalized) relates to the artifacts of handler: nothing when it is
+// neither a file artifact nor below a directory artifact; otherwise the media type of the
+// artifact when path is the file a client opens (the file artifact, the index of a directory),
+// and an empty string for any other file below a directory artifact
+std::optional<std::string> mediaTypeInsideArtifact(const EntryHandler& handler, const std::string& path) {
+    for (const auto& a : handler.artifacts()) {
+        if (a.kind == ArtifactKind::File) {
+            if (path == a.path)
+                return a.mediaType;
+        } else if (path.size() > a.path.size() + 1 && path.starts_with(a.path) && path[a.path.size()] == '/') {
+            return path == a.path + "/" + a.index ? a.mediaType : std::string();
+        }
+    }
+    return std::nullopt;
 }
 
 }  // namespace
 
-fs::path resolveBuildFile(Database* db, const std::string& hash, const std::string& relativePath) {
+json ResolvedBuildFile::toJson() const {
+    json j = {{"path", io::toUtf8(path)}};
+    if (!mediaType.empty())
+        j["mediaType"] = mediaType;
+    return j;
+}
+
+ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const std::string& relativePath) {
     requireBuildHash(hash);
     const EntryPathResult normalized = normalizeEntryPath(relativePath);
     if (!normalized.accepted())
@@ -380,8 +391,15 @@ fs::path resolveBuildFile(Database* db, const std::string& hash, const std::stri
     const auto handlers = handlersOfHash(db, hash);
     if (handlers.empty())
         throw EntryNotFoundException("No entry has the build hash " + hash);
-    if (std::none_of(handlers.begin(), handlers.end(),
-                     [&](const EntryHandler* h) { return isInsideArtifact(*h, normalized.path); }))
+    std::optional<std::string> mediaType;
+    for (const EntryHandler* handler : handlers) {
+        const auto found = mediaTypeInsideArtifact(*handler, normalized.path);
+        // The type of the first handler that names the file; one that only holds it inside a
+        // directory artifact says nothing
+        if (found && (!mediaType || mediaType->empty()))
+            mediaType = found;
+    }
+    if (!mediaType)
         throw EntryNotFoundException("'" + normalized.path + "' is not a build artifact of " + hash);
 
     const fs::path root = fs::absolute(db->buildDirectory() / hash);
@@ -398,7 +416,7 @@ fs::path resolveBuildFile(Database* db, const std::string& hash, const std::stri
     if (fileError || rootError || !deppath::isInside(realFile, realRoot))
         throw EntryNotFoundException("Build file '" + normalized.path + "' of " + hash +
                                      " resolves outside its build folder");
-    return file;
+    return {file, *mediaType};
 }
 
 // ---- Copy --------------------------------------------------------------------------------------
