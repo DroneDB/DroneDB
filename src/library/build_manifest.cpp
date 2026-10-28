@@ -250,11 +250,17 @@ void removeSupersededArtifacts(const EntryHandler& handler,
         // Cleanup after a published build: a folder that cannot go now (a file kept open on
         // Windows, a permission) must not fail that build. The next build of the entry tries
         // again, also when it finds the output complete.
-        const fs::path folder = root / io::fromUtf8(legacy.folder());
+        // The folder of the legacy output goes whole, unless a current artifact lives in it too
+        // (a splat's model.spz next to its model.rad): then only the legacy output itself goes
+        const bool sharesFolder =
+            std::any_of(artifacts.begin(), artifacts.end(), [&](const BuildArtifact& a) {
+                return !a.legacy && a.folder() == legacy.folder();
+            });
+        const fs::path target = root / io::fromUtf8(sharesFolder ? legacy.path : legacy.folder());
         try {
-            io::assureIsRemoved(folder);
+            io::assureIsRemoved(target);
         } catch (const std::exception& e) {
-            LOGW << "Cannot remove the superseded build output '" << io::toUtf8(folder)
+            LOGW << "Cannot remove the superseded build output '" << io::toUtf8(target)
                  << "': " << e.what();
         }
     }

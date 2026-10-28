@@ -635,6 +635,53 @@ TEST(BuildManifest, SupersededLegacyOutputIsRemovedOnceItsRoleExists) {
     EXPECT_NO_THROW(removeSupersededArtifacts(handler, root / "missing", filesystemBuildProbe()));
 }
 
+// A legacy output that lives in the folder of a current one (a splat's model.spz beside its
+// model.rad) goes alone: removing its folder would take the output that replaced it
+constexpr auto SharedFolderFakeType = static_cast<EntryType>(32);
+
+class SharedFolderFakeHandler : public EntryHandler {
+  public:
+    SharedFolderFakeHandler() : EntryHandler(SharedFolderFakeType, "SharedFolderFake") {}
+    std::vector<std::string> extensions() const override { return {"ddbsharedfake"}; }
+    std::string subfolder() const override { return "shared"; }
+    std::vector<BuildArtifact> artifacts() const override {
+        return {BuildArtifact::file("fake.new", "shared/new.txt", "text/plain"),
+                BuildArtifact::file("fake.old", "shared/old.txt", "text/plain").legacyFor("fake.new"),
+                BuildArtifact::directory("fake.olddir", "shared/olddir", "text/plain", "index.txt")
+                    .legacyFor("fake.new")};
+    }
+};
+
+TEST(BuildManifest, SupersededLegacyOutputInTheFolderOfACurrentOneLeavesTheCurrentOne) {
+    EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+    CopyFixture fx(TEST_NAME);
+    ScopedEntryHandler registration(std::make_unique<SharedFolderFakeHandler>());
+    const EntryHandler& handler = *findEntryHandler(SharedFolderFakeType);
+    const fs::path root = fx.source.db->buildDirectory() / std::string(64, '0');
+    fs::remove_all(root);
+
+    writeFile(root / "shared" / "old.txt", "x");
+    writeFile(root / "shared" / "olddir" / "index.txt", "x");
+    writeFile(root / "shared" / "unrelated.txt", "x");
+
+    // The role they stand in for is missing: both stay
+    removeSupersededArtifacts(handler, root, filesystemBuildProbe());
+    EXPECT_TRUE(fs::exists(root / "shared" / "old.txt"));
+    EXPECT_TRUE(fs::exists(root / "shared" / "olddir" / "index.txt"));
+
+    // It exists: the legacy file and the legacy directory go, what else is in the folder stays
+    writeFile(root / "shared" / "new.txt", "x");
+    removeSupersededArtifacts(handler, root, filesystemBuildProbe());
+    EXPECT_FALSE(fs::exists(root / "shared" / "old.txt"));
+    EXPECT_FALSE(fs::exists(root / "shared" / "olddir"));
+    EXPECT_TRUE(fs::exists(root / "shared" / "new.txt"));
+    EXPECT_TRUE(fs::exists(root / "shared" / "unrelated.txt"));
+
+    // Again, with nothing left of them
+    EXPECT_NO_THROW(removeSupersededArtifacts(handler, root, filesystemBuildProbe()));
+    EXPECT_TRUE(fs::exists(root / "shared" / "new.txt"));
+}
+
 // The legacy Nexus file of a model is served while bm3d/ is missing, with the 3D Tiles it also
 // has, and never next to model.bm3d
 TEST(BuildManifest, LegacyNexusFileIsServedOnlyWhileBm3dIsMissing) {
