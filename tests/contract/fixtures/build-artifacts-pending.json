@@ -14,6 +14,7 @@
     {
       "build": {
         "artifacts": [],
+        "awaitingFiles": true,
         "buildable": true,
         "hash": "afe1bd97fb41ff4dd3fc4134a9c32e95ed6a1a0af81c20e88e20b92bbc73a30c",
         "lastAttempt": 0,

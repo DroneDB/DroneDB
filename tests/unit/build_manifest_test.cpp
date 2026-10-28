@@ -163,6 +163,7 @@ TEST(BuildManifest, StatesAndExistingArtifacts) {
     EXPECT_TRUE(b["dsm.tif"].artifacts.empty());
     EXPECT_FALSE(b["dsm.tif"].lastAttempt.has_value());
     EXPECT_FALSE(b["dsm.tif"].retryAfter.has_value()) << "no marker, no retry time";
+    EXPECT_FALSE(b["dsm.tif"].awaitingFiles) << "no marker, no file awaited";
     EXPECT_FALSE(b["ortho.tif"].retryAfter.has_value());
 
     // The legacy EPT is served only while there is no COPC (Registry's fallback, now in libddb)
@@ -188,6 +189,7 @@ TEST(BuildManifest, StatesAndExistingArtifacts) {
               (std::vector<std::string>{"sub/pending.shx", "sub/pending.dbf"}));
     EXPECT_EQ(b["pending.shp"].lastAttempt, std::optional<time_t>(1700000000));
     EXPECT_EQ(b["pending.shp"].retryAfter, std::optional<time_t>(1700000060)) << "lastAttempt + the 60 s backoff";
+    EXPECT_TRUE(b["pending.shp"].awaitingFiles) << "a marker that lists missing files awaits them";
 
     EXPECT_EQ(b["busy.tif"].state, BuildState::Building);
     EXPECT_EQ(b["stale.tif"].state, BuildState::Complete) << "a lock file without a live holder is no build";
@@ -330,13 +332,40 @@ TEST(BuildManifest, Json) {
     EXPECT_EQ(out[1]["build"]["state"], "pending");
     EXPECT_EQ(out[1]["build"]["lastAttempt"], 1700000000);
     EXPECT_EQ(out[1]["build"]["retryAfter"], 1700000060);
+    EXPECT_EQ(out[1]["build"]["awaitingFiles"], true);
+    EXPECT_EQ(cog["awaitingFiles"], false);
 
     EXPECT_TRUE(out[2]["hash"].is_null());
     EXPECT_EQ(out[2]["build"], json::parse(R"({"buildable": false, "source": null, "hash": null, "root": null,
-        "state": "none", "missingDependencies": [], "lastAttempt": null, "retryAfter": null,
-        "artifacts": []})"));
+        "state": "none", "missingDependencies": [], "awaitingFiles": false, "lastAttempt": null,
+        "retryAfter": null, "artifacts": []})"));
 
     EXPECT_EQ(out[3], json::parse(R"({"path": "missing.tif", "exists": false})"));
+}
+
+// "awaitingFiles" is the rule of the pending marker, the one DDBGetPendingBuildInfo reports: a
+// marker released by the add of a file it waited for keeps the build pending but awaits nothing
+TEST(BuildManifest, AwaitingFilesFollowsThePendingMarker) {
+    ManifestFixture fx(TEST_NAME);
+    const auto awaiting = [&] {
+        return getBuildArtifactsJson(fx.db.get(), {"pending.shp"})[0]["build"]["awaitingFiles"].get<bool>();
+    };
+    const auto infoAwaiting = [&] {
+        const auto infos = getPendingBuildInfo(fx.db.get());
+        const auto it = std::find_if(infos.begin(), infos.end(),
+                                     [](const PendingBuildInfo& i) { return i.hash == H_PENDING; });
+        EXPECT_NE(it, infos.end());
+        return it != infos.end() && it->awaitingFiles;
+    };
+
+    EXPECT_TRUE(awaiting());
+    EXPECT_EQ(awaiting(), infoAwaiting());
+
+    ASSERT_TRUE(releasePendingMarker(fx.build / (H_PENDING + ".pending")));
+    const json released = getBuildArtifactsJson(fx.db.get(), {"pending.shp"})[0]["build"];
+    EXPECT_EQ(released["state"], "pending") << "a released build is still deferred, due at once";
+    EXPECT_FALSE(awaiting());
+    EXPECT_EQ(awaiting(), infoAwaiting());
 }
 
 // "retryAfter" is the retry rule of buildPending(): the backoff after the last attempt, never

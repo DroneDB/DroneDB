@@ -87,6 +87,7 @@ void to_json(json& j, const EntryBuild& build) {
          {"root", build.root.empty() ? json(nullptr) : json(io::toUtf8(build.root))},
          {"state", std::string(buildStateName(build.state))},
          {"missingDependencies", build.missingDependencies},
+         {"awaitingFiles", build.awaitingFiles},
          {"lastAttempt", unixSecondsOrNull(build.lastAttempt)},
          {"retryAfter", unixSecondsOrNull(build.retryAfter)},
          {"artifacts", std::move(artifacts)}};
@@ -287,6 +288,7 @@ EntryBuild BuildStateReader::read(const Entry& e) {
     const auto marker = probe_.readPendingMarker(pendingMarkerPath(build.root));
     if (marker) {
         build.missingDependencies = marker->missingDependencies;
+        build.awaitingFiles = marker->awaitsFiles();
         build.lastAttempt = marker->lastAttempt;
         build.retryAfter = pendingRetryAfter(marker->lastAttempt);
     }

@@ -66,6 +66,7 @@
         "root",
         "state",
         "missingDependencies",
+        "awaitingFiles",
         "lastAttempt",
         "retryAfter",
         "artifacts"
@@ -111,6 +112,10 @@
             "type": "string"
           },
           "description": "From the pending marker: dataset-relative names; [] without a marker"
+        },
+        "awaitingFiles": {
+          "type": "boolean",
+          "description": "The build waits for files the dataset lacks (missingDependencies is not empty): no timer retries it, adding one of them releases it; the awaitingFiles of DDBGetPendingBuildInfo; false without a marker"
         },
         "lastAttempt": {
           "type": [

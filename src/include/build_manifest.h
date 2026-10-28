@@ -51,6 +51,9 @@ struct EntryBuild {
     BuildState state = BuildState::None;
     // From "<hash>.pending", when it exists
     std::vector<std::string> missingDependencies;
+    // The pending build waits for files the dataset lacks (PendingMarker::awaitsFiles()): no
+    // timer retries it, adding one of those files releases it; false without a marker
+    bool awaitingFiles = false;
     std::optional<time_t> lastAttempt;
     // The first Unix second at which buildPending() (without force) retries the pending build:
     // lastAttempt + the retry backoff (60 s); set exactly when lastAttempt is
@@ -62,8 +65,8 @@ struct EntryBuild {
 
 // {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?}
 void to_json(json& j, const BuildArtifact& artifact);
-// {"buildable", "source", "hash", "root", "state", "missingDependencies", "lastAttempt",
-// "retryAfter", "artifacts"}; source, hash, root, lastAttempt and retryAfter are null when they
+// {"buildable", "source", "hash", "root", "state", "missingDependencies", "awaitingFiles",
+// "lastAttempt", "retryAfter", "artifacts"}; source, hash, root, lastAttempt and retryAfter are null when they
 // do not apply
 void to_json(json& j, const EntryBuild& build);
 

@@ -912,7 +912,8 @@ extern "C"
      * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
      *   {"buildable": bool, "source": string|null, "hash": string|null, "root": string|null,
      *    "state": "none"|"pending"|"building"|"complete", "missingDependencies": [string],
-     *    "lastAttempt": integer|null, "retryAfter": integer|null, "artifacts": [artifact]}
+     *    "awaitingFiles": bool, "lastAttempt": integer|null, "retryAfter": integer|null,
+     *    "artifacts": [artifact]}
      *   buildable  the entry is built, by itself or as a sidecar of its main file (a .dbf of a .shp)
      *   source     dataset-relative path of the entry the artifacts belong to: the entry itself,
      *              or the main file of a sidecar
@@ -925,6 +926,10 @@ extern "C"
      *              from the pending marker when there is one (a pending or a building entry),
      *              [] and null otherwise: dataset-relative names, and the time of the last
      *              attempt in Unix seconds (0 when the marker's time is unreadable)
+     *   awaitingFiles
+     *              the build waits for files the dataset lacks (missingDependencies is not
+     *              empty): no timer retries it, adding one of them releases it; the same value
+     *              as awaitingFiles of DDBGetPendingBuildInfo, false without a pending marker
      *   retryAfter the Unix second from which DDBBuild with pendingOnly (and no force) retries it:
      *              lastAttempt + the retry backoff (60 s, libddb's rule; a host must not keep a
      *              copy of it). The retry is due when the current time is at or past it, so an

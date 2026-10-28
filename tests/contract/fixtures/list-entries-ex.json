@@ -11,6 +11,7 @@
     {
       "build": {
         "artifacts": [],
+        "awaitingFiles": false,
         "buildable": false,
         "hash": null,
         "lastAttempt": null,
@@ -30,6 +31,7 @@
     {
       "build": {
         "artifacts": [],
+        "awaitingFiles": false,
         "buildable": true,
         "hash": "76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
         "lastAttempt": null,
@@ -49,6 +51,7 @@
     {
       "build": {
         "artifacts": [],
+        "awaitingFiles": false,
         "buildable": true,
         "hash": "6ff9caf347f675d2b45a6d9aa600a0b337f23c193c971302e55bca4a2151bde4",
         "lastAttempt": null,
@@ -76,6 +79,7 @@
             "role": "raster.cog"
           }
         ],
+        "awaitingFiles": false,
         "buildable": true,
         "hash": "d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
         "lastAttempt": null,
@@ -95,6 +99,7 @@
     {
       "build": {
         "artifacts": [],
+        "awaitingFiles": false,
         "buildable": false,
         "hash": null,
         "lastAttempt": null,
@@ -113,6 +118,7 @@
     {
       "build": {
         "artifacts": [],
+        "awaitingFiles": false,
         "buildable": false,
         "hash": null,
         "lastAttempt": null,

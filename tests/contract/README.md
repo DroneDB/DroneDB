@@ -161,6 +161,10 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   when `lastAttempt` is, and is a time, not a "due now" flag: the retry is due when the current
   time is at or past it. `DDBGetPendingBuildInfo` reports the same value. A host compares it with
   its clock and keeps no copy of the backoff.
+* `awaitingFiles` is true when the pending marker lists missing files (`missingDependencies` is
+  not empty): no timer retries that build, adding one of the files releases it. It is the
+  `awaitingFiles` of `DDBGetPendingBuildInfo`, and false without a marker, so a host reads the
+  flag and does not derive it from `state` and `missingDependencies`.
 
 `DDBResolveBuildFile` returns a JSON object, `{"path": "<absolute path>", "mediaType": "<type>"}`:
 `mediaType` is the one of the manifest when the file is a declared artifact (a file artifact, or
@@ -431,3 +435,10 @@ Registry has to adopt first.
   destination indexes such a file already. The fixture of the deferred `roads.shp` has `"awaitingFiles": true`; no
   other fixture changed. Registry's exact-JSON adapter tests of this output need the field before
   Registry moves to a libddb build that has it.
+
+* 2026-10-28: the build object (`build-artifacts`, `build-artifacts-pending`, `list-entries-ex`)
+  gains `awaitingFiles` (additive, boolean, required), the value `pending-build-info` reports for
+  the same marker: true when the pending marker lists missing files, false otherwise (also
+  without a marker). The fixture of the deferred `roads.shp` has `"awaitingFiles": true`, the
+  other build objects `false`. Registry's exact-JSON adapter tests of these outputs need the
+  field before Registry moves to a libddb build that has it.
