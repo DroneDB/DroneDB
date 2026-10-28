@@ -130,19 +130,57 @@ namespace ddb
     // empty when the texture layout is supported.
     std::string plyUnsupportedTextureReason(const PlyHeader &header);
 
+    // ---------------------------------------------------------------------
+    // Gaussian Splat PLY rules
+    //
+    // build-lod, the tool that builds a splat, decodes a PLY by its own rules
+    // (vendor/spark rust/spark-lib/src/ply.rs); these functions state the same
+    // rules once, on the header only, so the detection and the build agree.
+    // ---------------------------------------------------------------------
+
+    // True when the PLY has no face element and its vertex element carries 3D
+    // Gaussian Splat attributes: the spherical-harmonics DC term (f_dc_0), the
+    // anisotropic covariance set (scale_0..2, rot_0..3 and opacity), or the
+    // SuperSplat compressed layout (a `chunk` element and packed_position). A
+    // PLY that looks like a splat is a splat even when plySplatBuildProblem()
+    // says build-lod cannot read it, so that the build can name what to fix.
+    bool looksLikeSplatPly(const PlyHeader &header);
+
+    // The first rule build-lod would refuse the PLY for, as a message that says what
+    // to change ("ASCII splat PLY is not supported: export it as binary
+    // little-endian", "f_rest count 12 is not 0, 9, 24 or 45", "Splat PLY is
+    // missing properties: opacity"); empty when it can decode the header.
+    // The rules: binary_little_endian 1.0; no list property and only the scalar type names
+    // build-lod knows; a `vertex` element with x, y, z, f_dc_0..2, opacity,
+    // scale_0..2, rot_0..3 and a count of f_rest_* properties of that element
+    // only that is 0, 9, 24 or 45 -- or, when a `chunk` element exists (SuperSplat
+    // compressed), the chunk bounds, the packed_* vertex properties and an optional
+    // `sh` element with the same count of f_rest_*.
+    std::string plySplatBuildProblem(const PlyHeader &header);
+
+    // True when plySplatBuildProblem() finds nothing to refuse.
+    bool isBuildableSplatPly(const PlyHeader &header);
+
     struct PlyInfo
     {
         unsigned long vertexCount;
         bool isMesh;
         bool hasTextures;
         // True when the vertex element carries 3D Gaussian Splat attributes
-        // (spherical-harmonic DC term and/or anisotropic scale + rotation + opacity)
-        // and there is no face element. Mutually exclusive with isMesh.
+        // (spherical-harmonic DC term and/or anisotropic scale + rotation + opacity,
+        // or the SuperSplat compressed layout) and there is no face element, see
+        // looksLikeSplatPly(). Mutually exclusive with isMesh.
         bool isSplat;
         // Spherical-harmonics degree (0..3) inferred from the number of f_rest_*
-        // properties. -1 when the file is not a Gaussian Splat.
+        // properties of the vertex element (of the `sh` element for a compressed
+        // splat). -1 when the file is not a Gaussian Splat, or when that number is not
+        // 0, 9, 24 or 45.
         int shDegree;
-        // Flat list of every property name across all elements, in header order.
+        // Non-empty when the file looks like a splat (isSplat) but build-lod cannot
+        // read it: the reason, see plySplatBuildProblem(). Empty otherwise.
+        std::string splatProblem;
+        // Flat list of every property name across all elements, in header order (the
+        // splat rules look at the vertex element only, see plySplatBuildProblem()).
         std::vector<std::string> dimensions;
         // Value of `comment TextureFile <name>` (rest of line, trimmed); empty when
         // absent. hasTextures is true exactly when a TextureFile comment exists.

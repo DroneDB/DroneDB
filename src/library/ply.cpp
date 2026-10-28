@@ -16,60 +16,6 @@ namespace ddb
 
     namespace
     {
-        // Determine whether a vertex-only PLY carries 3D Gaussian Splat attributes and,
-        // if so, its spherical-harmonics degree. Operates on the property names already
-        // collected in info.dimensions. A splat is never a mesh, so callers must check
-        // info.isMesh first.
-        void computePlySplatInfo(PlyInfo &info)
-        {
-            if (info.isMesh)
-                return;
-
-            const auto &dims = info.dimensions;
-            const auto has = [&dims](const std::string &name) {
-                return std::find(dims.begin(), dims.end(), name) != dims.end();
-            };
-
-            // Primary signature: the spherical-harmonics DC term.
-            // Fallback signature: anisotropic covariance attributes (scale + rotation + opacity),
-            // which a few exporters emit without an explicit f_dc_* term.
-            const bool primary = has("f_dc_0");
-            const bool fallback = has("scale_0") && has("scale_1") && has("scale_2") &&
-                                  has("rot_0") && has("rot_1") && has("rot_2") && has("rot_3") &&
-                                  has("opacity");
-
-            if (!primary && !fallback)
-                return;
-
-            info.isSplat = true;
-
-            // Spherical-harmonics degree from the count of f_rest_* properties.
-            // Per-channel higher-order coeffs x 3 channels:
-            //   0 -> degree 0, 9 -> degree 1, 24 -> degree 2, 45 -> degree 3.
-            int fRestCount = 0;
-            for (const auto &d : dims)
-            {
-                if (d.starts_with("f_rest_"))
-                    ++fRestCount;
-            }
-
-            switch (fRestCount)
-            {
-                case 0:  info.shDegree = 0; break;
-                case 9:  info.shDegree = 1; break;
-                case 24: info.shDegree = 2; break;
-                case 45: info.shDegree = 3; break;
-                default:
-                    // Unknown/partial SH layout: clamp to the closest lower standard degree
-                    // so downstream consumers still get a sane value.
-                    if (fRestCount >= 45)      info.shDegree = 3;
-                    else if (fRestCount >= 24) info.shDegree = 2;
-                    else if (fRestCount >= 9)  info.shDegree = 1;
-                    else                       info.shDegree = 0;
-                    break;
-            }
-        }
-
         // Longest header line accepted; protects against binary files that happen to
         // start with "ply\n" but have no line structure.
         constexpr size_t kMaxHeaderLineLength = 64 * 1024;
@@ -365,12 +311,207 @@ namespace ddb
         return "";
     }
 
+    namespace
+    {
+        const PlyElement *elementNamed(const PlyHeader &h, const char *name)
+        {
+            const int i = h.findElement(name);
+            return i < 0 ? nullptr : &h.elements[i];
+        }
+
+        bool hasProperty(const PlyElement &e, const std::string &name)
+        {
+            return e.findProperty(name) >= 0;
+        }
+
+        // The f_rest_* properties build-lod counts: f_rest_0, f_rest_1, ... up to the first
+        // one that is missing
+        int fRestCount(const PlyElement &e)
+        {
+            int n = 0;
+            while (hasProperty(e, "f_rest_" + std::to_string(n)))
+                ++n;
+            return n;
+        }
+
+        // Spherical-harmonics degree for a count of f_rest_* properties (per-channel
+        // higher-order coefficients x 3 channels: 0 -> 0, 9 -> 1, 24 -> 2, 45 -> 3); -1 when
+        // the count is none of those
+        int shDegreeOfFRestCount(int count)
+        {
+            switch (count)
+            {
+                case 0: return 0;
+                case 9: return 1;
+                case 24: return 2;
+                case 45: return 3;
+                default: return -1;
+            }
+        }
+
+        std::string fRestProblem(int count)
+        {
+            return "f_rest count " + std::to_string(count) + " is not 0, 9, 24 or 45";
+        }
+
+        // The names of `required` the element lacks, comma separated
+        std::string missingProperties(const PlyElement &e, const std::vector<std::string> &required)
+        {
+            std::string missing;
+            for (const auto &name : required)
+            {
+                if (hasProperty(e, name))
+                    continue;
+                missing += (missing.empty() ? "" : ", ") + name;
+            }
+            return missing;
+        }
+
+        // The scalar type names build-lod reads (its parse_property_type): not the sized aliases
+        bool isTypeNameOfBuildLod(const std::string &name)
+        {
+            return name == "char" || name == "uchar" || name == "short" || name == "ushort" ||
+                   name == "int" || name == "uint" || name == "float" || name == "double";
+        }
+
+        // SuperSplat stores one chunk record per 256 splats
+        constexpr uint64_t kSuperSplatChunkSize = 256;
+
+        // The standard layout: x, y, z, f_dc_0..2, opacity, scale_0..2 and rot_0..3 on the vertex
+        std::string standardSplatProblem(const PlyElement &vertex)
+        {
+            const std::string missing = missingProperties(
+                vertex, {"x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2",
+                         "rot_0", "rot_1", "rot_2", "rot_3"});
+            if (!missing.empty())
+                return "Splat PLY is missing properties: " + missing;
+            const int rest = fRestCount(vertex);
+            return shDegreeOfFRestCount(rest) < 0 ? fRestProblem(rest) : std::string();
+        }
+
+        // The SuperSplat compressed layout: per-chunk bounds, packed vertices, optional `sh`
+        std::string compressedSplatProblem(const PlyHeader &h, const PlyElement &vertex, const PlyElement &chunk)
+        {
+            const uint64_t chunksNeeded = (vertex.count + kSuperSplatChunkSize - 1) / kSuperSplatChunkSize;
+            if (chunk.count < chunksNeeded)
+                return "Compressed splat PLY has " + std::to_string(chunk.count) + " chunk records for " +
+                       std::to_string(vertex.count) + " splats (at least " + std::to_string(chunksNeeded) +
+                       " are needed)";
+
+            std::string missing = missingProperties(chunk, {"min_x", "min_y", "min_z", "max_x", "max_y", "max_z",
+                                                            "min_scale_x", "min_scale_y", "min_scale_z",
+                                                            "max_scale_x", "max_scale_y", "max_scale_z"});
+            if (!missing.empty())
+                return "Compressed splat PLY is missing chunk properties: " + missing;
+            missing = missingProperties(vertex, {"packed_position", "packed_rotation", "packed_scale", "packed_color"});
+            if (!missing.empty())
+                return "Compressed splat PLY is missing properties: " + missing;
+
+            if (const PlyElement *sh = elementNamed(h, "sh"))
+            {
+                if (sh->count != vertex.count)
+                    return "Compressed splat PLY has " + std::to_string(sh->count) + " sh records for " +
+                           std::to_string(vertex.count) + " splats";
+                const int rest = fRestCount(*sh);
+                if (shDegreeOfFRestCount(rest) < 0)
+                    return fRestProblem(rest);
+            }
+            return std::string();
+        }
+
+        // The layout part of the problem, once the file format is known to be readable
+        std::string layoutProblem(const PlyHeader &h)
+        {
+            const PlyElement *vertex = elementNamed(h, "vertex");
+            if (vertex == nullptr)
+                return "Splat PLY has no vertex element";
+            if (const PlyElement *chunk = elementNamed(h, "chunk"))
+                return compressedSplatProblem(h, *vertex, *chunk);
+            return standardSplatProblem(*vertex);
+        }
+
+        // Degree of the splat the header describes; -1 when the count of f_rest_* is none of the
+        // standard ones or there is no vertex element
+        int splatShDegree(const PlyHeader &h)
+        {
+            const PlyElement *vertex = elementNamed(h, "vertex");
+            if (vertex == nullptr)
+                return -1;
+            if (elementNamed(h, "chunk") != nullptr)
+            {
+                const PlyElement *sh = elementNamed(h, "sh");
+                return sh == nullptr ? 0 : shDegreeOfFRestCount(fRestCount(*sh));
+            }
+            return shDegreeOfFRestCount(fRestCount(*vertex));
+        }
+    } // namespace
+
+    bool looksLikeSplatPly(const PlyHeader &h)
+    {
+        // A splat is never a mesh
+        if (h.findElement("face") >= 0)
+            return false;
+        const PlyElement *vertex = elementNamed(h, "vertex");
+        if (vertex == nullptr)
+            return false;
+
+        // The SuperSplat compressed layout
+        if (elementNamed(h, "chunk") != nullptr && hasProperty(*vertex, "packed_position"))
+            return true;
+
+        // Primary signature: the spherical-harmonics DC term.
+        // Fallback signature: anisotropic covariance attributes (scale + rotation + opacity),
+        // which a few exporters emit without an explicit f_dc_* term.
+        return hasProperty(*vertex, "f_dc_0") ||
+               missingProperties(*vertex, {"scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3",
+                                           "opacity"}).empty();
+    }
+
+    std::string plySplatBuildProblem(const PlyHeader &h)
+    {
+        switch (h.format)
+        {
+            case PlyFormat::BinaryLittleEndian:
+                break;
+            case PlyFormat::Ascii:
+                return "ASCII splat PLY is not supported: export it as binary little-endian";
+            case PlyFormat::BinaryBigEndian:
+                return "Big-endian splat PLY is not supported: export it as binary little-endian";
+            default:
+                return h.formatName.empty()
+                           ? "The splat PLY header has no format line"
+                           : "PLY format '" + h.formatName + "' is not supported: export it as binary little-endian";
+        }
+        if (h.version != "1.0")
+            return "PLY version '" + h.version + "' is not supported: export it as version 1.0";
+
+        for (const auto &e : h.elements)
+        {
+            for (const auto &p : e.properties)
+            {
+                if (p.isList)
+                    return "Splat PLY has the list property '" + p.name + "' in element '" + e.name +
+                           "', which is not supported";
+                if (!isTypeNameOfBuildLod(p.typeName))
+                    return "Property '" + p.name + "' has the type '" + p.typeName +
+                           "', which is not supported: use char, uchar, short, ushort, int, uint, float or double";
+            }
+        }
+        return layoutProblem(h);
+    }
+
+    bool isBuildableSplatPly(const PlyHeader &header)
+    {
+        return plySplatBuildProblem(header).empty();
+    }
+
     bool getPlyInfo(const fs::path &plyFile, PlyInfo &info)
     {
         info.isMesh = false;      // Assumed
         info.hasTextures = false; // Assumed
         info.isSplat = false;     // Assumed
         info.shDegree = -1;       // Not a splat
+        info.splatProblem.clear();
         info.dimensions.clear();
         info.vertexCount = 0;
         info.textureFilename.clear();
@@ -399,7 +540,12 @@ namespace ddb
         info.textureFileCount = h.textureFilenames.size();
         info.unsupportedTextureReason = plyUnsupportedTextureReason(h);
 
-        computePlySplatInfo(info);
+        if (!info.isMesh && looksLikeSplatPly(h))
+        {
+            info.isSplat = true;
+            info.shDegree = splatShDegree(h);
+            info.splatProblem = plySplatBuildProblem(h);
+        }
         return true;
     }
 

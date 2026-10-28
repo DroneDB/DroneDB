@@ -145,6 +145,22 @@ namespace ddb
                 throw AppException("Failed to transcode .spz to viewer-compatible version: " + io::toUtf8(output));
         }
 
+        // build-lod exits 0 after it refuses a PLY and only prints why; the header of the file
+        // says the same before the tool is launched (the rules are ply.h's), so the build fails
+        // with what to change in the export
+        void assureBuildableSplatSource(const std::string &input)
+        {
+            if (formatOf(input) != SplatFormat::Ply)
+                return;
+            PlyHeader header;
+            std::string error;
+            if (!parsePlyHeader(io::fromUtf8(input), header, &error))
+                throw AppException("Cannot build the Gaussian splat " + input + ": invalid PLY header: " + error);
+            const std::string problem = plySplatBuildProblem(header);
+            if (!problem.empty())
+                throw AppException("Cannot build the Gaussian splat " + input + ": " + problem);
+        }
+
         // Decode an antimatter15 .splat file into an SPZ GaussianCloud.
         //
         // Layout (32 bytes per primitive):
@@ -407,6 +423,8 @@ namespace ddb
 
     void buildGsplat(const std::string &input, const std::string &outdir)
     {
+        assureBuildableSplatSource(input);
+
         io::assureFolderExists(io::fromUtf8(outdir));
 
         // build-lod is a mandatory dependency: model.rad is the sole delivery artifact (streamed

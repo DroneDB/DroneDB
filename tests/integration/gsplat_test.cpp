@@ -250,6 +250,59 @@ std::string buildFailure(const fs::path& input, const fs::path& outdir) {
     return std::string();
 }
 
+// The header lines (after the "ply" line, up to the end of the vertex element's properties) of a
+// splat PLY that build-lod reads; the tests change one thing of it at a time.
+std::vector<std::string> splatHeaderLines(const std::string& format = "binary_little_endian 1.0", int fRest = 0,
+                                          const std::string& without = std::string()) {
+    std::vector<std::string> lines = {"format " + format, "element vertex 4"};
+    std::vector<std::string> props = {"x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2"};
+    for (int i = 0; i < fRest; ++i)
+        props.push_back("f_rest_" + std::to_string(i));
+    for (const char* p : {"opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"})
+        props.push_back(p);
+    for (const auto& p : props)
+        if (p != without)
+            lines.push_back("property float " + p);
+    return lines;
+}
+
+// A PLY of the given header lines and an arbitrary body: for what only reads the header.
+void writeHeaderOnlyPly(const fs::path& path, const std::vector<std::string>& lines) {
+    std::ofstream out(path.string(), std::ios::binary);
+    out << "ply\n";
+    for (const auto& l : lines)
+        out << l << "\n";
+    out << "end_header\n";
+    out << std::string(256, '\0');
+}
+
+// A SuperSplat compressed PLY: one chunk record per 256 splats, each splat four packed uints.
+void writeCompressedSplatPly(const fs::path& path, int n) {
+    const int chunks = (n + 255) / 256;
+    std::ofstream out(path.string(), std::ios::binary);
+    out << "ply\nformat binary_little_endian 1.0\nelement chunk " << chunks << "\n";
+    for (const char* p : {"min_x", "min_y", "min_z", "max_x", "max_y", "max_z", "min_scale_x", "min_scale_y",
+                          "min_scale_z", "max_scale_x", "max_scale_y", "max_scale_z", "min_r", "min_g", "min_b",
+                          "max_r", "max_g", "max_b"})
+        out << "property float " << p << "\n";
+    out << "element vertex " << n << "\n";
+    for (const char* p : {"packed_position", "packed_rotation", "packed_scale", "packed_color"})
+        out << "property uint " << p << "\n";
+    out << "end_header\n";
+    const float chunk[18] = {0, 0, 0, 10, 10, 1, -5, -5, -5, -2, -2, -2, 0, 0, 0, 1, 1, 1};
+    for (int c = 0; c < chunks; ++c)
+        out.write(reinterpret_cast<const char*>(chunk), sizeof(chunk));
+    for (int i = 0; i < n; ++i) {
+        const uint32_t position = (static_cast<uint32_t>(i * 7 % 2048) << 21) | (static_cast<uint32_t>(i % 1024) << 11) |
+                                  static_cast<uint32_t>(i * 3 % 2048);
+        const uint32_t rotation = (3u << 30) | (512u << 20) | (512u << 10) | 512u;
+        const uint32_t scale = (1024u << 21) | (512u << 11) | 1024u;
+        const uint32_t color = (128u << 24) | (128u << 16) | (128u << 8) | 255u;
+        const uint32_t row[4] = {position, rotation, scale, color};
+        out.write(reinterpret_cast<const char*>(row), sizeof(row));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Detection
 // ---------------------------------------------------------------------------
@@ -326,6 +379,127 @@ TEST(gsplat, shDegreeFromFRestCount) {
         EXPECT_TRUE(info.isSplat) << "degree " << d;
         EXPECT_EQ(info.shDegree, d) << "degree " << d;
     }
+}
+
+// A PLY that looks like a splat stays a GaussianSplat when build-lod cannot read it (the type is not
+// downgraded to a point cloud); the file says what to change, so the build can tell the user.
+TEST(gsplat, aSplatPlyBuildLodCannotReadStaysASplatAndNamesTheProblem) {
+    TestArea ta(TEST_NAME);
+
+    struct Case {
+        std::string name;
+        std::vector<std::string> header;
+        std::string problem;
+    };
+    std::vector<Case> cases = {
+        {"ascii", splatHeaderLines("ascii 1.0"), "ASCII splat PLY is not supported: export it as binary little-endian"},
+        {"big_endian", splatHeaderLines("binary_big_endian 1.0"),
+         "Big-endian splat PLY is not supported: export it as binary little-endian"},
+        {"version", splatHeaderLines("binary_little_endian 2.0"), "PLY version '2.0' is not supported"},
+        {"f_rest_12", splatHeaderLines("binary_little_endian 1.0", 12), "f_rest count 12 is not 0, 9, 24 or 45"},
+        {"f_rest_50", splatHeaderLines("binary_little_endian 1.0", 50), "f_rest count 50 is not 0, 9, 24 or 45"},
+        {"no_opacity", splatHeaderLines("binary_little_endian 1.0", 0, "opacity"), "missing properties: opacity"},
+        {"no_rot_3", splatHeaderLines("binary_little_endian 1.0", 0, "rot_3"), "missing properties: rot_3"},
+        {"no_f_dc_1", splatHeaderLines("binary_little_endian 1.0", 0, "f_dc_1"), "missing properties: f_dc_1"},
+    };
+    auto withExtra = [](std::vector<std::string> lines, const std::string& line) {
+        lines.push_back(line);
+        return lines;
+    };
+    cases.push_back({"list", withExtra(splatHeaderLines(), "property list uchar int extra"),
+                     "the list property 'extra' in element 'vertex'"});
+    auto sized = splatHeaderLines();
+    sized.back() = "property float32 rot_3";
+    cases.push_back({"sized_type_name", sized, "Property 'rot_3' has the type 'float32'"});
+
+    for (const auto& c : cases) {
+        const fs::path ply = ta.getPath(c.name + ".ply");
+        writeHeaderOnlyPly(ply, c.header);
+
+        EXPECT_EQ(ddb::fingerprint(ply), EntryType::GaussianSplat) << c.name;
+        PlyInfo info;
+        ASSERT_TRUE(ddb::getPlyInfo(ply, info)) << c.name;
+        EXPECT_TRUE(info.isSplat) << c.name;
+        EXPECT_NE(info.splatProblem.find(c.problem), std::string::npos) << c.name << ": " << info.splatProblem;
+        EXPECT_FALSE(ddb::isBuildableSplatPly(ddb::readPlyHeader(ply))) << c.name;
+    }
+}
+
+// build-lod counts the f_rest_* of the vertex element, and a count that is none of the standard ones
+// is not a degree: it was clamped to the closest lower one, which hid the problem.
+TEST(gsplat, theShDegreeComesFromTheVertexElementAndIsNotClamped) {
+    TestArea ta(TEST_NAME);
+
+    auto lines = splatHeaderLines();
+    lines.push_back("element extra 4");
+    for (int i = 0; i < 9; ++i)
+        lines.push_back("property float f_rest_" + std::to_string(i));
+    const fs::path other = ta.getPath("other_element.ply");
+    writeHeaderOnlyPly(other, lines);
+    PlyInfo info;
+    ASSERT_TRUE(ddb::getPlyInfo(other, info));
+    EXPECT_TRUE(info.isSplat);
+    EXPECT_EQ(info.shDegree, 0) << "the f_rest_* of another element are not spherical harmonics";
+    EXPECT_TRUE(info.splatProblem.empty()) << info.splatProblem;
+
+    const fs::path odd = ta.getPath("odd.ply");
+    writeHeaderOnlyPly(odd, splatHeaderLines("binary_little_endian 1.0", 30));
+    ASSERT_TRUE(ddb::getPlyInfo(odd, info));
+    EXPECT_TRUE(info.isSplat);
+    EXPECT_EQ(info.shDegree, -1) << "30 f_rest_* are no degree";
+
+    // build-lod stops counting at the first f_rest_N that is missing
+    auto gap = splatHeaderLines("binary_little_endian 1.0", 9);
+    gap.erase(std::find(gap.begin(), gap.end(), "property float f_rest_4"));
+    const fs::path gapped = ta.getPath("gap.ply");
+    writeHeaderOnlyPly(gapped, gap);
+    ASSERT_TRUE(ddb::getPlyInfo(gapped, info));
+    EXPECT_NE(info.splatProblem.find("f_rest count 4 is not 0, 9, 24 or 45"), std::string::npos) << info.splatProblem;
+}
+
+// The SuperSplat compressed layout (a chunk element and packed vertices) is a splat that build-lod reads.
+TEST(gsplat, aCompressedSplatPlyIsASplatBuildLodReads) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("compressed.ply");
+    writeCompressedSplatPly(ply, 300);
+
+    EXPECT_EQ(ddb::fingerprint(ply), EntryType::GaussianSplat);
+    PlyInfo info;
+    ASSERT_TRUE(ddb::getPlyInfo(ply, info));
+    EXPECT_TRUE(info.isSplat);
+    EXPECT_EQ(info.shDegree, 0);
+    EXPECT_EQ(info.vertexCount, 300u);
+    EXPECT_TRUE(info.splatProblem.empty()) << info.splatProblem;
+    EXPECT_TRUE(ddb::isBuildableSplatPly(ddb::readPlyHeader(ply)));
+
+    // What build-lod needs of it, rule by rule
+    auto header = [&](const std::string& drop) {
+        PlyHeader h = ddb::readPlyHeader(ply);
+        for (auto& e : h.elements)
+            e.properties.erase(std::remove_if(e.properties.begin(), e.properties.end(),
+                                              [&](const PlyProperty& p) { return p.name == drop; }),
+                               e.properties.end());
+        return ddb::plySplatBuildProblem(h);
+    };
+    EXPECT_NE(header("packed_color").find("missing properties: packed_color"), std::string::npos);
+    EXPECT_NE(header("max_scale_z").find("missing chunk properties: max_scale_z"), std::string::npos);
+
+    PlyHeader fewChunks = ddb::readPlyHeader(ply);
+    fewChunks.elements[fewChunks.findElement("chunk")].count = 1;
+    EXPECT_NE(ddb::plySplatBuildProblem(fewChunks).find("1 chunk records for 300 splats"), std::string::npos);
+
+    PlyHeader badSh = ddb::readPlyHeader(ply);
+    PlyElement sh;
+    sh.name = "sh";
+    sh.count = 300;
+    for (int i = 0; i < 12; ++i) {
+        PlyProperty p;
+        p.name = "f_rest_" + std::to_string(i);
+        p.typeName = "uchar";
+        sh.properties.push_back(p);
+    }
+    badSh.elements.push_back(sh);
+    EXPECT_NE(ddb::plySplatBuildProblem(badSh).find("f_rest count 12 is not 0, 9, 24 or 45"), std::string::npos);
 }
 
 TEST(gsplat, looksLikeHelpers) {
@@ -490,14 +664,9 @@ TEST(gsplat, buildFailureNamesTheReasonBuildLodPrinted) {
     EXPECT_NE(nanFailure.find("build-lod failed for"), std::string::npos) << nanFailure;
     EXPECT_NE(nanFailure.find("invalid splats"), std::string::npos) << nanFailure;
 
-    const fs::path ascii = ta.getPath("ascii.ply");
-    writeAsciiSplatPly(ascii, 40);
-    const std::string asciiFailure = buildFailure(ascii, ta.getFolder("out_ascii"));
-    EXPECT_NE(asciiFailure.find("Decoding failed: Unsupported PLY format: ascii"), std::string::npos) << asciiFailure;
-
     EXPECT_FALSE(fs::exists(ta.getPath("out_nan/model.rad")));
     EXPECT_TRUE(namesIn(ta.getPath("out_nan")).empty()) << "a failed build leaves nothing in the output folder";
-    EXPECT_EQ(namesIn(ta.getFolder("")).size(), 4u) << "and nothing beside the input";
+    EXPECT_EQ(namesIn(ta.getFolder("")).size(), 2u) << "and nothing beside the input";
 }
 
 // build-lod writes "<name>-lod.rad" beside its input and skips an input named "*-lod.spz": the
@@ -828,6 +997,54 @@ TEST(gsplat, buildLodMissingToolThrows) {
     expectMissingToolFailure([&] { ddb::buildGsplat(ply.string(), outdir.string()); }, "build-lod");
     EXPECT_FALSE(fs::exists(outdir / GsplatRadFileName)) << "no tool -> no model.rad";
     EXPECT_FALSE(fs::exists(outdir / GsplatFileName)) << "no tool -> no intermediate model.spz";
+}
+
+// A PLY build-lod would refuse fails the build from its header, before the tool is looked for or
+// launched (here the tool is missing: the message is still the problem of the file, not the tool's),
+// and nothing is written.
+TEST(gsplat, buildRefusesASplatPlyBuildLodCannotReadBeforeLaunchingIt) {
+    TestArea ta(TEST_NAME);
+    const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
+    BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
+    ASSERT_FALSE(ddb::buildlod::isBuildLodAvailable());
+
+    const fs::path ascii = ta.getPath("ascii.ply");
+    writeAsciiSplatPly(ascii, 40);
+    const fs::path outdir = ta.getPath("gsplat_out");
+    const std::string asciiFailure = buildFailure(ascii, outdir);
+    EXPECT_NE(asciiFailure.find("ASCII splat PLY is not supported: export it as binary little-endian"),
+              std::string::npos)
+        << asciiFailure;
+    EXPECT_NE(asciiFailure.find(ascii.string()), std::string::npos) << "the message names the file: " << asciiFailure;
+    EXPECT_FALSE(fs::exists(outdir)) << "a refused input leaves nothing behind";
+
+    const fs::path odd = ta.getPath("odd.ply");
+    writeHeaderOnlyPly(odd, splatHeaderLines("binary_little_endian 1.0", 12));
+    EXPECT_NE(buildFailure(odd, outdir).find("f_rest count 12 is not 0, 9, 24 or 45"), std::string::npos);
+
+    const fs::path noOpacity = ta.getPath("no_opacity.ply");
+    writeHeaderOnlyPly(noOpacity, splatHeaderLines("binary_little_endian 1.0", 0, "opacity"));
+    EXPECT_NE(buildFailure(noOpacity, outdir).find("missing properties: opacity"), std::string::npos);
+
+    // A splat PLY that is fine reaches the tool, which is then the missing one
+    const fs::path good = ta.getPath("good.ply");
+    writeSplatPly(good, 8, 0);
+    expectMissingToolFailure([&] { ddb::buildGsplat(good.string(), outdir.string()); }, "build-lod");
+}
+
+// A SuperSplat compressed PLY is a splat build-lod reads: the build gives a model.rad of its splats
+TEST(gsplat, aCompressedSplatPlyBuilds) {
+    TestArea ta(TEST_NAME);
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping compressed PLY build");
+
+    const fs::path ply = ta.getPath("compressed.ply");
+    writeCompressedSplatPly(ply, 300);
+    const fs::path outdir = ta.getFolder("gsplat_out");
+    ddb::buildGsplat(ply.string(), outdir.string());
+
+    ASSERT_TRUE(fs::exists(outdir / GsplatRadFileName));
+    EXPECT_TRUE(isRad(outdir / GsplatRadFileName));
+    EXPECT_TRUE(fs::exists(outdir / GsplatBoundsFileName));
 }
 
 // Through the build pipeline: a GaussianSplat entry without build-lod fails the build
