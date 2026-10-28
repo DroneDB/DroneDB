@@ -30,6 +30,26 @@ struct Scene {
     }
 };
 
+// The frame a trainer gave a scene: `up` (with its sign) and two axes across it, the cross products
+// of up with the axis it is not
+struct Frame {
+    Vec3 u{}, v{}, up{};
+
+    explicit Frame(const Vec3& upAxis) : up(upAxis) {
+        const Vec3 other = std::abs(up[0]) < 0.5 ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+        u = {up[1] * other[2] - up[2] * other[1], up[2] * other[0] - up[0] * other[2],
+             up[0] * other[1] - up[1] * other[0]};
+        const double un = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+        for (double& c : u) c /= un;
+        v = {up[1] * u[2] - up[2] * u[1], up[2] * u[0] - up[0] * u[2], up[0] * u[1] - up[1] * u[0]};
+    }
+
+    // The point `a` and `b` across the ground and `h` above it
+    Vec3 at(double a, double b, double h) const {
+        return Vec3{u[0] * a + v[0] * b + up[0] * h, u[1] * a + v[1] * b + up[1] * h, u[2] * a + v[2] * b + up[2] * h};
+    }
+};
+
 // A ground of `side` metres square with a little roughness, and things standing on it: columns of
 // splats that rise up to `height` from points of the ground. `upAxis` is the axis (with sign) the
 // scene stands on, the frame the trainer chose.
@@ -38,28 +58,54 @@ Scene groundWithObjects(const Vec3& upAxis, int ground = 3000, int objects = 150
     std::mt19937 rng(7);
     std::uniform_real_distribution<double> across(-side / 2, side / 2), rise(0.0, height);
     std::normal_distribution<double> rough(0.0, 0.03);
-
-    // Two axes spanning the ground: the cross products of up with the axis it is not
-    const Vec3 other = std::abs(upAxis[0]) < 0.5 ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
-    Vec3 u = {upAxis[1] * other[2] - upAxis[2] * other[1], upAxis[2] * other[0] - upAxis[0] * other[2],
-              upAxis[0] * other[1] - upAxis[1] * other[0]};
-    const double un = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
-    for (double& c : u) c /= un;
-    const Vec3 v = {upAxis[1] * u[2] - upAxis[2] * u[1], upAxis[2] * u[0] - upAxis[0] * u[2],
-                    upAxis[0] * u[1] - upAxis[1] * u[0]};
+    const Frame frame(upAxis);
 
     Scene scene;
-    const auto at = [&](double a, double b, double h) {
-        return Vec3{u[0] * a + v[0] * b + upAxis[0] * h, u[1] * a + v[1] * b + upAxis[1] * h,
-                    u[2] * a + v[2] * b + upAxis[2] * h};
-    };
     for (int i = 0; i < ground; ++i)
-        scene.add(at(across(rng), across(rng), rough(rng)));
+        scene.add(frame.at(across(rng), across(rng), rough(rng)));
     // Objects: a few clusters, each a column
     for (int c = 0; c < 6; ++c) {
         const double cx = across(rng) * 0.8, cy = across(rng) * 0.8;
         for (int i = 0; i < objects / 6; ++i)
-            scene.add(at(cx + rough(rng) * 20, cy + rough(rng) * 20, rise(rng)));
+            scene.add(frame.at(cx + rough(rng) * 20, cy + rough(rng) * 20, rise(rng)));
+    }
+    return scene;
+}
+
+// How many splats each surface of a room holds
+struct RoomSplats {
+    int shelfWall = 0; // the wall the capture looked at most (a bookcase, a fireplace): more than the floor
+    int otherWalls = 0; // each of the three others
+    int floor = 0;
+    int ceiling = 0;
+    int furniture = 0; // in boxes up to a metre high, on the floor
+};
+
+// A room `width` by `width` and `height` high in the frame of `upAxis`, as an INRIA capture from inside
+// it sees it: a floor with furniture, a plainer ceiling, and walls
+Scene room(const Vec3& upAxis, double width, double height, const RoomSplats& splats) {
+    std::mt19937 rng(5);
+    std::uniform_real_distribution<double> across(-width / 2, width / 2), rise(0.0, height), low(0.0, 1.0);
+    std::normal_distribution<double> rough(0.0, 0.02);
+    const Frame frame(upAxis);
+    const double half = width / 2;
+
+    Scene scene;
+    for (int i = 0; i < splats.floor; ++i)
+        scene.add(frame.at(across(rng), across(rng), rough(rng)));
+    for (int i = 0; i < splats.ceiling; ++i)
+        scene.add(frame.at(across(rng), across(rng), height + rough(rng)));
+    for (int i = 0; i < splats.shelfWall; ++i)
+        scene.add(frame.at(-half + rough(rng), across(rng), rise(rng)));
+    for (int i = 0; i < splats.otherWalls; ++i) {
+        scene.add(frame.at(half + rough(rng), across(rng), rise(rng)));
+        scene.add(frame.at(across(rng), -half + rough(rng), rise(rng)));
+        scene.add(frame.at(across(rng), half + rough(rng), rise(rng)));
+    }
+    for (int box = 0; box < 5; ++box) {
+        const double cx = across(rng) * 0.7, cy = across(rng) * 0.7;
+        for (int i = 0; i < splats.furniture / 5; ++i)
+            scene.add(frame.at(cx + rough(rng) * 25, cy + rough(rng) * 25, low(rng)));
     }
     return scene;
 }
@@ -128,6 +174,56 @@ TEST(splatFrame, aSheetWithNothingOnItHasNoSign) {
     Scene sheet = groundWithObjects({0, 0, 1}, 3000, 0);
     const SplatUp up = estimateSplatUp(sheet.positions, sheet.opacities);
     EXPECT_LT(up.confidence, SplatUpConfident);
+}
+
+// A capture from inside a room (INRIA's playroom): the wall the camera looked at most holds more splats
+// than the floor, so the plane that holds the most is a wall, and the room stood on it is on its side.
+// A room is as high as it is wide, it has no flat axis to tell its floor from its walls: the floor is
+// the best guess, but not one to stand the scene on.
+TEST(splatFrame, aRoomAsHighAsItIsWideIsNotStoodOnAWall) {
+    const Vec3 yDown = {0, -1, 0};
+    const Scene scene = room(yDown, 6.0, 4.5, {2500, 1200, 1500, 800, 1200});
+    const SplatUp up = estimateSplatUp(scene.positions, scene.opacities);
+    EXPECT_LT(up.confidence, SplatUpConfident);
+    EXPECT_LT(degreesBetween(up.up, yDown), 3.0) << up.up[0] << " " << up.up[1] << " " << up.up[2];
+}
+
+// A wide room (INRIA's drjohnson hall) is lower than it is wide: its floor is the plane along its
+// flattest axis, even though a wall holds more splats, and the furnished floor is the side it stands on
+TEST(splatFrame, aWideRoomStandsOnItsFloorWhenAWallHoldsMoreSplats) {
+    for (const Vec3 axis : {Vec3{0, -1, 0}, Vec3{0.84, 0, -0.54}}) {
+        const Vec3 expected = normalised(axis);
+        const Scene scene = room(expected, 12.0, 3.0, {5000, 1000, 2500, 800, 1500});
+        const SplatUp up = estimateSplatUp(scene.positions, scene.opacities);
+        EXPECT_LT(degreesBetween(up.up, expected), 3.0) << up.up[0] << " " << up.up[1] << " " << up.up[2];
+        EXPECT_GE(up.confidence, SplatUpConfident);
+    }
+}
+
+// A subject on level ground beside a wooded slope that holds most of the splats (INRIA's train): the
+// slope is the densest plane in a thick slab and the crisp level ground in a thin one. The scene has two
+// grounds 20 degrees apart, and the estimate says it is not sure rather than tilt the subject.
+TEST(splatFrame, aSubjectOnLevelGroundBesideALargerSlopeIsNotConfident) {
+    std::mt19937 rng(13);
+    std::uniform_real_distribution<double> level(-6.0, 6.0), uphill(6.0, 36.0), along(-15.0, 15.0), rise(0.0, 3.0);
+    std::normal_distribution<double> crisp(0.0, 0.02), leafy(0.0, 1.5), spot(0.0, 0.4);
+    const Frame frame({0, -1, 0});
+    const double slope = std::tan(20.0 * 3.14159265358979323846 / 180.0);
+
+    Scene scene;
+    for (int i = 0; i < 4000; ++i)
+        scene.add(frame.at(level(rng), level(rng), crisp(rng)));
+    for (int column = 0; column < 4; ++column) { // the subject
+        const double ca = level(rng) * 0.5, cb = level(rng) * 0.5;
+        for (int i = 0; i < 200; ++i)
+            scene.add(frame.at(ca + spot(rng), cb + spot(rng), rise(rng)));
+    }
+    for (int i = 0; i < 6000; ++i) { // the slope, its trees a thick layer of leaves
+        const double a = uphill(rng);
+        scene.add(frame.at(a, along(rng), (a - 6.0) * slope + std::abs(leafy(rng))));
+    }
+    const SplatUp up = estimateSplatUp(scene.positions, scene.opacities);
+    EXPECT_LT(up.confidence, SplatUpConfident) << up.up[0] << " " << up.up[1] << " " << up.up[2];
 }
 
 // A georeferenced scene is in a local frame whose Z is up, whatever its splats look like

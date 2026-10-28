@@ -6,7 +6,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
+#include <numeric>
 #include <random>
+#include <utility>
 
 #include "json.h"
 
@@ -28,6 +31,17 @@ namespace ddb
         constexpr double kMinOpacity = 0.05;
         // A plane is as thick as this much of the extent of the scene
         constexpr double kPlaneThickness = 0.02;
+        // ... and the ground is looked for again in a slab a quarter as thick. A level ground is the
+        // densest plane however thin it is taken; a slope that wins only in the thicker slab (a wooded
+        // hillside behind a subject that stands on level ground) leaves the scene with two grounds.
+        constexpr double kThinPlaneThickness = 0.005;
+        // The planes fitted one after the other at each thickness
+        constexpr int kPlaneCandidates = 6;
+        // The grounds found at the two thicknesses are one plane up to the first angle, and two from the second
+        constexpr double kAgreeDegrees = 8.0;
+        constexpr double kDisagreeDegrees = 15.0;
+        // A median this close to the ground (in standard deviations) says nothing about the side
+        constexpr double kSideDeadZone = 0.05;
         // The plane through three splats is not one if they are nearly on a line
         constexpr double kMinTriangleSine = 0.1;
         // Below this share of the opacity there is no ground: the flat axis of everything is used
@@ -197,32 +211,38 @@ namespace ddb
             double distance(const Vec3 &p) const { return dot(normal, p) + offset; }
         };
 
-        // The share of the opacity within `thickness` of the plane, and which points those are
-        double supportOf(const Points &points, const Plane &plane, double thickness, std::vector<size_t> *inliers)
+        // The opacity within `thickness` of the plane, over the points `among` names (all of them when
+        // null), and which points those are (in ascending order)
+        double supportOf(const Points &points, const Plane &plane, double thickness, const std::vector<size_t> *among,
+                         std::vector<size_t> *inliers)
         {
             double sum = 0.0;
             if (inliers != nullptr)
                 inliers->clear();
-            for (size_t i = 0; i < points.p.size(); ++i)
+            const size_t n = among != nullptr ? among->size() : points.p.size();
+            for (size_t j = 0; j < n; ++j)
+            {
+                const size_t i = among != nullptr ? (*among)[j] : j;
                 if (std::abs(plane.distance(points.p[i])) <= thickness)
                 {
                     sum += points.w[i];
                     if (inliers != nullptr)
                         inliers->push_back(i);
                 }
+            }
             return sum;
         }
 
-        // The plane through three splats that most of the opacity lies on
-        Plane ransacPlane(const Points &points, double thickness)
+        // The plane through three of the `among` splats that most of their opacity lies on; false when
+        // no three of them make a plane
+        bool ransacPlane(const Points &points, const std::vector<size_t> &among, double thickness, std::mt19937 &rng,
+                         Plane &best)
         {
-            std::mt19937 rng(kSeed);
-            const size_t n = points.p.size();
-            Plane best;
+            const size_t n = among.size();
             double bestSupport = -1.0;
             for (int it = 0; it < kRansacIterations; ++it)
             {
-                const size_t a = rng() % n, b = rng() % n, c = rng() % n;
+                const size_t a = among[rng() % n], b = among[rng() % n], c = among[rng() % n];
                 if (a == b || b == c || a == c)
                     continue;
                 const Vec3 u = sub(points.p[b], points.p[a]);
@@ -234,64 +254,187 @@ namespace ddb
                 Plane plane;
                 plane.normal = {normal[0] / len, normal[1] / len, normal[2] / len};
                 plane.offset = -dot(plane.normal, points.p[a]);
-                const double support = supportOf(points, plane, thickness, nullptr);
+                const double support = supportOf(points, plane, thickness, &among, nullptr);
                 if (support > bestSupport)
                 {
                     bestSupport = support;
                     best = plane;
                 }
             }
-            return best;
+            return bestSupport >= 0.0;
         }
 
-        SplatUp groundPlaneUp(const Points &points, const Plane &ransac, double thickness, double &support)
+        // A plane the splats lie on, and how much of them it holds
+        struct PlaneCandidate
         {
-            // Refit to the splats on the plane (twice: the first fit moves it, and the splats with it)
-            Plane plane = ransac;
+            Plane plane;
+            double share = 0.0;    // of all the opacity, within the thickness of the plane
+            double ownShare = 0.0; // of the opacity that no plane found before it holds
+            double inPlane = 0.0;  // sqrt(l2 / l1) of the two spreads of its splats: a line is not a ground
+            bool found = false;
+        };
+
+        // Refits `plane` to all the splats on it (twice: the first fit moves it, and the splats with it)
+        void refit(const Points &points, Plane plane, double thickness, PlaneCandidate &candidate)
+        {
             std::vector<size_t> inliers;
-            Spread spread;
             for (int pass = 0; pass < 2; ++pass)
             {
-                supportOf(points, plane, thickness, &inliers);
+                supportOf(points, plane, thickness, nullptr, &inliers);
                 if (inliers.size() < 3)
                     break;
-                spread = spreadOf(points, &inliers);
+                const Spread spread = spreadOf(points, &inliers);
                 plane.normal = axisOf(spread, 2);
                 plane.offset = -dot(plane.normal, spread.mean);
             }
-            support = supportOf(points, plane, thickness, &inliers) / points.totalWeight;
+            candidate.plane = plane;
+            candidate.share = supportOf(points, plane, thickness, nullptr, &inliers) / points.totalWeight;
             if (inliers.size() >= 3)
-                spread = spreadOf(points, &inliers);
+            {
+                const Spread spread = spreadOf(points, &inliers);
+                candidate.inPlane = spread.values[0] > 0.0 ? std::sqrt(spread.values[1] / spread.values[0]) : 0.0;
+            }
+        }
 
-            // The opacity off the plane, on each side of it
-            double above = 0.0, below = 0.0;
+        // The plane the scene stands on, among planes `thickness` thick. Several are found, one after the
+        // other, each among the splats the planes before it do not hold (a room has a floor, a ceiling and
+        // walls; a street has the road and the roofs), and the one kept holds the most opacity of its own
+        // weighted by |cos|^4 of its angle to the flattest axis of the scene: a wall can hold more splats
+        // than the floor, but a room is lower than it is wide.
+        PlaneCandidate dominantPlane(const Points &points, double thickness, const Vec3 &flattest)
+        {
+            std::mt19937 rng(kSeed);
+            std::vector<size_t> remaining(points.p.size());
+            std::iota(remaining.begin(), remaining.end(), size_t{0});
+            std::vector<size_t> inliers, rest;
+            PlaneCandidate best;
+            double bestScore = -1.0;
+            for (int k = 0; k < kPlaneCandidates && remaining.size() >= kMinSplats; ++k)
+            {
+                Plane plane;
+                if (!ransacPlane(points, remaining, thickness, rng, plane))
+                    break;
+                PlaneCandidate candidate;
+                refit(points, plane, thickness, candidate);
+                candidate.ownShare = supportOf(points, candidate.plane, thickness, &remaining, nullptr) / points.totalWeight;
+                candidate.found = true;
+                const double score = candidate.ownShare * std::pow(dot(candidate.plane.normal, flattest), 4);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = candidate;
+                }
+
+                supportOf(points, candidate.plane, thickness, nullptr, &inliers);
+                rest.clear();
+                std::set_difference(remaining.begin(), remaining.end(), inliers.begin(), inliers.end(),
+                                    std::back_inserter(rest));
+                remaining.swap(rest);
+            }
+            return best;
+        }
+
+        // Which side of the ground along `normal` the scene is on. The ground is the densest layer of
+        // splats, `thickness` thick, between the 1st and 99th percentile of the heights; `sideBias` is
+        // (above - below) / (above + below) of the opacity off it, and `medianOffset` how far the
+        // weighted median height is above it (0 within it), in standard deviations of the heights. Both
+        // are positive when the scene stands on the layer.
+        struct Side
+        {
+            double sideBias = 0.0;
+            double medianOffset = 0.0;
+        };
+
+        Side sideOf(const Points &points, const Vec3 &normal, double thickness)
+        {
+            std::vector<std::pair<double, double>> heights; // height, weight
+            heights.reserve(points.p.size());
             for (size_t i = 0; i < points.p.size(); ++i)
+                heights.emplace_back(dot(points.p[i], normal), points.w[i]);
+            std::sort(heights.begin(), heights.end());
+            const size_t lo = heights.size() / 100;
+            const size_t hi = heights.size() - 1 - lo;
+            const double from = heights[lo].first, to = heights[hi].first;
+
+            Side side;
+            if (!(to > from) || !(thickness > 0.0))
+                return side;
+            const size_t bins = std::clamp<size_t>(static_cast<size_t>((to - from) / thickness), 8, 4096);
+            std::vector<double> histogram(bins, 0.0);
+            double total = 0.0, mean = 0.0;
+            for (size_t i = lo; i <= hi; ++i)
             {
-                const double d = plane.distance(points.p[i]);
-                if (d > thickness)
-                    above += points.w[i];
-                else if (d < -thickness)
-                    below += points.w[i];
+                const auto bin = std::min(bins - 1, static_cast<size_t>((heights[i].first - from) / (to - from) * static_cast<double>(bins)));
+                histogram[bin] += heights[i].second;
+                total += heights[i].second;
+                mean += heights[i].second * heights[i].first;
             }
-            if (below > above)
+            mean /= total;
+            double variance = 0.0, median = from, cumulative = 0.0;
+            bool medianFound = false;
+            for (size_t i = lo; i <= hi; ++i)
             {
-                for (double &c : plane.normal)
+                variance += heights[i].second * (heights[i].first - mean) * (heights[i].first - mean) / total;
+                cumulative += heights[i].second;
+                if (!medianFound && cumulative >= total / 2.0)
+                {
+                    median = heights[i].first;
+                    medianFound = true;
+                }
+            }
+            const size_t densest = static_cast<size_t>(std::max_element(histogram.begin(), histogram.end()) - histogram.begin());
+            const double ground = from + (static_cast<double>(densest) + 0.5) * (to - from) / static_cast<double>(bins);
+
+            double above = 0.0, below = 0.0;
+            for (const auto &[h, w] : heights)
+            {
+                if (h - ground > thickness)
+                    above += w;
+                else if (h - ground < -thickness)
+                    below += w;
+            }
+            side.sideBias = above + below > 0.0 ? (above - below) / (above + below) : 0.0;
+            // A median within the layer is on neither side of it
+            const double off = median - ground;
+            const double beyond = std::abs(off) <= thickness ? 0.0 : off - std::copysign(thickness, off);
+            side.medianOffset = variance > 0.0 ? beyond / std::sqrt(variance) : 0.0;
+            return side;
+        }
+
+        double degreesBetweenAxes(const Vec3 &a, const Vec3 &b)
+        {
+            return std::acos(std::min(1.0, std::abs(dot(a, b)))) * 180.0 / 3.14159265358979323846;
+        }
+
+        SplatUp groundPlaneUp(const Points &points, const PlaneCandidate &thick, const PlaneCandidate &thin,
+                              double thickness, double flatness)
+        {
+            // The thin plane places the ground more precisely; the side is read at the usual thickness
+            Vec3 normal = thin.found ? thin.plane.normal : thick.plane.normal;
+            Side side = sideOf(points, normal, thickness);
+            if (side.sideBias < 0.0)
+            {
+                for (double &c : normal)
                     c = -c;
-                std::swap(above, below);
+                side.sideBias = -side.sideBias;
+                side.medianOffset = -side.medianOffset;
             }
-            const double sideBias = above + below > 0.0 ? (above - below) / (above + below) : 0.0;
-            const double inPlane = spread.values[0] > 0.0 ? std::sqrt(spread.values[1] / spread.values[0]) : 0.0;
+            // The two readings of the side must not contradict each other; either is enough when they do not
+            const double sideClear = side.medianOffset <= -kSideDeadZone
+                                         ? 0.0
+                                         : std::max(ramp(side.sideBias, 0.1, 0.5), ramp(side.medianOffset, kSideDeadZone, 0.25));
+            const double tilt = thin.found ? degreesBetweenAxes(thick.plane.normal, thin.plane.normal) : 90.0;
 
             SplatUp up;
-            up.up = plane.normal;
+            up.up = normal;
             up.source = SplatUpSource::GroundPlane;
-            up.confidence = ramp(support, 0.08, 0.30) * ramp(sideBias, 0.1, 0.5) * ramp(inPlane, 0.05, 0.25);
+            up.confidence = ramp(thick.share, 0.08, 0.30) * ramp(thick.inPlane, 0.05, 0.25) * ramp(flatness, 0.3, 0.6) *
+                            sideClear * (1.0 - ramp(tilt, kAgreeDegrees, kDisagreeDegrees));
             return up;
         }
 
-        SplatUp pcaUp(const Points &points)
+        SplatUp pcaUp(const Points &points, const Spread &spread, double flatness)
         {
-            const Spread spread = spreadOf(points, nullptr);
             Vec3 normal = axisOf(spread, 2);
 
             // The skew of the splats along the flat axis: a floor with things on it has its tail up
@@ -310,7 +453,6 @@ namespace ddb
                 for (double &c : normal)
                     c = -c;
 
-            const double flatness = spread.values[1] > 0.0 ? 1.0 - std::sqrt(spread.values[2] / spread.values[1]) : 0.0;
             SplatUp up;
             up.up = normal;
             up.source = SplatUpSource::Pca;
@@ -355,10 +497,17 @@ namespace ddb
         if (points.p.size() < kMinSplats || !(points.extent > 0.0) || !(points.totalWeight > 0.0))
             return result;
 
+        // The flattest axis of everything, and how flat the scene is along it: 1 - sqrt(l3 / l2)
+        const Spread all = spreadOf(points, nullptr);
+        const Vec3 flattest = axisOf(all, 2);
+        const double flatness = all.values[1] > 0.0 ? 1.0 - std::sqrt(all.values[2] / all.values[1]) : 0.0;
+
         const double thickness = kPlaneThickness * points.extent;
-        double support = 0.0;
-        const SplatUp ground = groundPlaneUp(points, ransacPlane(points, thickness), thickness, support);
-        return support >= kMinGroundSupport ? ground : pcaUp(points);
+        const PlaneCandidate thick = dominantPlane(points, thickness, flattest);
+        if (!thick.found || thick.share < kMinGroundSupport)
+            return pcaUp(points, all, flatness);
+        const PlaneCandidate thin = dominantPlane(points, kThinPlaneThickness * points.extent, flattest);
+        return groundPlaneUp(points, thick, thin, thickness, flatness);
     }
 
     SplatUp estimateSplatUp(const RadCoarseSplats &splats, bool georeferenced)

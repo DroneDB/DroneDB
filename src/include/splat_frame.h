@@ -39,27 +39,38 @@ namespace ddb
     /// {"up": [x, y, z], "upConfidence", "upSource"}: the members bounds.json adds to its bounding box
     void to_json(json &j, const SplatUp &up);
 
-    // Estimates the up vector of a scene from the centres of its splats (`positions`, 3 floats
-    // each) weighted by their activated `opacities` (one each; an empty array weighs all as 1).
+    // Estimates the up vector of a scene from the centres of its splats (`positions`, 3 floats each)
+    // weighted by their activated `opacities` (one each; an empty array weighs all as 1).
     //
     // A georeferenced scene is in a local ENU or projected frame, so up is +Z with confidence 1.
-    // Any other is estimated, deterministically (the same splats give the same answer):
+    // Any other is estimated, deterministically (the same splats give the same answer). A confident
+    // answer is a claim the viewers stand the scene on, so the confidence is kept low wherever the
+    // splats allow two answers, rather than right on average:
     //
-    //  1. A RANSAC plane fit: planes through three splats are scored by the opacity within 2% of the
-    //     extent of the scene (the 1st to 99th percentile of each axis), and the best one is refitted
-    //     to its own splats. The scene is taken to stand on it: up is the side most of the opacity
-    //     that is off the plane is on.
-    //     confidence = ramp(support, 0.08, 0.30) * ramp(sideBias, 0.1, 0.5) * ramp(spread, 0.05, 0.25)
-    //     where support is the share of all the opacity on the plane, sideBias is
-    //     |above - below| / (above + below) of the opacity off it (a scene with as much on either
-    //     side has no up), spread is sqrt(l2 / l1) of the plane's own two spreads (a line of splats
-    //     is not a ground), and ramp(x, a, b) goes from 0 at a to 1 at b.
-    //  2. When the plane holds less than 12% of the opacity there is no ground to speak of, and the
-    //     flattest axis of all the splats (PCA) is used instead. Its sign is that of the skew of
-    //     the splats along it: a floor with things on it has a long tail upward.
+    //  1. The ground is the dominant plane. RANSAC finds six planes one after the other, each among the
+    //     splats the earlier ones do not hold, scored by the opacity within 2% of the extent of the scene
+    //     (the 1st to 99th percentile of each axis) and refitted to their own splats. The one kept holds
+    //     the most opacity of its own weighted by |cos|^4 of its angle to the flattest axis of all the
+    //     splats (PCA): in a room a wall can hold more splats than the floor, and a room is lower than it
+    //     is wide. The search is made again with planes a quarter as thick, and that plane gives `up`.
+    //  2. The side is the one the scene stands on: the densest layer along the normal is the ground, and
+    //     the opacity off it (sideBias = (above - below) / (above + below)) and the median height
+    //     (medianOffset, in standard deviations, 0 within the layer) are both above it. When they point
+    //     to opposite sides, the side is unknown.
+    //     confidence = ramp(support, 0.08, 0.30) * ramp(spread, 0.05, 0.25) * ramp(flatness, 0.3, 0.6)
+    //                  * max(ramp(sideBias, 0.1, 0.5), ramp(medianOffset, 0.05, 0.25))
+    //                  * (1 - ramp(tilt, 8, 15))
+    //     where support is the share of all the opacity on the thick plane, spread is sqrt(l2 / l1) of
+    //     its own two spreads (a line of splats is not a ground), flatness is 1 - sqrt(l3 / l2) of the
+    //     three spreads l1 >= l2 >= l3 of all the splats (a room as high as it is wide has no axis to
+    //     tell its floor from its walls), tilt is the angle in degrees between the thick and the thin
+    //     plane (a wooded slope that is the densest plane only in the thick slab, beside a subject on
+    //     level ground, leaves two grounds), and ramp(x, a, b) goes from 0 at a to 1 at b.
+    //  3. When the thick plane holds less than 12% of the opacity there is no ground to speak of, and
+    //     the flattest axis of all the splats is used instead. Its sign is that of the skew of the
+    //     splats along it: a floor with things on it has a long tail upward.
     //     confidence = 0.8 * ramp(flatness, 0.3, 0.8) * ramp(|skew|, 0.2, 1.0)
-    //     where flatness is 1 - sqrt(l3 / l2) of the three spreads l1 >= l2 >= l3. A fit of
-    //     everything is a weaker claim than a fitted ground, hence the 0.8 ceiling.
+    //     A fit of everything is a weaker claim than a fitted ground, hence the 0.8 ceiling.
     // A ball of splats, or too few of them, has no flat axis and comes out at confidence 0.
     SplatUp estimateSplatUp(const std::vector<float> &positions, const std::vector<float> &opacities,
                             bool georeferenced = false);
