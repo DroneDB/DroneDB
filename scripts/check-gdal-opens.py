@@ -7,9 +7,14 @@ Registry, ddbcmd, the tests) asks the helper and opens only what the helper wrot
 src/include/raster_artefacts.h. Two rules keep that true, and this check enforces both on the
 sources:
 
-  raw-open     GDALOpen, GDALOpenEx, GDALOpenShared, GDALIdentifyDriver, GDALIdentifyDriverEx,
-               OGROpen, OGROpenShared and the string "/vsicurl" appear in src/ and apps/ (apps/gdal-util
-               aside: it is the helper) only in the files of ALLOWED_FILES, each with its reason. A new
+  raw-open     The calls that open a file by its name (GDALOpen, GDALOpenEx, GDALOpenShared,
+               GDALDataset::Open, GDALOpenInfo, GDALIdentifyDriver, GDALIdentifyDriverEx, OGROpen,
+               OGROpenShared, OGR_Dr_Open, OGRSFDriverRegistrar::Open, GDALBuildVRT, which opens the
+               files it is given by name) and the strings of the network and archive file systems of
+               GDAL (/vsicurl, /vsicurl_streaming, /vsis3, /vsigs, /vsiaz, /vsiadls, /vsioss,
+               /vsiswift, /vsihdfs, /vsiwebhdfs, /vsizip, /vsitar, /vsi7z, /vsirar and their
+               _streaming forms) appear in src/ and apps/ (apps/gdal-util aside: it is the helper)
+               only in the files of ALLOWED_FILES, each with its reason. A new
                open goes through openUserRaster / openUserVector (the helper's operations),
                openArtefactRaster / openArtefactVector or reopenWrittenRaster; a file that needs
                a raw one is added to the list with a one-line reason, which a review reads.
@@ -19,7 +24,8 @@ sources:
                and identifyUserRaster (gdal_open_policy.h) stops protecting it.
 
 An entry of ALLOWED_FILES or ENABLE_CALLERS that no longer matches anything fails too, so the lists
-only hold what is needed. Comments are ignored (and so are string literals, except for "/vsicurl").
+only hold what is needed. Comments are ignored (and so are string literals, except for the file
+system prefixes).
 
 Usage:
     scripts/check-gdal-opens.py              check the sources
@@ -46,6 +52,8 @@ ALLOWED_FILES: dict[str, str] = {
         "opens the artefacts libddb wrote (and the files it just wrote) with the drivers it writes them with",
     "src/library/copc_utils.cpp":
         "reads a COPC file by /vsicurl/ with VSI calls for the node cache; no GDAL driver parses it",
+    "src/library/merge_vrt.cpp":
+        "GDALBuildVRT over the handles of artefacts it already opened (no file names)",
 }
 
 # The files that may call enableUserFileOpens(), with the reason
@@ -64,9 +72,12 @@ ENABLE_DIRS = ("src", "apps", "tests", "vendor")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp"}
 SKIPPED_DIRS = {".git", "node_modules"}
 
-RAW_OPEN = re.compile(r"(?<![\w])(GDALOpen|GDALOpenEx|GDALOpenShared|GDALIdentifyDriver|GDALIdentifyDriverEx|"
-                      r"OGROpen|OGROpenShared)(?![\w])")
-VSICURL = "/vsicurl"
+RAW_OPEN = re.compile(r"(?<![\w])(GDALOpen|GDALOpenEx|GDALOpenShared|GDALDataset\s*::\s*Open|GDALOpenInfo|"
+                      r"GDALIdentifyDriver|GDALIdentifyDriverEx|OGROpen|OGROpenShared|OGR_Dr_Open|"
+                      r"OGRSFDriverRegistrar\s*::\s*Open|GDALBuildVRT)(?![\w])")
+# The file systems of GDAL that reach the network or open an archive; a prefix also matches its
+# _streaming form
+VSI_PREFIX = re.compile(r"/vsi(?:curl|s3|gs|az|adls|oss|swift|hdfs|webhdfs|zip|tar|7z|rar)(?![a-z0-9])")
 ENABLE_CALL = re.compile(r"(?<![\w])(?:\w+::)*enableUserFileOpens\s*\(")
 DECLARATION = re.compile(r"\bvoid\s+(?:\w+::)*$")
 
@@ -128,7 +139,9 @@ def raw_opens(text: str) -> list[tuple[int, str]]:
     found = [(number, match.group(1))
              for number, source_line in enumerate(code.split("\n"), 1)
              for match in RAW_OPEN.finditer(source_line)]
-    found += [(number, VSICURL) for number, content in strings if VSICURL in content]
+    found += [(number, match.group(0))
+              for number, content in strings
+              for match in VSI_PREFIX.finditer(content)]
     return sorted(found)
 
 
@@ -216,10 +229,31 @@ def self_test() -> int:
                                "// \"/vsicurl/\"\n"}, {}, {}, []),
         ("a name inside a string is not an open",
          {"src/library/a.cpp": 'const char *s = "GDALOpen failed";\n'}, {}, {}, []),
-        ("another identifier that starts with the name is not an open",
-         {"src/library/a.cpp": "GDALOpenInfo info; MyGDALOpen(); GDALOpenEx2();\n"}, {}, {}, []),
+        ("every other function that opens a file by its name",
+         {"src/library/a.cpp": "GDALDataset::Open(p, 0);\nGDALOpenInfo info(p, GA_ReadOnly);\n"
+                               "OGR_Dr_Open(d, p, 0);\nOGRSFDriverRegistrar::Open(p);\n"
+                               "GDALBuildVRT(o, 2, nullptr, names, opts, &e);\n::GDALOpenEx(p, 0, 0, 0, 0);\n"
+                               "GDALDataset :: Open(p, 0);\n"},
+         {}, {},
+         [("src/library/a.cpp", n) for n in range(1, 8)]),
+        ("another identifier that starts or ends with the name is not an open",
+         {"src/library/a.cpp": "MyGDALOpen(); GDALOpenEx2(); GDALOpenInfoTag t; GDALBuildVRTOptionsNew(0, 0);\n"
+                               "x.GDALDatasetOpen(); OGR_Dr_OpenFoo();\n"},
+         {}, {}, []),
         ("the /vsicurl string is an open",
          {"src/library/a.cpp": 'auto p = "/vsicurl/" + url;\n'}, {}, {}, [("src/library/a.cpp", 1)]),
+        ("every network and archive file system is an open",
+         {"src/library/a.cpp": "".join(f'auto p{i} = "/vsi{name}/x";\n' for i, name in enumerate(
+             ["curl", "curl_streaming", "s3", "s3_streaming", "gs", "gs_streaming", "az", "az_streaming", "adls",
+              "oss", "oss_streaming", "swift", "swift_streaming", "hdfs", "webhdfs", "zip", "tar", "7z", "rar"]))},
+         {}, {},
+         [("src/library/a.cpp", n) for n in range(1, 20)]),
+        ("the other file systems are not",
+         {"src/library/a.cpp": 'auto a = "/vsimem/x"; auto b = "/vsigzip/x"; auto c = "/vsistdout/";\n'
+                               'auto d = "/vsizipper/"; auto e = "/vsis3x/";\n'},
+         {}, {}, []),
+        ("a file system in a comment is not an open",
+         {"src/library/a.cpp": "// \"/vsis3/bucket\" and /vsizip/ here\n"}, {}, {}, []),
         ("a raw string with /vsicurl is an open",
          {"src/library/a.cpp": 'auto p = R"x(\n/vsicurl/)x";\n'}, {}, {}, [("src/library/a.cpp", 1)]),
         ("the line of an open after a block comment",
