@@ -130,6 +130,9 @@ namespace
 #include "test.h"
 #include "testarea.h"
 
+// LeakSanitizer's check on demand: null in a build without it
+extern "C" int __lsan_do_recoverable_leak_check() __attribute__((weak));
+
 namespace
 {
     using namespace ddb;
@@ -527,15 +530,17 @@ namespace
         return out.str();
     }
 
-#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
-#define SANDBOX_TEST_UNDER_SANITIZER 1
-#endif
+    // A sanitizer that takes its shadow memory as address space leaves no room for a limit of it,
+    // so the sandbox of such a build sets none (sandbox::sanitizerAllowances)
+    bool addressSpaceUnlimited()
+    {
+        return sandbox::sanitizerAllowances().unlimitedAddressSpace;
+    }
 
     TEST(Sandbox, anAllocationAboveTheAddressSpaceLimitFails)
     {
-#ifdef SANDBOX_TEST_UNDER_SANITIZER
-        GTEST_SKIP() << "A sanitizer maps address space of its own";
-#endif
+        if (addressSpaceUnlimited())
+            GTEST_SKIP() << "This " << sandbox::sanitizerAllowances().runtime << " build sets no address space limit";
         const ChildResult limited = inChild([] { return allocateAGigabyte(Mode::BestEffort); });
         ASSERT_TRUE(limited.exited());
         EXPECT_EQ(limited.field("applied"), "yes");
@@ -546,6 +551,45 @@ namespace
         const ChildResult free = inChild([] { return allocateAGigabyte(Mode::Off); });
         EXPECT_EQ(free.field("mmap"), "0");
         EXPECT_EQ(free.field("malloc"), "block");
+    }
+
+    // The shadow memory of the sanitizer already exceeds any limit the policy could ask for: with
+    // one the next mapping would fail, and the runtime ends the process when its own does
+    TEST(Sandbox, aSanitizerBuildSetsNoAddressSpaceLimitAndSaysSo)
+    {
+        // What the process has mapped tells, whatever the library says
+        if (addressSpaceNow() < (1ULL << 40))
+            GTEST_SKIP() << "The process has not reserved terabytes of address space: no sanitizer shadow memory";
+        const ChildResult result = inChild([] {
+            sandbox::Policy policy;
+            policy.maxMemoryBytes = addressSpaceNow() + (256ULL << 20);
+            const sandbox::Report report = sandbox::apply(policy, Mode::BestEffort);
+            std::string detail;
+            for (const auto &layer : report.layers)
+                if (layer.name == "rlimits")
+                    detail = layer.detail;
+            rlimit addressSpace{};
+            getrlimit(RLIMIT_AS, &addressSpace);
+            // What a worker of a sanitizer build allocates goes through the runtime, which maps
+            // more of its own memory as it goes
+            void *(*volatile allocate)(size_t) = std::malloc;
+            void *block = allocate(1ULL << 30);
+            const bool allocated = block != nullptr;
+            std::free(block);
+            return Fields()
+                .set("applied", report.ok ? "yes" : report.error)
+                .set("unlimited", addressSpace.rlim_cur == RLIM_INFINITY ? "yes" : "no")
+                .set("detail", detail)
+                .set("malloc", allocated ? "block" : "null")
+                .str();
+        });
+        ASSERT_TRUE(result.exited()) << "status " << result.status;
+        EXPECT_EQ(result.field("applied"), "yes");
+        EXPECT_EQ(result.field("malloc"), "block");
+        EXPECT_EQ(result.field("unlimited"), "yes");
+        EXPECT_NE(result.field("detail").find("no address space limit"), std::string::npos) << result.field("detail");
+        EXPECT_NE(layerDetail("rlimits").find(sandbox::sanitizerAllowances().runtime), std::string::npos)
+            << "the report of the layers says it too: " << layerDetail("rlimits");
     }
 
     double cpuSeconds()
@@ -605,12 +649,14 @@ namespace
 
     TEST(Sandbox, theFiveLimitsAreSetSoftAndHard)
     {
-#ifdef SANDBOX_TEST_UNDER_SANITIZER
-        GTEST_SKIP() << "A sanitizer maps address space of its own";
-#endif
         const ChildResult limited = inChild([] { return limitsInForce(Mode::BestEffort); });
-        EXPECT_NE(limited.field("asSoft"), "-1");
-        EXPECT_EQ(limited.field("asSoft"), limited.field("asHard"));
+        if (addressSpaceUnlimited())
+            EXPECT_EQ(limited.field("asSoft"), "-1") << "a sanitizer build sets the other four only";
+        else
+        {
+            EXPECT_NE(limited.field("asSoft"), "-1");
+            EXPECT_EQ(limited.field("asSoft"), limited.field("asHard"));
+        }
         EXPECT_EQ(limited.field("cpuSoft"), "100");
         EXPECT_EQ(limited.field("cpuHard"), "101"); // SIGKILL a second after SIGXCPU
         EXPECT_EQ(limited.field("fsizeSoft"), std::to_string(1 << 20));
@@ -719,10 +765,16 @@ namespace
         EXPECT_EQ(result.field("applied"), "yes");
         const std::string denied = std::to_string(EPERM);
         for (const char *call : {"execve", "execveat", "killParent", "killGroup", "killEveryone", "tgkillParent",
-                                 "ptrace", "processVmReadv", "processVmWritev", "pidfdOpen", "cloneNewUser",
-                                 "cloneNewNet", "unshare", "setns", "mount", "ioUringSetup", "bpf", "perfEventOpen",
-                                 "keyctl", "addKey", "requestKey", "userfaultfd"})
+                                 "processVmReadv", "processVmWritev", "pidfdOpen", "cloneNewUser", "cloneNewNet",
+                                 "unshare", "setns", "mount", "ioUringSetup", "bpf", "perfEventOpen", "keyctl",
+                                 "addKey", "requestKey", "userfaultfd"})
             EXPECT_EQ(result.field(call), denied) << call;
+        // The leak check of a LeakSanitizer build traces the process at its exit, so its filter
+        // lets ptrace through (aLeakSanitizerBuildChecksAConfinedProcessForLeaks)
+        if (!sandbox::sanitizerAllowances().leakCheck)
+        {
+            EXPECT_EQ(result.field("ptrace"), denied);
+        }
         // The one thing a filter cannot see into: the C library falls back to clone
         EXPECT_EQ(result.field("clone3"), std::to_string(ENOSYS));
         // A signal to the process itself is its own business
@@ -797,6 +849,30 @@ namespace
 #ifdef SYS_fork
         EXPECT_EQ(result.field("forkSyscall"), denied);
 #endif
+    }
+
+    // LeakSanitizer checks for leaks from a process it clones, which lists the threads in /proc and
+    // stops them with ptrace: the layers of such a build let that through, and nothing else of
+    // what they refuse (threadsWorkButNoOtherProcessCanBeMade; the policy of the child lets it
+    // read no file), so a confined process still ends with its leak check instead of a fatal
+    // error of the runtime
+    TEST(Sandbox, aLeakSanitizerBuildChecksAConfinedProcessForLeaks)
+    {
+        if (__lsan_do_recoverable_leak_check == nullptr)
+            GTEST_SKIP() << "This build has no LeakSanitizer";
+        SKIP_WITHOUT_LAYER("seccomp");
+        const ChildResult result = inChild([] {
+            const std::string refused = applyOrExplain(sandbox::Policy(), Mode::BestEffort);
+            // 0 or 1 (leaks found: the objects the threads of the test process hold are not
+            // reachable from the one thread the child has); the runtime ends the process when it
+            // cannot check
+            const int leaks = __lsan_do_recoverable_leak_check();
+            return Fields().set("applied", refused.empty() ? "yes" : refused).set("checked", leaks == 0 || leaks == 1 ? "yes" : "no").str();
+        });
+        ASSERT_TRUE(result.exited()) << "status " << result.status;
+        EXPECT_EQ(WEXITSTATUS(result.status), 0);
+        EXPECT_EQ(result.field("applied"), "yes");
+        EXPECT_EQ(result.field("checked"), "yes");
     }
 
     // The same calls work without the filter: the child of the test is no group leader, so it can

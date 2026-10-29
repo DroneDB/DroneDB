@@ -90,6 +90,29 @@ namespace sandbox
     // The layers this host offers, without restricting the process
     Report probe();
 
+    // What the sanitizer runtime this build is compiled with cannot live with, and the layers
+    // therefore leave out, in such a build only: the detail of the layer says so, in the report
+    // of apply() and of probe(). A build without a sanitizer leaves out nothing, and its layers
+    // are the same as if this did not exist.
+    struct SanitizerAllowances
+    {
+        // AddressSanitizer, ThreadSanitizer and MemorySanitizer reserve terabytes of address
+        // space for their shadow memory when the process starts, so a limit of the address space
+        // (RLIMIT_AS) would make every later mapping fail: maxMemoryBytes is not applied. The
+        // Job Object of Windows limits the memory a process commits, which the shadow memory is
+        // not until it is used, and keeps its limit.
+        bool unlimitedAddressSpace = false;
+        // LeakSanitizer checks a process for leaks when it exits, from a process it clones that
+        // shares its memory, lists the threads in /proc/self/task, stops them with ptrace and
+        // reads their registers: the seccomp filter allows ptrace, and a clone with exactly the
+        // flags of that process (fork, vfork, execve and every other clone stay refused), and
+        // Landlock lets the process read /proc/self/task.
+        bool leakCheck = false;
+        // The runtime, for the detail of a layer; empty without a sanitizer
+        const char *runtime = "";
+    };
+    SanitizerAllowances sanitizerAllowances();
+
 #ifdef _WIN32
     // Pieces for a host that sets a child up from the outside, and what apply() uses on Windows.
     // A handle is passed as void* so that this header does not include windows.h.

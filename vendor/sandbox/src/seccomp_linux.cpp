@@ -106,6 +106,10 @@ namespace sandbox::detail
             return SECCOMP_RET_ERRNO | (static_cast<uint32_t>(number) & SECCOMP_RET_DATA);
         }
 
+        // The clone of LeakSanitizer's leak check: a process that shares the memory, the files
+        // and the file system information of the process it checks and that cannot be traced
+        constexpr uint32_t LeakCheckCloneFlags = static_cast<uint32_t>(CLONE_VM) | CLONE_FS | CLONE_FILES | CLONE_UNTRACED;
+
         // The namespaces a clone can ask for
         constexpr uint32_t NamespaceFlags = static_cast<uint32_t>(CLONE_NEWNS) | CLONE_NEWCGROUP | CLONE_NEWUTS |
                                             CLONE_NEWIPC | CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET;
@@ -171,6 +175,15 @@ namespace sandbox::detail
                               statement(Return, Allow)});
             }
 
+            // The same, and the syscall is allowed too when the argument is `exactly`
+            void allowWhenArgumentHasBitAndNoneOrIs(long number, unsigned argument, uint32_t required,
+                                                    uint32_t forbidden, uint32_t exactly)
+            {
+                rule(number, {statement(Load, argumentOffset(argument)), jump(Equal, exactly, 3, 0),
+                              jump(AnyBit, forbidden, 1, 0), jump(AnyBit, required, 1, 0),
+                              statement(Return, errorNumber(EPERM)), statement(Return, Allow)});
+            }
+
             sock_fprog finish()
             {
                 add(statement(Return, Allow));
@@ -204,8 +217,12 @@ namespace sandbox::detail
             filter.deny(__NR_io_uring_enter, EPERM);
             filter.deny(__NR_io_uring_register, EPERM);
 
-            // Other processes: no tracing, no memory access, no signals, no pid file descriptors
-            filter.deny(__NR_ptrace, EPERM);
+            // Other processes: no tracing, no memory access, no signals, no pid file descriptors.
+            // The leak check of a LeakSanitizer build traces the threads of the process from a
+            // process of its own at exit (sanitizerAllowances)
+            const bool leakCheck = sanitizerAllowances().leakCheck;
+            if (!leakCheck)
+                filter.deny(__NR_ptrace, EPERM);
             filter.deny(__NR_process_vm_readv, EPERM);
             filter.deny(__NR_process_vm_writev, EPERM);
             filter.deny(__NR_pidfd_open, EPERM);
@@ -223,7 +240,10 @@ namespace sandbox::detail
 
             // Processes: a thread of this process, never another process or a namespace, and
             // no way out of the process group
-            filter.allowWhenArgumentHasBitAndNone(__NR_clone, 0, CLONE_THREAD, NamespaceFlags);
+            if (leakCheck)
+                filter.allowWhenArgumentHasBitAndNoneOrIs(__NR_clone, 0, CLONE_THREAD, NamespaceFlags, LeakCheckCloneFlags);
+            else
+                filter.allowWhenArgumentHasBitAndNone(__NR_clone, 0, CLONE_THREAD, NamespaceFlags);
             filter.deny(__NR_clone3, ENOSYS);
 #ifdef __NR_fork
             filter.deny(__NR_fork, EPERM);
@@ -257,15 +277,25 @@ namespace sandbox::detail
             filter.deny(__NR_userfaultfd, EPERM);
             return filter;
         }
+
+        // What the filter of this build lets through for the leak check, empty where it lets
+        // nothing through
+        std::string leakCheckAllowance()
+        {
+            const SanitizerAllowances sanitizer = sanitizerAllowances();
+            if (!sanitizer.leakCheck)
+                return std::string();
+            return std::string("ptrace and the clone of the leak check allowed in this ") + sanitizer.runtime + " build";
+        }
     } // namespace
 
     LayerState probeSeccomp()
     {
         uint32_t action = SECCOMP_RET_ERRNO;
         if (syscall(__NR_seccomp, SECCOMP_GET_ACTION_AVAIL, 0, &action) == 0)
-            return state("seccomp", true);
+            return state("seccomp", true, leakCheckAllowance());
         if (errno == ENOSYS && prctl(PR_GET_SECCOMP) >= 0)
-            return state("seccomp", true);
+            return state("seccomp", true, leakCheckAllowance());
         return state("seccomp", false, std::string("not available: ") + std::strerror(errno));
     }
 
@@ -280,7 +310,10 @@ namespace sandbox::detail
         const sock_fprog program = filter.finish();
         if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &program) != 0)
             return result("seccomp", false, std::string("not installed: ") + std::strerror(errno));
-        return result("seccomp", true, "no sockets but AF_UNIX, no exec, no new process, no namespaces, no signals to other processes");
+        const std::string allowance = leakCheckAllowance();
+        return result("seccomp", true,
+                      "no sockets but AF_UNIX, no exec, no new process, no namespaces, no signals to other processes" +
+                          (allowance.empty() ? std::string() : "; " + allowance));
     }
 #else
     LayerState probeSeccomp()

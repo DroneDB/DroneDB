@@ -124,6 +124,20 @@ namespace sandbox::detail
             return 0;
         }
 
+        // What LeakSanitizer reads to stop the threads of the process for its leak check
+        constexpr const char *LeakCheckThreads = "/proc/self/task";
+
+        // What the rules of this build let a process read for the leak check, empty where they
+        // let nothing through
+        std::string leakCheckAllowance()
+        {
+            const SanitizerAllowances sanitizer = sanitizerAllowances();
+            if (!sanitizer.leakCheck)
+                return std::string();
+            return std::string("; ") + LeakCheckThreads + " readable for the leak check of this " + sanitizer.runtime +
+                   " build";
+        }
+
         std::string unavailable(int failure)
         {
             if (failure == ENOSYS)
@@ -139,7 +153,7 @@ namespace sandbox::detail
         const int abi = abiVersion();
         if (abi < 1)
             return state("landlock", false, unavailable(errno));
-        return state("landlock", true, "ABI " + std::to_string(abi));
+        return state("landlock", true, "ABI " + std::to_string(abi) + leakCheckAllowance());
     }
 
     LayerResult applyLandlock(const Policy &policy)
@@ -169,6 +183,12 @@ namespace sandbox::detail
                 close(ruleset);
                 return fatal("landlock", "write path " + error);
             }
+        // The leak check of a LeakSanitizer build lists the threads of the process
+        if (sanitizerAllowances().leakCheck && allow(ruleset, LeakCheckThreads, ReadRights, handled, false, &error) < 0)
+        {
+            close(ruleset);
+            return result("landlock", false, "the threads of the process for the leak check " + error);
+        }
 
         // A process that could gain privileges may not restrict itself
         if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
@@ -190,6 +210,6 @@ namespace sandbox::detail
             covers += ", signals and abstract sockets";
         else
             covers += "; no scoping of signals and abstract sockets before ABI 6";
-        return result("landlock", true, covers);
+        return result("landlock", true, covers + leakCheckAllowance());
     }
 } // namespace sandbox::detail

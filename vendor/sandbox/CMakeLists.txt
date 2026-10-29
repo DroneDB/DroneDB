@@ -7,7 +7,7 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     project(sandbox LANGUAGES CXX)
 endif()
 
-set(DDB_SANDBOX_SOURCES src/sandbox.cpp)
+set(DDB_SANDBOX_SOURCES src/sandbox.cpp src/sanitizers.cpp)
 if(WIN32)
     list(APPEND DDB_SANDBOX_SOURCES src/platform_windows.cpp)
 else()

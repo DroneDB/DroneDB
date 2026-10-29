@@ -87,6 +87,23 @@ and `windows::lowerCurrentProcessIntegrity` are public for a host that sets a ch
 outside. The layers of Linux are not listed, so `strict` starts and a report can show every
 layer `active`.
 
+### Sanitizer builds
+
+A build with a sanitizer leaves out what its runtime cannot live with, and only there:
+`sandbox::sanitizerAllowances()` says what, and the detail of the layer in the report of
+`apply()` and `probe()` says it too. A build without a sanitizer applies every layer as above.
+
+* AddressSanitizer, ThreadSanitizer and MemorySanitizer reserve terabytes of address space for
+  their shadow memory when the process starts, so `rlimits` sets no `RLIMIT_AS`: with one, every
+  later mapping of the process would fail. The Windows Job Object limits committed memory and
+  keeps its limit.
+* LeakSanitizer (part of AddressSanitizer on Linux) checks a process for leaks when it exits,
+  from a process it clones that shares its memory, lists the threads in `/proc/self/task` and
+  stops them with `ptrace`. The filter of such a build allows `ptrace` and a `clone` with exactly
+  the flags of that process (`CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_UNTRACED`), and Landlock
+  lets the process read `/proc/self/task`; `fork`, `vfork`, `execve` and every other `clone` stay
+  refused. Without them the check ends a confined process with a fatal error of the runtime.
+
 ## Residual risks
 
 * Landlock and seccomp need a kernel that has them. Docker's default seccomp profile and some

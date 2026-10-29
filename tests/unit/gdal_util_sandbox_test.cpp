@@ -844,6 +844,20 @@ namespace
         int writer_ = -1;
     };
 
+    // The address space of a process limited to at least `minBytes`; none in a sanitizer build,
+    // whose runtime takes terabytes of it for its shadow memory (sandbox::sanitizerAllowances)
+    void expectAddressSpaceLimit(unsigned long pid, uint64_t minBytes)
+    {
+        const Limit limit = limitOf(pid, "Max address space");
+        if (sandbox::sanitizerAllowances().unlimitedAddressSpace)
+        {
+            EXPECT_EQ(limit.soft, "unlimited") << "a " << sandbox::sanitizerAllowances().runtime << " build";
+            return;
+        }
+        EXPECT_GE(limit.softValue(), minBytes);
+        EXPECT_NE(limit.soft, "unlimited");
+    }
+
     struct ExpectedLimits
     {
         const char *op;
@@ -871,8 +885,7 @@ namespace
         EXPECT_EQ(limitOf(worker, "Max file size").softValue(), expected.fileBytes);
         EXPECT_EQ(limitOf(worker, "Max open files").softValue(), expected.openFiles);
         EXPECT_EQ(limitOf(worker, "Max core file size").softValue(), 0u);
-        EXPECT_GE(limitOf(worker, "Max address space").softValue(), expected.minMemoryBytes);
-        EXPECT_NE(limitOf(worker, "Max address space").soft, "unlimited");
+        expectAddressSpaceLimit(worker, expected.minMemoryBytes);
     }
 
     void expectNotConfined(unsigned long worker)
@@ -1003,7 +1016,7 @@ namespace
         EXPECT_EQ(limitOf(pid, "Max cpu time").softValue(), 1000 * threads);
         EXPECT_EQ(limitOf(pid, "Max file size").softValue(), 1024 * kGiB);
         EXPECT_EQ(limitOf(pid, "Max open files").softValue(), 4096u);
-        EXPECT_GE(limitOf(pid, "Max address space").softValue(), 4 * kGiB);
+        expectAddressSpaceLimit(pid, 4 * kGiB);
 
         // The build opens its input more than once: it is not worth waiting for its failure
         session.kill();
@@ -1060,6 +1073,9 @@ namespace
 
     TEST_F(GdalUtilSandboxLimits, aWorkerThatCannotAllocateWhatTheFileNeedsEndsWithLimitAndTheServerGoesOn)
     {
+        if (sandbox::sanitizerAllowances().unlimitedAddressSpace)
+            GTEST_SKIP() << "A " << sandbox::sanitizerAllowances().runtime
+                         << " build cannot start under an address space limit: its shadow memory takes terabytes of it";
         // The server and its workers have 512 MiB of address space; a block of the file is 576 MiB
         Server server({{kSandboxEnv, "best-effort"}}, 512 * kMiB);
         const auto response = server.ask(request(1, raster::op::kNormalize, *heavy_, outputFolder("memory") / "n.tif"));
