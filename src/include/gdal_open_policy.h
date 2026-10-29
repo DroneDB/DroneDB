@@ -66,6 +66,14 @@ namespace ddb
         // and the sidecars of a raster sidecar are checked in turn. A VRT named .tif.ovr is
         // refused.
         VrtVerdict validateSidecars(const std::string &path);
+
+        // Declares that this process is the one that parses user files: the raster helper
+        // (gdal-util) calls it once, at start. Nothing else in the library may call it, so that
+        // a host process (the Registry, ddbcmd, the tests) can be told apart from the helper.
+        void enableUserFileOpens();
+
+        // Whether enableUserFileOpens() was called in this process
+        bool userFileOpensEnabled();
     } // namespace gdalopen
 
     // Opens a raster file of a user read-only with the drivers its extension allows. Null (as

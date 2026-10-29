@@ -6,175 +6,28 @@
 // built into a GeoPackage copy plus an MVT pyramid (or the drawing-coordinate metadata of a CAD
 // drawing without CRS).
 
-#include <algorithm>
-#include <limits>
 #include <optional>
 
 #include "build_layout.h"
 #include "json.h"
 #include "cad.h"
-#include "coordstransformer.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
-#include "gdal_open_policy.h"
-#include "gdal_raii.h"
-#include "ogr_api.h"
-#include "ogr_spatialref.h"
+#include "logger.h"
+#include "mio.h"
+#include "raster_ops.h"
 #include "vector.h"
 
 namespace ddb {
 
 namespace {
 
-// The name, geometry type and feature count of a layer (the layer index names an unnamed one)
-json layerSummary(OGRLayerH hLayer, int i)
-{
-    auto layerJson = json::object();
-    const char *layerName = OGR_L_GetName(hLayer);
-    layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
-    layerJson["geometryType"] = OGRGeometryTypeToName(OGR_L_GetGeomType(hLayer));
-    // A driver without a fast count (GPX) answers -1: count the features then
-    GIntBig count = OGR_L_GetFeatureCount(hLayer, FALSE);
-    if (count < 0)
-        count = OGR_L_GetFeatureCount(hLayer, TRUE);
-    layerJson["featureCount"] = static_cast<int64_t>(count);
-    return layerJson;
-}
-
-// A local CAD drawing (no CRS) has no footprint: nothing to place on a map. Its layer extents
-// stay in drawing coordinates.
-void describeLocalCad(GDALDatasetH hDS, const cad::CadCrs &crs, const json &cadJson, Entry &entry)
-{
-    auto layers = json::array();
-    for (int i = 0; i < GDALDatasetGetLayerCount(hDS); i++)
-    {
-        OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
-        if (hLayer == nullptr) continue;
-        layers.push_back(layerSummary(hLayer, i));
-    }
-    entry.properties["vector"] = {
-        {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
-        {"layers", layers}};
-    entry.properties["vector"].update(cadJson);
-    if (crs.hasExtent)
-        entry.properties["vector"]["localExtent"] = {crs.extent.MinX, crs.extent.MinY,
-                                                     crs.extent.MaxX, crs.extent.MaxY};
-}
-
-// The extent of a layer in WGS84. The layer's own SRS (or the one of its CAD drawing) decides
-// whether the corners need a reprojection; wgs84 is made on first use.
-OGREnvelope layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGREnvelope &env, OGRSpatialReferenceH fallbackSrs,
-                               SrsPtr &wgs84)
-{
-    OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
-    if (hSrs == nullptr) hSrs = fallbackSrs; // CAD layers carry no SRS
-    OGREnvelope envWgs84 = env;
-
-    if (hSrs == nullptr)
-    {
-        LOGD << "Vector parse: layer " << i << " has no SRS, assuming WGS84";
-        return envWgs84;
-    }
-
-    // Check if reprojection is needed (skip if already WGS84).
-    const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
-    const char *authName = OSRGetAuthorityName(hSrs, nullptr);
-    bool isWgs84 = (authName && authCode &&
-                    std::string(authName) == "EPSG" &&
-                    std::string(authCode) == "4326");
-    if (isWgs84) return envWgs84;
-
-    if (!wgs84)
-    {
-        wgs84 = srsFromEpsg(4326);
-        if (!wgs84)
-        {
-            LOGD << "Vector parse: failed to import EPSG:4326";
-        }
-    }
-    if (!wgs84) return envWgs84;
-
-    const auto toWgs84 =
-        CoordsTransformer::tryCreate(*OGRSpatialReference::FromHandle(hSrs), srsOf(wgs84));
-    if (!toWgs84) return envWgs84;
-
-    // Transform all 4 corners (a single rectangle in src
-    // CRS can become a curved quadrilateral in WGS84).
-    double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
-    double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
-    if (toWgs84->tryTransform(4, xs, ys))
-    {
-        envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
-        envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
-        envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
-        envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
-    }
-    else
-    {
-        LOGD << "Vector parse: layer " << i << " transform failed";
-    }
-    return envWgs84;
-}
-
-// The layers of the dataset, and the envelope of them all in WGS84 (when any has an extent)
-struct VectorLayers
-{
-    json layers = json::array();
-    OGREnvelope totalEnv;
-    bool haveEnv = false;
-};
-
-VectorLayers describeLayers(GDALDatasetH hDS, OGRSpatialReferenceH fallbackSrs)
-{
-    VectorLayers out;
-    // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
-    SrsPtr wgs84;
-    // Convex envelope in WGS84 across all layers.
-    out.totalEnv.MinX = out.totalEnv.MinY =  std::numeric_limits<double>::max();
-    out.totalEnv.MaxX = out.totalEnv.MaxY = -std::numeric_limits<double>::max();
-
-    const int layerCount = GDALDatasetGetLayerCount(hDS);
-    for (int i = 0; i < layerCount; i++)
-    {
-        OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
-        if (hLayer == nullptr) continue;
-
-        OGREnvelope env;
-        if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE)
-        {
-            LOGD << "Vector parse: layer " << i << " has no extent";
-            continue;
-        }
-
-        const OGREnvelope envWgs84 = layerEnvelopeWgs84(hLayer, i, env, fallbackSrs, wgs84);
-
-        // Per-layer metadata
-        auto layerJson = layerSummary(hLayer, i);
-        layerJson["extent"] = {envWgs84.MinX, envWgs84.MinY, envWgs84.MaxX, envWgs84.MaxY};
-        out.layers.push_back(layerJson);
-
-        // Accumulate global envelope
-        if (!out.haveEnv)
-        {
-            out.totalEnv = envWgs84;
-            out.haveEnv = true;
-        }
-        else
-        {
-            out.totalEnv.MinX = std::min(out.totalEnv.MinX, envWgs84.MinX);
-            out.totalEnv.MinY = std::min(out.totalEnv.MinY, envWgs84.MinY);
-            out.totalEnv.MaxX = std::max(out.totalEnv.MaxX, envWgs84.MaxX);
-            out.totalEnv.MaxY = std::max(out.totalEnv.MaxY, envWgs84.MaxY);
-        }
-    }
-    return out;
-}
-
+// Layers, extent and footprint in WGS84 (and the coordinate system of a CAD drawing), found by
+// GDAL (raster_ops.h) and put in the entry.
+// Best-effort: any failure leaves the entry indexed without geometry but
+// never aborts the parse (a corrupted vector file should not block ddb add).
 void parseVectorMetadata(const fs::path &path, Entry &entry)
 {
-    // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
-    // Best-effort: any failure leaves the entry indexed without geometry but
-    // never aborts the parse (a corrupted vector file should not block ddb add).
     // Declared outside try: the CAD source outlives the dataset (a converted DXF is
     // deleted only once closed).
     std::optional<cad::CadSource> cadSource;
@@ -187,60 +40,18 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
             cadSource.emplace(path);
         const fs::path openPath = isCad ? cadSource->dxfPath() : path;
 
-        const auto dataset = openUserVector(io::toUtf8(openPath));
-        if (!dataset)
-        {
-            LOGD << "Vector parse: GDAL cannot open " << io::toUtf8(path);
-            return;
-        }
-        GDALDatasetH hDS = datasetHandle(dataset);
-        SrsPtr cadSrs;
-
-        json cadJson;
+        raster::ProbeParams params;
+        params.kind = raster::ProbeKind::Vector;
         if (isCad)
         {
-            const auto info = cad::readDxfInfo(openPath);
-            const auto crs = cad::resolveCadCrs(path, hDS, info);
-            cadJson = {{"crs", {{"source", crs.source}, {"label", crs.label}}},
-                       {"units", cad::insUnitsName(info.insUnits)}};
-            if (cadSource->converted()) cadJson["converter"] = "dwg2dxf";
-            entry.properties["georeferenced"] = crs.georeferenced;
-
-            if (!crs.georeferenced)
-            {
-                describeLocalCad(hDS, crs, cadJson, entry);
-                return;
-            }
-
-            if (!crs.srs.empty())
-            {
-                cadSrs = srsFromUserInput(crs.srs.c_str());
-                if (!cadSrs)
-                    throw GDALException("Invalid CAD coordinate system " + crs.label);
-            }
+            params.source = path;
+            params.converted = cadSource->converted();
         }
-
-        const VectorLayers described = describeLayers(hDS, cadSrs.get());
-        const OGREnvelope &totalEnv = described.totalEnv;
-
-        entry.properties["vector"] = {
-            {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
-            {"layers", described.layers}};
-        if (!cadJson.is_null()) entry.properties["vector"].update(cadJson);
-
-        if (described.haveEnv)
-        {
-            // Populate polygon_geom as 5-point closed ring in CCW order.
-            entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);
-            entry.polygon_geom.addPoint(totalEnv.MaxX, totalEnv.MinY, 0.0);
-            entry.polygon_geom.addPoint(totalEnv.MaxX, totalEnv.MaxY, 0.0);
-            entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MaxY, 0.0);
-            entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);
-
-            entry.point_geom.addPoint((totalEnv.MinX + totalEnv.MaxX) / 2.0,
-                                      (totalEnv.MinY + totalEnv.MaxY) / 2.0,
-                                      0.0);
-        }
+        raster::applyProbe(raster::probe(openPath, params), entry);
+    }
+    catch (const raster::RasterOpException &)
+    {
+        LOGD << "Vector parse: GDAL cannot open " << io::toUtf8(path);
     }
     catch (const std::exception &e)
     {

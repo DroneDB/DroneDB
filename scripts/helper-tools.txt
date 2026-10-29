@@ -18,3 +18,4 @@
 # either.
 metadata-util | package
 bm3d | vendor/bm3d/VERSION
+gdal-util | package

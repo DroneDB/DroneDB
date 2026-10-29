@@ -9,6 +9,7 @@
 #include <cpl_vsi.h>
 
 #include <algorithm>
+#include <atomic>
 #include <initializer_list>
 #include <string_view>
 
@@ -601,6 +602,21 @@ namespace ddb
         VrtVerdict validateSidecars(const std::string &path)
         {
             return validateSidecars(path, 0);
+        }
+
+        namespace
+        {
+            std::atomic<bool> userFileOpens{false};
+        }
+
+        void enableUserFileOpens()
+        {
+            userFileOpens.store(true);
+        }
+
+        bool userFileOpensEnabled()
+        {
+            return userFileOpens.load();
         }
     } // namespace gdalopen
 

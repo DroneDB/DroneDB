@@ -2,6 +2,10 @@ set(CMD_SRC_LIST "")
 
 add_subdirectory(cmd)
 
+# gdal-util (its own repository, MPL-2.0): the helper program that reads the files of users with
+# GDAL. Like the CLI it contains the library, so it is added after src/.
+add_subdirectory(gdal-util)
+
 # cxxopts parses the command line; only the CLI uses it, libddb does not
 find_package(cxxopts CONFIG REQUIRED)
 

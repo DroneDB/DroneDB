@@ -9,9 +9,8 @@
 
 #include "entry.h"
 #include "entry_handlers_builtin.h"
-#include "gdal_open_policy.h"
-#include "gdal_raii.h"
 #include "mio.h"
+#include "raster_ops.h"
 #include "thermal.h"
 
 namespace ddb {
@@ -57,16 +56,11 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
 
     if (gdalRaster)
     {
-        const auto dataset = openUserRaster(io::toUtf8(path));
-        if (dataset)
+        try
         {
-            const char *proj = GDALGetProjectionRef(datasetHandle(dataset));
-            if (proj != NULL)
-            {
-                georaster = std::string(proj) != "";
-            }
+            georaster = raster::probe(path, raster::ProbeParams()).type == "GeoRaster";
         }
-        else
+        catch (const raster::RasterOpException &)
         {
             LOGD << "Cannot open " << io::toUtf8(path) << " for georaster test";
         }

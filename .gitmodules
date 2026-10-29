@@ -19,3 +19,6 @@
 [submodule "vendor/bm3d"]
 	path = vendor/bm3d
 	url = https://github.com/DroneDB/bm3d.git
+[submodule "apps/gdal-util"]
+	path = apps/gdal-util
+	url = https://github.com/DroneDB/gdal-util.git
