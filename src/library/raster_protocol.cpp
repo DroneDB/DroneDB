@@ -84,8 +84,43 @@ namespace ddb
                 return text ? io::fromUtf8(*text) : fs::path();
             }
 
+            // Whether the arrays and objects of the text nest deeper than the protocol allows,
+            // counted without parsing: brackets inside strings do not count, and a text that is
+            // not JSON is left to the parser
+            bool nestsTooDeep(std::string_view text)
+            {
+                size_t depth = 0;
+                bool inString = false;
+                bool escaped = false;
+                for (const char c : text)
+                {
+                    if (inString)
+                    {
+                        if (escaped)
+                            escaped = false;
+                        else if (c == '\\')
+                            escaped = true;
+                        else if (c == '"')
+                            inString = false;
+                    }
+                    else if (c == '"')
+                        inString = true;
+                    else if (c == '[' || c == '{')
+                    {
+                        if (++depth > kMaxNestingDepth)
+                            return true;
+                    }
+                    else if ((c == ']' || c == '}') && depth > 0)
+                        depth--;
+                }
+                return false;
+            }
+
             json parseObject(std::string_view line, const char *what)
             {
+                if (nestsTooDeep(line))
+                    throw ProtocolError(std::string(what) + " nests deeper than " + std::to_string(kMaxNestingDepth) +
+                                        " levels");
                 json parsed = json::parse(line.begin(), line.end(), nullptr, false);
                 if (parsed.is_discarded())
                     throw ProtocolError(std::string("not a valid JSON line: ") + what);
@@ -274,6 +309,8 @@ namespace ddb
 
         std::optional<int64_t> requestIdOf(std::string_view line)
         {
+            if (nestsTooDeep(line))
+                return std::nullopt;
             const json parsed = json::parse(line.begin(), line.end(), nullptr, false);
             if (!parsed.is_object())
                 return std::nullopt;
@@ -540,7 +577,7 @@ namespace ddb
 
         std::optional<double> decodeProgress(std::string_view line)
         {
-            if (line.empty() || line.front() != '{')
+            if (line.empty() || line.front() != '{' || nestsTooDeep(line))
                 return std::nullopt;
             const json parsed = json::parse(line.begin(), line.end(), nullptr, false);
             if (!parsed.is_object())

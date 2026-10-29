@@ -35,6 +35,12 @@ namespace ddb
         // The longest line of either side
         constexpr size_t kMaxLineBytes = 16 * 1024 * 1024;
 
+        // How deep the arrays and objects of a line may nest, the outer object included. A line
+        // is parsed without recursion, but copying or writing its JSON recurses once per level,
+        // on threads whose stacks may be small: a deeper line is refused before anything is done
+        // with it (ProtocolError). The protocol needs a few levels.
+        constexpr size_t kMaxNestingDepth = 64;
+
         // The `--version` line ends with "protocol <major>.<minor>", as the line of the other
         // helper programs does
         using Version = exif::protocol::Version;

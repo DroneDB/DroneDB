@@ -238,6 +238,57 @@ namespace
     {
         EXPECT_EQ(raster::kMaxLineBytes, 16u * 1024 * 1024);
         EXPECT_EQ(raster::kMaxMessageBytes, 2000u);
+        EXPECT_EQ(raster::kMaxNestingDepth, 64u);
+    }
+
+    // `levels` arrays, one inside the other
+    std::string nestedArrays(size_t levels)
+    {
+        return std::string(levels, '[') + std::string(levels, ']');
+    }
+
+    // A successful response whose result holds arrays that nest `levels` deep: with the outer
+    // object and the result, the line nests two levels more
+    std::string responseNesting(size_t levels)
+    {
+        return R"({"id":1,"ok":true,"result":{"a":)" + nestedArrays(levels) + "}}";
+    }
+
+    std::string requestNesting(size_t levels)
+    {
+        return R"({"id":1,"op":"probe","path":"/a.tif","params":{"a":)" + nestedArrays(levels) + "}}";
+    }
+
+    // Copying or writing the JSON of a line recurses once per level, on threads whose stacks may be
+    // small: a line that nests deeper than the protocol allows is refused before it is parsed
+    TEST(RasterProtocol, aLineThatNestsDeeperThanTheProtocolAllowsIsRefused)
+    {
+        EXPECT_TRUE(refusedResponse(responseNesting(10000)));
+        EXPECT_TRUE(refusedRequest(requestNesting(10000)));
+        EXPECT_TRUE(refusedResponse(responseNesting(raster::kMaxNestingDepth - 1)));
+        EXPECT_TRUE(refusedRequest(requestNesting(raster::kMaxNestingDepth - 1)));
+        EXPECT_FALSE(raster::requestIdOf(requestNesting(10000)).has_value());
+        EXPECT_FALSE(raster::decodeProgress(R"({"progress":0.5,"a":)" + nestedArrays(10000) + "}").has_value());
+    }
+
+    TEST(RasterProtocol, aLineThatNestsAsDeepAsTheProtocolAllowsIsDecoded)
+    {
+        const Response response = raster::decodeResponse(responseNesting(raster::kMaxNestingDepth - 2));
+        EXPECT_TRUE(response.ok);
+        EXPECT_TRUE(response.result.contains("a"));
+        const Request request = raster::decodeRequest(requestNesting(raster::kMaxNestingDepth - 2));
+        EXPECT_TRUE(request.params.contains("a"));
+        EXPECT_EQ(raster::requestIdOf(requestNesting(raster::kMaxNestingDepth - 2)), std::optional<int64_t>(1));
+    }
+
+    // Brackets inside a string, escaped quotes included, are text and do not nest
+    TEST(RasterProtocol, theBracketsOfAStringDoNotCountAsNesting)
+    {
+        const std::string brackets = std::string(10000, '[') + "\\\"" + std::string(10000, '{');
+        const Response response = raster::decodeResponse(R"({"id":1,"ok":false,"error":"internal","message":")" +
+                                                         brackets + R"("})");
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.message.substr(0, 3), "[[[");
     }
 
     // ------------------------------------------------------------------ version
