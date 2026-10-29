@@ -161,6 +161,26 @@ Every layer the report lists must be active. `DDB_GDAL_SANDBOX=strict` makes `gd
 start when a layer is missing (use it where the host is known to support all of them);
 `best-effort` is the default; `off` applies nothing and is for tests and debugging only.
 
+## Opening files with GDAL
+
+The host (the Registry, `ddbcmd`, the tests) never opens a file of a user with GDAL: it asks
+`gdal-util` (`src/include/raster_helper.h`) and reads only what libddb wrote, through
+`openArtefactRaster`, `openArtefactVector` or `reopenWrittenRaster` (`src/include/raster_artefacts.h`).
+The operations of the helper open user files with `openUserRaster` and `openUserVector`
+(`src/include/gdal_open_policy.h`), which throw in any process that did not call
+`enableUserFileOpens()`. `scripts/check-gdal-opens.py` (run by CI before the build; `--self-test`
+checks the check) enforces both rules on the sources:
+
+- `GDALOpen*`, `GDALIdentifyDriver*`, `OGROpen*` and the string `/vsicurl` may appear in `src/` and
+  `apps/` (`apps/gdal-util` aside) only in the files of `ALLOWED_FILES`. Use the functions above;
+  a file that really needs a raw open is added to `ALLOWED_FILES` with a one-line reason that says
+  why none of them fits, and the review reads it. An entry that no longer matches anything fails
+  the check, so remove it with the open.
+- `enableUserFileOpens()` is called only by `gdal-util` at its start and by the test support that
+  runs a test body in a forked child (`tests/user_open_child.cpp`, the `USER_OPEN_TEST` macros).
+  A test that needs to open a user file uses those macros or the real `gdal-util`; nothing else
+  calls it.
+
 ## Bumping vendor/spz and vendor/spark
 
 - **vendor/spz** (nianticlabs): bump by checking out a tagged commit, or a reviewed commit of
