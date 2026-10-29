@@ -24,14 +24,18 @@ namespace ddb
     // If includeDirs is true and the list includes paths to directories that are in
     // paths eg. if path/to/file is in paths, both "path/" and "path/to" are
     // included in the result.
-    // ".ddb" files/dirs are always ignored and skipped.
     // If a directory is in the input paths, they are included regardless of
     // includeDirs
-    std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
-                                           const std::vector<std::string> &paths,
-                                           bool includeDirs, bool recursive)
+    // A listed path that cannot be indexed (a name hasIndexableName refuses, or a ".ddb" segment)
+    // is not expanded: it is returned in `rejected`, with the reason. The files a folder walk
+    // finds are not listed there: they keep being skipped without a report.
+    IndexPathList expandIndexPaths(const fs::path &rootDirectory,
+                                   const std::vector<std::string> &paths,
+                                   bool includeDirs, bool recursive)
     {
-        std::vector<fs::path> result;
+        IndexPathList list;
+        std::vector<fs::path> &result = list.paths;
+        std::unordered_set<std::string> rejectedInputs;
         std::unordered_map<std::string, bool> directories;
 
         // A file can be listed explicitly and found again under a listed folder
@@ -69,13 +73,33 @@ namespace ddb
                               io::toUtf8(rootDirectory) + ". Did you run ddb init?");
         }
 
+        const auto reject = [&list, &rejectedInputs](const fs::path &p, const char *reason)
+        {
+            if (rejectedInputs.insert(io::toUtf8(p)).second)
+                list.rejected.push_back({p, reason});
+        };
+
         for (const auto &pathUtf8 : paths)
         {
             fs::path p = io::fromUtf8(pathUtf8);
-            if (isReservedSegment(p.filename()))
-                continue;
 
-            if (fs::is_directory(p))
+            if (containsDdbSegment(io::Path(p).relativeTo(rootDirectory).get()))
+            {
+                reject(p, "The name is reserved: '.ddb' is the index of the dataset and cannot be indexed");
+                continue;
+            }
+
+            const bool isDirectory = fs::is_directory(p);
+            if (!isDirectory && !fs::exists(p))
+                throw FSException("Path does not exist: " + io::toUtf8(p));
+
+            if (!hasIndexableName(p))
+            {
+                reject(p, "The name contains '\\', a path separator: rename the file to index it");
+                continue;
+            }
+
+            if (isDirectory)
             {
                 if (recursive)
                 {
@@ -104,17 +128,13 @@ namespace ddb
                 if (includeDirs)
                     addParents(p);
             }
-            else if (fs::exists(p))
+            else
             {
                 // File
                 addFile(p);
 
                 if (includeDirs)
                     addParents(p);
-            }
-            else
-            {
-                throw FSException("Path does not exist: " + io::toUtf8(p));
             }
         }
 
@@ -123,7 +143,14 @@ namespace ddb
             result.push_back(io::fromUtf8(fst));
         }
 
-        return result;
+        return list;
+    }
+
+    std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
+                                           const std::vector<std::string> &paths,
+                                           bool includeDirs, bool recursive)
+    {
+        return expandIndexPaths(rootDirectory, paths, includeDirs, recursive).paths;
     }
 
     std::vector<fs::path> getPathList(const std::vector<std::string> &paths,

@@ -547,6 +547,20 @@ namespace ddb
         addPathsToIndex(db, pathsOf(files), &knownHashes, callback);
     }
 
+    // The listed paths that cannot be indexed (expandIndexPaths) are item errors "INDEX", so that
+    // every listed path is in entries, unchanged or errors. With stopOnError the first one
+    // aborts the call before anything is indexed, like any other item error.
+    static void reportRejectedPaths(const std::vector<RejectedPath> &rejected, const fs::path &directory,
+                                    bool stopOnError, AddResult &result)
+    {
+        for (const auto &r : rejected) {
+            const std::string relPath = io::Path(r.path).relativeTo(directory).generic();
+            if (stopOnError)
+                throw IndexException(relPath + ": " + r.reason);
+            result.errors.push_back({relPath, "INDEX", r.reason});
+        }
+    }
+
     // addToIndexEx() with optional known hashes (see computeAddEntries)
     static void addPathsToIndexEx(Database *db, const std::vector<std::string> &paths, const AddOptions &options,
                                   AddResult &result, AddCallback callback, const KnownHashes *knownHashes)
@@ -555,7 +569,9 @@ namespace ddb
             return; // Nothing to do
         const fs::path directory = db->rootDirectory();
         // Files with known hashes are indexed exactly as listed (see addPathsToIndex)
-        auto pathList = getIndexPathList(directory, paths, true, /*recursive=*/knownHashes == nullptr);
+        auto expanded = expandIndexPaths(directory, paths, true, /*recursive=*/knownHashes == nullptr);
+        reportRejectedPaths(expanded.rejected, directory, options.stopOnError, result);
+        auto pathList = std::move(expanded.paths);
 
         // Clamp negative retries: a negative value would skip the loop entirely
         // and report every item as a CONFLICT without attempting indexing.

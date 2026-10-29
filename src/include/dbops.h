@@ -74,6 +74,23 @@ namespace ddb
      * content of every listed folder.
      */
     std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory, const std::vector<std::string> &paths, bool includeDirs, bool recursive = true);
+
+    /// A listed path that cannot be indexed, and why
+    struct RejectedPath
+    {
+        fs::path path;
+        std::string reason;
+    };
+
+    /// What getIndexPathList expands `paths` to, plus the listed paths it refuses: a name that
+    /// hasIndexableName refuses (it contains a path separator) or a ".ddb" segment. Files found
+    /// by walking a listed folder are not reported when their name is refused: they are skipped.
+    struct IndexPathList
+    {
+        std::vector<fs::path> paths;
+        std::vector<RejectedPath> rejected;
+    };
+    IndexPathList expandIndexPaths(const fs::path &rootDirectory, const std::vector<std::string> &paths, bool includeDirs, bool recursive = true);
     std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth, bool includeFiles = true);
 
     /**

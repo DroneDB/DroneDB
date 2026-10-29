@@ -430,6 +430,12 @@ extern "C"
      * @param output pointer to C-string where to store output JSON:
      *               { "entries": [...], "unchanged": [...], "errors": [...] } — every input
      *               path appears in exactly one of the three arrays
+     *               An input path that cannot be indexed is an error with code "INDEX":
+     *               a name that contains a backslash or another path separator (the file must
+     *               be renamed), or a reserved name (".ddb", or a path inside it). With
+     *               stopOnError the first such path fails the call instead. Files found by
+     *               walking a folder input are not reported when their name cannot be
+     *               indexed: they are skipped.
      * @return DDBERR_NONE on success (even if options->stopOnError is false and some items
      *         failed — check the "errors" array), an error otherwise */
     DDB_DLL DDBErr DDBAddWithOptions(const char *ddbPath, const char **paths, int numPaths,

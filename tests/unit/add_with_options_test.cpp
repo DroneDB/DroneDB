@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include <algorithm>
+
 #include "gtest/gtest.h"
 #include "dbops.h"
 #include "exceptions.h"
@@ -118,6 +120,142 @@ TEST(addToIndexEx, reportsAddedThenUpdated) {
     EXPECT_TRUE(second.entries[0].second);
 
     EXPECT_EQ(reported, (std::vector<bool>{false, true}));
+}
+
+// The errors of result with the given path, as "code" strings
+std::vector<std::string> errorCodesOf(const AddResult &result, const std::string &path) {
+    std::vector<std::string> codes;
+    for (const auto &e : result.errors) {
+        if (e.path == path) codes.push_back(e.code);
+    }
+    return codes;
+}
+
+bool hasEntry(const AddResult &result, const std::string &path) {
+    return std::any_of(result.entries.begin(), result.entries.end(),
+                       [&path](const auto &e) { return e.first.path == path; });
+}
+
+#ifndef _WIN32
+// A file whose name contains a backslash (a path separator for the index) cannot be indexed:
+// it is reported as an error instead of vanishing from entries, unchanged and errors.
+TEST(addToIndexEx, reportsExplicitFileWithSeparatorInName) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+
+    fileWriteAllText(root / "a\\b.txt", "backslash");
+    fileWriteAllText(root / "c.txt", "plain");
+
+    initIndex(root.string());
+    auto db = ddb::open(root.string(), true);
+    AddOptions opts;
+    opts.stopOnError = false;
+
+    AddResult result;
+    addToIndexEx(db.get(), {(root / "a\\b.txt").string(), (root / "c.txt").string()}, opts, result);
+
+    EXPECT_TRUE(hasEntry(result, "c.txt"));
+    EXPECT_EQ(result.entries.size(), 1u);
+    EXPECT_TRUE(result.unchanged.empty());
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors[0].path, "a\\b.txt");
+    EXPECT_EQ(result.errors[0].code, "INDEX");
+    EXPECT_NE(result.errors[0].message.find("rename"), std::string::npos) << result.errors[0].message;
+
+    // Nothing was written for it
+    auto q = db->query("SELECT COUNT(*) FROM entries");
+    q->fetch();
+    EXPECT_EQ(q->getInt(0), 1);
+}
+
+// With stopOnError the unindexable name aborts the call like any other item error, before
+// anything is indexed.
+TEST(addToIndexEx, stopOnErrorAbortsOnExplicitFileWithSeparatorInName) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+
+    fileWriteAllText(root / "a\\b.txt", "backslash");
+    fileWriteAllText(root / "c.txt", "plain");
+
+    initIndex(root.string());
+    auto db = ddb::open(root.string(), true);
+    AddOptions opts; // stopOnError defaults to true
+    AddResult result;
+
+    EXPECT_THROW(addToIndexEx(db.get(), {(root / "c.txt").string(), (root / "a\\b.txt").string()}, opts, result),
+                 IndexException);
+
+    auto q = db->query("SELECT COUNT(*) FROM entries");
+    q->fetch();
+    EXPECT_EQ(q->getInt(0), 0);
+}
+
+// The same file found by walking a folder is skipped without an error, as before.
+TEST(addToIndexEx, skipsFileWithSeparatorInNameFoundInFolder) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+    const auto folder = root / "d";
+    fs::create_directories(folder);
+
+    fileWriteAllText(folder / "a\\b.txt", "backslash");
+    fileWriteAllText(folder / "c.txt", "plain");
+
+    initIndex(root.string());
+    auto db = ddb::open(root.string(), true);
+    AddOptions opts;
+    opts.stopOnError = false;
+
+    AddResult result;
+    addToIndexEx(db.get(), {folder.string()}, opts, result);
+
+    EXPECT_TRUE(result.errors.empty());
+    EXPECT_TRUE(hasEntry(result, "d/c.txt"));
+    EXPECT_FALSE(hasEntry(result, "d/a\\b.txt"));
+}
+#endif
+
+// A listed path named .ddb is reserved: reported, not dropped.
+TEST(addToIndexEx, reportsExplicitReservedName) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+
+    fileWriteAllText(root / "c.txt", "plain");
+
+    initIndex(root.string());
+    auto db = ddb::open(root.string(), true);
+    AddOptions opts;
+    opts.stopOnError = false;
+
+    AddResult result;
+    addToIndexEx(db.get(), {(root / ".ddb").string(), (root / "c.txt").string()}, opts, result);
+
+    EXPECT_TRUE(hasEntry(result, "c.txt"));
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors[0].path, ".ddb");
+    EXPECT_EQ(result.errors[0].code, "INDEX");
+    EXPECT_NE(result.errors[0].message.find("reserved"), std::string::npos) << result.errors[0].message;
+}
+
+// A listed file below the .ddb folder is reserved too.
+TEST(addToIndexEx, reportsExplicitPathInsideReservedFolder) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+
+    initIndex(root.string());
+    fs::create_directories(root / ".ddb" / "build");
+    fileWriteAllText(root / ".ddb" / "build" / "x.tif", "not an image");
+    auto db = ddb::open(root.string(), true);
+    AddOptions opts;
+    opts.stopOnError = false;
+
+    AddResult result;
+    addToIndexEx(db.get(), {(root / ".ddb" / "build" / "x.tif").string()}, opts, result);
+
+    EXPECT_TRUE(result.entries.empty());
+    EXPECT_TRUE(result.unchanged.empty());
+    EXPECT_EQ(errorCodesOf(result, ".ddb/build/x.tif"), std::vector<std::string>{"INDEX"});
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_NE(result.errors[0].message.find("reserved"), std::string::npos) << result.errors[0].message;
 }
 
 } // namespace
