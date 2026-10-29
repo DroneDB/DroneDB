@@ -47,12 +47,6 @@ namespace sandbox::detail
         return LayerResult{state(name, false, std::move(detail)), true};
     }
 
-    // A mechanism this platform does not have
-    inline LayerState unsupportedProbe(const char *name, const char *reason)
-    {
-        return state(name, false, reason);
-    }
-
 #ifndef _WIN32
     // rlimits (rlimits.cpp), shared by the POSIX platforms
     LayerResult applyRlimits(const Policy &policy);

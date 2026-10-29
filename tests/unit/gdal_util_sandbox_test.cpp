@@ -24,6 +24,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -739,6 +740,29 @@ namespace
         return line;
     }
 
+    // The parent of a process, 0 when it cannot be read
+    unsigned long parentOf(const fs::path &procEntry)
+    {
+        std::ifstream stat(procEntry / "stat");
+        std::string line;
+        if (!std::getline(stat, line))
+            return 0;
+        // pid (name) state ppid ...: the name may hold spaces and brackets, so read after the last )
+        const size_t close = line.rfind(')');
+        if (close == std::string::npos)
+            return 0;
+        std::istringstream rest(line.substr(close + 1));
+        char state = 0;
+        unsigned long ppid = 0;
+        rest >> state >> ppid;
+        return ppid;
+    }
+
+    unsigned long parentOf(unsigned long pid)
+    {
+        return parentOf(fs::path("/proc") / std::to_string(pid));
+    }
+
     // The processes whose parent is `parent`
     std::vector<unsigned long> childrenOf(unsigned long parent)
     {
@@ -748,22 +772,30 @@ namespace
             const std::string name = entry.path().filename().string();
             if (name.empty() || !std::all_of(name.begin(), name.end(), [](char c) { return c >= '0' && c <= '9'; }))
                 continue;
-            std::ifstream stat(entry.path() / "stat");
-            std::string line;
-            if (!std::getline(stat, line))
-                continue;
-            // pid (name) state ppid ...: the name may hold spaces and brackets, so read after the last )
-            const size_t close = line.rfind(')');
-            if (close == std::string::npos)
-                continue;
-            std::istringstream rest(line.substr(close + 1));
-            char state = 0;
-            unsigned long ppid = 0;
-            rest >> state >> ppid;
-            if (ppid == parent)
+            if (parentOf(entry.path()) == parent)
                 children.push_back(std::stoul(name));
         }
         return children;
+    }
+
+    // What each open descriptor of a process is: "pipe:[inode]", "socket:[inode]", a path. The two
+    // ends of a pipe have the same text.
+    std::map<int, std::string> descriptorsOf(unsigned long pid)
+    {
+        std::map<int, std::string> links;
+        for (const auto &entry : fs::directory_iterator(fs::path("/proc") / std::to_string(pid) / "fd"))
+        {
+            std::error_code error;
+            const fs::path target = fs::read_symlink(entry.path(), error);
+            if (!error)
+                links[std::stoi(entry.path().filename().string())] = target.string();
+        }
+        return links;
+    }
+
+    bool isChannel(const std::string &link)
+    {
+        return link.rfind("pipe:", 0) == 0 || link.rfind("socket:", 0) == 0;
     }
 
     // A named pipe in place of the input. Whatever reads it waits for the test: the process that
@@ -909,6 +941,34 @@ namespace
             inspectWorker(folder, expected.op, {{kSandboxEnv, "strict"}},
                           [&](unsigned long worker) { expectConfined(worker, expected); });
         }
+    }
+
+    // Only the server answers the host. A worker that a file took over must find no descriptor that
+    // leads to the host but standard error, which the host only logs: not the copy of standard
+    // output the server writes its responses to (a line written there would be read as the answer
+    // to a request), not the requests on standard input
+    TEST_F(GdalUtilSandboxFiles, aWorkerKeepsNoDescriptorThatLeadsToTheHostButStandardError)
+    {
+        const fs::path folder = area_->getFolder("held-descriptors");
+        inspectWorker(folder, raster::op::kProbe, {}, [](unsigned long worker) {
+            const auto host = descriptorsOf(static_cast<unsigned long>(getpid()));
+            const auto server = descriptorsOf(parentOf(worker));
+            const auto kept = descriptorsOf(worker);
+            ASSERT_EQ(kept.count(STDERR_FILENO), 1u);
+            ASSERT_EQ(server.count(STDIN_FILENO), 1u);
+            const std::string standardError = kept.at(STDERR_FILENO);
+            EXPECT_EQ(kept.count(STDIN_FILENO) == 1 ? kept.at(STDIN_FILENO) : std::string(), "/dev/null");
+
+            for (const auto &[fd, link] : kept)
+            {
+                if (!isChannel(link) || link == standardError)
+                    continue;
+                EXPECT_NE(link, server.at(STDIN_FILENO)) << "descriptor " << fd << " of the worker reads the requests";
+                for (const auto &[hostFd, hostLink] : host)
+                    EXPECT_NE(link, hostLink) << "descriptor " << fd << " of the worker leads to descriptor " << hostFd
+                                              << " of the host";
+            }
+        });
     }
 
     TEST_F(GdalUtilSandboxFiles, withTheSandboxOffTheWorkerIsNotConfined)

@@ -5,7 +5,9 @@
 // The Windows layers: a Job Object that limits memory, CPU time and the number of processes
 // and shuts the process off from the desktop, and a low integrity level, which keeps the process
 // from writing anywhere that has not been given a low integrity label (the output folders of
-// the policy). Reads and the network are not confined on Windows.
+// the policy). Reads and the network are not confined on Windows. The layers of Linux are not
+// listed: a layer is missing only where its system could offer it, so strict can start here and
+// the report of a host can show every layer active.
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -181,8 +183,6 @@ namespace sandbox
     {
         namespace
         {
-            constexpr const char *LinuxOnly = "only available on Linux";
-
             // The calling process joins a new job. The job handle stays open for the life of the
             // process: closing it would not lift the limits, there is just nothing to gain.
             LayerResult applyJobObject(const Policy &policy)
@@ -222,23 +222,6 @@ namespace sandbox
             {
                 return state("integrity-level", true);
             }
-
-            LayerResult applySeccomp(const Policy &)
-            {
-                return result("seccomp", false, LinuxOnly);
-            }
-            LayerState probeSeccomp()
-            {
-                return unsupportedProbe("seccomp", LinuxOnly);
-            }
-            LayerResult applyLandlock(const Policy &)
-            {
-                return result("landlock", false, LinuxOnly);
-            }
-            LayerState probeLandlock()
-            {
-                return unsupportedProbe("landlock", LinuxOnly);
-            }
         } // namespace
 
         const std::vector<Layer> &platformLayers()
@@ -246,8 +229,6 @@ namespace sandbox
             static const std::vector<Layer> layers = {
                 {"job-object", applyJobObject, probeJobObject},
                 {"integrity-level", applyIntegrity, probeIntegrity},
-                {"seccomp", applySeccomp, probeSeccomp},
-                {"landlock", applyLandlock, probeLandlock},
             };
             return layers;
         }

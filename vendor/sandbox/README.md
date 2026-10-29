@@ -62,7 +62,7 @@ output folder is the one of the request.
 | `oom-score` | Writes 1000 to `/proc/self/oom_score_adj`: when a container runs out of memory, the helper is killed first and not the host. |
 | `no-new-privs` | `PR_SET_NO_NEW_PRIVS`: set-uid programs and file capabilities give nothing. seccomp and Landlock need it, and each sets it as well. |
 | `landlock` | Read access to `readPaths`, read and write access (create, delete, rename within, truncate) to `writePaths`, nothing else. Handles every right of the Landlock ABI the kernel reports (1 to 6 are used): refer (2), truncate (3), TCP bind and connect with no rule, so none is allowed (4), ioctl on devices (5), no signals to and no abstract unix sockets of processes outside the sandbox (6). Needs a kernel 5.13 or later with Landlock in the list of security modules. |
-| `seccomp` | A BPF filter written by hand. A syscall of another architecture or of the x32 ABI kills the process. `socket` and `socketpair` are refused for every family but `AF_UNIX`. `execve`, `execveat`, `ptrace`, `process_vm_readv/writev`, the pid file descriptors, `unshare`, `setns`, the mount calls, `io_uring`, `bpf`, `perf_event_open`, the key ring calls and `userfaultfd` fail with `EPERM`. `clone` fails with `EPERM` when it asks for a namespace, so `fork` and threads work; `clone3` answers `ENOSYS` (its flags are in memory, where a filter cannot read them) and the C library falls back to `clone`. `kill`, `tkill`, `tgkill` and the signal-queueing calls are refused unless they name the process itself. |
+| `seccomp` | A BPF filter written by hand. A syscall of another architecture or of the x32 ABI kills the process. `socket` and `socketpair` are refused for every family but `AF_UNIX`. `execve`, `execveat`, `ptrace`, `process_vm_readv/writev`, the pid file descriptors, `unshare`, `setns`, the mount calls, `io_uring`, `bpf`, `perf_event_open`, the key ring calls and `userfaultfd` fail with `EPERM`. No new process: `fork`, `vfork` and a `clone` without `CLONE_THREAD` or with a namespace flag fail with `EPERM`, so threads work and a child that could outlive the job with the descriptors it inherited cannot be made; `clone3` answers `ENOSYS` (its flags are in memory, where a filter cannot read them) and the C library falls back to `clone`. `setsid` and `setpgid` fail with `EPERM`: the process stays in the process group it was started in, and the host that ends that group ends it. `kill`, `tkill`, `tgkill` and the signal-queueing calls are refused unless they name the process itself. |
 
 Why `AF_UNIX` stays: the C library uses it (logging, name service caches), and Landlock's
 scoping stops abstract sockets outside the sandbox. Every other family is refused, not only the
@@ -72,7 +72,8 @@ parser does not need.
 ### macOS
 
 `rlimits` only. The address space limit is accepted by the system and not enforced, and the
-report says so. `seccomp` and `landlock` are listed as missing.
+report says so. The layers of Linux are not listed, so `strict` starts and a report can show
+every layer `active`.
 
 ### Windows
 
@@ -83,7 +84,8 @@ parameters). `integrity-level`: every folder of `writePaths` gets a low integrit
 the process can still set labels, then the process drops its token to low integrity, which
 stops it writing anywhere without that label. `windows::createJob`, `windows::setLowIntegrityLabel`
 and `windows::lowerCurrentProcessIntegrity` are public for a host that sets a child up from the
-outside. `seccomp` and `landlock` are listed as missing.
+outside. The layers of Linux are not listed, so `strict` starts and a report can show every
+layer `active`.
 
 ## Residual risks
 

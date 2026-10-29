@@ -72,12 +72,18 @@ namespace
         for (char c : text)
             lines += c == '\n' ? 1 : 0;
         EXPECT_EQ(lines, report.layers.size()) << text;
-#ifdef __linux__
+        // The layers of this platform and no other: a layer of another system would always be
+        // missing, and strict could never start
         std::vector<std::string> names;
         for (const auto &layer : report.layers)
             names.push_back(layer.name);
+#ifdef __linux__
         for (const char *expected : {"rlimits", "seccomp", "landlock"})
             EXPECT_NE(std::find(names.begin(), names.end(), expected), names.end()) << expected;
+#elif defined(_WIN32)
+        EXPECT_EQ(names, (std::vector<std::string>{"job-object", "integrity-level"}));
+#else
+        EXPECT_EQ(names, (std::vector<std::string>{"rlimits"}));
 #endif
     }
 } // namespace
@@ -89,6 +95,7 @@ namespace
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
+#include <spawn.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <dirent.h>
@@ -733,80 +740,92 @@ namespace
         EXPECT_EQ(result.field("pidfdOpen"), "0");
     }
 
-    TEST(Sandbox, forkAndThreadsStillWork)
+    // A thread of the worker works (GDAL uses them); another process cannot be made, since it
+    // would outlive the request with the descriptors it inherited, and the worker cannot leave
+    // the process group whose end ends it
+    std::string makeThreadsAndProcesses(Mode mode)
+    {
+        Fields out;
+        out.set("applied", applyOrExplain(sandbox::Policy(), mode).empty() ? "yes" : "no");
+        const auto errorOf = [](long result) { return result < 0 ? errno : 0; };
+
+        pthread_t thread;
+        out.set("thread", pthread_create(&thread, nullptr, doNothing, nullptr) == 0 && pthread_join(thread, nullptr) == 0
+                              ? "ran"
+                              : "failed");
+
+        // A child made here ends at once and is reaped: the tests compare the error numbers
+        const auto reaped = [&errorOf](long pid) {
+            if (pid == 0)
+                _exit(0);
+            if (pid > 0)
+                waitpid(static_cast<pid_t>(pid), nullptr, 0);
+            return errorOf(pid);
+        };
+        out.set("fork", reaped(fork()));
+        // The child of vfork shares the memory of the parent: it does nothing but end
+        const pid_t shared = vfork();
+        if (shared == 0)
+            _exit(0);
+        out.set("vfork", reaped(shared));
+#ifdef SYS_fork
+        out.set("forkSyscall", reaped(syscall(SYS_fork)));
+#endif
+        out.set("cloneProcess", reaped(syscall(SYS_clone, SIGCHLD, nullptr, nullptr, nullptr, nullptr)));
+        pid_t spawned = 0;
+        char *const noArguments[] = {const_cast<char *>("/bin/true"), nullptr};
+        const int spawn = posix_spawn(&spawned, "/bin/true", nullptr, nullptr, noArguments, nullptr);
+        if (spawn == 0)
+            waitpid(spawned, nullptr, 0);
+        out.set("posixSpawn", spawn);
+
+        out.set("setsid", errorOf(setsid()));
+        out.set("setpgid", errorOf(setpgid(0, 0)));
+        return out.str();
+    }
+
+    TEST(Sandbox, threadsWorkButNoOtherProcessCanBeMade)
     {
         SKIP_WITHOUT_LAYER("seccomp");
-        const ChildResult result = inChild([] {
-            Fields out;
-            out.set("applied", applyOrExplain(sandbox::Policy(), Mode::BestEffort).empty() ? "yes" : "no");
-
-            const pid_t grandchild = fork();
-            if (grandchild == 0)
-                _exit(7);
-            int status = 0;
-            waitpid(grandchild, &status, 0);
-            out.set("fork", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-
-            pthread_t thread;
-            out.set("thread", pthread_create(&thread, nullptr, doNothing, nullptr) == 0 && pthread_join(thread, nullptr) == 0
-                                  ? "ran"
-                                  : "failed");
-            // The child of a fork is another process: a signal to it is refused, as to any
-            // process but the worker itself
-            int channel[2];
-            if (pipe(channel) != 0)
-                return out.str();
-            const pid_t sibling = fork();
-            if (sibling == 0)
-            {
-                // Waits until the parent closes its end of the pipe
-                close(channel[1]);
-                char go = 0;
-                _exit(read(channel[0], &go, 1) == 0 ? 0 : 1);
-            }
-            out.set("killChild", kill(sibling, 0) == 0 ? 0 : errno);
-            close(channel[1]);
-            waitpid(sibling, &status, 0);
-            return out.str();
-        });
+        const ChildResult result = inChild([] { return makeThreadsAndProcesses(Mode::BestEffort); });
         ASSERT_TRUE(result.exited());
         EXPECT_EQ(result.field("applied"), "yes");
-        EXPECT_EQ(result.field("fork"), "7");
         EXPECT_EQ(result.field("thread"), "ran");
-        EXPECT_EQ(result.field("killChild"), std::to_string(EPERM));
+        const std::string denied = std::to_string(EPERM);
+        for (const char *call : {"fork", "vfork", "cloneProcess", "posixSpawn", "setsid", "setpgid"})
+            EXPECT_EQ(result.field(call), denied) << call;
+#ifdef SYS_fork
+        EXPECT_EQ(result.field("forkSyscall"), denied);
+#endif
+    }
+
+    // The same calls work without the filter: the child of the test is no group leader, so it can
+    // make a session of its own
+    TEST(Sandbox, withTheSandboxOffTheSameCodeMakesProcesses)
+    {
+        const ChildResult result = inChild([] { return makeThreadsAndProcesses(Mode::Off); });
+        ASSERT_TRUE(result.exited());
+        EXPECT_EQ(result.field("thread"), "ran");
+        for (const char *call : {"fork", "vfork", "cloneProcess", "posixSpawn", "setsid"})
+            EXPECT_EQ(result.field(call), "0") << call;
     }
 
 #if defined(__x86_64__)
-    // A syscall of the x32 ABI or of the 32-bit ABI kills the process: the numbers the filter knows
-    // are the native ones
+    // A syscall of the x32 ABI kills the process: the numbers the filter knows are the native ones
     TEST(Sandbox, aSyscallOfAnotherAbiKillsTheProcess)
     {
         SKIP_WITHOUT_LAYER("seccomp");
-        const ChildResult result = inChild([] {
-            applyOrExplain(sandbox::Policy(), Mode::BestEffort);
-            Fields out;
-            int status = 0;
-            const pid_t x32 = fork();
-            if (x32 == 0)
-            {
-                syscall(SYS_getpid | 0x40000000);
-                _exit(0);
-            }
-            waitpid(x32, &status, 0);
-            out.set("x32", WIFSIGNALED(status) ? WTERMSIG(status) : 0);
-
-            const pid_t native = fork();
-            if (native == 0)
-            {
-                syscall(SYS_getpid);
-                _exit(0);
-            }
-            waitpid(native, &status, 0);
-            out.set("native", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-            return out.str();
-        });
-        EXPECT_EQ(result.field("x32"), std::to_string(SIGSYS));
-        EXPECT_EQ(result.field("native"), "0");
+        const auto callAfterApplying = [](long number) {
+            return inChild([number] {
+                applyOrExplain(sandbox::Policy(), Mode::BestEffort);
+                syscall(number);
+                return Fields().set("survived", 1).str();
+            });
+        };
+        EXPECT_TRUE(callAfterApplying(SYS_getpid | 0x40000000).killedBy(SIGSYS));
+        const ChildResult native = callAfterApplying(SYS_getpid);
+        ASSERT_TRUE(native.exited());
+        EXPECT_EQ(native.field("survived"), "1");
     }
 #endif
 

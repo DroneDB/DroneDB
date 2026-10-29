@@ -15,9 +15,15 @@
 //   * Namespaces, mounts, tracing of other processes, io_uring, bpf, perf, the key ring,
 //     userfaultfd and the pid file descriptors are refused with EPERM; so is execve, so a
 //     compromised parser cannot start a program.
-//   * clone is refused only when it asks for a namespace, so fork and threads work. clone3
-//     passes its flags in memory, where a filter cannot read them: it answers ENOSYS, and the C
-//     library falls back to clone.
+//   * No new process: fork and vfork are refused with EPERM, and so is a clone that is not a
+//     thread of this process (no CLONE_THREAD) or that asks for a namespace. Threads work. A
+//     child of a compromised parser would outlive the request: it could keep descriptors the
+//     process inherited and go on writing to them after the process ended. clone3 passes its
+//     flags in memory, where a filter cannot read them: it answers ENOSYS, and the C library
+//     falls back to clone.
+//   * setsid and setpgid are refused with EPERM: the process stays in the process group it was
+//     started in, so whoever ends that group (the host of a helper kills the group of the
+//     helper) ends the process too, whatever it did to its own parent-death signal.
 //   * kill, tkill, tgkill and the signal-queueing calls are refused unless they name the process
 //     itself, so the host is never signalled.
 
@@ -156,11 +162,13 @@ namespace sandbox::detail
                               statement(Return, errorNumber(EPERM)), statement(Return, Allow)});
             }
 
-            // The syscall is allowed when none of `bits` is set in its first argument
-            void allowWhenArgumentHasNoBit(long number, unsigned argument, uint32_t bits)
+            // The syscall is allowed when the argument has `required` set and none of
+            // `forbidden`; it fails with EPERM otherwise
+            void allowWhenArgumentHasBitAndNone(long number, unsigned argument, uint32_t required, uint32_t forbidden)
             {
-                rule(number, {statement(Load, argumentOffset(argument)), jump(AnyBit, bits, 0, 1),
-                              statement(Return, errorNumber(EPERM)), statement(Return, Allow)});
+                rule(number, {statement(Load, argumentOffset(argument)), jump(AnyBit, forbidden, 1, 0),
+                              jump(AnyBit, required, 1, 0), statement(Return, errorNumber(EPERM)),
+                              statement(Return, Allow)});
             }
 
             sock_fprog finish()
@@ -213,9 +221,20 @@ namespace sandbox::detail
             filter.deny(__NR_execve, EPERM);
             filter.deny(__NR_execveat, EPERM);
 
-            // Namespaces and mounts
-            filter.allowWhenArgumentHasNoBit(__NR_clone, 0, NamespaceFlags);
+            // Processes: a thread of this process, never another process or a namespace, and
+            // no way out of the process group
+            filter.allowWhenArgumentHasBitAndNone(__NR_clone, 0, CLONE_THREAD, NamespaceFlags);
             filter.deny(__NR_clone3, ENOSYS);
+#ifdef __NR_fork
+            filter.deny(__NR_fork, EPERM);
+#endif
+#ifdef __NR_vfork
+            filter.deny(__NR_vfork, EPERM);
+#endif
+            filter.deny(__NR_setsid, EPERM);
+            filter.deny(__NR_setpgid, EPERM);
+
+            // Namespaces and mounts
             filter.deny(__NR_unshare, EPERM);
             filter.deny(__NR_setns, EPERM);
             filter.deny(__NR_mount, EPERM);
@@ -261,7 +280,7 @@ namespace sandbox::detail
         const sock_fprog program = filter.finish();
         if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &program) != 0)
             return result("seccomp", false, std::string("not installed: ") + std::strerror(errno));
-        return result("seccomp", true, "no sockets but AF_UNIX, no exec, no namespaces, no signals to other processes");
+        return result("seccomp", true, "no sockets but AF_UNIX, no exec, no new process, no namespaces, no signals to other processes");
     }
 #else
     LayerState probeSeccomp()
