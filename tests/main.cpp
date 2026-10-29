@@ -11,11 +11,19 @@
 #include "win_crash_report.h"
 #include <fstream>
 #include <iostream>
+#include <cstdlib>
 #include <cstring>
 
 int main(int argc, char **argv)
 {
     installWindowsCrashReport();
+
+    // The profile and the caches of libddb (artefacts, thumbnails, tiles, templates, auth.json)
+    // are this process's own, in its test folder: tests of different processes (ctest -j) never
+    // share a cache file, and none touches the one of the user who runs them. A DDB_HOME that
+    // the caller set stays (the tests that run this binary as a child pass theirs).
+    if (!std::getenv("DDB_HOME"))
+        setEnv("DDB_HOME", (TestArea::processRoot() / "home").string());
 
     ddb::registerProcess(true);
 

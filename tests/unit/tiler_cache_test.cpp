@@ -6,11 +6,16 @@
 // through TileEncoder
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <fstream>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #include "ddb.h"
 #include "gdaltiler.h"
+#include "mio.h"
 #include "raster_cache.h"
 #include "raster_stats.h"
 #include "raster_test_utils.h"
@@ -20,6 +25,8 @@
 #include "tile_encoder.h"
 #include "tile_test_support.h"
 #include "tilerhelper.h"
+#include "userprofile.h"
+#include "utils.h"
 
 namespace
 {
@@ -289,6 +296,104 @@ namespace
         createGeoRaster(raster, spec);
         spm.detectSensor(raster.string());
         EXPECT_EQ(spm.uncachedDetections() - before, 2u) << "a rewritten raster is detected again";
+    }
+
+    // The clean-up that a tile request starts now and then (one in a thousand) works on a cache
+    // that other requests, and other processes sharing it, change at the same time: a folder it
+    // listed may be gone when it looks at it, because another clean-up removed it. That is the
+    // normal state of the cache, not an error, and it must not fail the tile request that
+    // happened to start it.
+    TEST(TilerCleanup, cleanupsThatRunTogetherOnAnOldCacheAllFinish)
+    {
+        TestArea ta(TEST_NAME, true);
+        const ScopedProcessConfig cache(json{{"cacheDir", io::toUtf8(ta.getPath("cache"))}}.dump());
+        const fs::path tiles = UserProfile::get()->getTilesDir();
+        const auto longAgo = fs::file_time_type::clock::now() - std::chrono::hours(24 * 6);
+
+        constexpr int rounds = 12;
+        constexpr int threads = 4;
+        constexpr int cacheFolders = 40;
+        for (int round = 0; round < rounds; round++)
+        {
+            // What a raster leaves: <hash>/<z>/<x>/<y>.png, all older than the limit
+            for (int i = 0; i < cacheFolders; i++)
+            {
+                const fs::path folder = tiles / ("c" + std::to_string(round) + "-" + std::to_string(i));
+                for (const char *level : {"3", "4"})
+                    for (const char *column : {"1", "2", "3"})
+                    {
+                        writeFile(folder / level / column / "1.png", "tile");
+                        fs::last_write_time(folder / level / column, longAgo);
+                        fs::last_write_time(folder / level, longAgo);
+                    }
+                fs::last_write_time(folder, longAgo);
+            }
+
+            std::atomic<int> failures{0};
+            std::string firstFailure;
+            std::mutex failureMutex;
+            std::atomic<bool> go{false};
+            std::vector<std::thread> cleaners;
+            for (int t = 0; t < threads; t++)
+                cleaners.emplace_back([&] {
+                    while (!go.load())
+                        std::this_thread::yield();
+                    try
+                    {
+                        TilerHelper::cleanupUserCache();
+                    }
+                    catch (const std::exception &e)
+                    {
+                        std::lock_guard<std::mutex> lock(failureMutex);
+                        failures++;
+                        if (firstFailure.empty())
+                            firstFailure = e.what();
+                    }
+                });
+            go = true;
+            for (auto &cleaner : cleaners)
+                cleaner.join();
+
+            EXPECT_EQ(failures.load(), 0) << "round " << round << ": " << firstFailure;
+        }
+    }
+
+    // What a clean-up removes when it runs alone: the folders not touched for five days, at any
+    // level, and nothing else
+    TEST(TilerCleanup, aCleanupRemovesTheFoldersNotTouchedForFiveDaysAtAnyLevel)
+    {
+        TestArea ta(TEST_NAME, true);
+        const ScopedProcessConfig cache(json{{"cacheDir", io::toUtf8(ta.getPath("cache"))}}.dump());
+        const fs::path tiles = UserProfile::get()->getTilesDir();
+        const auto longAgo = fs::file_time_type::clock::now() - std::chrono::hours(24 * 6);
+        const auto recent = fs::file_time_type::clock::now() - std::chrono::hours(24);
+
+        // Old as a whole
+        writeFile(tiles / "old" / "3" / "1" / "1.png", "tile");
+        for (const fs::path &folder : {fs::path("old") / "3" / "1", fs::path("old") / "3", fs::path("old")})
+            fs::last_write_time(tiles / folder, longAgo);
+        // Recent, with a level nobody asked for since it was made
+        writeFile(tiles / "recent" / "3" / "1" / "1.png", "tile");
+        writeFile(tiles / "recent" / "4" / "1" / "1.png", "tile");
+        for (const fs::path &folder : {fs::path("recent") / "3" / "1", fs::path("recent") / "3",
+                                       fs::path("recent") / "4" / "1", fs::path("recent") / "4"})
+            fs::last_write_time(tiles / folder, folder.parent_path().filename() == "3" || folder.filename() == "3" ? longAgo : recent);
+        fs::last_write_time(tiles / "recent", recent);
+        // A file at the top, and a link to a folder outside that is old
+        writeFile(tiles / "loose.txt", "not a folder");
+        writeFile(ta.getPath("outside") / "keep.txt", "somebody else's");
+        fs::last_write_time(ta.getPath("outside"), longAgo);
+#ifndef _WIN32
+        fs::create_directory_symlink(ta.getPath("outside"), tiles / "link");
+#endif
+
+        TilerHelper::cleanupUserCache();
+
+        EXPECT_FALSE(fs::exists(tiles / "old"));
+        EXPECT_TRUE(fs::exists(tiles / "recent" / "4" / "1" / "1.png"));
+        EXPECT_FALSE(fs::exists(tiles / "recent" / "3")) << "an old level of a folder that is in use goes";
+        EXPECT_TRUE(fs::exists(tiles / "loose.txt"));
+        EXPECT_TRUE(fs::exists(ta.getPath("outside") / "keep.txt")) << "a link is not followed";
     }
 
     TEST(TileEncoderFormats, formats)

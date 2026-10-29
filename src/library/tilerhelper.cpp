@@ -275,29 +275,67 @@ namespace ddb
         });
     }
 
+    namespace
+    {
+        // Removes the folders below `folder` that were not touched since `threshold`, the oldest
+        // level first (what is below a folder that goes is not looked at). The cache is shared by
+        // every process of the user and by the tile requests of this one, which make and remove
+        // folders at the same time, and so does another clean-up: a folder that was listed may be
+        // gone when it is looked at. That is the normal state of the cache, so the listing of a
+        // folder is taken whole before anything in it is removed, and what vanished is skipped.
+        void removeStaleFolders(const fs::path &folder, time_t threshold)
+        {
+            std::vector<fs::path> subfolders;
+            std::error_code ec;
+            for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+            {
+                std::error_code statEc;
+                if (it->symlink_status(statEc).type() == fs::file_type::directory && !statEc)
+                    subfolders.push_back(it->path());
+            }
+
+            for (const auto &subfolder : subfolders)
+            {
+                std::error_code removeEc;
+                try
+                {
+                    if (io::Path(subfolder).getModifiedTime() >= threshold)
+                    {
+                        removeStaleFolders(subfolder, threshold);
+                        continue;
+                    }
+                }
+                catch (const FSException &)
+                {
+                    continue; // removed by somebody else since the listing
+                }
+                fs::remove_all(subfolder, removeEc);
+                if (removeEc)
+                {
+                    LOGD << "Cannot remove " << io::toUtf8(subfolder) << " from the cache: " << removeEc.message();
+                }
+            }
+        }
+    } // namespace
+
     void TilerHelper::cleanupUserCache()
     {
         LOGD << "Cleaning up tiles user cache";
 
         constexpr time_t maxAge = 60 * 60 * 24 * 5; // 5 days
         const time_t threshold = currentUnixTimestamp() - maxAge;
-        const fs::path tilesDir = UserProfile::get()->getTilesDir();
 
-        // What the raster helper wrote for the tiles: the same rule
-        raster::cleanupArtefacts(maxAge);
-
-        // Iterate directories
-        for (auto d = fs::recursive_directory_iterator(tilesDir);
-             d != fs::recursive_directory_iterator(); ++d)
+        // A housekeeping done on the way of a request must not fail the request: whatever goes
+        // wrong here is logged and the next clean-up looks again
+        try
         {
-            fs::path dir = d->path();
-            if (fs::is_directory(dir))
-            {
-                if (io::Path(dir).getModifiedTime() < threshold)
-                {
-                    io::assureIsRemoved(dir);
-                }
-            }
+            // What the raster helper wrote for the tiles: the same rule
+            raster::cleanupArtefacts(maxAge);
+            removeStaleFolders(UserProfile::get()->getTilesDir(), threshold);
+        }
+        catch (const std::exception &e)
+        {
+            LOGW << "Cannot clean up the tiles user cache: " << e.what();
         }
     }
 
