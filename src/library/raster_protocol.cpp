@@ -304,7 +304,10 @@ namespace ddb
             if (!request.out.empty())
                 setText(line, "out", io::toUtf8(request.out));
             line["params"] = request.params;
-            return line.dump();
+            // ASCII, every other character as a \u escape of JSON: a build sends the request on
+            // the command line, which Windows passes to the program in its ANSI code page, so a
+            // path with "à" or "é" in UTF-8 reached the helper as other bytes, not JSON
+            return line.dump(-1, ' ', true);
         }
 
         std::optional<int64_t> requestIdOf(std::string_view line)

@@ -1034,6 +1034,26 @@ namespace
         EXPECT_EQ(runner.programs[1], fakePath());
     }
 
+    // Windows passes a command line to a program in its ANSI code page: the request of a build is
+    // ASCII on it, so a path of a folder named in any language reaches the helper as it is
+    TEST(RasterOneShot, theRequestOnTheCommandLineIsAsciiForAPathThatIsNot)
+    {
+        FakeRunner runner;
+        runner.handler = [](const std::vector<std::string> &args, const process::Options &options) {
+            options.onOutputLine(R"({"id":)" + std::to_string(idOfRequest(args)) + R"(,"ok":true,"result":{}})");
+            return exitedWith(0);
+        };
+        GdalUtilHelper helper = oneShotHelper(runner);
+
+        const fs::path input = fs::absolute(io::fromUtf8("ddb_citt\xC3\xA0_\xC3\xBC/ortho_\xC3\xA9.tif"));
+        helper.buildCog(input, fs::absolute("out/raster.cog"), json::object(), ProgressCallback());
+
+        const std::string &line = runner.calls.at(1).at(1);
+        EXPECT_TRUE(std::all_of(line.begin(), line.end(), [](char c) { return static_cast<unsigned char>(c) < 0x80; }))
+            << line;
+        EXPECT_EQ(decodeRequest(line).path, input.lexically_normal());
+    }
+
     TEST(RasterOneShot, theVectorBuildIsTheSameRequestWithItsOwnOperation)
     {
         FakeRunner runner;

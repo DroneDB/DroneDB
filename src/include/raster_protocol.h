@@ -94,9 +94,10 @@ namespace ddb
             json params = json::object();
         };
 
-        // The request line (without the line feed). A path that is not valid UTF-8 goes out as
-        // base64 in its own member (path64, out64); a relative path as it is: the sender makes
-        // paths absolute.
+        // The request line (without the line feed), in ASCII: any other character of a text is a
+        // \u escape of JSON, so the line passes unchanged through a command line in any code page.
+        // A path that is not valid UTF-8 goes out as base64 in its own member (path64, out64); a
+        // relative path as it is: the sender makes paths absolute.
         std::string encodeRequest(const Request &request);
 
         // @throws ProtocolError for a line that is not a request: not a JSON object, no integer

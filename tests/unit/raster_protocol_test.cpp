@@ -7,6 +7,7 @@
 // version line, and the params and results of the probe and thumbnail operations. Canned lines,
 // no process and no file.
 
+#include <algorithm>
 #include <string>
 
 #include "../../vendor/base64/base64.h"
@@ -73,6 +74,28 @@ namespace
         const Request back = raster::decodeRequest(line);
         EXPECT_EQ(back.id, request.id);
         EXPECT_EQ(back.op, request.op);
+        EXPECT_EQ(back.path, request.path);
+        EXPECT_EQ(back.out, request.out);
+        EXPECT_EQ(back.params, request.params);
+    }
+
+    // A build sends its request on the command line, which Windows passes to the program in its
+    // ANSI code page: a request is ASCII, whatever the paths and params, and decodes to the text
+    TEST(RasterProtocol, aRequestIsAsciiAndKeepsItsText)
+    {
+        Request request;
+        request.id = 3;
+        request.op = raster::op::kCog;
+        request.path = io::fromUtf8("/data/ddb_citt\xC3\xA0_\xC3\xBC/ortho_\xC3\xA9.tif");
+        request.out = io::fromUtf8("/tmp/ddb/\xE6\x97\xA5\xE6\x9C\xAC/\xF0\x9F\x8C\x8D.tif");
+        request.params = json{{"name", "Z\xC3\xBCrich"}};
+
+        const std::string line = raster::encodeRequest(request);
+        EXPECT_TRUE(std::all_of(line.begin(), line.end(), [](char c) { return static_cast<unsigned char>(c) < 0x80; }))
+            << line;
+        EXPECT_NE(line.find("\\u00e0"), std::string::npos) << line;
+
+        const Request back = raster::decodeRequest(line);
         EXPECT_EQ(back.path, request.path);
         EXPECT_EQ(back.out, request.out);
         EXPECT_EQ(back.params, request.params);
