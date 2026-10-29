@@ -46,8 +46,6 @@ ALLOWED_FILES: dict[str, str] = {
         "opens the artefacts libddb wrote (and the files it just wrote) with the drivers it writes them with",
     "src/library/copc_utils.cpp":
         "reads a COPC file by /vsicurl/ with VSI calls for the node cache; no GDAL driver parses it",
-    "src/library/raster_ops_thumbnail.cpp":
-        "thumbnail operation of the helper: a .tif URL in the request is read by /vsicurl/ (the host downloads URLs first)",
 }
 
 # The files that may call enableUserFileOpens(), with the reason

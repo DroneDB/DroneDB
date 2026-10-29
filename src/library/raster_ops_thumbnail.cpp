@@ -32,20 +32,10 @@ struct ScaleRange {
     double max;
 };
 
+// Opens the file of the request: always a local file, the host downloads a URL before it asks
 GDALDatasetUniquePtr openThumbSource(const fs::path& imagePath, std::string& resolvedPath) {
     resolvedPath = io::toUtf8(imagePath);
-    bool tryReopen = false;
-    if (io::isNetworkPath(resolvedPath) &&
-        io::Path(io::fromUtf8(resolvedPath)).checkExtension({"tif", "tiff"})) {
-        resolvedPath = "/vsicurl/" + resolvedPath;
-        tryReopen = true;
-    }
-
     auto src = openUserRaster(resolvedPath);
-    if (!src && tryReopen) {
-        resolvedPath = io::toUtf8(imagePath);
-        src = openUserRaster(resolvedPath);
-    }
     if (!src)
         throw raster::RasterOpException(raster::ErrorCode::Unreadable, "Cannot open " + resolvedPath + " for reading");
     return src;
@@ -59,7 +49,7 @@ GDALDatasetUniquePtr openThumbSource(const fs::path& imagePath, std::string& res
 GDALDatasetUniquePtr openImageThumbSource(const fs::path& imagePath, int thumbSize, std::string& openPath,
                                           int& frameWidth, int& frameHeight) {
     frameWidth = frameHeight = 0;
-    if (!io::isNetworkPath(io::toUtf8(imagePath)) && io::Path(imagePath).checkExtension({"jpg", "jpeg"})) {
+    if (io::Path(imagePath).checkExtension({"jpg", "jpeg"})) {
         const JpegLayout layout = readJpegLayout(imagePath);
         if (const auto preview = pickJpegPreview(layout, thumbSize)) {
             openPath = jpegPreviewGdalPath(imagePath, *preview);
