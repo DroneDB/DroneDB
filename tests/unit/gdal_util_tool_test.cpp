@@ -699,6 +699,44 @@ namespace
         EXPECT_FALSE(fs::exists(out));
     }
 
+    // The cpu time limit of a thumbnail (and of a probe, a normalize, a geoproject) is a little
+    // below the time the host waits for it, and counts every thread of the worker: GDAL reads such
+    // a request on one thread, or the limit would end it after a fraction of that time. A JPEG
+    // 2000 of several tiles decodes them on one thread per CPU unless GDAL_NUM_THREADS says
+    // otherwise, and its driver logs the threads it decodes a read of several tiles with.
+    TEST_F(GdalUtilToolTest, aThumbnailDecodesItsRasterOnOneThread)
+    {
+        testutils::GeoRasterSpec spec;
+        spec.width = 1024;
+        spec.height = 1024;
+        spec.bands = 3;
+        spec.value = [](int band, int x, int y) { return static_cast<double>((x * band + y) % 256); };
+        const fs::path tiff = testutils::createGeoRaster(area_->getFolder() / "tiles.tif", spec);
+        const fs::path jp2 = area_->getFolder() / "tiles.jp2";
+        {
+            const auto source = adoptDataset(GDALOpen(io::toUtf8(tiff).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(source);
+            const CPLStringList options(cslFromStrings({"BLOCKXSIZE=256", "BLOCKYSIZE=256", "REVERSIBLE=YES"}));
+            const auto copy = adoptDataset(GDALCreateCopy(GDALGetDriverByName("JP2OpenJPEG"), io::toUtf8(jp2).c_str(),
+                                                          datasetHandle(source), FALSE, options.List(), nullptr, nullptr));
+            ASSERT_TRUE(copy);
+        }
+
+        process::SessionOptions options;
+        options.envOverrides = {{"CPL_DEBUG", "ON"}};
+        Server server(options);
+        const fs::path out = area_->getFolder() / "tiles.webp";
+        const auto response = server.ask(thumbnailRequest(24, jp2, out, raster::ThumbnailParams{256, std::nullopt}));
+        ASSERT_TRUE(response.ok) << response.message;
+        server.session().closeStdin();
+        ASSERT_TRUE(server.session().wait(patiently()));
+
+        const std::string log = server.session().stderrTail();
+        const std::regex decode(R"((\d+) blocks to load \((\d+) threads\))");
+        for (std::sregex_iterator it(log.begin(), log.end(), decode), end; it != end; ++it)
+            EXPECT_EQ((*it)[2].str(), "1") << it->str();
+    }
+
     // ------------------------------------------------------------------ normalize
 
     TEST_F(GdalUtilToolTest, aNormalizedPhotoHoldsThePixelsOfTheJpeg)
