@@ -48,7 +48,7 @@ void parseModelMetadata(const fs::path &path, Entry &entry)
     catch (const std::exception &e)
     {
         LOGD << "Model parse warning: " << e.what();
-        entry.properties["warning"] = std::string("model parse failed: ") + e.what();
+        setEntryWarning(entry, std::string("model parse failed: ") + e.what());
     }
 }
 

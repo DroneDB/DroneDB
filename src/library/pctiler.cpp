@@ -38,6 +38,16 @@ namespace ddb
         if (pcInfo.wktProjection.empty())
             throw InvalidArgsException("COPC file has no WKT SRS: " + inputPath);
 
+        // Web map tiles need the footprint of the cloud in EPSG:3857, which a CRS without a
+        // transformation to it (a site grid) or bounds out of range do not give
+        if (pcInfo.polyBounds.size() < 5)
+        {
+            throw InvalidArgsException(
+                "Cannot tile " + inputPath + ": footprint unavailable: " +
+                (pcInfo.footprintWarning.empty() ? std::string("its bounds do not map to EPSG:3857")
+                                                 : pcInfo.footprintWarning));
+        }
+
         oMinX = pcInfo.polyBounds.getPoint(0).x;
         oMaxX = pcInfo.polyBounds.getPoint(2).x;
         oMaxY = pcInfo.polyBounds.getPoint(2).y;

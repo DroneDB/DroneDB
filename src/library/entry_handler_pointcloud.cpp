@@ -44,6 +44,10 @@ void parsePointCloudMetadata(const fs::path &path, Entry &entry)
         entry.properties = info;
         entry.polygon_geom = info.polyBounds;
         entry.point_geom = info.centroid;
+
+        // The properties above replace any warning: it is recorded last
+        if (!info.footprintWarning.empty())
+            setEntryWarning(entry, "footprint unavailable: " + info.footprintWarning);
     }
 }
 

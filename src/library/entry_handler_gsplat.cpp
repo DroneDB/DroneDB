@@ -57,7 +57,7 @@ void parseGaussianSplatMetadata(const fs::path &path, Entry &entry)
     catch (const std::exception &e)
     {
         LOGW << "Splat georeference ignored for " << io::toUtf8(path) << ": " << e.what();
-        entry.properties["warning"] = std::string("georeference ignored: ") + e.what();
+        setEntryWarning(entry, std::string("georeference ignored: ") + e.what());
     }
 }
 

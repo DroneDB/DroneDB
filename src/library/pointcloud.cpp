@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <cctype>
 
@@ -388,10 +389,71 @@ void populatePointCloudInfoFromQuickInfo(const pdal::QuickInfo& quickInfo, Point
         info.dimensions.push_back(dimension);
 }
 
+// Fills the polygon and the centroid of the point cloud (in EPSG:polyBoundsSrs) from the bounds of its
+// file. Only the horizontal part of the CRS of the file takes part: x and y are transformed, z is not
+// (a height in the vertical unit of the CRS, converted to metres), so a vertical datum that PROJ
+// cannot use here (a geoid grid that is not installed) does not matter. Throws GDALException when
+// the horizontal CRS cannot be transformed.
+void populatePointCloudFootprint(const pdal::QuickInfo& quickInfo, PointCloudInfo& info, int polyBoundsSrs) {
+    const pdal::BOX3D bbox = quickInfo.m_bounds;
+
+    const SrsPtr fileSrs = srsFromWkt(quickInfo.m_srs.getWKT().c_str());
+    if (!fileSrs)
+        throw GDALException("Cannot read the coordinate reference system of the file. Is PROJ available?");
+
+    const SrsPtr tgt = srsFromEpsg(polyBoundsSrs);
+    if (!tgt) {
+        throw GDALException("Cannot read EPSG:" + std::to_string(polyBoundsSrs) +
+                            ". Is PROJ available?");
+    }
+
+    const OGRSpatialReference& fullSrs = srsOf(fileSrs);
+    const OGRSpatialReference horizontal = horizontalSrs(fullSrs);
+    const double zToMeters = verticalUnitInMeters(fullSrs);
+
+    const auto transform = CoordsTransformer::tryCreate(horizontal, srsOf(tgt));
+    if (!transform) {
+        const char* name = horizontal.GetName();
+        throw GDALException("No coordinate transformation from " + std::string(name != nullptr ? name : "the CRS of the file") +
+                            " to EPSG:" + std::to_string(polyBoundsSrs));
+    }
+
+    double geoMinX = bbox.minx;
+    double geoMinY = bbox.miny;
+    double geoMaxX = bbox.maxx;
+    double geoMaxY = bbox.maxy;
+    double centroidX = (bbox.minx + bbox.maxx) / 2.0;
+    double centroidY = (bbox.miny + bbox.maxy) / 2.0;
+
+    if (!transform->tryTransform(1, &geoMinX, &geoMinY) || !transform->tryTransform(1, &geoMaxX, &geoMaxY) ||
+        !transform->tryTransform(1, &centroidX, &centroidY)) {
+        throw GDALException("Cannot transform the bounds " + bbox.toWKT() + " to EPSG:" +
+                            std::to_string(polyBoundsSrs));
+    }
+
+    const double geoMinZ = bbox.minz * zToMeters;
+    const double geoMaxZ = bbox.maxz * zToMeters;
+
+    if (geoMinZ < -30000 || geoMaxZ > 30000 || (geoMinX == -90 && geoMaxX == 90)) {
+        LOGD << "Strange point cloud bounds [[" << geoMinX << ", " << geoMaxX << "], [" << geoMinY << ", "
+             << geoMaxY << "], [" << geoMinZ << ", " << geoMaxZ << "]]";
+        info.bounds.clear();
+        return;
+    }
+
+    info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
+    info.polyBounds.addPoint(geoMaxX, geoMinY, geoMinZ);
+    info.polyBounds.addPoint(geoMaxX, geoMaxY, geoMinZ);
+    info.polyBounds.addPoint(geoMinX, geoMaxY, geoMinZ);
+    info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
+    info.centroid.addPoint(centroidX, centroidY, geoMinZ);
+}
+
 void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
                                            PointCloudInfo& info,
                                            int polyBoundsSrs) {
     clearSpatialInfo(info);
+    info.footprintWarning.clear();
     if (!quickInfo.m_bounds.valid())
         return;
 
@@ -402,72 +464,33 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
     info.bounds.push_back(quickInfo.m_bounds.maxy);
     info.bounds.push_back(quickInfo.m_bounds.maxz);
 
-    pdal::BOX3D bbox = quickInfo.m_bounds;
+    if (!quickInfo.m_srs.valid())
+        return;
 
-    // We need to convert the bbox to EPSG:<polyboundsSrs>
-    if (quickInfo.m_srs.valid()) {
-        std::string proj = quickInfo.m_srs.getProj4();
-        const SrsPtr srs = srsFromProj4(proj.c_str());
-        if (!srs) {
-            throw GDALException("Cannot import spatial reference system " + proj +
-                                ". Is PROJ available?");
-        }
-
-        const SrsPtr tgt = srsFromEpsg(polyBoundsSrs);
-        if (!tgt) {
-            throw GDALException("Cannot read EPSG:" + std::to_string(polyBoundsSrs) +
-                                ". Is PROJ available?");
-        }
-
-        const auto transform = CoordsTransformer::tryCreate(srsOf(srs), srsOf(tgt));
-        if (!transform) {
-            throw GDALException("Cannot create coordinate transformation from " + proj +
-                                " to EPSG:" + std::to_string(polyBoundsSrs));
-        }
-
-        double geoMinX = bbox.minx;
-        double geoMinY = bbox.miny;
-        double geoMinZ = bbox.minz;
-        double geoMaxX = bbox.maxx;
-        double geoMaxY = bbox.maxy;
-        double geoMaxZ = bbox.maxz;
-
-        bool minSuccess = transform->tryTransform(1, &geoMinX, &geoMinY, &geoMinZ);
-        bool maxSuccess = transform->tryTransform(1, &geoMaxX, &geoMaxY, &geoMaxZ);
-
-        if (!minSuccess || !maxSuccess) {
-            throw GDALException("Cannot transform coordinates " + bbox.toWKT() + " to " +
-                                proj);
-        }
-
+    // A footprint that cannot be computed does not make the file unreadable: it is indexed and built
+    // without one (the native bounds above stay), and the entry says why it has none.
+    try {
+        populatePointCloudFootprint(quickInfo, info, polyBoundsSrs);
+    } catch (const GDALException& e) {
+        LOGD << "No footprint for the point cloud: " << e.what();
         info.polyBounds.clear();
-
-        if (geoMinZ < -30000 || geoMaxZ > 30000 || (geoMinX == -90 && geoMaxX == 90)) {
-            LOGD << "Strange point cloud bounds [[" << geoMinX << ", " << geoMaxX << "], ["
-                 << geoMinY << ", " << geoMaxY << "], [" << geoMinZ << ", " << geoMaxZ
-                 << "]]";
-            info.bounds.clear();
-        } else {
-            info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
-            info.polyBounds.addPoint(geoMaxX, geoMinY, geoMinZ);
-            info.polyBounds.addPoint(geoMaxX, geoMaxY, geoMinZ);
-            info.polyBounds.addPoint(geoMinX, geoMaxY, geoMinZ);
-            info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
-
-            double centroidX = (bbox.minx + bbox.maxx) / 2.0;
-            double centroidY = (bbox.miny + bbox.maxy) / 2.0;
-            double centroidZ = bbox.minz;
-
-            if (transform->tryTransform(1, &centroidX, &centroidY, &centroidZ)) {
-                info.centroid.clear();
-                info.centroid.addPoint(centroidX, centroidY, centroidZ);
-            } else {
-                throw GDALException("Cannot transform coordinates " +
-                                    std::to_string(centroidX) + ", " +
-                                    std::to_string(centroidY) + " to " + proj);
-            }
-        }
+        info.centroid.clear();
+        info.footprintWarning = e.what();
     }
+}
+
+// Takes the one lock that readers.e57 needs, for the files it reads (a lock that holds nothing for any
+// other format). libE57Format shares state between the readers of one process: several E57 files
+// read at once (indexing in parallel) crash it, so one file at a time goes through it, from the
+// preview of its header to the end of the translation of its points. Keep the returned lock for as
+// long as the reader of the file is used.
+std::unique_lock<std::mutex> lockForReaderOf(const std::string& filename) {
+    static std::mutex e57Mutex;
+
+    std::unique_lock<std::mutex> lock(e57Mutex, std::defer_lock);
+    if (resolvePointCloudReaderDriver(filename) == "readers.e57")
+        lock.lock();
+    return lock;
 }
 
 pdal::Stage* createPointCloudReader(pdal::StageFactory& factory, const std::string& filename) {
@@ -544,6 +567,8 @@ bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int po
 
     // Las/Laz
     try {
+        const auto readerLock = lockForReaderOf(filename);
+
         pdal::StageFactory factory;
         pdal::Stage* reader = createPointCloudReader(factory, filename);
         if (!reader) {
@@ -826,6 +851,8 @@ void translateToLas(const std::string& input, const std::string& outputLas) {
         throw FSException(input + " does not exist");
 
     try {
+        const auto readerLock = lockForReaderOf(input);
+
         pdal::StageFactory factory;
         pdal::Stage* reader = createPointCloudReader(factory, input);
         if (!reader)

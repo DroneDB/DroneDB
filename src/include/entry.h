@@ -173,6 +173,10 @@ namespace ddb
     void to_json(json &j, const Entry &e);
     void from_json(const json &j, Entry &e);
 
+    /// Records why a part of the metadata of an entry is missing, in its `warning` property (one
+    /// string; a later warning replaces an earlier one)
+    void setEntryWarning(Entry &entry, const std::string &message);
+
     /** Parse an entry
      * @param path path to file
      * @param rootDirectory root directory from which to compute relative path

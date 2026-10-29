@@ -321,6 +321,10 @@
             }
           ]
         },
+        "warning": {
+          "type": "string",
+          "description": "Why part of the metadata of the entry is missing, one string: a model or splat whose georeference could not be used, a vector file that did not parse, a point cloud with no footprint (\"footprint unavailable: <reason>\")"
+        },
         "pointCount": {
           "type": "integer",
           "minimum": 0

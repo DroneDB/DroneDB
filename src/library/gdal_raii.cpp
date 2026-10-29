@@ -57,6 +57,23 @@ namespace ddb
         return srs;
     }
 
+    OGRSpatialReference horizontalSrs(const OGRSpatialReference &srs)
+    {
+        OGRSpatialReference horizontal(srs);
+        if (horizontal.StripVertical() != OGRERR_NONE)
+            throw GDALException("Cannot take the vertical part off a coordinate reference system");
+        horizontal.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        return horizontal;
+    }
+
+    double verticalUnitInMeters(const OGRSpatialReference &srs)
+    {
+        if (!srs.IsCompound())
+            return 1.0;
+        const double factor = srs.GetTargetLinearUnits("VERT_CS");
+        return factor > 0.0 ? factor : 1.0;
+    }
+
     VsiMemFile::~VsiMemFile()
     {
         reset();

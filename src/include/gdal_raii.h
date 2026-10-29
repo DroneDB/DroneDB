@@ -166,6 +166,17 @@ namespace ddb
         return *OGRSpatialReference::FromHandle(srs.get());
     }
 
+    // A copy of srs without its vertical component, with the traditional GIS axis order: a
+    // compound CRS (a projected or geographic CRS plus a height) is left with its horizontal
+    // part, any other CRS is copied as it is. For the transformations that need x and y only, which
+    // must not depend on the vertical datum (a geoid grid that is not installed, for one).
+    // Throws GDALException when GDAL cannot take the vertical part off.
+    OGRSpatialReference horizontalSrs(const OGRSpatialReference &srs);
+
+    // Metres in one unit of the vertical CRS of a compound srs; 1 when srs has no vertical CRS
+    // (a height in a CRS without one is taken to be metres)
+    double verticalUnitInMeters(const OGRSpatialReference &srs);
+
     struct FeatureDeleter
     {
         using pointer = OGRFeatureH;

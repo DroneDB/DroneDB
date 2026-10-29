@@ -22,6 +22,10 @@ namespace ddb
         std::vector<double> bounds;
         BasicPointGeometry centroid;
         BasicPolygonGeometry polyBounds;
+        /// Why polyBounds and centroid are empty although the file has a coordinate reference
+        /// system and bounds (a CRS that has no transformation to EPSG:4326, for one); "" otherwise.
+        /// The native bounds are kept: a build needs no footprint. Not part of the properties JSON.
+        std::string footprintWarning;
 
     };
 
