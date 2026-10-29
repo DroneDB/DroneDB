@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "sensorprofile.h"
 #include "json.h"
+#include "gdal_metadata.h"
 #include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "exceptions.h"
@@ -204,34 +205,10 @@ namespace {
 // Every metadata string of the raster the profiles are matched against: the TIFF description and
 // software, all domains of the dataset, and the metadata of each band
 std::vector<std::string> collectMatchingMetadata(GDALDatasetH hDataset, int bandCount) {
-    std::vector<std::string> allMetadata;
-    const char *mdItem = GDALGetMetadataItem(hDataset, "TIFFTAG_IMAGEDESCRIPTION", nullptr);
-    if (mdItem) allMetadata.push_back(mdItem);
-    mdItem = GDALGetMetadataItem(hDataset, "TIFFTAG_SOFTWARE", nullptr);
-    if (mdItem) allMetadata.push_back(mdItem);
-
-    // Collect all metadata domains
-    const CPLStringList mdDomains(GDALGetMetadataDomainList(hDataset), TRUE);
-    for (int i = 0; i < mdDomains.size(); i++) {
-        CSLConstList md = GDALGetMetadata(hDataset, mdDomains[i]);
-        if (md) {
-            for (int k = 0; md[k] != nullptr; k++) {
-                allMetadata.push_back(md[k]);
-            }
-        }
-    }
-
-    // Also check per-band metadata
-    for (int b = 1; b <= bandCount; b++) {
-        GDALRasterBandH hBand = GDALGetRasterBand(hDataset, b);
-        CSLConstList bmd = GDALGetMetadata(hBand, nullptr);
-        if (bmd) {
-            for (int k = 0; bmd[k] != nullptr; k++) {
-                allMetadata.push_back(bmd[k]);
-            }
-        }
-    }
-    return allMetadata;
+    gdalmeta::CollectOptions options;
+    options.datasetItems = {"TIFFTAG_IMAGEDESCRIPTION", "TIFFTAG_SOFTWARE"};
+    options.bandCount = bandCount;
+    return gdalmeta::collectMetadata(hDataset, options);
 }
 
 // The detection result of a matched profile: its identity, bands and presets, and the default

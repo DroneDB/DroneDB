@@ -6,6 +6,7 @@
 #include "exif.h"
 #include "exceptions.h"
 #include "coordstransformer.h"
+#include "gdal_metadata.h"
 #include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "logger.h"
@@ -461,29 +462,13 @@ struct ThermalSignals {
 };
 
 ThermalSignals readThermalSignals(GDALDatasetH hDs) {
-    // Collect all metadata strings for keyword scanning
-    std::vector<std::string> metaStrings;
+    // The metadata of the dataset and of its only band, with its description
+    gdalmeta::CollectOptions options;
+    options.bandCount = 1;
+    options.bandDescriptions = true;
+    const std::vector<std::string> metaStrings = gdalmeta::collectMetadata(hDs, options);
 
-    // Dataset-level metadata across all domains
-    const CPLStringList mdDomains(GDALGetMetadataDomainList(hDs), TRUE);
-    for (int d = 0; d < mdDomains.size(); d++) {
-        CSLConstList md = GDALGetMetadata(hDs, mdDomains[d]);
-        if (md) {
-            for (int k = 0; md[k] != nullptr; k++)
-                metaStrings.push_back(md[k]);
-        }
-    }
-
-    // Band-level metadata and description
     GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-    const char *bandDesc = GDALGetDescription(hBand);
-    if (bandDesc && bandDesc[0]) metaStrings.push_back(bandDesc);
-
-    CSLConstList bmd = GDALGetMetadata(hBand, nullptr);
-    if (bmd) {
-        for (int k = 0; bmd[k] != nullptr; k++)
-            metaStrings.push_back(bmd[k]);
-    }
 
     ThermalSignals signals;
 
@@ -507,6 +492,25 @@ ThermalSignals readThermalSignals(GDALDatasetH hDs) {
     return signals;
 }
 
+// Keywords to look for in metadata: short ones (dem, bt, lst...) are acronyms that occur inside
+// ordinary words ("academic", "subtitles"), so they count only as whole words; long ones are
+// specific enough to match anywhere
+struct KeywordSet {
+    std::vector<std::string> tokens;
+    std::vector<std::string> substrings;
+};
+
+// The first keyword of the set found in the lowercase text
+std::optional<std::string> findKeyword(const std::string &text, const KeywordSet &keywords) {
+    for (const auto &kw : keywords.tokens) {
+        if (gdalmeta::containsToken(text, kw)) return kw;
+    }
+    for (const auto &kw : keywords.substrings) {
+        if (text.find(kw) != std::string::npos) return kw;
+    }
+    return std::nullopt;
+}
+
 // Whether the signals describe a thermal raster: a DEM's keywords and units rule it out, then
 // thermal keywords, units and the Landsat scale/offset pattern make it one
 bool looksThermal(const ThermalSignals &signals) {
@@ -515,9 +519,7 @@ bool looksThermal(const ThermalSignals &signals) {
     const std::string &unitLower = signals.unitLower;
 
     // DEM negative signals - reject early
-    static const std::vector<std::string> demKeywords = {
-        "dem", "dtm", "dsm", "elevation", "height"
-    };
+    static const KeywordSet demKeywords = {{"dem", "dtm", "dsm"}, {"elevation", "height"}};
     static const std::vector<std::string> demUnits = {
         "m", "ft", "meter", "meters", "feet", "foot"
     };
@@ -525,11 +527,9 @@ bool looksThermal(const ThermalSignals &signals) {
         "vertical", "geoid", "ellipsoid height"
     };
 
-    for (const auto &kw : demKeywords) {
-        if (allMeta.find(kw) != std::string::npos) {
-            LOGD << "GDAL metadata contains DEM keyword '" << kw << "', not thermal";
-            return false;
-        }
+    if (const auto kw = findKeyword(allMeta, demKeywords)) {
+        LOGD << "GDAL metadata contains DEM keyword '" << *kw << "', not thermal";
+        return false;
     }
     for (const auto &u : demUnits) {
         if (unitLower == u) {
@@ -545,20 +545,17 @@ bool looksThermal(const ThermalSignals &signals) {
     }
 
     // Thermal positive signals
-    static const std::vector<std::string> thermalKeywords = {
-        "thermal", "temperature", "surface_temperature",
-        "lst", "tir", "brightness_temperature", "bt", "lwir"
-    };
+    static const KeywordSet thermalKeywords = {
+        {"lst", "tir", "bt", "lwir"},
+        {"thermal", "temperature", "surface_temperature", "brightness_temperature"}};
     static const std::vector<std::string> thermalUnits = {
         "kelvin", "celsius", "degc", "degk",
         "\xc2\xb0""c", "\xc2\xb0""k"  // UTF-8 for °C, °K
     };
 
-    for (const auto &kw : thermalKeywords) {
-        if (allMeta.find(kw) != std::string::npos) {
-            LOGD << "GDAL metadata contains thermal keyword '" << kw << "'";
-            return true;
-        }
+    if (const auto kw = findKeyword(allMeta, thermalKeywords)) {
+        LOGD << "GDAL metadata contains thermal keyword '" << *kw << "'";
+        return true;
     }
     for (const auto &u : thermalUnits) {
         if (unitLower.find(u) != std::string::npos) {

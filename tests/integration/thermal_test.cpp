@@ -274,6 +274,65 @@ TEST(thermal, nonThermalDetection) {
 }
 
 // ============================================================
+// Keyword detection on GDAL metadata
+// ============================================================
+
+// A single-band Float32 GeoTIFF with no pixel data written; the band description, the unit and
+// one dataset metadata item are set only when given
+fs::path writeSingleBandTiff(const fs::path &path, const std::string &bandDescription = "",
+                             const std::string &unit = "", const std::string &noteItem = "") {
+    fs::create_directories(path.parent_path());
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    EXPECT_NE(tifDrv, nullptr);
+    GDALDatasetH hDs = GDALCreate(tifDrv, path.string().c_str(), 16, 16, 1, GDT_Float32, nullptr);
+    EXPECT_NE(hDs, nullptr);
+    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+    if (!bandDescription.empty()) GDALSetDescription(hBand, bandDescription.c_str());
+    if (!unit.empty()) GDALSetRasterUnitType(hBand, unit.c_str());
+    if (!noteItem.empty()) GDALSetMetadataItem(hDs, "NOTE", noteItem.c_str(), nullptr);
+    GDALClose(hDs);
+    return path;
+}
+
+TEST(thermal, folderNameWithShortKeywordIsNotThermal) {
+    TestArea ta(TEST_NAME);
+    // GDAL lists the path of the file in its DERIVED_SUBDATASETS domain: a folder called
+    // "subtitles_bt" must not make a plain raster thermal
+    const fs::path rasterPath = writeSingleBandTiff(ta.getPath("subtitles_bt/plain.tif"));
+
+    EXPECT_FALSE(isThermalImage(rasterPath.string()));
+}
+
+TEST(thermal, bandDescriptionLstIsThermal) {
+    TestArea ta(TEST_NAME);
+    const fs::path rasterPath = writeSingleBandTiff(ta.getPath("lst.tif"), "LST");
+
+    EXPECT_TRUE(isThermalImage(rasterPath.string()));
+}
+
+TEST(thermal, bandUnitKelvinIsThermal) {
+    TestArea ta(TEST_NAME);
+    const fs::path rasterPath = writeSingleBandTiff(ta.getPath("kelvin.tif"), "", "Kelvin");
+
+    EXPECT_TRUE(isThermalImage(rasterPath.string()));
+}
+
+TEST(thermal, wordContainingDemDoesNotRuleOutThermal) {
+    TestArea ta(TEST_NAME);
+    const fs::path rasterPath =
+        writeSingleBandTiff(ta.getPath("academic.tif"), "", "Kelvin", "academic survey");
+
+    EXPECT_TRUE(isThermalImage(rasterPath.string()));
+}
+
+TEST(thermal, demTokenRulesOutThermal) {
+    TestArea ta(TEST_NAME);
+    const fs::path rasterPath = writeSingleBandTiff(ta.getPath("dem.tif"), "", "Kelvin", "DEM of the site");
+
+    EXPECT_FALSE(isThermalImage(rasterPath.string()));
+}
+
+// ============================================================
 // Sensor Profile Detection for Thermal
 // ============================================================
 
