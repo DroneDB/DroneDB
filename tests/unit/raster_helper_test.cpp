@@ -11,6 +11,7 @@
 // bounded deadlines, never sleeps used for synchronization.
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <memory>
@@ -107,9 +108,8 @@ namespace
     }
 
     // Waits until the process is gone (killed, then reaped by its parent)
-    bool goneWithin(unsigned long pid, seconds limit)
+    bool goneBy(unsigned long pid, Clock::time_point deadline)
     {
-        const auto deadline = Clock::now() + limit;
         while (processAlive(pid))
         {
             if (Clock::now() >= deadline)
@@ -117,6 +117,11 @@ namespace
             std::this_thread::sleep_for(milliseconds(10));
         }
         return true;
+    }
+
+    bool goneWithin(unsigned long pid, seconds limit)
+    {
+        return goneBy(pid, Clock::now() + limit);
     }
 
     std::vector<std::string> linesOf(const fs::path &file)
@@ -138,6 +143,41 @@ namespace
                 found.push_back(line);
         return found;
     }
+
+    // A test thread that cancels `token` once the helper has a request for `name` (its log line is
+    // written when it reads one), and remembers when
+    class CancelOnRequest
+    {
+      public:
+        CancelOnRequest(const fs::path &log, const char *operation, const char *name, cancel::TokenRef token)
+            : thread_([this, log, operation, name, token] {
+                  const auto deadline = Clock::now() + kPatience;
+                  while (requestsFor(log, operation, name).empty() && Clock::now() < deadline)
+                      std::this_thread::sleep_for(milliseconds(5));
+                  canceledAt_ = Clock::now().time_since_epoch().count();
+                  token.get()->cancel("canceled by the test");
+              })
+        {
+        }
+        ~CancelOnRequest() { join(); }
+
+        // When the token was canceled; joins the thread first
+        Clock::time_point canceledAt()
+        {
+            join();
+            return Clock::time_point(Clock::duration(canceledAt_.load()));
+        }
+
+      private:
+        void join()
+        {
+            if (thread_.joinable())
+                thread_.join();
+        }
+
+        std::atomic<Clock::rep> canceledAt_{0};
+        std::thread thread_;
+    };
 
     std::string readFile(const fs::path &file)
     {
@@ -525,15 +565,8 @@ namespace
         const fs::path input = touch("hang.tif");
         auto token = cancel::TokenRef::adopt(cancel::Token::create());
 
-        // Cancels once the helper has the request: the log line is written when it reads it
-        std::thread canceler([&] {
-            const auto deadline = Clock::now() + kPatience;
-            while (requestsFor(log_, "normalize", "hang.tif").empty() && Clock::now() < deadline)
-                std::this_thread::sleep_for(milliseconds(5));
-            token.get()->cancel("canceled by the test");
-        });
+        CancelOnRequest canceler(log_, "normalize", "hang.tif", token);
 
-        const auto begin = Clock::now();
         bool canceled = false;
         {
             cancel::ScopedThreadToken scope(token);
@@ -546,15 +579,16 @@ namespace
                 canceled = true;
             }
         }
-        canceler.join();
+        const auto returned = Clock::now();
+        const auto canceledAt = canceler.canceledAt();
         EXPECT_TRUE(canceled);
         // The cancellation is looked at every half second; the deadline of the request is 30 s
-        EXPECT_LT(Clock::now() - begin, seconds(20));
+        EXPECT_LT(returned - canceledAt, seconds(1));
 
         const auto requests = requestsFor(log_, "normalize", "hang.tif");
         ASSERT_EQ(requests.size(), 1u);
         const unsigned long pid = std::stoul(requests[0].substr(0, requests[0].find(' ')));
-        EXPECT_TRUE(goneWithin(pid, seconds(5))) << "helper " << pid << " still runs";
+        EXPECT_TRUE(goneBy(pid, canceledAt + seconds(1))) << "helper " << pid << " still runs";
         EXPECT_EQ(helper_->idleHelpers(), 0u);
         EXPECT_EQ(helper_->busyHelpers(), 0u);
     }
@@ -684,12 +718,7 @@ namespace
     {
         const fs::path input = touch("hang.jpg");
         auto token = cancel::TokenRef::adopt(cancel::Token::create());
-        std::thread canceler([&] {
-            const auto deadline = Clock::now() + kPatience;
-            while (requestsFor(log_, "normalize", "hang.jpg").empty() && Clock::now() < deadline)
-                std::this_thread::sleep_for(milliseconds(5));
-            token.get()->cancel("canceled by the test");
-        });
+        CancelOnRequest canceler(log_, "normalize", "hang.jpg", token);
 
         bool canceled = false;
         {
@@ -703,13 +732,15 @@ namespace
                 canceled = true;
             }
         }
-        canceler.join();
+        const auto returned = Clock::now();
+        const auto canceledAt = canceler.canceledAt();
         EXPECT_TRUE(canceled);
+        EXPECT_LT(returned - canceledAt, seconds(1));
 
         const auto requests = requestsFor(log_, "normalize", "hang.jpg");
         ASSERT_EQ(requests.size(), 1u);
         const unsigned long pid = std::stoul(requests[0].substr(0, requests[0].find(' ')));
-        EXPECT_TRUE(goneWithin(pid, seconds(1))) << "helper " << pid << " still runs";
+        EXPECT_TRUE(goneBy(pid, canceledAt + seconds(1))) << "helper " << pid << " still runs";
         EXPECT_TRUE(copiesInCache().empty());
         EXPECT_TRUE(requestFolders().empty());
     }

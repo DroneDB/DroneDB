@@ -567,7 +567,7 @@ namespace
             // slice of half a second and some
             EXPECT_THROW(lease->receive(Clock::now() + seconds(60)), CanceledException);
         }
-        EXPECT_LT(Clock::now() - started, seconds(5));
+        EXPECT_LT(Clock::now() - started, seconds(1));
         lease.reset();
         expectKilledAndReplaced(pool, pid);
     }
@@ -602,7 +602,7 @@ namespace
         threads.join();
 
         EXPECT_TRUE(canceled);
-        EXPECT_LT(finished - asked, seconds(5)) << "the wait looks every half second";
+        EXPECT_LT(finished - asked, seconds(1)) << "the wait looks every half second";
         expectKilledAndReplaced(pool, pid);
     }
 
