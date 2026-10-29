@@ -43,72 +43,12 @@ namespace
         return ttz;
     }
 
-    // Appends a little-endian integer to a byte buffer.
-    template <typename T>
-    void putLE(std::vector<uint8_t> &b, T v)
-    {
-        for (size_t i = 0; i < sizeof(T); ++i)
-            b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFF));
-    }
-
-    // Builds a minimal, valid ZIP archive containing a single zero-length STORE entry with the
-    // given name. Used to inject a path-traversal entry name that libzip's own writer would not
-    // normally produce, so we can exercise the Zip-Slip guard in _extractAll.
+    // A ZIP archive with a single zero-length entry of the given name, one libzip's own writer
+    // would not produce (a path-traversal name): the Zip-Slip guard of the extraction is
+    // exercised with it.
     void writeMinimalZip(const fs::path &path, const std::string &entryName)
     {
-        std::vector<uint8_t> buf;
-        const uint16_t nameLen = static_cast<uint16_t>(entryName.size());
-
-        // Local file header.
-        putLE<uint32_t>(buf, 0x04034b50);
-        putLE<uint16_t>(buf, 20);   // version needed
-        putLE<uint16_t>(buf, 0);    // flags
-        putLE<uint16_t>(buf, 0);    // method: store
-        putLE<uint16_t>(buf, 0);    // mod time
-        putLE<uint16_t>(buf, 0);    // mod date
-        putLE<uint32_t>(buf, 0);    // crc32 (empty payload)
-        putLE<uint32_t>(buf, 0);    // compressed size
-        putLE<uint32_t>(buf, 0);    // uncompressed size
-        putLE<uint16_t>(buf, nameLen);
-        putLE<uint16_t>(buf, 0);    // extra len
-        buf.insert(buf.end(), entryName.begin(), entryName.end());
-
-        const uint32_t cdOffset = static_cast<uint32_t>(buf.size());
-
-        // Central directory header.
-        putLE<uint32_t>(buf, 0x02014b50);
-        putLE<uint16_t>(buf, 20);   // version made by
-        putLE<uint16_t>(buf, 20);   // version needed
-        putLE<uint16_t>(buf, 0);    // flags
-        putLE<uint16_t>(buf, 0);    // method
-        putLE<uint16_t>(buf, 0);    // mod time
-        putLE<uint16_t>(buf, 0);    // mod date
-        putLE<uint32_t>(buf, 0);    // crc32
-        putLE<uint32_t>(buf, 0);    // compressed size
-        putLE<uint32_t>(buf, 0);    // uncompressed size
-        putLE<uint16_t>(buf, nameLen);
-        putLE<uint16_t>(buf, 0);    // extra len
-        putLE<uint16_t>(buf, 0);    // comment len
-        putLE<uint16_t>(buf, 0);    // disk number start
-        putLE<uint16_t>(buf, 0);    // internal attrs
-        putLE<uint32_t>(buf, 0);    // external attrs
-        putLE<uint32_t>(buf, 0);    // local header offset
-        buf.insert(buf.end(), entryName.begin(), entryName.end());
-
-        const uint32_t cdSize = static_cast<uint32_t>(buf.size()) - cdOffset;
-
-        // End of central directory.
-        putLE<uint32_t>(buf, 0x06054b50);
-        putLE<uint16_t>(buf, 0);    // disk number
-        putLE<uint16_t>(buf, 0);    // cd start disk
-        putLE<uint16_t>(buf, 1);    // entries this disk
-        putLE<uint16_t>(buf, 1);    // total entries
-        putLE<uint32_t>(buf, cdSize);
-        putLE<uint32_t>(buf, cdOffset);
-        putLE<uint16_t>(buf, 0);    // comment len
-
-        std::ofstream o(path.string(), std::ios::binary);
-        o.write(reinterpret_cast<const char *>(buf.data()), buf.size());
+        writeZipOfEmptyEntries(path, {entryName});
     }
 
     // A .3tz is recognised as EntryType::Tiles3D by extension.

@@ -6,6 +6,7 @@
 #include <fstream>
 
 #include "build_internal.h"
+#include "entry_path.h"
 #include "exceptions.h"
 #include "http_client.h"
 #include "mio.h"
@@ -108,6 +109,14 @@ void RegistryClient::downloadFiles(const std::string &organization, const std::s
     if (files.empty())
         return;
 
+    // The names come from the Registry's delta: a pull writes dataset files, so a name that is
+    // no entry path (absolute, "..", or with a ".ddb" segment, where the builds and the index
+    // live) is refused before anything is requested, and an archive entry that is not one
+    // before anything is written. Without it a name such as "../../../build/<hash>/cog/cog.tif"
+    // puts a file where the builds of the dataset are.
+    for (const auto &file : files)
+        requireEntryPath(file, "path to download");
+
     auto downloadPath = datasetPath(organization, dataset) + "/download";
 
     if (files.size() == 1) {
@@ -152,6 +161,7 @@ void RegistryClient::downloadFiles(const std::string &organization, const std::s
 #ifndef _WIN32
             options.refuseWindowsUnsafeNames = false;
 #endif
+            options.acceptEntry = [](const std::string &name) { return normalizeEntryPath(name).accepted(); };
             options.beforeWrite = [&folder](uint64_t declaredTotal) {
                 ensureSufficientDiskSpace(io::fromUtf8(folder), declaredTotal);
             };

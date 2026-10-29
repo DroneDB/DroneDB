@@ -35,6 +35,12 @@ namespace ddb::zip
         // extracts to the same tree everywhere, which an archive libddb serves needs. Off, such
         // a name extracts where the file system takes it (a POSIX one takes them all).
         bool refuseWindowsUnsafeNames = true;
+
+        // Decides from the name of an entry (as the archive spells it) whether the caller wants
+        // it: an entry it returns false for throws a ZipException before anything is written,
+        // like a name that leaves the folder. For the caller that knows which names its
+        // archive may hold (a pull gets the files it asked for, never a ".ddb" folder).
+        std::function<bool(const std::string &entryName)> acceptEntry;
     };
 
     // Extracts every entry of zipFile into outdir (created). An entry name that is absolute,

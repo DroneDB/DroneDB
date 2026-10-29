@@ -141,6 +141,8 @@ namespace ddb::zip
                 continue;
 
             ensureSafeZipEntry(outdir, fStat.name, options.refuseWindowsUnsafeNames);
+            if (options.acceptEntry && !options.acceptEntry(fStat.name))
+                throw ZipException(std::string("Archive entry not allowed here: ") + fStat.name);
 
             if (!(fStat.valid & ZIP_STAT_SIZE))
                 throw ZipException(std::string("Archive entry without a size: ") + fStat.name);

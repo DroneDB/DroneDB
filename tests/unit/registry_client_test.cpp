@@ -632,6 +632,63 @@ namespace
         EXPECT_EQ(entries, 2u); // no .tmp left
     }
 
+    // A pull writes the files of the dataset, whatever names the Registry sends: a name that
+    // leaves the folder or reaches ".ddb" (where the builds of the dataset are) is refused before
+    // a request is made, so no file lands in the folder of the builds
+    TEST(RegistryClientDatasets, ANameThatIsNoEntryPathIsRefusedBeforeAnythingIsRequested)
+    {
+        const std::vector<std::string> names = {
+            "../../../build/0123456789abcdef/cog/cog.tif", ".ddb/build/0123456789abcdef/cog/cog.tif",
+            "a/.ddb/build/x.tif", "/etc/passwd", "a/../../x.txt", ".ddb", "a\\..\\..\\x.txt"};
+        for (const auto &name : names)
+        {
+            SCOPED_TRACE(name);
+            ClientFixture f(std::string(TEST_NAME) + "-" + std::to_string(&name - names.data()));
+            // Where a pull puts what it downloads: below .ddb/tmp, as pullDataset does
+            const auto ddbFolder = f.ta.getFolder("dataset/.ddb");
+            const auto pullFolder = ddbFolder / "tmp" / "pull_cache" / "o-d" / "1";
+            std::ostringstream out;
+            EXPECT_THROW(f.client.downloadFiles("o", "d", {name}, io::toUtf8(pullFolder), out), InvalidPathException);
+            EXPECT_THROW(f.client.downloadFiles("o", "d", {"fine.txt", name}, io::toUtf8(pullFolder), out),
+                         InvalidPathException);
+            EXPECT_TRUE(f.net.http.calls.empty());
+            EXPECT_FALSE(fs::exists(ddbFolder / "build"));
+            EXPECT_FALSE(fs::exists(pullFolder));
+        }
+    }
+
+    // The archive of a pull holds what was asked for: an entry that leaves the folder, or is in
+    // ".ddb", is refused before anything is written, also when the Registry adds it on its own
+    TEST(RegistryClientDatasets, AnArchiveEntryThatIsNoEntryPathWritesNothing)
+    {
+        const std::vector<std::vector<std::string>> archives = {
+            {"a.txt", ".ddb/build/0123456789abcdef/cog/cog.tif"},
+            {"a.txt", "sub/.ddb/build/x.tif"},
+            {"a.txt", "../outside.txt"},
+            {".ddb/dbase.sqlite", "b.txt"},
+        };
+        for (const auto &entries : archives)
+        {
+            SCOPED_TRACE(entries.back());
+            ClientFixture f(std::string(TEST_NAME) + "-" + std::to_string(&entries - archives.data()));
+            const auto zipFile = f.ta.getPath("evil.zip");
+            writeZipOfEmptyEntries(zipFile, entries);
+            std::ifstream zin(zipFile, std::ios::binary);
+            std::stringstream zbytes;
+            zbytes << zin.rdbuf();
+            f.net.http.on("DOWNLOAD-POST", "/orgs/o/ds/d/download", reply(200, zbytes.str()));
+
+            const auto dl = f.ta.getFolder("dataset/.ddb/tmp/pull_cache/o-d/1");
+            std::ostringstream out;
+            EXPECT_THROW(f.client.downloadFiles("o", "d", {"a.txt", "b.txt"}, io::toUtf8(dl), out), AppException);
+
+            EXPECT_TRUE(fs::is_empty(dl)) << "nothing of the archive was written";
+            EXPECT_FALSE(fs::exists(f.ta.getPath("dataset/.ddb/build")));
+            EXPECT_FALSE(fs::exists(f.ta.getPath("dataset/.ddb/dbase.sqlite")));
+            EXPECT_FALSE(fs::exists(f.ta.getPath("dataset/.ddb/tmp/pull_cache/o-d/outside.txt")));
+        }
+    }
+
     TEST(RegistryClientDatasets, AFailedArchiveDownloadLeavesNoTempFile)
     {
         ClientFixture f(TEST_NAME);

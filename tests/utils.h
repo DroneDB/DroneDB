@@ -60,6 +60,11 @@ std::string calculateHash(const std::filesystem::path &file);
 // relative to it. Throws std::runtime_error when the archive cannot be written.
 void zipFolder(const std::string &folder, const std::string &zipFile);
 
+// Writes the archive `path` of zero-length STORE entries named exactly `entryNames`, written by
+// hand: names libzip's own writer would refuse or normalize ("../x", "/etc/x", ".ddb/build/x") are
+// what the extraction guards are tested with.
+void writeZipOfEmptyEntries(const std::filesystem::path &path, const std::vector<std::string> &entryNames);
+
 void createFile(const std::filesystem::path &filePath);
 bool createTestTree(const std::filesystem::path &root);
 std::string toHumanReadableTime(long long timeMs);

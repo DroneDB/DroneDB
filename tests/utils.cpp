@@ -67,6 +67,80 @@ std::filesystem::path writeFile(const std::filesystem::path &path, const std::ve
     return writeFile(path, std::string(content.begin(), content.end()));
 }
 
+namespace
+{
+    // Appends a little-endian integer to a byte buffer
+    template <typename T>
+    void putLE(std::vector<uint8_t> &b, T v)
+    {
+        for (size_t i = 0; i < sizeof(T); ++i)
+            b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xFF));
+    }
+} // namespace
+
+void writeZipOfEmptyEntries(const std::filesystem::path &path, const std::vector<std::string> &entryNames)
+{
+    std::vector<uint8_t> buf;
+    std::vector<uint32_t> offsets;
+
+    for (const auto &name : entryNames)
+    {
+        offsets.push_back(static_cast<uint32_t>(buf.size()));
+        // Local file header
+        putLE<uint32_t>(buf, 0x04034b50);
+        putLE<uint16_t>(buf, 20);   // version needed
+        putLE<uint16_t>(buf, 0);    // flags
+        putLE<uint16_t>(buf, 0);    // method: store
+        putLE<uint16_t>(buf, 0);    // mod time
+        putLE<uint16_t>(buf, 0);    // mod date
+        putLE<uint32_t>(buf, 0);    // crc32 (empty payload)
+        putLE<uint32_t>(buf, 0);    // compressed size
+        putLE<uint32_t>(buf, 0);    // uncompressed size
+        putLE<uint16_t>(buf, static_cast<uint16_t>(name.size()));
+        putLE<uint16_t>(buf, 0);    // extra len
+        buf.insert(buf.end(), name.begin(), name.end());
+    }
+
+    const uint32_t cdOffset = static_cast<uint32_t>(buf.size());
+    for (size_t i = 0; i < entryNames.size(); i++)
+    {
+        const auto &name = entryNames[i];
+        // Central directory header
+        putLE<uint32_t>(buf, 0x02014b50);
+        putLE<uint16_t>(buf, 20);   // version made by
+        putLE<uint16_t>(buf, 20);   // version needed
+        putLE<uint16_t>(buf, 0);    // flags
+        putLE<uint16_t>(buf, 0);    // method
+        putLE<uint16_t>(buf, 0);    // mod time
+        putLE<uint16_t>(buf, 0);    // mod date
+        putLE<uint32_t>(buf, 0);    // crc32
+        putLE<uint32_t>(buf, 0);    // compressed size
+        putLE<uint32_t>(buf, 0);    // uncompressed size
+        putLE<uint16_t>(buf, static_cast<uint16_t>(name.size()));
+        putLE<uint16_t>(buf, 0);    // extra len
+        putLE<uint16_t>(buf, 0);    // comment len
+        putLE<uint16_t>(buf, 0);    // disk number start
+        putLE<uint16_t>(buf, 0);    // internal attrs
+        putLE<uint32_t>(buf, 0);    // external attrs
+        putLE<uint32_t>(buf, offsets[i]);
+        buf.insert(buf.end(), name.begin(), name.end());
+    }
+    const uint32_t cdSize = static_cast<uint32_t>(buf.size()) - cdOffset;
+
+    // End of central directory
+    putLE<uint32_t>(buf, 0x06054b50);
+    putLE<uint16_t>(buf, 0);    // disk number
+    putLE<uint16_t>(buf, 0);    // cd start disk
+    putLE<uint16_t>(buf, static_cast<uint16_t>(entryNames.size()));
+    putLE<uint16_t>(buf, static_cast<uint16_t>(entryNames.size()));
+    putLE<uint32_t>(buf, cdSize);
+    putLE<uint32_t>(buf, cdOffset);
+    putLE<uint16_t>(buf, 0);    // comment len
+
+    std::ofstream o(path, std::ios::binary);
+    o.write(reinterpret_cast<const char *>(buf.data()), static_cast<std::streamsize>(buf.size()));
+}
+
 void zipFolder(const std::string &folder, const std::string &zipFile)
 {
     int error = 0;
