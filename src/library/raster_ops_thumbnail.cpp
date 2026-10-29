@@ -172,13 +172,26 @@ RasterImage translateToImage(GDALDatasetH hSrc, const ImageTranslation& spec) {
         return os.str();
     };
 
+    // Without overviews every pixel of the raster is read. GDALTranslate reads its source through
+    // a VRT whose blocks are 128 x 128 pixels of the output, every band of a block before the next
+    // block: one block covers thousands of rows of the source, and a pixel-interleaved file decodes
+    // all its bands for any of them, so when that window does not fit in the block cache the file
+    // is decoded again for each band read (four times for a raster of 52 bands, a thumbnail longer
+    // than the helper allows). Blocks of one output row cover a few rows of the source: the first
+    // band decodes them and the next ones find them in the cache, so the file is decoded once.
+    // Such a VRT is read in place of a copy. A raster with overviews is read from them in the
+    // windows it always had: rows would place the pixels of an overview otherwise.
+    const bool fullResolution = GDALGetOverviewCount(GDALGetRasterBand(hSrc, 1)) == 0;
+
     std::vector<std::string> argStore = {
         "-outsize", std::to_string(spec.width), std::to_string(spec.height),
         "-ot", "Byte",
         "-r", spec.expandPalette ? "nearest" : "average",
-        "-of", "MEM",
+        "-of", fullResolution ? "VRT" : "MEM",
         // Drop SRS: the thumbnail is meant as a display-only artifact.
         "-a_srs", ""};
+    if (fullResolution)
+        argStore.insert(argStore.end(), {"-co", "BLOCKXSIZE=" + std::to_string(spec.width), "-co", "BLOCKYSIZE=1"});
 
     if (spec.expandPalette) {
         // Palette transparency, if any, is recovered from the source mask band.
@@ -198,7 +211,8 @@ RasterImage translateToImage(GDALDatasetH hSrc, const ImageTranslation& spec) {
         GDALTranslateOptionsNew(argv.List(), nullptr));
     if (!psOptions)
         throw GDALException("Failed to create GDAL translate options for " + spec.sourceLabel);
-    // The resampling reads the whole raster: it stops when the call is canceled
+    // The resampling reads the whole raster (in the copy, or in the read of the VRT): it stops
+    // when the call is canceled
     cancel::GdalProgress progress;
     progress.attach(psOptions.get());
 
@@ -209,9 +223,12 @@ RasterImage translateToImage(GDALDatasetH hSrc, const ImageTranslation& spec) {
     }
 
     RasterImage image(spec.width, spec.height, 3, false);
-    if (GDALDatasetRasterIO(datasetHandle(translated), GF_Read, 0, 0, spec.width, spec.height, image.color.data(),
-                            spec.width, spec.height, GDT_Byte, 3, nullptr, 0, 0, 0) != CE_None)
+    GDALRasterIOExtraArg extraArg = progress.rasterIOExtraArg();
+    if (GDALDatasetRasterIOEx(datasetHandle(translated), GF_Read, 0, 0, spec.width, spec.height, image.color.data(),
+                              spec.width, spec.height, GDT_Byte, 3, nullptr, 0, 0, 0, &extraArg) != CE_None) {
+        cancel::throwIfCanceled();
         throw GDALException(std::string("Failed to read thumbnail pixels: ") + CPLGetLastErrorMsg());
+    }
     return image;
 }
 
