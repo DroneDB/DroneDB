@@ -20,8 +20,9 @@ struct BandNodata {
 };
 
 // Reads the geotransform of a dataset into gt. Throws GDALException("Raster has no geotransform:
-// <the dataset's name>") when the dataset has none (GDAL would hand out its default one).
-void requireGeoTransform(GDALDatasetH ds, double gt[6]);
+// <name>") when the dataset has none (GDAL would hand out its default one). `name` is the raster
+// the caller was asked about: the dataset is a copy of it, which the user never named.
+void requireGeoTransform(GDALDatasetH ds, double gt[6], const std::string &name);
 
 // Reads the nodata value of a band. The one place that calls GDALGetRasterNoDataValue.
 BandNodata readBandNodata(GDALRasterBandH band);

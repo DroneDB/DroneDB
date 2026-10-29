@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "cancellation.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "mask.h"
@@ -170,7 +170,7 @@ namespace ddb
     {
         removeStaleOutput(input, output);
 
-        const auto srcDataset = openUserRaster(input);
+        const auto srcDataset = raster::openInputRaster(input);
         if (!srcDataset)
             throw GDALException("Cannot open " + input + " for reading");
         GDALDatasetH hSrcDataset = datasetHandle(srcDataset);

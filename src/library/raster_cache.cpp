@@ -11,9 +11,10 @@
 #include "env.h"
 #include "exceptions.h"
 #include "fileversion.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "logger.h"
+#include "raster_artefacts.h"
 #include "raster_utils.h"
 #include "tiler.h"
 #include "mio.h"
@@ -35,7 +36,10 @@ namespace ddb
     OpenedDataset::OpenedDataset(const std::string &path, Kind kind)
     {
         const bool raster = kind == Kind::Raster;
-        dataset_ = raster ? openUserRaster(path) : openUserVector(path);
+        // A raster is read as an artefact: the COG of a build as it is, any other raster as the
+        // normalized copy the raster helper wrote. A vector is read from the GeoPackage that a
+        // build wrote (the vector queries name it): there is no raw vector to normalize.
+        dataset_ = raster ? raster::openInputRaster(path) : raster::openArtefactVector(io::fromUtf8(path));
         if (!dataset_)
             throw GDALException(std::string(raster ? "Cannot open raster: " : "Cannot open vector: ") + path);
     }

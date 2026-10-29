@@ -11,9 +11,9 @@
 
 namespace ddb {
 
-void requireGeoTransform(GDALDatasetH ds, double gt[6]) {
+void requireGeoTransform(GDALDatasetH ds, double gt[6], const std::string &name) {
     if (GDALGetGeoTransform(ds, gt) != CE_None)
-        throw GDALException(std::string("Raster has no geotransform: ") + GDALGetDescription(ds));
+        throw GDALException("Raster has no geotransform: " + name);
 }
 
 

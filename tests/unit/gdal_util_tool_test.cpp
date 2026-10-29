@@ -23,6 +23,7 @@
 #include "contract_fixtures.h"
 #include "fs.h"
 #include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "gtest/gtest.h"
 #include "json.h"
 #include "json_schema_check.h"
@@ -192,6 +193,16 @@ namespace
         request.path = path;
         request.out = out;
         request.params = raster::toJson(params);
+        return request;
+    }
+
+    raster::Request normalizeRequest(int64_t id, const fs::path &path, const fs::path &out)
+    {
+        raster::Request request;
+        request.id = id;
+        request.op = raster::op::kNormalize;
+        request.path = path;
+        request.out = out;
         return request;
     }
 
@@ -488,6 +499,76 @@ namespace
         EXPECT_FALSE(fs::exists(out));
     }
 
+    // ------------------------------------------------------------------ normalize
+
+    TEST_F(GdalUtilToolTest, aNormalizedPhotoHoldsThePixelsOfTheJpeg)
+    {
+        const fs::path out = area_->getFolder() / "photo-normalized.tif";
+        Server server;
+        const auto response = server.ask(normalizeRequest(31, jpeg_, out));
+        ASSERT_TRUE(response.ok) << response.message;
+
+        const auto in = adoptDataset(GDALOpenEx(io::toUtf8(jpeg_).c_str(), GDAL_OF_RASTER, nullptr, nullptr, nullptr));
+        const auto copy = adoptDataset(GDALOpenEx(io::toUtf8(out).c_str(), GDAL_OF_RASTER, nullptr, nullptr, nullptr));
+        ASSERT_TRUE(in);
+        ASSERT_TRUE(copy);
+        EXPECT_STREQ(copy->GetDriverName(), "GTiff");
+        ASSERT_EQ(copy->GetRasterCount(), in->GetRasterCount());
+        const int width = in->GetRasterXSize();
+        const int height = in->GetRasterYSize();
+        ASSERT_EQ(copy->GetRasterXSize(), width);
+        ASSERT_EQ(copy->GetRasterYSize(), height);
+        for (int band = 1; band <= in->GetRasterCount(); band++)
+        {
+            std::vector<uint8_t> a(static_cast<size_t>(width) * height), b(a.size());
+            ASSERT_EQ(in->GetRasterBand(band)->RasterIO(GF_Read, 0, 0, width, height, a.data(), width, height, GDT_Byte, 0, 0), CE_None);
+            ASSERT_EQ(copy->GetRasterBand(band)->RasterIO(GF_Read, 0, 0, width, height, b.data(), width, height, GDT_Byte, 0, 0), CE_None);
+            EXPECT_EQ(a, b) << band;
+        }
+    }
+
+    TEST_F(GdalUtilToolTest, aFileThatIsNoRasterIsUnreadableToNormalizeAndWritesNothing)
+    {
+        const fs::path out = area_->getFolder() / "none.tif";
+        Server server;
+        const auto response = server.ask(normalizeRequest(32, fakeRaster_, out));
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Unreadable);
+        EXPECT_FALSE(fs::exists(out));
+    }
+
+    TEST_F(GdalUtilToolTest, aRasterOfMoreThanABillionPixelsIsALimitThatSaysToBuildTheDatasetAndWritesNothing)
+    {
+        const fs::path huge = area_->getFolder() / "huge.tif";
+        {
+            CPLStringList options;
+            options.SetNameValue("TILED", "YES");
+            options.SetNameValue("SPARSE_OK", "TRUE");
+            const auto ds = adoptDataset(GetGDALDriverManager()->GetDriverByName("GTiff")->Create(
+                io::toUtf8(huge).c_str(), 40000, 30000, 1, GDT_Byte, options.List()));
+            ASSERT_TRUE(ds);
+        }
+        const fs::path out = area_->getFolder() / "huge-normalized.tif";
+        Server server;
+        const auto response = server.ask(normalizeRequest(33, huge, out));
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Limit);
+        EXPECT_NE(response.message.find("build the dataset first"), std::string::npos) << response.message;
+        EXPECT_FALSE(fs::exists(out));
+    }
+
+    TEST_F(GdalUtilToolTest, aNormalizeRequestNeedsAnAbsoluteOutput)
+    {
+        Server server;
+        const auto noOut = server.ask(normalizeRequest(1, jpeg_, fs::path()));
+        EXPECT_FALSE(noOut.ok);
+        EXPECT_EQ(noOut.error, raster::ErrorCode::Internal);
+        const auto relative = server.ask(normalizeRequest(2, jpeg_, "relative.tif"));
+        EXPECT_FALSE(relative.ok);
+        EXPECT_EQ(relative.error, raster::ErrorCode::Internal);
+        EXPECT_FALSE(fs::exists("relative.tif"));
+    }
+
     TEST_F(GdalUtilToolTest, aThumbnailRequestNeedsAnAbsoluteOutputAndAPositiveSize)
     {
         Server server;
@@ -515,19 +596,15 @@ namespace
         EXPECT_EQ(response.error, raster::ErrorCode::Internal);
     }
 
-    TEST_F(GdalUtilToolTest, anUnknownOperationAndOneNotYetAvailableAreInternalErrors)
+    TEST_F(GdalUtilToolTest, anUnknownOperationIsAnInternalError)
     {
         Server server;
-        for (const char *op : {"bogus", "normalize"})
-        {
-            SCOPED_TRACE(op);
-            raster::Request request = probeRequest(1, geotiff_);
-            request.op = op;
-            const auto response = server.ask(request);
-            EXPECT_FALSE(response.ok);
-            EXPECT_EQ(response.error, raster::ErrorCode::Internal);
-            EXPECT_NE(response.message.find(op), std::string::npos) << response.message;
-        }
+        raster::Request request = probeRequest(1, geotiff_);
+        request.op = "bogus";
+        const auto response = server.ask(request);
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Internal);
+        EXPECT_NE(response.message.find("bogus"), std::string::npos) << response.message;
     }
 
     TEST_F(GdalUtilToolTest, badLinesAreAnsweredAndDoNotStopTheServer)

@@ -132,7 +132,7 @@ namespace ddb
             {
                 if (!isLibddbArtefact(path))
                     throw GDALException("Refusing to open " + io::toUtf8(path) +
-                                        ": it is not a file libddb wrote (convert it with the raster helper first)");
+                                        ": it is not a file libddb wrote (build the dataset, or copy it with the raster helper, first)");
                 const std::string utf8 = io::toUtf8(path);
                 const CPLStringList allowed = cslFromStrings(drivers);
                 const NoNetworkWhileOpening noNetwork(utf8);
@@ -144,6 +144,11 @@ namespace ddb
         fs::path artefactsDir()
         {
             return UserProfile::get()->getCachePath("artefacts");
+        }
+
+        fs::path normalizedDir()
+        {
+            return UserProfile::get()->getCachePath(fs::path("artefacts") / "normalized");
         }
 
         bool isLibddbArtefact(const fs::path &path)
@@ -224,24 +229,40 @@ namespace ddb
             io::assureIsRemoved(produced);
         }
 
+        namespace
+        {
+            // Removes the entries of `folder` (files and folders) that were not touched since
+            // `threshold`, except the ones `keep` names
+            void removeOlderThan(const fs::path &folder, time_t threshold, const fs::path &keep)
+            {
+                std::error_code ec;
+                for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+                {
+                    const fs::path entry = it->path();
+                    if (entry == keep)
+                        continue;
+                    try
+                    {
+                        if (io::Path(entry).getModifiedTime() < threshold)
+                            io::assureIsRemoved(entry);
+                    }
+                    catch (const std::exception &e)
+                    {
+                        // A file a reader still holds (Windows) stays until the next time
+                        LOGD << "Cannot remove the artefact " << io::toUtf8(entry) << ": " << e.what();
+                    }
+                }
+            }
+        } // namespace
+
         void cleanupArtefacts(time_t maxAge)
         {
             const time_t threshold = currentUnixTimestamp() - maxAge;
-            std::error_code ec;
-            for (fs::directory_iterator it(artefactsDir(), ec), end; !ec && it != end; it.increment(ec))
-            {
-                const fs::path entry = it->path();
-                try
-                {
-                    if (io::Path(entry).getModifiedTime() < threshold)
-                        io::assureIsRemoved(entry);
-                }
-                catch (const std::exception &e)
-                {
-                    // A file a reader still holds (Windows) stays until the next time
-                    LOGD << "Cannot remove the artefact " << io::toUtf8(entry) << ": " << e.what();
-                }
-            }
+            // The folder of the normalized copies stays: it is the files in it that age, and it
+            // changes only when one is added or removed
+            const fs::path normalized = normalizedDir();
+            removeOlderThan(artefactsDir(), threshold, normalized);
+            removeOlderThan(normalized, threshold, fs::path());
         }
 
     } // namespace raster

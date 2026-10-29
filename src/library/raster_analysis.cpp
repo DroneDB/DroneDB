@@ -9,7 +9,7 @@
 #include "thermal.h"
 #include "sensorprofile.h"
 #include "exceptions.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "vegetation.h"
@@ -293,7 +293,7 @@ std::string getRasterValueInfoJson(const std::string &filePath) {
     float vMin = 0.f, vMax = 0.f;
     bool hasStats = false;
 
-    if (const auto dataset = openUserRaster(filePath)) {
+    if (const auto dataset = raster::openInputRaster(filePath)) {
         GDALDatasetH hDs = datasetHandle(dataset);
         width = GDALGetRasterXSize(hDs);
         height = GDALGetRasterYSize(hDs);
@@ -376,7 +376,7 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y) {
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
 
-    if (const auto dataset = openUserRaster(filePath)) {
+    if (const auto dataset = raster::openInputRaster(filePath)) {
         GDALDatasetH hDs = datasetHandle(dataset);
         const int w = GDALGetRasterXSize(hDs);
         const int h = GDALGetRasterYSize(hDs);
@@ -412,7 +412,7 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
 
-    if (const auto dataset = openUserRaster(filePath)) {
+    if (const auto dataset = raster::openInputRaster(filePath)) {
         GDALDatasetH hDs = datasetHandle(dataset);
         const int w = GDALGetRasterXSize(hDs);
         const int h = GDALGetRasterYSize(hDs);
@@ -613,7 +613,7 @@ json algorithmList(const VegetationEngine &ve, GDALDatasetH hDs, const BandFilte
 std::string getRasterMetadataJson(const std::string &path, const std::string &formula, const std::string &bandFilter) {
     cancel::throwIfCanceled();
     // Owned: the formula, statistics and sensor steps below can throw while it is open
-    auto dataset = openUserRaster(path);
+    auto dataset = raster::openInputRaster(path);
     if (!dataset)
         throw GDALException("Cannot open " + path);
     GDALDatasetH hDs = datasetHandle(dataset);

@@ -21,7 +21,9 @@ namespace ddb
 {
     class Tiler;
 
-    /// A raster or vector file opened read-only with GDAL, closed when destroyed
+    /// A raster or vector read-only with GDAL, closed when destroyed. It is not the file of a user
+    /// that is opened but an artefact (raster_artefacts.h): see artefact_cache.h for a raster; a
+    /// vector must be the GeoPackage of a build.
     class OpenedDataset
     {
         GDALDatasetUniquePtr dataset_;

@@ -4,6 +4,7 @@
 #ifndef RASTER_OPS_H
 #define RASTER_OPS_H
 
+#include <cstdint>
 #include <exception>
 
 #include "entry.h"
@@ -56,6 +57,25 @@ namespace ddb
 
         // The same thumbnail, written to outFile as the thumbnails are (WebP)
         void thumbnail(const fs::path &path, const fs::path &outFile, const ThumbnailParams &params);
+
+        // The most pixels (width x height) a raster may have to be normalized. The copy is read
+        // whole by the analyses, so a raster beyond this is not copied, whatever the memory of
+        // the host: its dataset is built first, and the analyses read the COG of the build.
+        constexpr int64_t kMaxNormalizePixels = 1000000000;
+
+        // Writes the raster of a user as the GeoTIFF outFile that libddb wrote, with the blocks and
+        // the overviews of the raster (GDAL's approximate statistics read an overview, or sample
+        // whole blocks, so the same ones give the same statistics). It has all the bands of the raster with their
+        // types, no-data values, colour interpretation, descriptions, units, offsets and scales;
+        // its georeferencing (geotransform and coordinate system, or the
+        // ground control points; the RPC); and the metadata of the dataset and of its bands in
+        // every domain, except the ones that name other files (isFileNamingDomain), so reading the
+        // copy never leads to a file of the user. The compression loses nothing: a value of the
+        // copy is the value of the raster. The sidecar files of the raster are not copied. Nothing is written for a raster of more than kMaxNormalizePixels.
+        // @throws RasterOpException when the file cannot be opened (code Unreadable) or has more
+        // pixels than allowed (code Limit); GDALException when GDAL fails; RetryableBuildException
+        // when the device is full
+        void normalizeRaster(const fs::path &path, const fs::path &outFile);
 
         // The long operations below run in a process of their own (`gdal-util --request`). The
         // COG build reports how far it is through `progress` (called from any thread, at most

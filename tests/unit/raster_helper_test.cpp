@@ -19,6 +19,7 @@
 #include <thread>
 #include <vector>
 
+#include "artefact_cache.h"
 #include "build_budget.h"
 #include "build_layout.h"
 #include "cancellation.h"
@@ -568,6 +569,164 @@ namespace
         EXPECT_THROW(helper_->probe(input, ProbeParams()), CanceledException);
         EXPECT_THROW(helper_->thumbnail(input, area_->getPath("t.webp"), {64, std::nullopt}), CanceledException);
         EXPECT_THROW(renderThumbnailWebp(input, {64, std::nullopt}), CanceledException);
+        EXPECT_EQ(helper_->requestsSent(), 0u);
+        EXPECT_EQ(helper_->startedHelpers(), 0u);
+    }
+
+    // ------------------------------------------------------------------ normalized copies
+
+    // The copies in the cache of the test
+    std::vector<fs::path> copiesInCache()
+    {
+        std::vector<fs::path> copies;
+        for (const auto &entry : fs::directory_iterator(raster::normalizedDir()))
+            copies.push_back(entry.path());
+        return copies;
+    }
+
+    // The folders the requests of the artefact cache write to, in the artefacts of the cache
+    std::vector<fs::path> requestFolders()
+    {
+        std::vector<fs::path> folders;
+        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
+            if (entry.path().filename() != "normalized")
+                folders.push_back(entry.path());
+        return folders;
+    }
+
+    // The cache of the artefacts is the one of the test
+    class RasterNormalizeTest : public RasterHelperTest
+    {
+      protected:
+        void SetUp() override
+        {
+            RasterHelperTest::SetUp();
+            config_ = std::make_unique<ScopedProcessConfig>(json{{"cacheDir", io::toUtf8(area_->getPath("cache"))}}.dump());
+        }
+
+        void TearDown() override
+        {
+            config_.reset();
+            RasterHelperTest::TearDown();
+        }
+
+        std::unique_ptr<ScopedProcessConfig> config_;
+    };
+
+    TEST_F(RasterNormalizeTest, theCopyTheHelperWroteIsCheckedAndPublishedUnderTheKeyOfTheFile)
+    {
+        const fs::path input = touch("ok.jpg");
+        const fs::path copy = artefactFor(input);
+
+        EXPECT_EQ(copy, normalizedDir() / (artefactKey(input) + ".tif"));
+        ASSERT_TRUE(openArtefactRaster(copy));
+        EXPECT_EQ(copiesInCache(), std::vector<fs::path>{copy});
+        EXPECT_TRUE(requestFolders().empty());
+        EXPECT_EQ(requestsFor(log_, "normalize", "ok.jpg").size(), 1u);
+
+        // The same file again: the cache answers, the helper is not asked
+        EXPECT_EQ(artefactFor(input), copy);
+        EXPECT_EQ(requestsFor(log_, "normalize", "ok.jpg").size(), 1u);
+    }
+
+    TEST_F(RasterNormalizeTest, aFileThatChangedIsAskedAgain)
+    {
+        const fs::path input = touch("ok.jpg");
+        const fs::path first = artefactFor(input);
+
+        std::ofstream(input, std::ios::binary | std::ios::app) << " and more";
+        const fs::path second = artefactFor(input);
+        EXPECT_NE(second, first);
+        EXPECT_EQ(requestsFor(log_, "normalize", "ok.jpg").size(), 2u);
+    }
+
+    TEST_F(RasterNormalizeTest, aCopyThatIsNoGeoTiffIsNeverPublished)
+    {
+        const fs::path input = touch("garbagetif.jpg");
+        try
+        {
+            artefactFor(input);
+            FAIL() << "no exception";
+        }
+        catch (const GDALException &e)
+        {
+            EXPECT_NE(std::string(e.what()).find("not a GeoTIFF"), std::string::npos) << e.what();
+        }
+        EXPECT_TRUE(copiesInCache().empty());
+        EXPECT_TRUE(requestFolders().empty()) << "the folder of the request stays";
+    }
+
+    TEST_F(RasterNormalizeTest, theFailuresOfTheHelperOpenAsAMissingRasterOrAreThrown)
+    {
+        // A raster GDAL cannot open or the policy refuses: as for any file GDAL does not read
+        EXPECT_FALSE(openInputRaster(io::toUtf8(touch("unreadable.jpg"))));
+        EXPECT_FALSE(openInputRaster(io::toUtf8(touch("policy.jpg"))));
+        EXPECT_THROW(artefactFor(touch("unreadable2.jpg")), RasterOpException);
+        // A raster the helper could not read within its limits, a full device and a broken helper are not
+        EXPECT_THROW(openInputRaster(io::toUtf8(touch("limit.jpg"))), RasterNotReadException);
+        EXPECT_THROW(openInputRaster(io::toUtf8(touch("crashed.jpg"))), RasterNotReadException);
+        EXPECT_THROW(openInputRaster(io::toUtf8(touch("garbage.jpg"))), RasterNotReadException);
+        EXPECT_THROW(openInputRaster(io::toUtf8(touch("internal.jpg"))), RasterOpException);
+        try
+        {
+            artefactFor(touch("nospace.jpg"));
+            FAIL() << "no exception";
+        }
+        catch (const FSException &e)
+        {
+            EXPECT_EQ(e.code(), std::make_error_code(std::errc::no_space_on_device));
+        }
+        EXPECT_TRUE(copiesInCache().empty());
+        EXPECT_TRUE(requestFolders().empty());
+    }
+
+    TEST_F(RasterNormalizeTest, aCanceledCopyKillsTheWorkerAndLeavesNothingInTheCache)
+    {
+        const fs::path input = touch("hang.jpg");
+        auto token = cancel::TokenRef::adopt(cancel::Token::create());
+        std::thread canceler([&] {
+            const auto deadline = Clock::now() + kPatience;
+            while (requestsFor(log_, "normalize", "hang.jpg").empty() && Clock::now() < deadline)
+                std::this_thread::sleep_for(milliseconds(5));
+            token.get()->cancel("canceled by the test");
+        });
+
+        bool canceled = false;
+        {
+            cancel::ScopedThreadToken scope(token);
+            try
+            {
+                artefactFor(input);
+            }
+            catch (const CanceledException &)
+            {
+                canceled = true;
+            }
+        }
+        canceler.join();
+        EXPECT_TRUE(canceled);
+
+        const auto requests = requestsFor(log_, "normalize", "hang.jpg");
+        ASSERT_EQ(requests.size(), 1u);
+        const unsigned long pid = std::stoul(requests[0].substr(0, requests[0].find(' ')));
+        EXPECT_TRUE(goneWithin(pid, seconds(1))) << "helper " << pid << " still runs";
+        EXPECT_TRUE(copiesInCache().empty());
+        EXPECT_TRUE(requestFolders().empty());
+    }
+
+    TEST_F(RasterNormalizeTest, anArtefactIsOpenedWithNoRequestAtAll)
+    {
+        const fs::path build = area_->getPath("dataset") / DDB_FOLDER / DDB_BUILD_PATH /
+                               "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        const fs::path cog = build / CogBuildSubfolder / CogFileName;
+        fs::create_directories(cog.parent_path());
+        testutils::GeoRasterSpec spec;
+        spec.width = 32;
+        spec.height = 32;
+        testutils::createGeoRaster(cog, spec);
+
+        EXPECT_EQ(artefactFor(cog), cog);
+        EXPECT_TRUE(openInputRaster(io::toUtf8(cog)));
         EXPECT_EQ(helper_->requestsSent(), 0u);
         EXPECT_EQ(helper_->startedHelpers(), 0u);
     }

@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include "build_layout.h"
+#include "database.h"
 #include "ddb.h"
 #include "test.h"
 #include "testarea.h"
@@ -23,12 +25,15 @@ namespace
 
     using json = nlohmann::json;
 
-    // Builds a vector dataset and returns the path to the GPKG sidecar.
+    // Builds a vector dataset and returns the path to the GPKG sidecar. The queries read the
+    // GeoPackage of a build, which lies in the build folder of its dataset: only there is a file
+    // one that libddb wrote.
     static fs::path BuildAndGetGpkg(TestArea &ta, const std::string &assetUrl,
                                     const std::string &filename)
     {
         const fs::path src = ta.downloadTestAsset(assetUrl, filename);
-        const fs::path baseDir = ta.getPath("build");
+        const fs::path baseDir = ta.getPath("dataset") / DDB_FOLDER / DDB_BUILD_PATH /
+                                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         ddb::buildVector(src.string(), baseDir.string());
         const fs::path gpkg = baseDir / "vec" / "source.gpkg";
         EXPECT_TRUE(fs::exists(gpkg)) << "Missing " << gpkg.string();

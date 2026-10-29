@@ -16,6 +16,7 @@
 #include "build.h"
 #include "cad.h"
 #include "dbops.h"
+#include "build_layout.h"
 #include "ddb.h"
 #include "exceptions.h"
 #include "gdal_failure_counter.h"
@@ -295,7 +296,9 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const auto dxf = cadAsset(ta, "utm32n_site.dxf");
-        const auto out = ta.getPath("build");
+        // The queries read the GeoPackage of a build, in the build folder of its dataset
+        const auto out = ta.getPath("dataset") / DDB_FOLDER / DDB_BUILD_PATH /
+                         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         buildVector(dxf.string(), out.string());
 
         VectorQuery query;

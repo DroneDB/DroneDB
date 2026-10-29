@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "c_api_util.h"
+#include "artefact_cache.h"
 #include "cancellation.h"
 #include "databasepool.h"
 #include "dbops.h"
@@ -474,6 +475,11 @@ TEST_F(CancelToken, canceledExportsLogNoErrors) {
         }
     } reset;
 
+    // The raster helper copies the rasters of the calls once. A canceled call stops before it asks
+    // the helper, so the copies are made first: the canceled calls then reach GDAL, which is what
+    // the test looks at.
+    for (const auto& raster : {in.raster, in.raster5, in.dem})
+        raster::artefactFor(raster);
     for (const auto& [name, call] : cancellableCalls(in)) {
         SCOPED_TRACE(name);
         HostToken token;

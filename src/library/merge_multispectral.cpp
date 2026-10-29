@@ -14,7 +14,7 @@
 #include "exceptions.h"
 #include "exif.h"
 #include "exifeditor.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "logger.h"
@@ -159,7 +159,7 @@ SeparateVrt buildAlignedVrt(const std::vector<std::string> &inputPaths, const Al
     std::vector<GDALDatasetUniquePtr> shiftedDatasets;
 
     for (size_t i = 0; i < inputPaths.size(); i++) {
-        const auto src = openUserRaster(inputPaths[i]);
+        const auto src = raster::openInputRaster(inputPaths[i]);
         if (!src) {
             throw GDALException("Cannot open " + inputPaths[i]);
         }
@@ -394,7 +394,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                 LOGD << "GPS coordinates written to merged output: " << outputPath;
             else
                 LOGD << "Could not write GPS to " << outputPath << ": " << failures.front().message;
-        } catch (const MetadataHelperException &) {
+        } catch (const HelperUnavailableException &) {
             throw;
         } catch (const std::exception &e) {
             LOGD << "Could not write GPS to " << outputPath << ": " << e.what();

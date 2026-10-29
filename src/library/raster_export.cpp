@@ -10,7 +10,7 @@
 
 #include "cancellation.h"
 #include "exceptions.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "logger.h"
@@ -450,7 +450,7 @@ void exportRaster(const RasterExport &request)
     ExportSession session(request.progress);
 
     // Closed on any return or throw
-    auto srcGuard = openUserRaster(request.input);
+    auto srcGuard = raster::openInputRaster(request.input);
     if (!srcGuard)
         throw GDALException("Cannot open " + request.input);
 

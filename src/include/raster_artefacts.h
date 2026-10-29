@@ -32,6 +32,10 @@ namespace ddb
         // The "artefacts" folder of the cache (created)
         fs::path artefactsDir();
 
+        // The folder of the artefacts folder that holds the normalized copies of rasters of
+        // users (artefact_cache.h), named by artefactKey (created)
+        fs::path normalizedDir();
+
         // Whether the file is an artefact (see above). A file that does not exist can be: the
         // place is what counts. The path is resolved first (symbolic links, "..").
         bool isLibddbArtefact(const fs::path &path);
@@ -68,8 +72,8 @@ namespace ddb
         // @throws FSException
         void publishArtefact(const fs::path &produced, const fs::path &target);
 
-        // Removes the artefacts that were not touched for `maxAge` seconds: files, and the
-        // folders of requests that were left behind
+        // Removes the artefacts that were not touched for `maxAge` seconds: files, the normalized
+        // copies, and the folders of requests that were left behind
         void cleanupArtefacts(time_t maxAge);
 
     } // namespace raster

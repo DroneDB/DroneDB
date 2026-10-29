@@ -7,7 +7,7 @@
 #include "exceptions.h"
 #include "coordstransformer.h"
 #include "gdal_metadata.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "sensorprofile.h"
@@ -232,7 +232,7 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
     // Method 2: GDAL fallback (DJI R-JPEG, thermal GeoTIFF, etc.)
     LOGD << "No FLIR segment found, trying GDAL fallback for " << filePath;
 
-    const auto dataset = openUserRaster(filePath);
+    const auto dataset = raster::openInputRaster(filePath);
     if (!dataset) return result;
     GDALDatasetH hDs = datasetHandle(dataset);
 
@@ -405,7 +405,7 @@ std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalC
 bool isDirectTemperatureRaster(const std::string &filePath) {
     if (!isThermalImage(filePath)) return false;
 
-    const auto dataset = openUserRaster(filePath);
+    const auto dataset = raster::openInputRaster(filePath);
     if (!dataset) return false;
     GDALDatasetH hDs = datasetHandle(dataset);
 
@@ -583,7 +583,7 @@ bool looksThermal(const ThermalSignals &signals) {
 // Uses explicit metadata signals; avoids value-range heuristics to prevent
 // false positives on DEMs or other single-band Float32 rasters.
 bool isThermalByGdalMetadata(const std::string &filePath) {
-    auto dataset = openUserRaster(filePath);
+    auto dataset = raster::openInputRaster(filePath);
     if (!dataset) return false;
     GDALDatasetH hDs = datasetHandle(dataset);
     if (GDALGetRasterCount(hDs) != 1) return false;
@@ -613,7 +613,7 @@ TemperatureData readTemperatureData(const std::string &filePath) {
     TemperatureData td;
 
     // Try as GeoTIFF first (direct temperature or GDAL-readable)
-    if (const auto dataset = openUserRaster(filePath)) {
+    if (const auto dataset = raster::openInputRaster(filePath)) {
         GDALDatasetH hDs = datasetHandle(dataset);
         int nBands = GDALGetRasterCount(hDs);
         td.width = GDALGetRasterXSize(hDs);

@@ -5,7 +5,7 @@
 
 #include "cancellation.h"
 #include "exceptions.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "mathutil.h"
 
 #include <cctype>
@@ -17,13 +17,14 @@ namespace ddb
     {
         DemContext dem;
         // The path may be a raster a user uploaded (volume, stockpile, contour and profile
-        // requests name one), so it opens with the drivers its extension allows
-        dem.dataset = openUserRaster(path);
+        // requests name one): it is read as an artefact, the COG of a build as it is and any
+        // other raster as the normalized copy the raster helper wrote
+        dem.dataset = raster::openInputRaster(path);
         if (!dem.dataset)
             throw GDALException("Cannot open raster: " + path);
         const GDALDatasetH hDs = dem.handle();
 
-        requireGeoTransform(hDs, dem.gt);
+        requireGeoTransform(hDs, dem.gt, path);
 
         dem.width = GDALGetRasterXSize(hDs);
         dem.height = GDALGetRasterYSize(hDs);

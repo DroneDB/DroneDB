@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "database.h"
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
@@ -303,7 +304,9 @@ namespace
         {
             const fs::path file = ta.getPath(std::string(c.name) + "." + c.extension);
             writeVector(file, c);
-            const fs::path build = ta.getPath(std::string("build_") + c.name);
+            // The queries read the GeoPackage of a build, in the build folder of its dataset
+            const fs::path build = ta.getPath(std::string("dataset_") + c.name) / DDB_FOLDER / DDB_BUILD_PATH /
+                                   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
             try
             {
                 buildVector(file.string(), build.string());

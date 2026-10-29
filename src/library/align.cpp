@@ -3,7 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "align.h"
 #include "mathutil.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
+#include "raster_artefacts.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "raster_utils.h"
@@ -99,13 +100,14 @@ struct RasterGrid {
  *   DEM   → standardized elevation: (v − μ) / σ
  */
 static RasterGrid readToCommonGrid(GDALDatasetH hDs,
+                                   const std::string &name,
                                    const Extent &area,
                                    double targetGsd,
                                    bool isDem)
 {
     const double x0 = area.x0, y0 = area.y0, x1 = area.x1, y1 = area.y1;
     double gt[6];
-    requireGeoTransform(hDs, gt);
+    requireGeoTransform(hDs, gt, name);
 
     // Source window in pixels
     int px0 = static_cast<int>(std::floor((x0 - gt[0]) / gt[1]));
@@ -546,12 +548,12 @@ static void applyWarp(const std::string &sourcePath,
     // Resolve to an absolute path so the VRT SimpleSource can find the file
     // regardless of any cwd change between the VRT creation and the warp read.
     const std::string absSrcPath = io::toUtf8(fs::absolute(io::fromUtf8(sourcePath)));
-    const auto src = openUserRaster(absSrcPath);
+    const auto src = raster::openInputRaster(absSrcPath);
     if (!src) throw GDALException("Cannot open " + sourcePath);
     GDALDatasetH hSrc = datasetHandle(src);
 
     double gt[6];
-    requireGeoTransform(hSrc, gt);
+    requireGeoTransform(hSrc, gt, sourcePath);
 
     double co = sim.cosTheta, si = sim.sinTheta, sc = sim.scale;
     double ngt[6];
@@ -597,8 +599,8 @@ static void applyWarp(const std::string &sourcePath,
 static double computeZOffset(const std::string &alignedPath,
                              const std::string &referencePath)
 {
-    auto alignedDs = adoptDataset(GDALOpen(alignedPath.c_str(),   GA_ReadOnly));
-    auto refDs     = openUserRaster(referencePath);
+    auto alignedDs = raster::openArtefactRaster(io::fromUtf8(alignedPath));
+    auto refDs     = raster::openInputRaster(referencePath);
     if (!alignedDs || !refDs) return 0.0;
     GDALDatasetH hA = datasetHandle(alignedDs);
     GDALDatasetH hR = datasetHandle(refDs);
@@ -689,8 +691,8 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
 {
     AlignValidationResult r;
 
-    const auto srcDs = openUserRaster(sourcePath);
-    const auto refDs = openUserRaster(referencePath);
+    const auto srcDs = raster::openInputRaster(sourcePath);
+    const auto refDs = raster::openInputRaster(referencePath);
     if (!srcDs) { r.errors.push_back("Cannot open source: " + sourcePath); return r; }
     if (!refDs) { r.errors.push_back("Cannot open reference: " + referencePath); return r; }
     GDALDatasetH hS = datasetHandle(srcDs);
@@ -745,7 +747,7 @@ void reprojectReference(const std::string &referencePath, const std::string &sou
     CPLStringList args;
     args.AddString("-t_srs");
     args.AddString(sourceCrs.c_str());
-    const auto refSrc = openUserRaster(referencePath);
+    const auto refSrc = raster::openInputRaster(referencePath);
     if (!refSrc) throw GDALException("Cannot open reference for reprojection");
     GDALDatasetH hR = datasetHandle(refSrc);
     const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
@@ -763,6 +765,9 @@ struct AlignInputs {
     std::string effectiveReference; // in the CRS of the source
     std::string outputPath;
     std::string sourceCrs;
+    // The folder of this alignment for the rasters it writes and reads back: an artefact place
+    // (artefact_cache.h), so reading them needs no copy
+    fs::path scratch;
     bool isDem = false;
     double targetGsd = 0;
     RasterGrid srcGrid, refGrid;
@@ -770,8 +775,9 @@ struct AlignInputs {
 
 AlignInputs loadInputs(const std::string &sourcePath, const std::string &referencePath,
                        const std::string &effectiveRef, const std::string &outputPath,
-                       const AlignValidationResult &val) {
+                       const fs::path &scratch, const AlignValidationResult &val) {
     AlignInputs in;
+    in.scratch = scratch;
     in.sourcePath = sourcePath;
     in.referencePath = referencePath;
     in.effectiveReference = effectiveRef;
@@ -780,15 +786,15 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
 
     // Overlap bbox + common GSD
     // Owned: readToCommonGrid throws (empty window, failed RasterIO) while both are open
-    auto srcDs = openUserRaster(sourcePath);
-    auto refDs = openUserRaster(effectiveRef);
+    auto srcDs = raster::openInputRaster(sourcePath);
+    auto refDs = raster::openInputRaster(effectiveRef);
     if (!srcDs || !refDs)
         throw GDALException("Cannot reopen datasets for grid extraction");
     GDALDatasetH hS = datasetHandle(srcDs);
     GDALDatasetH hR = datasetHandle(refDs);
     double gts[6], gtr[6];
-    requireGeoTransform(hS, gts);
-    requireGeoTransform(hR, gtr);
+    requireGeoTransform(hS, gts, sourcePath);
+    requireGeoTransform(hR, gtr, referencePath);
 
     const Extent src = Extent::of(hS, gts);
     const Extent ref = Extent::of(hR, gtr);
@@ -810,8 +816,8 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
     // Use the worst (coarsest) GSD for the common grid
     in.targetGsd = std::max(std::abs(gts[1]), std::abs(gtr[1]));
 
-    in.srcGrid = readToCommonGrid(hS, ov, in.targetGsd, in.isDem);
-    in.refGrid = readToCommonGrid(hR, ov, in.targetGsd, in.isDem);
+    in.srcGrid = readToCommonGrid(hS, sourcePath, ov, in.targetGsd, in.isDem);
+    in.refGrid = readToCommonGrid(hR, referencePath, ov, in.targetGsd, in.isDem);
     srcDs.reset();
     refDs.reset();
 
@@ -823,8 +829,7 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
 // Applies the transform to the source and writes the COG: warp into a temporary file, DEM Z
 // offset, then buildCog; sets result.shiftZ for a DEM
 void writeAligned(const AlignInputs &in, const Similarity2D &sim, AlignResult &result) {
-    std::string tmpWarp = in.outputPath + ".warp_tmp.tif";
-    const io::ScopedTempDir warpGuard(io::fromUtf8(tmpWarp));
+    const std::string tmpWarp = io::toUtf8(in.scratch / "warp.tif");
     applyWarp(in.sourcePath, tmpWarp, sim, in.sourceCrs);
     if (in.isDem) {
         result.shiftZ = computeZOffset(tmpWarp, in.effectiveReference);
@@ -971,19 +976,18 @@ AlignResult alignRaster(const std::string &sourcePath,
     if (!val.ok) throw AppException("Alignment validation failed: " + val.errors[0]);
 
     // 2. Optional reprojection of the reference into the source CRS
+    // The rasters written on the way (the reprojected reference, the warped source) go to a
+    // folder of the artefacts of the cache, removed when the alignment ends
+    const io::ScopedTempDir scratch = raster::makeArtefactRequestFolder("align-");
     std::string effectiveRef = referencePath;
-    std::string tmpReproj;
-    io::ScopedTempDir refGuard;
 
     if (val.summary.crsMismatch) {
-        tmpReproj = outputPath + ".ref_reproj_tmp.tif";
-        refGuard.reset(io::fromUtf8(tmpReproj));
-        reprojectReference(referencePath, val.summary.sourceCrs, tmpReproj);
-        effectiveRef = tmpReproj;
+        effectiveRef = io::toUtf8(scratch.path() / "reference.tif");
+        reprojectReference(referencePath, val.summary.sourceCrs, effectiveRef);
     }
 
     // 3. The overlap of both rasters on one grid, then the estimate
-    const AlignInputs in = loadInputs(sourcePath, referencePath, effectiveRef, outputPath, val);
+    const AlignInputs in = loadInputs(sourcePath, referencePath, effectiveRef, outputPath, scratch.path(), val);
     if (opts.mode == AlignMode::Translation)
         return alignByTranslation(in, result);
     return alignBySimilarity(in, opts, result);

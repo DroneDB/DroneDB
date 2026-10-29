@@ -4,8 +4,6 @@
 #ifndef IN_PROCESS_RASTER_HELPER_H
 #define IN_PROCESS_RASTER_HELPER_H
 
-#include <stdexcept>
-
 #include "json.h"
 
 #include "raster_helper.h"
@@ -28,9 +26,9 @@ namespace testutils
         {
             ddb::raster::thumbnail(path, out, params);
         }
-        void normalize(const fs::path &, const fs::path &, const json &) override
+        void normalize(const fs::path &path, const fs::path &out, const json &) override
         {
-            throw std::logic_error("normalize is not available in this version");
+            ddb::raster::normalizeRaster(path, out);
         }
         void geoproject(const fs::path &path, const fs::path &out, const json &params) override
         {

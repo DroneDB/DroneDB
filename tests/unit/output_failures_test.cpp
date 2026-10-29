@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "artefact_cache.h"
 #include "exceptions.h"
 #include "file_size_limit.h"
 #include "gtest/gtest.h"
@@ -50,12 +51,20 @@ namespace
         return testutils::createGeoRaster(path, spec);
     }
 
+    // The raster of the test is read as a user's raster is: from the copy the raster helper writes.
+    // The copy is made before the limit, which is meant for the output of the call.
+    std::string copiedBeforeTheLimit(const fs::path &raster)
+    {
+        ddb::raster::artefactFor(raster);
+        return io::toUtf8(raster);
+    }
+
     TEST(OutputFailures, ABandExportThatCannotWriteItsFileIsAnError)
     {
         SKIP_WITHOUT_FILE_SIZE_LIMIT();
         TestArea ta(TEST_NAME, true);
         RasterExport request;
-        request.input = io::toUtf8(texturedRaster(ta.getPath("in.tif"), 3));
+        request.input = copiedBeforeTheLimit(texturedRaster(ta.getPath("in.tif"), 3));
         request.output = io::toUtf8(ta.getPath("out.tif"));
 
         {
@@ -74,7 +83,7 @@ namespace
         SKIP_WITHOUT_FILE_SIZE_LIMIT();
         TestArea ta(TEST_NAME, true);
         RasterExport request;
-        request.input = io::toUtf8(texturedRaster(ta.getPath("in.tif"), 3));
+        request.input = copiedBeforeTheLimit(texturedRaster(ta.getPath("in.tif"), 3));
         request.output = io::toUtf8(ta.getPath("out.tif"));
         request.formula = "VARI";
         request.bandFilter = "RGB";
@@ -94,7 +103,7 @@ namespace
     {
         SKIP_WITHOUT_FILE_SIZE_LIMIT();
         TestArea ta(TEST_NAME, true);
-        const auto input = io::toUtf8(texturedRaster(ta.getPath("in.tif"), 3));
+        const auto input = copiedBeforeTheLimit(texturedRaster(ta.getPath("in.tif"), 3));
         const auto output = io::toUtf8(ta.getPath("out.tif"));
 
         {

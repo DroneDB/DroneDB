@@ -8,7 +8,8 @@
 // good and bad requests in any order), else the value of DDB_FAKE_GDAL_MODE, else "ok":
 //
 //   ok            a canned GeoRaster for a raster probe, a canned Vector for a vector probe, a
-//                 valid (tiny) WebP written to `out` for a thumbnail, {} for any other operation
+//                 valid (tiny) WebP written to `out` for a thumbnail, a valid (1 x 1 pixel) GeoTIFF
+//                 written to `out` for a normalize, {} for any other operation
 //   plain         a probe answers a raster without a projection
 //   crash         exits in the middle of the request, without answering
 //   hang          never answers (and stays alive until it is killed)
@@ -19,6 +20,7 @@
 //   unreadable, policy, limit, crashed, timeout, nospace, internal
 //                 answers the failure of that name
 //   garbagethumb  a thumbnail is written as bytes that are not an image
+//   garbagetif    a normalize writes bytes that are no GeoTIFF
 //   hugethumb     a thumbnail is written as a file larger than any thumbnail can be
 //   linkthumb     a thumbnail is a symbolic link to the request's file
 //   sleep         waits 300 ms, then answers as "ok"
@@ -127,7 +129,7 @@ std::string failure(const std::string &id, const std::string &code, const std::s
     return "{\"id\":" + id + ",\"ok\":false,\"error\":\"" + code + "\",\"message\":\"" + message + "\"}";
 }
 
-const char *kModes[] = {"ok",        "plain",        "crash",    "crashed",   "hang",     "garbagethumb", "garbage",
+const char *kModes[] = {"ok",        "plain",        "crash",    "crashed",   "hang",     "garbagethumb", "garbagetif", "garbage",
                         "hugethumb", "huge",         "linkthumb", "wrongid",  "badresult", "unreadable",   "policy",
                         "limit",     "timeout",      "nospace",  "internal", "sleep"};
 
@@ -172,6 +174,44 @@ std::string tinyWebp() {
     return bytes;
 }
 
+// The smallest TIFF GDAL reads: 1 x 1 pixel, 8 bits, one band, no compression, one strip
+std::string tinyTiff() {
+    std::string bytes;
+    const auto put16 = [&bytes](unsigned value) {
+        bytes += static_cast<char>(value & 0xff);
+        bytes += static_cast<char>((value >> 8) & 0xff);
+    };
+    const auto put32 = [&bytes, &put16](unsigned value) {
+        put16(value & 0xffff);
+        put16(value >> 16);
+    };
+    // tag, type (3 = SHORT, 4 = LONG), count 1 and the value
+    const auto entry = [&](unsigned tag, unsigned type, unsigned value) {
+        put16(tag);
+        put16(type);
+        put32(1);
+        put32(value);
+    };
+    const unsigned entries = 9;
+    const unsigned pixelOffset = 8 + 2 + entries * 12 + 4;
+    bytes += "II";
+    put16(42);
+    put32(8);
+    put16(entries);
+    entry(256, 3, 1);            // width
+    entry(257, 3, 1);            // height
+    entry(258, 3, 8);            // bits per sample
+    entry(259, 3, 1);            // no compression
+    entry(262, 3, 1);            // black is zero
+    entry(273, 4, pixelOffset);  // strip offsets
+    entry(277, 3, 1);            // samples per pixel
+    entry(278, 3, 1);            // rows per strip
+    entry(279, 4, 1);            // strip byte counts
+    put32(0);                    // no next image
+    bytes += '\x7f';
+    return bytes;
+}
+
 void writeFile(const std::string &path, const std::string &content) {
     std::ofstream out(path, std::ios::binary);
     out.write(content.data(), static_cast<std::streamsize>(content.size()));
@@ -194,6 +234,11 @@ void answerThumbnail(const std::string &id, const std::string &line, const std::
         writeFile(out, tinyWebp());
     }
     answer("{\"id\":" + id + ",\"ok\":true,\"result\":{\"bytes\":28}}");
+}
+
+void answerNormalize(const std::string &id, const std::string &line, const std::string &mode) {
+    writeFile(stringMember(line, "out"), mode == "garbagetif" ? "this is not a TIFF, whatever the name says" : tinyTiff());
+    answer("{\"id\":" + id + ",\"ok\":true,\"result\":{}}");
 }
 
 int serve() {
@@ -237,6 +282,8 @@ int serve() {
                 answer(cannedProbe(id, line, mode));
             else if (op == "thumbnail")
                 answerThumbnail(id, line, mode);
+            else if (op == "normalize")
+                answerNormalize(id, line, mode);
             else
                 answer("{\"id\":" + id + ",\"ok\":true,\"result\":{}}");
         }

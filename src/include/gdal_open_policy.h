@@ -67,6 +67,13 @@ namespace ddb
         // refused.
         VrtVerdict validateSidecars(const std::string &path);
 
+        // Whether a metadata domain lists datasets by file name or holds the name of the dataset
+        // to open in one of its items: the domains a copy of a raster leaves behind. They are
+        // the domains of the items openUserRaster refuses (OVERVIEWS, GEOLOCATION) and the ones
+        // GDAL fills with the names of the datasets it can open from the file (SUBDATASETS,
+        // DERIVED_SUBDATASETS).
+        bool isFileNamingDomain(const std::string &domain);
+
         // Declares that this process is the one that parses user files: the raster helper
         // (gdal-util) calls it once, at start. Nothing else in the library may call it, so that
         // a host process (the Registry, ddbcmd, the tests) can be told apart from the helper.

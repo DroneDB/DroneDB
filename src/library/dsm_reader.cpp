@@ -5,7 +5,7 @@
 #include "dsm_reader.h"
 
 #include "exceptions.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "mio.h"
@@ -16,7 +16,7 @@ namespace ddb
     DsmRaster readDsmRaster(const fs::path &filePath, double latitude, double longitude)
     {
         // Owned: the checks below throw while the dataset is open
-        const auto dataset = openUserRaster(io::toUtf8(filePath));
+        const auto dataset = raster::openInputRaster(io::toUtf8(filePath));
         if (!dataset)
             throw GDALException("Cannot open " + io::toUtf8(filePath));
         GDALDatasetH hDataset = datasetHandle(dataset);

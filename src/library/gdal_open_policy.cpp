@@ -604,6 +604,16 @@ namespace ddb
             return validateSidecars(path, 0);
         }
 
+        bool isFileNamingDomain(const std::string &domain)
+        {
+            // GDAL compares the names of the domains without regard to case
+            const auto is = [&domain](const char *name) { return EQUAL(domain.c_str(), name); };
+            if (is("SUBDATASETS") || is("DERIVED_SUBDATASETS"))
+                return true;
+            return std::any_of(std::begin(MetadataFiles), std::end(MetadataFiles),
+                               [&is](const MetadataFile &file) { return is(file.domain); });
+        }
+
         namespace
         {
             std::atomic<bool> userFileOpens{false};

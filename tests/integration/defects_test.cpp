@@ -25,7 +25,9 @@
 #include "stringutil.h"
 
 #include "align.h"
+#include "build_layout.h"
 #include "constants.h"
+#include "database.h"
 #include "coordstransformer.h"
 #include "gdal_inc.h"
 #include "gdal_open_policy.h"
@@ -569,12 +571,17 @@ namespace
     }
 
     // alignRaster leaked both datasets when reading the common grid failed. The source is a
-    // GeoTIFF cut short after its header: it opens, and RasterIO fails after both opens.
+    // GeoTIFF cut short after its header: it opens, and RasterIO fails after both opens. It is
+    // the COG of a build: a raster of a user cut short like this is not copied by the raster
+    // helper, so it is never opened by the alignment.
     TEST(Defects, Target_AlignClosesDatasetsWhenTheGridReadFails)
     {
         TestArea ta(TEST_NAME, true);
         const double gt[6] = {500000.0, 1.0, 0.0, 4000064.0, 0.0, -1.0};
-        const auto src = ta.getPath("src.tif");
+        const auto build = ta.getPath("dataset") / DDB_FOLDER / DDB_BUILD_PATH /
+                           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" / CogBuildSubfolder;
+        fs::create_directories(build);
+        const auto src = build / CogFileName;
         const auto ref = ta.getPath("ref.tif");
         writeGeoTiff(src, 1, GDT_Byte, gt, 32615);
         writeGeoTiff(ref, 1, GDT_Byte, gt, 32615);

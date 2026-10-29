@@ -26,7 +26,7 @@
 #include "cancellation.h"
 #include "copc_utils.h"
 #include "exceptions.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "json.h"
 #include "local_frame_georef.h"
@@ -766,7 +766,7 @@ namespace ddb
 
         ImageSize imageSizeOf(const fs::path &file)
         {
-            const auto ds = openUserRaster(io::toUtf8(file));
+            const auto ds = raster::openInputRaster(io::toUtf8(file));
             if (!ds)
                 throw GDALException("Cannot open " + io::toUtf8(file));
             return {GDALGetRasterXSize(datasetHandle(ds)), GDALGetRasterYSize(datasetHandle(ds))};
@@ -786,7 +786,7 @@ namespace ddb
         // Writes the image resampled to a JPEG of the given size
         void resizeToJpeg(const fs::path &source, const fs::path &target, const ImageSize &size)
         {
-            const auto src = openUserRaster(io::toUtf8(source));
+            const auto src = raster::openInputRaster(io::toUtf8(source));
             if (!src)
                 throw GDALException("Cannot open " + io::toUtf8(source));
             GDALDatasetH hSrc = datasetHandle(src);

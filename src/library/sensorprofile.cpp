@@ -4,7 +4,7 @@
 #include "sensorprofile.h"
 #include "json.h"
 #include "gdal_metadata.h"
-#include "gdal_open_policy.h"
+#include "artefact_cache.h"
 #include "gdal_raii.h"
 #include "exceptions.h"
 #include "logger.h"
@@ -291,7 +291,7 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
                                                                  const std::vector<SensorProfile> &profiles) const {
     SensorDetectionResult result;
 
-    auto dataset = openUserRaster(rasterPath);
+    auto dataset = raster::openInputRaster(rasterPath);
     if (!dataset) return result;
     GDALDatasetH hDataset = datasetHandle(dataset);
 
@@ -376,7 +376,7 @@ BandMapping SensorProfileManager::getBandMappingForPreset(const std::string &ras
 BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPath, int bandCount) const {
     BandMapping bm;
 
-    auto dataset = openUserRaster(rasterPath);
+    auto dataset = raster::openInputRaster(rasterPath);
     if (!dataset) return bm;
     GDALDatasetH hDataset = datasetHandle(dataset);
 
@@ -413,7 +413,7 @@ BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPa
 std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPath) const {
     auto det = detectSensor(rasterPath);
 
-    const auto dataset = openUserRaster(rasterPath);
+    const auto dataset = raster::openInputRaster(rasterPath);
     if (!dataset) throw GDALException("Cannot open " + rasterPath);
     GDALDatasetH hDataset = datasetHandle(dataset);
 
