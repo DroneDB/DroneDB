@@ -496,6 +496,65 @@ namespace
         EXPECT_NE(readFile(out), readFile(plain));
     }
 
+    // An error handler of GDAL that keeps the debug messages in the vector of its user data
+    void CPL_STDCALL keepDebugMessage(CPLErr level, CPLErrorNum, const char *message)
+    {
+        if (level == CE_Debug)
+            static_cast<std::vector<std::string> *>(CPLGetErrorHandlerUserData())->push_back(message);
+    }
+
+    // A tile of a pixel-interleaved raster holds every band, and a thumbnail without overviews
+    // reads every pixel: the alpha (here the nodata of the first band) comes from the same pass as
+    // the colours, so each tile is decoded once even when the raster does not fit in the block
+    // cache. GDAL logs a band 1 read more times than it has blocks when it is closed.
+    USER_OPEN_TEST_F(GdalUtilToolTest, aThumbnailDecodesEachTileOfARasterWithNodataOnce)
+    {
+        constexpr int kSize = 1024;
+        constexpr int kBands = 8;
+        const fs::path raster = area_->getFolder() / "interleaved.tif";
+        {
+            const CPLStringList options(cslFromStrings({"TILED=YES", "INTERLEAVE=PIXEL", "COMPRESS=DEFLATE"}));
+            const auto dataset = adoptDataset(GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(raster).c_str(), kSize,
+                                                         kSize, kBands, GDT_Float32, options.List()));
+            ASSERT_TRUE(dataset);
+            std::vector<float> row(kSize);
+            for (int band = 1; band <= kBands; band++)
+            {
+                GDALRasterBandH hBand = GDALGetRasterBand(datasetHandle(dataset), band);
+                ASSERT_EQ(GDALSetRasterNoDataValue(hBand, -1.0), CE_None);
+                for (int y = 0; y < kSize; y++)
+                {
+                    for (int x = 0; x < kSize; x++)
+                        row[static_cast<size_t>(x)] = x < y ? -1.0f : static_cast<float>((x * band + y) % 97);
+                    ASSERT_EQ(GDALRasterIO(hBand, GF_Write, 0, y, kSize, 1, row.data(), kSize, 1, GDT_Float32, 0, 0),
+                              CE_None);
+                }
+            }
+        }
+
+        // A cache of 16 MB holds a row of tiles of every band (8 MB), not the raster (32 MB)
+        const GIntBig cacheMax = GDALGetCacheMax64();
+        GDALSetCacheMax64(16 * 1024 * 1024);
+        std::vector<std::string> debug;
+        CPLPushErrorHandlerEx(keepDebugMessage, &debug);
+        {
+            const ScopedThreadConfigOption debugOn("CPL_DEBUG", "ON");
+            raster::ThumbnailParams params;
+            params.size = 256;
+            params.vis = ThumbVisParams();
+            params.vis->bands = "1,2,3";
+            params.vis->rescale = "0,96";
+            raster::thumbnail(raster, area_->getFolder() / "interleaved.webp", params);
+        }
+        CPLPopErrorHandler();
+        GDALSetCacheMax64(cacheMax);
+
+        for (const std::string &message : debug)
+            EXPECT_EQ(message.find("block reads on"), std::string::npos) << message;
+        const auto image = testutils::decodeImageFile(area_->getFolder() / "interleaved.webp");
+        EXPECT_TRUE(image.hasAlpha()) << "the nodata of the first band is the alpha";
+    }
+
     // A thumbnail with visualisation parameters detects the sensor of the raster, a reading of the
     // raster by its path that the host does through a copy in its cache. The program reads the file
     // of its request itself: it starts no other program (the one it would start does not exist here)
