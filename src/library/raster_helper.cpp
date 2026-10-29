@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_helper.h"
 
+#include <algorithm>
 #include <csignal>
 #include <cstring>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_artefacts.h"
+#include "stringutil.h"
 #include "thermal.h"
 #include "tool_locator.h"
 #include "tool_run_support.h"
@@ -500,18 +502,82 @@ namespace ddb
             return declared + 8 == bytes.size();
         }
 
-        void downloadInput(const std::string &url, const fs::path &target)
+        namespace
+        {
+            // The sink of a download: the bytes go to the file until there would be more than
+            // `maxBytes`, when it fails (and with it the transfer) and says why
+            class CappedFileSink : public std::streambuf
+            {
+              public:
+                CappedFileSink(const fs::path &target, uint64_t maxBytes)
+                    : file_(target, std::ios::binary), maxBytes_(maxBytes)
+                {
+                }
+
+                bool exceeded() const { return exceeded_; }
+                // Whether every byte reached the file, once it is closed
+                bool close()
+                {
+                    file_.close();
+                    return !file_.fail();
+                }
+
+              protected:
+                std::streamsize xsputn(const char *data, std::streamsize count) override
+                {
+                    if (count < 0 || static_cast<uint64_t>(count) > maxBytes_ - written_)
+                    {
+                        exceeded_ = true;
+                        return 0;
+                    }
+                    file_.write(data, count);
+                    if (!file_)
+                        return 0;
+                    written_ += static_cast<uint64_t>(count);
+                    return count;
+                }
+                int_type overflow(int_type c) override
+                {
+                    if (traits_type::eq_int_type(c, traits_type::eof()))
+                        return traits_type::not_eof(c);
+                    const char ch = traits_type::to_char_type(c);
+                    return xsputn(&ch, 1) == 1 ? c : traits_type::eof();
+                }
+
+              private:
+                std::ofstream file_;
+                uint64_t maxBytes_;
+                uint64_t written_ = 0;
+                bool exceeded_ = false;
+            };
+        } // namespace
+
+        void downloadInput(const std::string &url, const fs::path &target, uint64_t maxBytes)
         {
             bool written = false;
+            bool announcedTooLarge = false;
+            bool exceeded = false;
             HttpResponse response;
             {
-                std::ofstream sink(target, std::ios::binary);
+                CappedFileSink buffer(target, maxBytes);
+                std::ostream sink(&buffer);
                 HttpRequest request;
                 request.url = url;
+                // The length the server announces stops the transfer before the body comes
+                request.progress = [maxBytes, &announcedTooLarge](const HttpProgress &progress) {
+                    announcedTooLarge = progress.downloadTotal > maxBytes;
+                    return !announcedTooLarge;
+                };
                 response = defaultHttpClient().download(request, sink);
+                exceeded = announcedTooLarge || buffer.exceeded();
                 // A disk-full or I/O failure stops the transfer, and also shows on the stream state
-                sink.close();
-                written = !sink.fail();
+                written = buffer.close() && !sink.fail();
+            }
+            if (exceeded)
+            {
+                io::assureIsRemoved(target);
+                throw NetException("Cannot download " + url + ": it is larger than the " + std::to_string(maxBytes) +
+                                   " bytes a remote file may have");
             }
             if (!written || response.hasTransportError() || response.status < 200 || response.status >= 300)
             {
@@ -519,6 +585,27 @@ namespace ddb
                 throw NetException("Cannot download " + url + " (HTTP " + std::to_string(response.status) + "): " +
                                    (written ? response.transportMessage : std::string("write error")));
             }
+        }
+
+        std::string urlFileExtension(const std::string &url)
+        {
+            std::string_view path(url);
+            path = path.substr(0, path.find_first_of("?#"));
+            if (const auto scheme = path.find("://"); scheme != std::string_view::npos)
+            {
+                // The authority ("host:port") is no part of the path
+                const auto pathStart = path.find('/', scheme + 3);
+                path = pathStart == std::string_view::npos ? std::string_view() : path.substr(pathStart);
+            }
+            const std::string_view name = path.substr(path.find_last_of('/') + 1);
+            const auto dot = name.find_last_of('.');
+            if (dot == std::string_view::npos || dot == 0)
+                return "";
+            const std::string_view extension = name.substr(dot + 1);
+            if (extension.empty() || extension.size() > 16 ||
+                !std::all_of(extension.begin(), extension.end(), [](char c) { return str::isAlnumChar(c); }))
+                return "";
+            return "." + std::string(extension);
         }
 
         namespace
@@ -560,7 +647,7 @@ namespace ddb
             if (io::isNetworkPath(utf8))
             {
                 // The helper reads files, never the network
-                input = request.path() / io::fromUtf8("input" + io::toUtf8(fs::path(path).extension()));
+                input = request.path() / io::fromUtf8("input" + urlFileExtension(utf8));
                 downloadInput(utf8, input);
             }
 

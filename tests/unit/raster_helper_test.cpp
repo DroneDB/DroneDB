@@ -1213,6 +1213,16 @@ namespace
         }
     };
 
+    // What a helper writes for a COG: a small GeoTIFF, which the host opens before the build
+    // publishes it
+    void writeCog(const fs::path &out)
+    {
+        fs::create_directories(out.parent_path());
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 8;
+        testutils::createGeoRaster(out, spec);
+    }
+
     class RasterBuildsTest : public ::testing::Test
     {
       protected:
@@ -1239,14 +1249,17 @@ namespace
             seenOut = out;
             threads = cogParamsFromJson(params).threads.value_or(0);
             tokensDuring = parallel::cpuTokensInUse();
+            writeCog(out);
         };
         const ScopedRasterHelper installed(helper);
 
+        const fs::path input = area_->getPath("input.tif");
+        const fs::path output = area_->getPath("out") / "cog.tif";
         const size_t tokensBefore = parallel::cpuTokensInUse();
-        buildCog(io::toUtf8(fs::absolute("input.tif")), io::toUtf8(fs::absolute("out/cog.tif")), BuildOptions::withThreads(3));
+        buildCog(io::toUtf8(input), io::toUtf8(output), BuildOptions::withThreads(3));
 
-        EXPECT_EQ(seenPath, fs::absolute("input.tif"));
-        EXPECT_EQ(seenOut, fs::absolute("out/cog.tif"));
+        EXPECT_EQ(seenPath, input);
+        EXPECT_EQ(seenOut, output);
         ASSERT_GE(threads, 1);
         EXPECT_LE(threads, 3) << "the cap of the caller lowers the threads";
         // The tokens of the CPU pool of the host stay taken for as long as the helper works: the
@@ -1268,12 +1281,22 @@ namespace
     {
         ScriptedHelper helper;
         fs::path seenOut;
-        helper.onCog = [&](const fs::path &, const fs::path &out, const json &) { seenOut = out; };
+        helper.onCog = [&](const fs::path &, const fs::path &out, const json &) {
+            seenOut = out;
+            writeCog(out);
+        };
         const ScopedRasterHelper installed(helper);
 
         const fs::path temp = area_->getPath("cog-temp-x");
         buildGeoRaster(area_->getPath("in.tif"), temp);
         EXPECT_EQ(seenOut, temp / CogFileName);
+
+        // What the helper wrote is no raster: the build fails before anything is published
+        helper.onCog = [](const fs::path &, const fs::path &out, const json &) {
+            fs::create_directories(out.parent_path());
+            std::ofstream(out, std::ios::binary) << "II*";
+        };
+        EXPECT_THROW(buildGeoRaster(area_->getPath("in.tif"), temp), GDALException);
 
         // A helper that was silent for the idle time is a build to retry
         helper.onCog = [](const fs::path &, const fs::path &, const json &) {

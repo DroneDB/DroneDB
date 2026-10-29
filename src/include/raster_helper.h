@@ -263,10 +263,23 @@ namespace ddb
         // kMaxThumbnailBytes long
         bool looksLikeThumbnail(const std::string &bytes);
 
+        // The largest remote file a tile or a thumbnail reads (it is downloaded first, into a
+        // temporary folder or the tile cache): 8 GiB, beyond the largest orthophoto a dataset
+        // serves remotely, below what a remote server could fill the disk with.
+        inline constexpr uint64_t kMaxInputDownloadBytes = 8ull * 1024 * 1024 * 1024;
+
         // Downloads a URL into `target` (a file in a folder the caller made); a failed or
-        // partial transfer leaves nothing at `target`.
+        // partial transfer leaves nothing at `target`. A body of more than `maxBytes` is refused:
+        // at once when the server announces its length, else when that many bytes arrived.
         // @throws NetException, FSException
-        void downloadInput(const std::string &url, const fs::path &target);
+        void downloadInput(const std::string &url, const fs::path &target,
+                           uint64_t maxBytes = kMaxInputDownloadBytes);
+
+        // The extension of the file a URL names, as a downloaded copy is named (".tif"): the one
+        // of the last segment of its path, without the query and the fragment. "" when it has
+        // none, or one that is not 1 to 16 ASCII letters and digits (a name of the local file
+        // system takes only those).
+        std::string urlFileExtension(const std::string &url);
 
     } // namespace raster
 } // namespace ddb

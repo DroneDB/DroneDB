@@ -20,6 +20,8 @@
 #include "mio.h"
 #include "mzip.h"
 #include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
 #include "userprofile.h"
@@ -86,6 +88,108 @@ namespace
         auto count = fx.db->query("SELECT COUNT(*) FROM entries WHERE path LIKE '%ddb%'");
         count->fetch();
         EXPECT_EQ(count->getInt(0), 0);
+    }
+
+    // The ".ddb" folder is reserved however a file system may spell it: Windows and macOS open
+    // ".DDB" as ".ddb", and Win32 drops trailing dots and spaces, so an upload to such a name
+    // would land in the builds. An add refuses those names, a walk skips them, and on a file
+    // system where they are folders of their own their files are no artefacts.
+    TEST(BuildFolderGuard, anAddRefusesTheReservedFolderInAnyCaseAndWithTrailingDotsOrSpaces)
+    {
+        IndexFixture fx(TEST_NAME);
+        writeFile(fx.root / "a.txt", "alpha");
+
+        const std::vector<fs::path> spellings = {
+            fs::path(".DDB") / DDB_BUILD_PATH / kHash / CogBuildSubfolder / CogFileName,
+            fs::path(".Ddb") / "x",
+            fs::path(".ddb.") / "x",
+            fs::path(".ddb ") / "x",
+            fs::path("sub") / ".dDb" / "x",
+        };
+        for (const auto &spelling : spellings)
+            writeFile(fx.root / spelling, "not a raster");
+
+        AddOptions options;
+        options.stopOnError = false;
+        for (const auto &spelling : spellings)
+        {
+            SCOPED_TRACE(spelling.generic_string());
+            AddResult result;
+            addToIndexEx(fx.db.get(), {(fx.root / spelling).string()}, options, result);
+            EXPECT_TRUE(result.entries.empty());
+            EXPECT_TRUE(result.unchanged.empty());
+            ASSERT_EQ(result.errors.size(), 1u);
+            EXPECT_EQ(result.errors[0].code, "INDEX");
+        }
+
+        AddResult walked;
+        addToIndexEx(fx.db.get(), {fx.root.string()}, options, walked);
+        EXPECT_TRUE(walked.errors.empty());
+        std::vector<std::string> paths;
+        for (const auto &[entry, updated] : walked.entries)
+            paths.push_back(entry.path);
+        std::sort(paths.begin(), paths.end());
+        EXPECT_EQ(paths, (std::vector<std::string>{"a.txt", "sub"}));
+
+        // Where ".DDB" is not the folder of the builds, what is below it was not written by libddb
+        const fs::path upper = fx.root / spellings[0];
+        std::error_code ec;
+        if (!fs::equivalent(fx.root / ".DDB", fx.root / DDB_FOLDER, ec))
+        {
+            EXPECT_FALSE(raster::isLibddbArtefact(upper));
+        }
+    }
+
+    // A raster helper that reads files as gdal-util does, and writes what is no raster for a COG
+    class GarbageCogHelper : public raster::IRasterHelper
+    {
+      public:
+        raster::ProbeResult probe(const fs::path &path, const raster::ProbeParams &params) override
+        {
+            return real_.probe(path, params);
+        }
+        void thumbnail(const fs::path &path, const fs::path &out, const raster::ThumbnailParams &params) override
+        {
+            real_.thumbnail(path, out, params);
+        }
+        void normalize(const fs::path &path, const fs::path &out, const json &params) override
+        {
+            real_.normalize(path, out, params);
+        }
+        void geoproject(const fs::path &path, const fs::path &out, const json &params) override
+        {
+            real_.geoproject(path, out, params);
+        }
+        void buildCog(const fs::path &, const fs::path &out, const json &, const raster::ProgressCallback &) override
+        {
+            writeFile(out, "II*\0 this is no TIFF");
+        }
+        void buildVector(const fs::path &path, const fs::path &out, const json &params,
+                         const raster::ProgressCallback &progress) override
+        {
+            real_.buildVector(path, out, params, progress);
+        }
+
+      private:
+        raster::GdalUtilHelper real_;
+    };
+
+    // The COG the helper wrote is trusted by its place once it is published: a file that does
+    // not open as a raster fails the build, and nothing is published
+    TEST(BuildFolderGuard, aCogOfTheHelperThatIsNoRasterIsNotPublished)
+    {
+        IndexFixture fx(TEST_NAME);
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 32;
+        testutils::createGeoRaster(fx.root / "ortho.tif", spec);
+        addToIndex(fx.db.get(), {(fx.root / "ortho.tif").string()});
+
+        GarbageCogHelper helper;
+        const raster::ScopedRasterHelper installed(helper);
+        EXPECT_THROW(build(fx.db.get(), "ortho.tif", "", true), AppException);
+
+        for (const auto &file : filesBelow(fx.root / DDB_FOLDER / DDB_BUILD_PATH))
+            EXPECT_NE(file.filename(), CogFileName) << io::toUtf8(file);
     }
 
     // The files of an archive are extracted into the folder of the role they build ("3dtiles"),

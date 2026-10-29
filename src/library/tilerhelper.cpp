@@ -145,57 +145,82 @@ namespace ddb
         }));
     }
 
-    fs::path TilerHelper::toLocalFile(const fs::path &tileablePath, const std::string &tileablePathHash)
+    namespace
     {
-        fs::path localTileablePath;
-
-        if (io::isNetworkPath(io::toUtf8(tileablePath)))
+        // Removes the files of `folder` whose names start with `prefix`, except `keep`. A file
+        // that cannot go now (Windows: still open) is left for the next version.
+        void removeEarlierVersions(const fs::path &folder, const std::string &prefix, const fs::path &keep)
         {
-            // Download file to user cache
-            const std::string ext = io::toUtf8(fs::path(tileablePath).extension());
-
-            // If we know a priori the hash of the remote resource,
-            // we use that value to search our local cache (to avoid
-            // downloading things twice)
-            bool alwaysDownload = false;
-            if (!tileablePathHash.empty())
+            std::error_code ec;
+            for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
             {
-                localTileablePath = UserProfile::get()->getTilesDir() /
-                                    io::fromUtf8(tileablePathHash + ext);
-
-                // Download only if not exists
-                alwaysDownload = false;
-            }
-            else
-            {
-                std::string crc = Hash::strCRC64(io::toUtf8(tileablePath));
-                localTileablePath = UserProfile::get()->getTilesDir() / io::fromUtf8(crc + ext);
-                alwaysDownload = true; // always download, content could have changed
-            }
-
-            // One thread at a time
-            {
-                ThreadLock lock(io::toUtf8(localTileablePath));
-
-                bool download = alwaysDownload || !fs::exists(localTileablePath);
-                if (download)
+                const fs::path &file = it->path();
+                if (file == keep || !io::toUtf8(file.filename()).starts_with(prefix))
+                    continue;
+                std::error_code removeError;
+                if (it->is_regular_file(removeError) && !fs::remove(file, removeError) && removeError)
                 {
-                    // Download to a temp file so a failed transfer never lands in the cache
-                    const fs::path tmpPath = io::concat(localTileablePath, ".download-" + randomString(16));
-                    raster::downloadInput(io::toUtf8(tileablePath), tmpPath);
-
-                    // Tilers kept open on the previous download would block the replace on Windows
-                    RasterCache::instance().release(localTileablePath);
-                    io::rename(tmpPath, localTileablePath);
+                    LOGD << "Cannot remove the earlier download " << io::toUtf8(file) << ": " << removeError.message();
                 }
             }
         }
-        else
+    } // namespace
+
+    fs::path TilerHelper::toLocalFile(const fs::path &tileablePath, const std::string &tileablePathHash)
+    {
+        const std::string url = io::toUtf8(tileablePath);
+        if (!io::isNetworkPath(url))
+            return tileablePath;
+
+        const fs::path tilesDir = UserProfile::get()->getTilesDir();
+        const std::string extension = raster::urlFileExtension(url);
+
+        if (!tileablePathHash.empty())
         {
-            localTileablePath = tileablePath;
+            // The caller knows the hash of the remote file: a copy of that name is the file, and
+            // it is downloaded (one thread at a time) only when there is none. A failed transfer
+            // never lands in the cache.
+            const fs::path local = tilesDir / io::fromUtf8(tileablePathHash + extension);
+            ThreadLock lock(io::toUtf8(local));
+            if (!fs::exists(local))
+            {
+                const fs::path download = io::concat(local, ".download-" + randomString(16));
+                raster::downloadInput(url, download);
+                io::rename(download, local);
+            }
+            return local;
         }
 
-        return localTileablePath;
+        // The remote file may have changed since the last call, so it is downloaded every time,
+        // and kept under the URL and the digest of its content. An unchanged file keeps its name
+        // and its state, and so what was made of it (the artefact, keyed by the path and the
+        // state, and the tilers kept open on it): the download is dropped. A changed one gets a
+        // name of its own, so no file is ever replaced under a reader, and the copies of the
+        // earlier versions of the URL go.
+        const std::string urlPrefix = Hash::strCRC64(url) + "-";
+        const fs::path download = tilesDir / io::fromUtf8("download-" + randomString(16) + extension);
+        raster::downloadInput(url, download);
+        try
+        {
+            const fs::path local =
+                tilesDir / io::fromUtf8(urlPrefix + Hash::fileSHA256(io::toUtf8(download)) + extension);
+            ThreadLock lock(io::toUtf8(local));
+            if (fs::exists(local))
+            {
+                io::assureIsRemoved(download);
+            }
+            else
+            {
+                io::rename(download, local);
+                removeEarlierVersions(tilesDir, urlPrefix, local);
+            }
+            return local;
+        }
+        catch (...)
+        {
+            io::assureIsRemoved(download);
+            throw;
+        }
     }
 
     namespace
@@ -233,10 +258,8 @@ namespace ddb
         {
             const io::ScopedTempDir request = raster::makeArtefactRequestFolder("cog-");
             const fs::path produced = request.path() / "cog.tif";
+            // buildCog refuses an output that does not open as a raster
             buildCog(io::toUtf8(raster), io::toUtf8(produced));
-            if (!raster::openArtefactRaster(produced))
-                throw GDALException(std::string(raster::kGdalUtilName) + " wrote a COG of " + io::toUtf8(raster) +
-                                    " that cannot be opened");
 
             // A tiler kept open on the previous file would block the replace on Windows
             RasterCache::instance().release(target);

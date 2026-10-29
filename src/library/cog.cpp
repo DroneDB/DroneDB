@@ -403,6 +403,13 @@ namespace ddb
         };
         raster::rasterHelper().buildCog(io::fromUtf8(input), io::fromUtf8(outputCog), raster::toJson(params),
                                         logProgress);
+
+        // The helper read a file of a user, and what it wrote is published (as the COG of a
+        // build, a tile artefact, the output of an alignment) and then trusted by its place: it
+        // has to open here as a raster first, with the drivers of the artefacts alone
+        if (!raster::reopenWrittenRaster(io::fromUtf8(outputCog)))
+            throw GDALException(std::string(raster::kGdalUtilName) + " wrote a COG of " + input +
+                                " that cannot be opened");
     }
 
     void generateCogStats(const std::string &cogPath) {
