@@ -8,6 +8,7 @@
 
 #include "ddb.h"
 #include "exceptions.h"
+#include "mio.h"
 #include "stringutil.h"
 #include "utf8.h"
 
@@ -97,12 +98,18 @@ bool isEntryPathSeparator(char c) noexcept {
 }
 
 bool isReservedSegment(std::string_view segment) noexcept {
-    return segment == DDB_FOLDER;
+    // Windows opens "x::$INDEX_ALLOCATION" (an NTFS stream of the folder x) as the folder x
+    if (const auto stream = segment.find(':'); stream != std::string_view::npos)
+        segment = segment.substr(0, stream);
+    // Win32 drops trailing dots and spaces from a name: ".ddb." and ".ddb " open ".ddb"
+    while (!segment.empty() && (segment.back() == '.' || segment.back() == ' '))
+        segment.remove_suffix(1);
+    // A case-insensitive file system (Windows, macOS) opens ".DDB" as ".ddb"
+    return str::iequals(segment, DDB_FOLDER);
 }
 
 bool isReservedSegment(const fs::path& segment) {
-    static const fs::path reserved(DDB_FOLDER);
-    return segment == reserved;
+    return isReservedSegment(std::string_view(io::toUtf8(segment)));
 }
 
 EntryPathResult normalizeEntryPath(std::string_view path, const ReservedRules& rules) {

@@ -35,9 +35,15 @@
 // whose name contains '\' (planAddCandidates skips it), so a normalized path, which cannot
 // contain one, never names a file that indexing would skip.
 //
-// Not rules (deliberately): names are compared byte for byte (".DDB", ".ddbx", ".ddb_notes.txt"
-// and "photos/.uploads/x" are ordinary); no Unicode normalization (NFC and NFD spellings are
-// different paths); whitespace is part of a name (Registry's whitespace-only check is its own).
+// The ".ddb" segment is matched as the file systems a dataset may live on open it, on every
+// platform alike (one rule, so a path is accepted or refused everywhere): ASCII letters in any
+// case, trailing dots and spaces dropped, and what follows a ':' (an NTFS stream name) ignored,
+// so ".DDB", ".Ddb", ".ddb.", ".ddb " and ".ddb::$INDEX_ALLOCATION" are reserved.
+//
+// Not rules (deliberately): other names are compared byte for byte (".ddbx", ".ddb_notes.txt"
+// and "photos/.uploads/x" are ordinary, and so are the caller's names); no Unicode
+// normalization (NFC and NFD spellings are different paths); whitespace is part of a name
+// (Registry's whitespace-only check is its own).
 namespace ddb {
 
 /// Extra reserved names, from the caller
@@ -66,8 +72,9 @@ void to_json(json& j, const EntryPathResult& result);
 /// True for a separator of a dataset-relative path: '/' or '\'
 bool isEntryPathSeparator(char c) noexcept;
 
-/// True when a path segment (one name, no separator) is reserved at any depth: exactly ".ddb"
-/// (DDB_FOLDER), byte for byte. libddb never indexes anything at or below such a segment.
+/// True when a path segment (one name, no separator) is reserved at any depth: ".ddb"
+/// (DDB_FOLDER) as a file system may open it (see above). libddb never indexes anything at or
+/// below such a segment.
 bool isReservedSegment(std::string_view segment) noexcept;
 /// The same rule for one component of a filesystem path (fs::path::filename(), or an element of
 /// the iteration over a path)

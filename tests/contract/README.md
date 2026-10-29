@@ -214,8 +214,11 @@ The rules, checked in this order: `empty` (the input is ""), `nul`, `encoding` (
 `absolute` (a leading `/` or `\`, which covers POSIX roots, UNC and device paths, or a drive
 `X:`), `traversal` (a `..` segment), `empty` (nothing left once empty and `.` segments are
 dropped), `reserved` (a `.ddb` segment at any depth, or a caller name as the first segment). `/`
-and `\` both separate segments, as in Registry. Names are compared byte for byte (`.DDB`,
-`.ddbx` and `photos/.uploads/x` are ordinary) and are not Unicode-normalized. A JSON string
+and `\` both separate segments, as in Registry. The `.ddb` segment is matched as the file
+systems a dataset may live on open it, on every platform alike: ASCII letters in any case,
+trailing dots and spaces dropped and what follows a `:` (an NTFS stream name) ignored, so
+`.DDB`, `.ddb.`, `.ddb ` and `.ddb::$INDEX_ALLOCATION` are reserved. Other names are compared
+byte for byte (`.ddbx` and `photos/.uploads/x` are ordinary) and are not Unicode-normalized. A JSON string
 cannot hold invalid UTF-8, so the `encoding` rejection is tested in `entry_path_test.cpp` only.
 
 ## Normalisation
@@ -473,3 +476,10 @@ Registry has to adopt first.
   No fixture changed (none lists a Model build); a host that offers the first artifact with a
   `downloadName` as the download of an entry now offers the 3D Tiles of a Model, so it must
   serve a directory as a ZIP before it moves to a libddb build that has the field.
+
+* 2026-10-29: `vectors/entry-paths.json`: the reserved `.ddb` segment is matched in any case of
+  its ASCII letters, without trailing dots and spaces and without an NTFS stream name (`.DDB/x`,
+  `.ddb./x`, `.ddb /x`, `.ddb::$INDEX_ALLOCATION/x` are `reserved`; `.DDB/x` was accepted), on
+  every platform: on Windows and macOS those names open the `.ddb` folder of the dataset, so an
+  upload to `.DDB/build/<hash>/...` wrote into its builds. Registry's copy of the vectors takes
+  the same change when it moves to a libddb build that has it.

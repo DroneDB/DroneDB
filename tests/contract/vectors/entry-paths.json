@@ -76,9 +76,73 @@
     {
       "input": ".DDB/x",
       "expected": {
-        "path": ".DDB/x"
+        "rejected": "reserved"
       },
-      "note": "byte comparison: .DDB is ordinary"
+      "note": "a case-insensitive file system (Windows, macOS) opens .DDB as .ddb: ASCII letters match in any case, on every platform"
+    },
+    {
+      "input": ".Ddb/x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".DDB/build/x.tif",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "sub/.dDb",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".ddb./x",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "Win32 drops trailing dots and spaces from a name"
+    },
+    {
+      "input": ".ddb /x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".ddb. ./x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".ddb::$INDEX_ALLOCATION/build/x.tif",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "Windows opens an NTFS stream of a folder as the folder: what follows ':' is ignored"
+    },
+    {
+      "input": ".ddb.x/a",
+      "expected": {
+        "path": ".ddb.x/a"
+      },
+      "note": "only trailing dots and spaces are dropped"
+    },
+    {
+      "input": " .ddb/a",
+      "expected": {
+        "path": " .ddb/a"
+      },
+      "note": "leading spaces are part of the name"
+    },
+    {
+      "input": ".DDBX/a",
+      "expected": {
+        "path": ".DDBX/a"
+      }
     },
     {
       "input": ".ddb",

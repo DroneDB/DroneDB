@@ -639,7 +639,8 @@ namespace
     {
         const std::vector<std::string> names = {
             "../../../build/0123456789abcdef/cog/cog.tif", ".ddb/build/0123456789abcdef/cog/cog.tif",
-            "a/.ddb/build/x.tif", "/etc/passwd", "a/../../x.txt", ".ddb", "a\\..\\..\\x.txt"};
+            "a/.ddb/build/x.tif", "/etc/passwd", "a/../../x.txt", ".ddb", "a\\..\\..\\x.txt",
+            ".DDB/build/0123456789abcdef/cog/cog.tif", ".Ddb/x", ".ddb./x", ".ddb /x"};
         for (const auto &name : names)
         {
             SCOPED_TRACE(name);
@@ -666,6 +667,10 @@ namespace
             {"a.txt", "sub/.ddb/build/x.tif"},
             {"a.txt", "../outside.txt"},
             {".ddb/dbase.sqlite", "b.txt"},
+            {"a.txt", ".DDB/build/0123456789abcdef/cog/cog.tif"},
+            {"a.txt", ".Ddb/x"},
+            {"a.txt", ".ddb./x"},
+            {"a.txt", ".ddb /x"},
         };
         for (const auto &entries : archives)
         {

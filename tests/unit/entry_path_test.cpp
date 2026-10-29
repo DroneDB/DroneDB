@@ -111,16 +111,21 @@ TEST(EntryPath, rejectsInvalidUtf8) {
     EXPECT_EQ(normalizeEntryPath("\xF4\x8F\xBF\xBF").path, "\xF4\x8F\xBF\xBF");
 }
 
-TEST(EntryPath, reservedSegmentIsExactlyDotDdb) {
-    EXPECT_TRUE(isReservedSegment(std::string_view(".ddb")));
-    EXPECT_TRUE(isReservedSegment(fs::path(".ddb")));
-    for (const char* ordinary : {".DDB", ".ddbx", ".ddb_notes.txt", "x.ddb", "", ".ddb/"}) {
+TEST(EntryPath, reservedSegmentIsDotDdbAsAFileSystemOpensIt) {
+    for (const char* reserved : {".ddb", ".DDB", ".Ddb", ".ddb.", ".ddb ", ".ddb. .", ".ddb::$INDEX_ALLOCATION",
+                                 ".DDB:stream"}) {
+        EXPECT_TRUE(isReservedSegment(std::string_view(reserved))) << reserved;
+        EXPECT_TRUE(isReservedSegment(fs::path(reserved))) << reserved;
+    }
+    for (const char* ordinary : {".ddbx", ".DDBX", ".ddb_notes.txt", "x.ddb", "", ".ddb/", " .ddb", ".ddb.x",
+                                 "ddb", ".", "..", "x:.ddb"}) {
         EXPECT_FALSE(isReservedSegment(std::string_view(ordinary))) << ordinary;
         EXPECT_FALSE(isReservedSegment(fs::path(ordinary))) << ordinary;
     }
     // containsDdbSegment (the indexer, glob expansion, status) applies the same rule per component
     EXPECT_TRUE(containsDdbSegment(fs::path("a") / ".ddb" / "b"));
-    EXPECT_FALSE(containsDdbSegment(fs::path("a") / ".DDB" / "b"));
+    EXPECT_TRUE(containsDdbSegment(fs::path("a") / ".DDB" / "b"));
+    EXPECT_TRUE(containsDdbSegment(fs::path("a") / ".ddb " / "b"));
     EXPECT_FALSE(containsDdbSegment(fs::path("a.ddbfile.txt")));
 
     EXPECT_TRUE(isEntryPathSeparator('/'));
