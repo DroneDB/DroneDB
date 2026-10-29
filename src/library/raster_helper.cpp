@@ -122,6 +122,15 @@ namespace ddb
                 }
             }
 
+            // Whether the failure means the process that answered is not fit for another request: it
+            // hit a limit, crashed or ran out of time. A server that ends itself after such an answer
+            // (Windows bounds the cpu time of a request that way) must not be handed to the next,
+            // innocent request, which would fail as crashed.
+            bool endsHelper(ErrorCode code)
+            {
+                return code == ErrorCode::Limit || code == ErrorCode::Crashed || code == ErrorCode::Timeout;
+            }
+
             // Throws what the failure of an operation means to the host (IRasterHelper)
             [[noreturn]] void raiseFailure(const char *op, const fs::path &path, ErrorCode code,
                                            const std::string &message)
@@ -252,7 +261,10 @@ namespace ddb
                         lease.fail(std::string(kGdalUtilName) + " sent an invalid result: " + e.what(), false);
                     }
                 }
-                lease.keep();
+                if (!response.ok && endsHelper(response.error))
+                    lease.abandon(std::string(kGdalUtilName) + " answered " + toString(response.error));
+                else
+                    lease.keep();
                 return response;
             }
             catch (const helper::Failure &failure)

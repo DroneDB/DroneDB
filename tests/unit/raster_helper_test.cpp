@@ -371,6 +371,42 @@ namespace
         EXPECT_EQ(helper_->startedHelpers(), 2u);
     }
 
+    // A server that answers that it hit a limit, crashed or ran out of time may end itself right after
+    // (the Windows server does after a cpu-time limit): the next request must not meet that process
+    TEST_F(RasterHelperTest, aHelperThatAnsweredALimitCrashOrTimeoutServesNoOtherRequest)
+    {
+        const auto pidOf = [&](const std::string &name) {
+            const auto requests = requestsFor(log_, "probe", name);
+            EXPECT_EQ(requests.size(), 1u) << name;
+            return requests.empty() ? 0ul : std::stoul(requests[0].substr(0, requests[0].find(' ')));
+        };
+
+        size_t started = 0;
+        for (const char *mode : {"limit", "crashed", "timeout"})
+        {
+            SCOPED_TRACE(mode);
+            const std::string failing = std::string(mode) + ".tif";
+            const std::string healthy = std::string("ok-after-") + mode + ".tif";
+
+            EXPECT_THROW(helper_->probe(touch(failing), ProbeParams()), RasterNotReadException);
+            EXPECT_EQ(helper_->startedHelpers(), ++started);
+            EXPECT_EQ(helper_->idleHelpers(), 0u);
+            EXPECT_EQ(helper_->busyHelpers(), 0u);
+
+            EXPECT_NO_THROW(helper_->probe(touch(healthy), ProbeParams()));
+            EXPECT_EQ(helper_->startedHelpers(), ++started);
+            EXPECT_EQ(helper_->idleHelpers(), 1u);
+
+            const unsigned long failed = pidOf(failing);
+            const unsigned long served = pidOf(healthy);
+            EXPECT_NE(failed, served);
+            EXPECT_TRUE(goneWithin(failed, kPatience)) << "helper " << failed << " still runs";
+            EXPECT_TRUE(processAlive(served));
+            // The next round starts from a pool without idle helpers
+            EXPECT_EQ(helper_->shutdown(), 1u);
+        }
+    }
+
     TEST_F(RasterHelperTest, aFileGdalCannotOpenIsTheTypeOfItsExtensionWithoutWarning)
     {
         for (const char *mode : {"unreadable", "policy"})
