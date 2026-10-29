@@ -11,6 +11,7 @@
 #include "env.h"
 #include "exceptions.h"
 #include "fileversion.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "raster_utils.h"
@@ -34,8 +35,7 @@ namespace ddb
     OpenedDataset::OpenedDataset(const std::string &path, Kind kind)
     {
         const bool raster = kind == Kind::Raster;
-        const unsigned int flags = (raster ? GDAL_OF_RASTER : GDAL_OF_VECTOR) | GDAL_OF_READONLY;
-        dataset_ = adoptDataset(GDALOpenEx(path.c_str(), flags, nullptr, nullptr, nullptr));
+        dataset_ = raster ? openUserRaster(path) : openUserVector(path);
         if (!dataset_)
             throw GDALException(std::string(raster ? "Cannot open raster: " : "Cannot open vector: ") + path);
     }

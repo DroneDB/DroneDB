@@ -11,6 +11,7 @@
 #include "logger.h"
 #include "mio.h"
 #include <format>
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 
@@ -242,7 +243,7 @@ namespace ddb
             std::string tmpOutFile = io::toUtf8(io::fromUtf8(outFile).replace_extension("." + randomString(8) + ".tif.tmp"));
 
             // Owned: the outsize parsing below throws InvalidArgsException after the open
-            auto srcDataset = adoptDataset(GDALOpen(io::toUtf8(p).c_str(), GA_ReadOnly));
+            auto srcDataset = openUserRaster(io::toUtf8(p));
             if (!srcDataset)
             {
                 if (stopOnError)

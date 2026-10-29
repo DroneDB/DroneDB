@@ -15,6 +15,7 @@
 #include "entry_handlers_builtin.h"
 #include "gdal_priv.h"
 #include "coordstransformer.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "ogr_spatialref.h"
 
@@ -121,7 +122,7 @@ void parseGeoRasterMetadata(const fs::path &path, Entry &entry)
     LOGV << "Processing GeoRaster file: " << io::toUtf8(path);
 
     // Owned: the SRS checks below throw while the dataset is open
-    auto dataset = adoptDataset(GDALOpen(io::toUtf8(path).c_str(), GA_ReadOnly));
+    auto dataset = openUserRaster(io::toUtf8(path));
     if (!dataset)
     {
         LOGV << "GDAL failed to open dataset: " << io::toUtf8(path);

@@ -15,6 +15,7 @@
 
 #include "entry.h"
 #include "exceptions.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "mio.h"
@@ -133,7 +134,7 @@ namespace ddb
             openPath = "/vsicurl/" + openPath;
         }
 
-        fileDataset = adoptDataset(GDALOpen(openPath.c_str(), GA_ReadOnly));
+        fileDataset = openUserRaster(openPath);
         if (!fileDataset)
             throw GDALException("Cannot open " + openPath);
         inputDataset = datasetHandle(fileDataset);

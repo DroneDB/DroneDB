@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "cog_utils.h"
 #include "logger.h"
@@ -15,7 +16,7 @@ namespace ddb
 
     bool isOptimizedCog(const std::string &inputPath)
     {
-        const auto dataset = adoptDataset(GDALOpen(inputPath.c_str(), GA_ReadOnly));
+        const auto dataset = openUserRaster(inputPath);
         if (!dataset) {
             LOGD << "Cannot open " << inputPath << " for COG verification";
             return false;

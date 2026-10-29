@@ -217,6 +217,16 @@ void initializeGDALandPROJ() {
     // carry that order too.
     CPLSetConfigOption("PROJ_NETWORK", "ON");
 
+    // A VRT never runs Python: a pixel function in the Python of a file we were given would
+    // execute its code. Set here, not left to GDAL's default, because the environment of the
+    // host could turn it on.
+    CPLSetConfigOption("GDAL_VRT_ENABLE_PYTHON", "NO");
+
+    // A GML that says it is a WFS response makes the GML driver download the schema its
+    // schemaLocation points at, a URL the file chooses. libddb only reads local files, so
+    // never; set for the same reason as the option above.
+    CPLSetConfigOption("GML_DOWNLOAD_SCHEMA", "NO");
+
     // Disable PAM (.aux.xml) files globally - we don't need sidecar files
     CPLSetConfigOption("GDAL_PAM_ENABLED", "NO");
 

@@ -4,6 +4,7 @@
 #include "merge_vrt.h"
 
 #include "exceptions.h"
+#include "gdal_open_policy.h"
 
 namespace ddb::merge {
 
@@ -11,7 +12,7 @@ std::vector<GDALDatasetUniquePtr> openAll(const std::vector<std::string> &paths)
     std::vector<GDALDatasetUniquePtr> datasets;
     datasets.reserve(paths.size());
     for (const auto &p : paths) {
-        auto ds = adoptDataset(GDALOpen(p.c_str(), GA_ReadOnly));
+        auto ds = openUserRaster(p);
         if (!ds) throw GDALException("Cannot open " + p);
         datasets.push_back(std::move(ds));
     }

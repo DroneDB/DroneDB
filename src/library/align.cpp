@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "align.h"
 #include "mathutil.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "raster_utils.h"
@@ -545,7 +546,7 @@ static void applyWarp(const std::string &sourcePath,
     // Resolve to an absolute path so the VRT SimpleSource can find the file
     // regardless of any cwd change between the VRT creation and the warp read.
     const std::string absSrcPath = io::toUtf8(fs::absolute(io::fromUtf8(sourcePath)));
-    const auto src = adoptDataset(GDALOpen(absSrcPath.c_str(), GA_ReadOnly));
+    const auto src = openUserRaster(absSrcPath);
     if (!src) throw GDALException("Cannot open " + sourcePath);
     GDALDatasetH hSrc = datasetHandle(src);
 
@@ -597,7 +598,7 @@ static double computeZOffset(const std::string &alignedPath,
                              const std::string &referencePath)
 {
     auto alignedDs = adoptDataset(GDALOpen(alignedPath.c_str(),   GA_ReadOnly));
-    auto refDs     = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+    auto refDs     = openUserRaster(referencePath);
     if (!alignedDs || !refDs) return 0.0;
     GDALDatasetH hA = datasetHandle(alignedDs);
     GDALDatasetH hR = datasetHandle(refDs);
@@ -688,8 +689,8 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
 {
     AlignValidationResult r;
 
-    const auto srcDs = adoptDataset(GDALOpen(sourcePath.c_str(),    GA_ReadOnly));
-    const auto refDs = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+    const auto srcDs = openUserRaster(sourcePath);
+    const auto refDs = openUserRaster(referencePath);
     if (!srcDs) { r.errors.push_back("Cannot open source: " + sourcePath); return r; }
     if (!refDs) { r.errors.push_back("Cannot open reference: " + referencePath); return r; }
     GDALDatasetH hS = datasetHandle(srcDs);
@@ -744,7 +745,7 @@ void reprojectReference(const std::string &referencePath, const std::string &sou
     CPLStringList args;
     args.AddString("-t_srs");
     args.AddString(sourceCrs.c_str());
-    const auto refSrc = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+    const auto refSrc = openUserRaster(referencePath);
     if (!refSrc) throw GDALException("Cannot open reference for reprojection");
     GDALDatasetH hR = datasetHandle(refSrc);
     const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
@@ -779,8 +780,8 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
 
     // Overlap bbox + common GSD
     // Owned: readToCommonGrid throws (empty window, failed RasterIO) while both are open
-    auto srcDs = adoptDataset(GDALOpen(sourcePath.c_str(),   GA_ReadOnly));
-    auto refDs = adoptDataset(GDALOpen(effectiveRef.c_str(), GA_ReadOnly));
+    auto srcDs = openUserRaster(sourcePath);
+    auto refDs = openUserRaster(effectiveRef);
     if (!srcDs || !refDs)
         throw GDALException("Cannot reopen datasets for grid extraction");
     GDALDatasetH hS = datasetHandle(srcDs);

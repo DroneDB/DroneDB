@@ -14,6 +14,7 @@
 #include "exceptions.h"
 #include "exif.h"
 #include "exifeditor.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "logger.h"
@@ -158,7 +159,7 @@ SeparateVrt buildAlignedVrt(const std::vector<std::string> &inputPaths, const Al
     std::vector<GDALDatasetUniquePtr> shiftedDatasets;
 
     for (size_t i = 0; i < inputPaths.size(); i++) {
-        const auto src = adoptDataset(GDALOpen(inputPaths[i].c_str(), GA_ReadOnly));
+        const auto src = openUserRaster(inputPaths[i]);
         if (!src) {
             throw GDALException("Cannot open " + inputPaths[i]);
         }

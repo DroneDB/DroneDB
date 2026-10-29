@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "raster_utils.h"
@@ -225,7 +226,7 @@ namespace ddb
         // A JPEG 2000 decodes on threads of its own, one per CPU unless GDAL_NUM_THREADS says
         // otherwise, and starts them when it is opened. It is never a COG: no open before the
         // budget below is in place.
-        const GDALDriverH sourceDriver = GDALIdentifyDriver(input.c_str(), nullptr);
+        const GDALDriverH sourceDriver = identifyUserRaster(input);
         const bool ownDecodeThreads = sourceDriver && decodesWithOwnThreads(GDALGetDriverShortName(sourceDriver));
 
         // Check if input is already an optimized COG
@@ -251,7 +252,7 @@ namespace ddb
         LOGD << "Building COG from " << input << " (requires optimization)";
 
         // Owned: the option list and GDALWarpAppOptionsNew below can throw
-        auto srcDataset = adoptDataset(GDALOpen(input.c_str(), GA_ReadOnly));
+        auto srcDataset = openUserRaster(input);
 
         if (!srcDataset)
             throw GDALException("Cannot open " + input + " for reading");

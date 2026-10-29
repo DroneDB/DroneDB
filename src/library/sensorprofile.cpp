@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "sensorprofile.h"
 #include "json.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "exceptions.h"
 #include "logger.h"
@@ -313,7 +314,7 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
                                                                  const std::vector<SensorProfile> &profiles) const {
     SensorDetectionResult result;
 
-    auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    auto dataset = openUserRaster(rasterPath);
     if (!dataset) return result;
     GDALDatasetH hDataset = datasetHandle(dataset);
 
@@ -398,7 +399,7 @@ BandMapping SensorProfileManager::getBandMappingForPreset(const std::string &ras
 BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPath, int bandCount) const {
     BandMapping bm;
 
-    auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    auto dataset = openUserRaster(rasterPath);
     if (!dataset) return bm;
     GDALDatasetH hDataset = datasetHandle(dataset);
 
@@ -435,7 +436,7 @@ BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPa
 std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPath) const {
     auto det = detectSensor(rasterPath);
 
-    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    const auto dataset = openUserRaster(rasterPath);
     if (!dataset) throw GDALException("Cannot open " + rasterPath);
     GDALDatasetH hDataset = datasetHandle(dataset);
 

@@ -16,6 +16,7 @@
 #include "coordstransformer.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "ogr_api.h"
 #include "ogr_spatialref.h"
@@ -186,9 +187,7 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
             cadSource.emplace(path);
         const fs::path openPath = isCad ? cadSource->dxfPath() : path;
 
-        const auto dataset = adoptDataset(GDALOpenEx(io::toUtf8(openPath).c_str(),
-                                                    GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                                                    nullptr, nullptr, nullptr));
+        const auto dataset = openUserVector(io::toUtf8(openPath));
         if (!dataset)
         {
             LOGD << "Vector parse: GDAL cannot open " << io::toUtf8(path);
@@ -246,7 +245,7 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
     catch (const std::exception &e)
     {
         LOGD << "Vector parse warning: " << e.what();
-        entry.properties["warning"] = std::string("vector parse failed: ") + e.what();
+        setEntryWarning(entry, std::string("vector parse failed: ") + e.what());
     }
 }
 

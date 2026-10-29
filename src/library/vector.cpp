@@ -19,6 +19,7 @@
 #include "cancellation.h"
 #include "coordstransformer.h"
 #include "gdal_inc.h"
+#include "gdal_open_policy.h"
 #include "json.h"
 #include "vector.h"
 #include "mvt.h"
@@ -852,9 +853,7 @@ namespace ddb
         const std::string openPath = isCad ? io::toUtf8(cadSource->dxfPath()) : input;
 
         // Step 3: open source once, reuse for both branches
-        const auto srcDS = adoptDataset(GDALOpenEx(openPath.c_str(),
-                                                   GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                                                   nullptr, nullptr, nullptr));
+        const auto srcDS = openUserVector(openPath);
         if (!srcDS)
             throw AppException("Cannot open vector source: " + input);
         GDALDatasetH hSrcDS = datasetHandle(srcDS);

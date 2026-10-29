@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -27,6 +28,7 @@
 #include "constants.h"
 #include "coordstransformer.h"
 #include "gdal_inc.h"
+#include "gdal_open_policy.h"
 #include "geo.h"
 #include "geoproject.h"
 #include "databasepool.h"
@@ -567,28 +569,28 @@ namespace
     }
 
     // alignRaster leaked both datasets when reading the common grid failed. The source is a
-    // VRT whose (lazily opened) backing file is missing, so RasterIO fails after both opens.
+    // GeoTIFF cut short after its header: it opens, and RasterIO fails after both opens.
     TEST(Defects, Target_AlignClosesDatasetsWhenTheGridReadFails)
     {
         TestArea ta(TEST_NAME, true);
-        const std::string vrt =
-            "<VRTDataset rasterXSize=\"64\" rasterYSize=\"64\">\n"
-            "  <SRS>EPSG:32615</SRS>\n"
-            "  <GeoTransform>500000, 1, 0, 4000064, 0, -1</GeoTransform>\n"
-            "  <VRTRasterBand dataType=\"Byte\" band=\"1\">\n"
-            "    <SimpleSource>\n"
-            "      <SourceFilename relativeToVRT=\"1\">missing.tif</SourceFilename>\n"
-            "      <SourceBand>1</SourceBand>\n"
-            "      <SourceProperties RasterXSize=\"64\" RasterYSize=\"64\" DataType=\"Byte\" BlockXSize=\"64\" BlockYSize=\"64\"/>\n"
-            "      <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"64\" ySize=\"64\"/>\n"
-            "      <DstRect xOff=\"0\" yOff=\"0\" xSize=\"64\" ySize=\"64\"/>\n"
-            "    </SimpleSource>\n"
-            "  </VRTRasterBand>\n"
-            "</VRTDataset>\n";
-        const auto src = ta.getPath("src.vrt");
-        const auto ref = ta.getPath("ref.vrt");
-        writeFile(src, vrt);
-        writeFile(ref, vrt);
+        const double gt[6] = {500000.0, 1.0, 0.0, 4000064.0, 0.0, -1.0};
+        const auto src = ta.getPath("src.tif");
+        const auto ref = ta.getPath("ref.tif");
+        writeGeoTiff(src, 1, GDT_Byte, gt, 32615);
+        writeGeoTiff(ref, 1, GDT_Byte, gt, 32615);
+
+        // Drop the pixels of the source, keeping the header and the directory before them
+        std::uintmax_t firstBlock = 0;
+        {
+            const auto ds = openUserRaster(src.string());
+            ASSERT_TRUE(ds);
+            const char *offset = GDALGetMetadataItem(GDALGetRasterBand(datasetHandle(ds), 1),
+                                                     "BLOCK_OFFSET_0_0", "TIFF");
+            ASSERT_NE(offset, nullptr);
+            firstBlock = std::stoull(offset);
+        }
+        fs::resize_file(src, firstBlock);
+        ASSERT_TRUE(openUserRaster(src.string())) << "the truncated source must still open";
 
         const int before = openDatasetCount();
         EXPECT_THROW(alignRaster(src.string(), ref.string(), ta.getPath("out.tif").string()), GDALException);

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "merge_multispectral.h"
@@ -293,7 +294,7 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     }
 
     // Open first file as reference
-    auto refDs = adoptDataset(GDALOpen(inputPaths[0].c_str(), GA_ReadOnly));
+    auto refDs = openUserRaster(inputPaths[0]);
     if (!refDs) {
         result.errors.push_back("Cannot open " + displayNames[0]);
         return result;
@@ -302,7 +303,7 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     int totalBands = ref.bands;
 
     for (size_t i = 1; i < inputPaths.size(); i++) {
-        const auto dataset = adoptDataset(GDALOpen(inputPaths[i].c_str(), GA_ReadOnly));
+        const auto dataset = openUserRaster(inputPaths[i]);
         if (!dataset) {
             result.errors.push_back("Cannot open " + displayNames[i]);
             continue;

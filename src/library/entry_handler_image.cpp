@@ -9,6 +9,7 @@
 
 #include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "mio.h"
 #include "thermal.h"
@@ -56,7 +57,7 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
 
     if (gdalRaster)
     {
-        const auto dataset = adoptDataset(GDALOpen(io::toUtf8(path).c_str(), GA_ReadOnly));
+        const auto dataset = openUserRaster(io::toUtf8(path));
         if (dataset)
         {
             const char *proj = GDALGetProjectionRef(datasetHandle(dataset));

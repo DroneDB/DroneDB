@@ -10,6 +10,7 @@
 
 #include "cancellation.h"
 #include "exceptions.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "logger.h"
@@ -449,7 +450,7 @@ void exportRaster(const RasterExport &request)
     ExportSession session(request.progress);
 
     // Closed on any return or throw
-    auto srcGuard = adoptDataset(GDALOpen(request.input.c_str(), GA_ReadOnly));
+    auto srcGuard = openUserRaster(request.input);
     if (!srcGuard)
         throw GDALException("Cannot open " + request.input);
 

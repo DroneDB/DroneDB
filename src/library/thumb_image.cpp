@@ -11,6 +11,7 @@
 #include "cancellation.h"
 #include "embedded_preview.h"
 #include "exceptions.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "mio.h"
@@ -37,10 +38,10 @@ GDALDatasetUniquePtr openThumbSource(const fs::path& imagePath, std::string& res
         tryReopen = true;
     }
 
-    auto src = adoptDataset(GDALOpen(resolvedPath.c_str(), GA_ReadOnly));
+    auto src = openUserRaster(resolvedPath);
     if (!src && tryReopen) {
         resolvedPath = io::toUtf8(imagePath);
-        src = adoptDataset(GDALOpen(resolvedPath.c_str(), GA_ReadOnly));
+        src = openUserRaster(resolvedPath);
     }
     if (!src)
         throw GDALException("Cannot open " + resolvedPath + " for reading");
@@ -59,7 +60,7 @@ GDALDatasetUniquePtr openImageThumbSource(const fs::path& imagePath, int thumbSi
         const JpegLayout layout = readJpegLayout(imagePath);
         if (const auto preview = pickJpegPreview(layout, thumbSize)) {
             openPath = jpegPreviewGdalPath(imagePath, *preview);
-            if (auto previewDs = adoptDataset(GDALOpen(openPath.c_str(), GA_ReadOnly))) {
+            if (auto previewDs = openUserRaster(openPath)) {
                 frameWidth = layout.width;
                 frameHeight = layout.height;
                 LOGD << "Thumbnail of " << io::toUtf8(imagePath) << " from its " << preview->width << "x"
@@ -267,7 +268,7 @@ void generateImageThumbEx(const fs::path& imagePath,
                           uint8_t** outBuffer,
                           int* outBufferSize,
                           const ThumbVisParams& visParams) {
-    const auto src = adoptDataset(GDALOpen(io::toUtf8(imagePath).c_str(), GA_ReadOnly));
+    const auto src = openUserRaster(io::toUtf8(imagePath));
     if (!src)
         throw GDALException("Cannot open " + io::toUtf8(imagePath) + " for reading");
     GDALDatasetH hSrc = datasetHandle(src);
