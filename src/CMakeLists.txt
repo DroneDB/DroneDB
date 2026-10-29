@@ -115,6 +115,12 @@ endif()
 
 add_library(ddb_core_usage INTERFACE)
 target_link_libraries(ddb_core_usage INTERFACE ${COMMON_LIBS} boolinq ddb_headers)
+# Windows: the folders the host makes for the output of the raster helper get a low integrity label
+# (raster_artefacts.cpp), which the helper's server, running at low integrity, needs to write. The
+# sandbox library depends on nothing of libddb and holds no GPL code.
+if(WIN32)
+    target_link_libraries(ddb_core_usage INTERFACE ddb_sandbox)
+endif()
 
 # Library sources only: glob.hpp (path_expansion.cpp), and <prefix>/include/pdal because PDAL's own
 # headers include their siblings without the pdal/ prefix (ColorinterpFilter.hpp includes
@@ -212,6 +218,9 @@ endif()
 # static archive members end up in libddb.so, and an INTERFACE target in between reorders the
 # link line
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} boolinq ddb_headers PUBLIC ddb_c_api)
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ddb_sandbox)
+endif()
 ddb_gc_sections(${PROJECT_NAME})
 
 # The helper programs (scripts/helper-tools.txt: bm3d, which writes bm3d model files, and

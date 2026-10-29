@@ -22,6 +22,10 @@
 #include "timeutil.h"
 #include "userprofile.h"
 
+#ifdef _WIN32
+#include "sandbox/sandbox.h"
+#endif
+
 namespace ddb
 {
     namespace raster
@@ -200,6 +204,15 @@ namespace ddb
             fs::permissions(folder.path(), fs::perms::owner_all, fs::perm_options::replace, ec);
             if (ec)
                 throw FSException("Cannot restrict the access to " + io::toUtf8(folder.path()), ec);
+#ifdef _WIN32
+            // The gdal-util server runs at low integrity on Windows, and such a process writes
+            // only below a folder with a low integrity label: the folder of every request gets
+            // one (what the helper makes in it inherits it). Without the label the helper fails
+            // to write and says so; with the sandbox off it needs none.
+            std::string labelError;
+            if (!sandbox::windows::setLowIntegrityLabel(io::toUtf8(folder.path()), &labelError))
+                LOGW << "Cannot give " << io::toUtf8(folder.path()) << " a low integrity label: " << labelError;
+#endif
             return folder;
         }
 

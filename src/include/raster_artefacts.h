@@ -85,7 +85,8 @@ namespace ddb
 
         // A new folder in `parent` that only the user of the process can enter, owned by the
         // returned object (removed with it): the place a helper writes its result, so that
-        // nobody else can swap the file between the helper and the host's check
+        // nobody else can swap the file between the helper and the host's check. On Windows it
+        // has a low integrity label, so that the confined helper may write in it.
         // @throws FSException
         io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix);
 
