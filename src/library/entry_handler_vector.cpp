@@ -119,7 +119,7 @@ class VectorEntryHandler : public EntryHandler {
     void build(const BuildContext& ctx) const override {
         // Propagate the force flag so a partial build (e.g. vec/ present but mvt/ missing) is
         // fully rebuilt instead of being silently treated as up-to-date inside buildVector.
-        buildVector(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.baseOutputPath), ctx.force);
+        buildVector(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.baseOutputPath), ctx.force, ctx.options);
     }
 
     // The .dbf/.shx/.cpg of a shapefile; a .prj also gives a CAD drawing its CRS
