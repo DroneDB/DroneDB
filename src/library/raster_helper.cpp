@@ -10,6 +10,7 @@
 #include <system_error>
 #include <utility>
 
+#include "build_budget.h"
 #include "cancellation.h"
 #include "exif.h"
 #include "http_client.h"
@@ -33,13 +34,29 @@ namespace ddb
             // What of the output of `gdal-util --version` goes to an error message
             constexpr size_t kVersionOutputInMessage = 300;
 
-            // The environment every helper starts with: a bounded heap for each worker, and no
-            // grid downloaded from the network by PROJ
-            const std::vector<std::pair<std::string, std::string>> &helperEnvironment()
+            using Environment = std::vector<std::pair<std::string, std::string>>;
+
+            // The heap arenas of glibc's allocator a worker of `--serve` has: it serves one request
+            // on one thread, and many workers run at once, so two bound the heap of each
+            constexpr size_t kWorkerArenas = 2;
+
+            // The environment a helper starts with: at most `arenas` heap arenas, and no grid
+            // downloaded from the network by PROJ
+            Environment helperEnvironment(size_t arenas = kWorkerArenas)
             {
-                static const std::vector<std::pair<std::string, std::string>> environment = {
-                    {"MALLOC_ARENA_MAX", "2"}, {"PROJ_NETWORK", "OFF"}};
-                return environment;
+                return {{"MALLOC_ARENA_MAX", std::to_string(arenas)}, {"PROJ_NETWORK", "OFF"}};
+            }
+
+            // The environment of a one-shot build: an arena for each thread the build may run, the
+            // calling one included. The threads of a build allocate all the time (the MVT writer
+            // encodes a tile on each), and with the two arenas of a worker they wait on each
+            // other's locks: a vector build of a few MB on 32 threads ran ten times slower, most
+            // of it in the kernel. The threads are what the host granted (the `threads` param),
+            // else what the configuration allows, as the helper reads the same.
+            Environment buildEnvironment(const json &params)
+            {
+                const int threads = buildThreadsFromJson(params).value_or(BuildResourceBudget::fromConfig().threads);
+                return helperEnvironment(static_cast<size_t>(std::max(threads, 1)) + 1);
             }
 
             std::string missingProgramMessage()
@@ -395,7 +412,7 @@ namespace ddb
 
             OneShotOutput output(progress);
             process::Options run;
-            run.envOverrides = helperEnvironment();
+            run.envOverrides = buildEnvironment(request.params);
             run.maxRuntime = tools::toolMaxRuntime(kGdalUtilMaxSecondsEnv, kGdalUtilDefaultMaxRuntime);
             run.onOutputLine = [&output](const std::string &line) { output.onLine(line); };
             const process::Result result = runner.run(program, {"--request", encodeRequest(request)}, run);

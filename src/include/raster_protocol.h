@@ -232,10 +232,14 @@ namespace ddb
         // object with `ok` that is not a valid response
         std::optional<Response> responseOfOutputLine(std::string_view line);
 
-        // The params of a `cog`. The warp and the compression of the COG use the threads of one
-        // build; the host holds the tokens of the CPU pool for them (parallel.h) and says how
-        // many it got, since the helper has a pool of its own and could not know. Without
-        // `threads` the build takes what the configuration (DDB_BUILD_THREADS) allows.
+        // The `threads` member of the params of a build (`cog`, `vector`): the threads of one
+        // build. The host holds the tokens of the CPU pool for them (parallel.h) and says how
+        // many it got, since the helper has a pool of its own and could not know. Without it the
+        // build takes what the configuration (DDB_BUILD_THREADS) allows.
+        // @throws ProtocolError for a member that is not an integer from 1 to 4096
+        std::optional<int> buildThreadsFromJson(const json &params);
+
+        // The params of a `cog`: the warp and the compression of the COG use `threads`
         struct CogParams
         {
             std::optional<int> threads;
@@ -247,10 +251,12 @@ namespace ddb
 
         // The params of a `vector` build. `source` is the file the user named when `path` is a
         // conversion of it (a DWG converted to a DXF by the host): its sidecars give the drawing
-        // its coordinate system. Empty for any other file.
+        // its coordinate system. Empty for any other file. The thread pool of the MVT writer
+        // uses `threads`.
         struct VectorParams
         {
             fs::path source;
+            std::optional<int> threads;
         };
 
         json toJson(const VectorParams &params);

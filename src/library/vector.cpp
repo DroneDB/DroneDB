@@ -837,6 +837,10 @@ namespace ddb
             const std::string openPath = io::toUtf8(path);
             const bool isCad = cad::isCadFile(original);
 
+            // The MVT writer starts a pool of GDAL_NUM_THREADS threads (one per CPU of the machine
+            // when it is not set), read on this thread: it gets the threads granted
+            const BuildThreads threads(params.threads);
+
             // Open the source once, reuse it for both branches
             const auto srcDS = openUserVector(openPath);
             if (!srcDS)
@@ -861,7 +865,8 @@ namespace ddb
 
     void buildVector(const std::string &input,
                      const std::string &baseOutputPath,
-                     bool overwrite)
+                     bool overwrite,
+                     const BuildOptions &options)
     {
         LOGD << "buildVector(" << input << " -> " << baseOutputPath
              << ", overwrite=" << (overwrite ? "true" : "false") << ")";
@@ -911,9 +916,12 @@ namespace ddb
         const io::ScopedTempDir staging = raster::makePrivateFolder(basePath, VectorStagingPrefix);
         const fs::path &stagingDir = staging.path();
 
+        // The tokens are held until the helper is done
+        const auto cpu = raster::acquireBuildThreads(options.threads);
         raster::VectorParams params;
         if (isCad)
             params.source = io::fromUtf8(input);
+        params.threads = static_cast<int>(cpu.threads());
         raster::rasterHelper().buildVector(openPath, stagingDir, raster::toJson(params), raster::ProgressCallback());
 
         // A local drawing has no MVT pyramid: local.json says so

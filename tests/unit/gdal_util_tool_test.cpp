@@ -1289,6 +1289,31 @@ namespace
         EXPECT_TRUE(filesOf(stage).empty()) << "nothing is left to publish";
     }
 
+    TEST_F(GdalUtilToolTest, aVectorBuildRunsOnTheThreadsOfItsRequest)
+    {
+        const fs::path stage = area_->getFolder() / "stage-threads";
+        fs::create_directories(stage);
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(57, raster::op::kVector, geojson_, stage, json{{"threads", 2}}))});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        EXPECT_TRUE(raster::decodeResponse(run.lines.back()).ok) << run.lines.back();
+        EXPECT_TRUE(filesOf(stage).count("mvt/metadata.json"));
+
+        // A count of threads that is none is refused before anything is built
+        const fs::path refused = area_->getFolder() / "stage-no-threads";
+        fs::create_directories(refused);
+        for (const json &threads : {json(0), json(4097), json("2")})
+        {
+            SCOPED_TRACE(threads.dump());
+            const ToolRun bad = runTool({"--request", raster::encodeRequest(buildRequest(58, raster::op::kVector, geojson_, refused, json{{"threads", threads}}))});
+            ASSERT_FALSE(bad.lines.empty()) << bad.stderrText;
+            const auto response = raster::decodeResponse(bad.lines.back());
+            EXPECT_FALSE(response.ok);
+            EXPECT_EQ(response.error, raster::ErrorCode::Internal);
+            EXPECT_NE(response.message.find("'threads'"), std::string::npos) << response.message;
+            EXPECT_TRUE(filesOf(refused).empty());
+        }
+    }
+
     raster::GeoprojectParams photoParams()
     {
         raster::GeoprojectParams params;

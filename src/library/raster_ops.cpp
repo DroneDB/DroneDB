@@ -4,7 +4,10 @@
 #include "raster_ops.h"
 
 #include <new>
+#include <string>
 #include <system_error>
+
+#include "build_budget.h"
 
 namespace ddb {
 namespace raster {
@@ -34,6 +37,16 @@ ErrorCode classify(const std::exception &failure) {
         return ErrorCode::Unreadable;
     return ErrorCode::Internal;
 }
+
+parallel::CpuTokens acquireBuildThreads(const std::optional<int> &cap) {
+    BuildOptions options;
+    options.threads = cap;
+    return parallel::tryAcquireThreads(static_cast<size_t>(BuildResourceBudget::fromConfig(options).threads));
+}
+
+BuildThreads::BuildThreads(const std::optional<int> &granted)
+    : tokens_(acquireBuildThreads(granted)),
+      numThreads_("GDAL_NUM_THREADS", std::to_string(tokens_.threads()).c_str()) {}
 
 }  // namespace raster
 }  // namespace ddb

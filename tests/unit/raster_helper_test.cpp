@@ -16,6 +16,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -38,6 +39,7 @@
 #include "process_runner.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
+#include "raster_ops.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
@@ -1044,6 +1046,31 @@ namespace
         EXPECT_EQ(decodeRequest(runner.calls.at(1).at(1)).op, op::kVector);
     }
 
+    TEST(RasterOneShot, aBuildProcessHasAHeapArenaForEachOfItsThreads)
+    {
+        FakeRunner runner;
+        std::vector<std::vector<std::pair<std::string, std::string>>> environments;
+        runner.handler = [&environments](const std::vector<std::string> &args, const process::Options &options) {
+            environments.push_back(options.envOverrides);
+            options.onOutputLine(R"({"id":)" + std::to_string(idOfRequest(args)) + R"(,"ok":true,"result":{}})");
+            return exitedWith(0);
+        };
+        GdalUtilHelper helper = oneShotHelper(runner);
+        helper.buildVector(fs::absolute("a.geojson"), fs::absolute("out"), json{{"threads", 3}}, ProgressCallback());
+        helper.buildCog(fs::absolute("a.tif"), fs::absolute("o.tif"), json{{"threads", 5}}, ProgressCallback());
+        // Without the param, the threads the configuration allows, which the helper takes then
+        helper.buildCog(fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback());
+
+        const std::vector<std::string> arenas = {"4", "6", std::to_string(BuildResourceBudget::fromConfig().threads + 1)};
+        ASSERT_EQ(environments.size(), arenas.size());
+        for (size_t i = 0; i < arenas.size(); i++)
+        {
+            SCOPED_TRACE(i);
+            using Variable = std::pair<std::string, std::string>;
+            EXPECT_EQ(environments[i], (std::vector<Variable>{{"MALLOC_ARENA_MAX", arenas[i]}, {"PROJ_NETWORK", "OFF"}}));
+        }
+    }
+
     TEST(RasterOneShot, aFailureResponseIsMappedLikeAnyOther)
     {
         const std::vector<std::pair<std::string, std::string>> cases = {
@@ -1378,6 +1405,67 @@ namespace
         // calling thread is one of the threads
         EXPECT_EQ(tokensDuring, tokensBefore + static_cast<size_t>(threads - 1));
         EXPECT_EQ(parallel::cpuTokensInUse(), tokensBefore);
+    }
+
+    TEST_F(RasterBuildsTest, theVectorBuildTellsTheHelperTheThreadsItHoldsTheTokensOf)
+    {
+        const fs::path source = area_->getPath("layer.geojson");
+        std::ofstream(source) << "{}";
+        const fs::path base = area_->getPath("build");
+
+        ScriptedHelper helper;
+        std::optional<int> threads;
+        size_t tokensDuring = 0;
+        helper.onVector = [&](const fs::path &, const fs::path &out, const json &params) {
+            threads = vectorParamsFromJson(params).threads;
+            tokensDuring = parallel::cpuTokensInUse();
+            fs::create_directories(out / VectorBuildSubfolder);
+            fs::create_directories(out / MvtBuildSubfolder);
+            std::ofstream(out / VectorBuildSubfolder / VectorGpkgFileName) << "gpkg";
+            std::ofstream(out / MvtBuildSubfolder / MvtMetadataFileName) << "{}";
+        };
+        const ScopedRasterHelper installed(helper);
+
+        const size_t tokensBefore = parallel::cpuTokensInUse();
+        buildVector(io::toUtf8(source), io::toUtf8(base), false, BuildOptions::withThreads(3));
+
+        ASSERT_TRUE(threads.has_value()) << "the helper is told, so it does not take one thread per CPU";
+        ASSERT_GE(*threads, 1);
+        EXPECT_LE(*threads, 3) << "the cap of the caller lowers the threads";
+        EXPECT_EQ(tokensDuring, tokensBefore + static_cast<size_t>(*threads - 1));
+        EXPECT_EQ(parallel::cpuTokensInUse(), tokensBefore);
+
+        // Without a cap, the budget of the configuration
+        buildVector(io::toUtf8(source), io::toUtf8(base), true);
+        ASSERT_TRUE(threads.has_value());
+        EXPECT_LE(*threads, BuildResourceBudget::fromConfig().threads);
+    }
+
+    TEST_F(RasterBuildsTest, theThreadsOfABuildInTheHelperAreTheOnesGdalStartsForIt)
+    {
+        const char *const before = CPLGetConfigOption("GDAL_NUM_THREADS", nullptr);
+        const std::optional<std::string> previous = before ? std::optional<std::string>(before) : std::nullopt;
+        const size_t tokensBefore = parallel::cpuTokensInUse();
+        {
+            const BuildThreads threads(3);
+            ASSERT_GE(threads.threads(), 1u);
+            EXPECT_LE(threads.threads(), 3u);
+            EXPECT_EQ(parallel::cpuTokensInUse(), tokensBefore + threads.threads() - 1);
+            const char *const set = CPLGetConfigOption("GDAL_NUM_THREADS", nullptr);
+            ASSERT_NE(set, nullptr);
+            EXPECT_EQ(std::string(set), std::to_string(threads.threads()));
+
+            // For the thread of the build only
+            std::optional<std::string> elsewhere;
+            std::thread([&elsewhere] {
+                if (const char *value = CPLGetConfigOption("GDAL_NUM_THREADS", nullptr))
+                    elsewhere = value;
+            }).join();
+            EXPECT_EQ(elsewhere, previous);
+        }
+        EXPECT_EQ(parallel::cpuTokensInUse(), tokensBefore);
+        const char *const after = CPLGetConfigOption("GDAL_NUM_THREADS", nullptr);
+        EXPECT_EQ(after ? std::optional<std::string>(after) : std::nullopt, previous);
     }
 
     // The build of a GeoRaster entry, as the dispatcher runs it

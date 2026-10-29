@@ -96,7 +96,8 @@ namespace ddb
             // The operations below take the members the protocol defines for them in `params`
             virtual void normalize(const fs::path &path, const fs::path &out, const json &params) = 0;
             virtual void geoproject(const fs::path &path, const fs::path &out, const json &params) = 0;
-            // Long conversions: one process each, which writes progress as it goes. A full device
+            // Long conversions: one process each, which writes progress as it goes. `threads` in
+            // `params` is the number of threads the caller holds CPU tokens for. A full device
             // is a RetryableBuildException (NoSpaceOnDevice), as any build reports it; an idle
             // process one with the reason IdleTimeout.
             virtual void buildCog(const fs::path &path, const fs::path &out, const json &params,
@@ -141,7 +142,9 @@ namespace ddb
         //     a helper, and is started only after `gdal-util --version` reported a protocol major
         //     this client implements.
         //   - Helpers start with MALLOC_ARENA_MAX=2 (a bounded heap per worker) and PROJ_NETWORK=OFF
-        //     (a worker never fetches a grid from the network).
+        //     (a worker never fetches a grid from the network). A build process gets one heap
+        //     arena more than the threads of its `threads` param (else of BuildResourceBudget),
+        //     since its threads would wait on each other's locks with two.
         //   - A helper that dies, hangs, or sends what the protocol does not allow is killed and
         //     dropped, the failure is logged (operation, error code, file) and the request fails
         //     with RasterNotReadException; the next request starts a new helper.

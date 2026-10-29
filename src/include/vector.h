@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "build_budget.h"
+
 namespace ddb
 {
 
@@ -40,6 +42,10 @@ namespace ddb
      * only vec/source.gpkg (drawing coordinates, no SRS) and vec/local.json
      * (units, extent) are written, no mvt/, and an older mvt/ is removed.
      *
+     * The threads of the build (the thread pool of the MVT writer) take tokens of the CPU pool
+     * of this process for as long as the helper works: the lower of the cap of @p options and
+     * the DDB_BUILD_THREADS budget (BuildResourceBudget), as many as the pool gives.
+     *
      * @throws BuildDepMissingException If sidecar files are missing (names are
      *                                  relative to the input's folder).
      * @throws AppException             On unrecoverable conversion errors,
@@ -48,7 +54,8 @@ namespace ddb
      */
     void buildVector(const std::string &input,
                      const std::string &baseOutputPath,
-                     bool overwrite = false);
+                     bool overwrite = false,
+                     const BuildOptions &options = {});
 
     /**
      * Return the list of required sidecar dependencies for a vector input

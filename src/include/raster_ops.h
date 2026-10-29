@@ -6,10 +6,13 @@
 
 #include <cstdint>
 #include <exception>
+#include <optional>
 
 #include "entry.h"
 #include "exceptions.h"
 #include "fs.h"
+#include "gdal_raii.h"
+#include "parallel.h"
 #include "raster_protocol.h"
 #include "tile_encoder.h"
 
@@ -38,6 +41,27 @@ namespace ddb
         // full disk, a limit for an allocation that failed, a defect otherwise (and for the
         // failures of GDAL that are the file's, unreadable)
         ErrorCode classify(const std::exception &failure);
+
+        // The CPU tokens of the threads of one build (cog, vector): the lower of `cap` and the
+        // DDB_BUILD_THREADS budget (BuildResourceBudget), as many as the CPU pool of this process
+        // gives. The host takes them for the helper process and says how many in the `threads`
+        // param; the helper, which has a pool of its own, takes them again for those.
+        parallel::CpuTokens acquireBuildThreads(const std::optional<int> &cap);
+
+        // The threads of a build in the helper, while it lives: the tokens of
+        // acquireBuildThreads(granted), and GDAL_NUM_THREADS set to their number for the calling
+        // thread, so that a thread pool GDAL starts for the build without an option of its own
+        // has the threads granted, not one per CPU of the machine (the MVT writer reads it)
+        class BuildThreads
+        {
+          public:
+            explicit BuildThreads(const std::optional<int> &granted);
+            size_t threads() const noexcept { return tokens_.threads(); }
+
+          private:
+            parallel::CpuTokens tokens_;
+            ScopedThreadConfigOption numThreads_;
+        };
 
         // What GDAL finds in a raster or a vector file, as the entry of the file needs it. A
         // raster with a projection is a GeoRaster, whose size, geotransform, bands and WGS84

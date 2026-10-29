@@ -607,11 +607,29 @@ namespace ddb
             return progress->get<double>();
         }
 
+        std::optional<int> buildThreadsFromJson(const json &params)
+        {
+            const json *threads = params.is_object() ? member(params, "threads") : nullptr;
+            if (threads == nullptr)
+                return std::nullopt;
+            if (!threads->is_number_integer() || threads->get<int64_t>() < 1 || threads->get<int64_t>() > 4096)
+                throw ProtocolError("'threads' is not an integer from 1 to 4096");
+            return threads->get<int>();
+        }
+
+        namespace
+        {
+            void setBuildThreads(json &result, const std::optional<int> &threads)
+            {
+                if (threads)
+                    result["threads"] = *threads;
+            }
+        } // namespace
+
         json toJson(const CogParams &params)
         {
             json result = json::object();
-            if (params.threads)
-                result["threads"] = *params.threads;
+            setBuildThreads(result, params.threads);
             return result;
         }
 
@@ -620,12 +638,7 @@ namespace ddb
             if (!params.is_object())
                 throw ProtocolError("the cog params are not an object");
             CogParams result;
-            if (const json *threads = member(params, "threads"))
-            {
-                if (!threads->is_number_integer() || threads->get<int64_t>() < 1 || threads->get<int64_t>() > 4096)
-                    throw ProtocolError("'threads' is not an integer from 1 to 4096");
-                result.threads = threads->get<int>();
-            }
+            result.threads = buildThreadsFromJson(params);
             return result;
         }
 
@@ -634,6 +647,7 @@ namespace ddb
             json result = json::object();
             if (!params.source.empty())
                 setText(result, "source", io::toUtf8(params.source));
+            setBuildThreads(result, params.threads);
             return result;
         }
 
@@ -643,6 +657,7 @@ namespace ddb
                 throw ProtocolError("the vector params are not an object");
             VectorParams result;
             result.source = getPath(params, "source");
+            result.threads = buildThreadsFromJson(params);
             return result;
         }
 
