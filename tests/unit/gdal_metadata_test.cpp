@@ -7,7 +7,9 @@
 
 #include "gdal_metadata.h"
 #include "gdal_raii.h"
+#include "sensorprofile.h"
 #include "test.h"
+#include "testarea.h"
 
 namespace
 {
@@ -47,7 +49,8 @@ namespace
         GDALSetMetadataItem(ds.get(), "VSI", "/vsimem/file.tif", nullptr);
         GDALSetMetadataItem(ds.get(), "DRIVE", "C:\\data\\file.tif", nullptr);
         GDALSetMetadataItem(ds.get(), "UNC", "\\\\server\\share\\file.tif", nullptr);
-        GDALSetMetadataItem(ds.get(), "URL", "see https://example.com/a", nullptr);
+        GDALSetMetadataItem(ds.get(), "URL", "https://example.com/a", nullptr);
+        GDALSetMetadataItem(ds.get(), "LINKED", "see https://example.com/a", nullptr);
         GDALSetMetadataItem(ds.get(), "KEPT", "LST day", nullptr);
         GDALSetMetadataItem(GDALGetRasterBand(ds.get(), 1), "BANDPATH", "/data/b.tif", nullptr);
         GDALSetMetadataItem(GDALGetRasterBand(ds.get(), 1), "BANDKEPT", "kelvin", nullptr);
@@ -58,6 +61,8 @@ namespace
 
         EXPECT_TRUE(has(entries, "KEPT=LST day"));
         EXPECT_TRUE(has(entries, "BANDKEPT=kelvin"));
+        EXPECT_TRUE(has(entries, "LINKED=see https://example.com/a"));
+        EXPECT_FALSE(has(entries, "URL=https://example.com/a"));
         for (const auto &entry : entries)
             EXPECT_FALSE(isPathOrUrl(entry.substr(entry.find('=') + 1))) << entry;
         EXPECT_FALSE(has(entries, "UNIX=/var/data/file.tif"));
@@ -73,7 +78,9 @@ namespace
         EXPECT_TRUE(isPathOrUrl("D:\\a.tif"));
         EXPECT_TRUE(isPathOrUrl("\\\\host\\share"));
         EXPECT_TRUE(isPathOrUrl("file:///a.tif"));
-        EXPECT_TRUE(isPathOrUrl("text with http://host in it"));
+        EXPECT_TRUE(isPathOrUrl("http://x/y"));
+        EXPECT_TRUE(isPathOrUrl(" svn+ssh://host/repo"));
+        EXPECT_TRUE(isPathOrUrl("s3.v2-x://bucket/key"));
 
         EXPECT_FALSE(isPathOrUrl(""));
         EXPECT_FALSE(isPathOrUrl("Kelvin"));
@@ -81,6 +88,10 @@ namespace
         EXPECT_FALSE(isPathOrUrl("1:2"));
         EXPECT_FALSE(isPathOrUrl("LST: day"));
         EXPECT_FALSE(isPathOrUrl("12 /s"));
+        EXPECT_FALSE(isPathOrUrl("text with http://host in it"));
+        EXPECT_FALSE(isPathOrUrl("\"adobe:ns:meta/\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\""));
+        EXPECT_FALSE(isPathOrUrl("1http://host"));
+        EXPECT_FALSE(isPathOrUrl("://host"));
     }
 
     TEST(GdalMetadata, BandScopeAndDescriptionFollowTheOptions)
@@ -148,6 +159,29 @@ namespace
         EXPECT_FALSE(containsToken("", "bt"));
         EXPECT_FALSE(containsToken("bt", ""));
         EXPECT_FALSE(containsToken("b", "bt"));
+    }
+
+    // A sensor named only in the XMP packet is matched: the packet declares its namespaces with
+    // "http://" URIs, which do not make it a URL.
+    TEST(GdalMetadata, SensorProfilePatternInXmpMatches)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = ta.getPath("xmp.tif");
+        {
+            auto ds = adoptDataset(GDALCreate(GDALGetDriverByName("GTiff"), raster.string().c_str(), 8, 8, 5,
+                                              GDT_UInt16, nullptr));
+            ASSERT_NE(ds, nullptr);
+            const std::string xmp =
+                "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF "
+                "xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><rdf:Description "
+                "xmlns:tiff=\"http://ns.adobe.com/tiff/1.0/\" tiff:Make=\"MicaSense\"/></rdf:RDF></x:xmpmeta>";
+            char *packet[] = {const_cast<char *>(xmp.c_str()), nullptr};
+            ASSERT_EQ(GDALSetMetadata(ds.get(), packet, "xml:XMP"), CE_None);
+        }
+
+        const auto result = SensorProfileManager::instance().detectSensor(raster.string());
+        EXPECT_TRUE(result.detected);
+        EXPECT_EQ(result.sensorId, "micasense-rededge");
     }
 
 } // namespace

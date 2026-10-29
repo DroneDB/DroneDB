@@ -32,7 +32,8 @@ struct CollectOptions {
 std::vector<std::string> collectMetadata(GDALDatasetH dataset, const CollectOptions &options);
 
 // Whether a metadata value is a file path or a URL: it starts with '/' (which includes /vsi
-// paths) or '\' (a UNC path), with a drive letter and ':', or contains "://"
+// paths) or '\' (a UNC path), with a drive letter and ':', or with "<scheme>://" (a value
+// that only contains a URL, such as an XMP packet or a description, is text)
 bool isPathOrUrl(std::string_view value);
 
 // Whether `token` is a whole word of `text`, where a word is a maximal run of ASCII letters and

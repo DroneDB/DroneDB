@@ -23,6 +23,17 @@ std::string_view entryValue(std::string_view entry) {
     return eq == std::string_view::npos ? entry : entry.substr(eq + 1);
 }
 
+// Whether the text starts with "<scheme>://" (RFC 3986: a letter, then letters, digits, '+',
+// '-' or '.'). Only a value that starts so is a URL: an XMP packet declares its namespaces with
+// "http://" URIs and a description may mention a link, and both are text worth matching.
+bool startsWithUrlScheme(std::string_view value) {
+    if (value.empty() || !str::isAlphaChar(value.front())) return false;
+    size_t i = 1;
+    while (i < value.size() && (str::isAlnumChar(value[i]) || value[i] == '+' || value[i] == '-' || value[i] == '.'))
+        i++;
+    return value.substr(i, 3) == "://";
+}
+
 void appendValue(std::vector<std::string> &out, std::string_view entry, std::string_view value) {
     if (!isPathOrUrl(value)) out.emplace_back(entry);
 }
@@ -39,7 +50,7 @@ bool isPathOrUrl(std::string_view value) {
     if (value.empty()) return false;
     if (value.front() == '/' || value.front() == '\\') return true;
     if (value.size() >= 2 && str::isAlphaChar(value[0]) && value[1] == ':') return true;
-    return value.find("://") != std::string_view::npos;
+    return startsWithUrlScheme(value);
 }
 
 bool containsToken(std::string_view text, std::string_view token) {
