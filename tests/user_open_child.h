@@ -16,15 +16,18 @@
 // the one place of the test code that calls enableUserFileOpens().
 namespace testutils
 {
-    // Runs `body` in a forked child where enableUserFileOpens() was called, waits for it, and
-    // reports in the calling test what the child's test recorded: its failures (with the file
-    // and line they were raised at), its skip, an uncaught exception, a crash. The child
-    // shares everything the test set up before the call (the cache folder, the installed
-    // raster helper, the hooks that make a GDAL write fail), and what it changes in the
-    // process stays there.
+    // Runs `body` in a child process where enableUserFileOpens() was called, waits for it, and
+    // reports in the calling test what the body recorded there: its failures (with the file and
+    // line they were raised at), its skip, an uncaught exception, a crash.
     //
-    // Windows has no fork: the body runs in the process of the test, which then stays a
-    // helper for the tests that follow (the ctest runs of that platform use a process per test).
+    // The child is a new process of the test binary, never a fork of this one (a copy of a process
+    // whose other threads hold locks, of GDAL or of an allocator, can wait on them for ever). It
+    // runs this test alone, with the environment of this process: SetUp and the test up to this
+    // call, as the host, then the body as the helper, and it ends there; the rest of the test and
+    // TearDown run here. So the child makes for itself what the test set up before the call (its
+    // test area, which is the child's own, the raster helper it installed, the hooks that make a
+    // GDAL write fail), shares the profile and caches of this process (DDB_HOME), and what it
+    // changes in its memory stays there. A test may call it more than once: each call has a child.
     void runWithUserFileOpens(const std::function<void()> &body);
 } // namespace testutils
 
@@ -37,7 +40,7 @@ namespace testutils
     }                                                                                    \
     static void suite##_##name##_UserOpenBody()
 
-// TEST_F whose body runs as runWithUserFileOpens says; SetUp and TearDown run in the parent
+// TEST_F whose body runs as runWithUserFileOpens says; SetUp runs in both processes, TearDown in the parent
 #define USER_OPEN_TEST_F(fixture, name)                                                  \
     class fixture##_##name##_UserOpen : public fixture                                   \
     {                                                                                    \
