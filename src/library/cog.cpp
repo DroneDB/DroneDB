@@ -20,6 +20,7 @@
 #include <fstream>
 #include <optional>
 #include <cerrno>
+#include <cstring>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -101,62 +102,87 @@ namespace ddb
         }
     }
 
-    // The GTiff compression of the COG: JPEG for 8-bit RGB and RGBA (no nodata), LZW otherwise
-    static GtiffOptions cogCreationOptions(GDALDatasetH hSrcDataset, bool hasNoData)
+    // The JPEG quality of a COG: DDB_COG_JPEG_QUALITY, 75 (GDAL's default) when it is not set
+    static int configuredJpegQuality()
+    {
+        const char* envQuality = CPLGetConfigOption("DDB_COG_JPEG_QUALITY", nullptr);
+        return envQuality ? std::clamp(std::atoi(envQuality), 1, 100) : 75;
+    }
+
+    // True when the COG of the source can be JPEG: 8-bit RGB, or 8-bit RGBA whose 4th band is
+    // alpha, without nodata
+    static bool jpegEligible(GDALDatasetH hSrcDataset, bool hasNoData)
     {
         const int numBands = GDALGetRasterCount(hSrcDataset);
+        if ((numBands != 3 && numBands != 4) || hasNoData)
+            return false;
 
-        // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
-        GtiffOptions creation;
-        if ((numBands == 3 || numBands == 4) && !hasNoData)
+        for (int n = 0; n < numBands; n++)
         {
-            bool all8Bit = true;
+            if (GDALGetRasterDataType(GDALGetRasterBand(hSrcDataset, n + 1)) != GDT_Byte)
+                return false;
+        }
+        // Only treat a 4-band raster as JPEG-eligible RGBA when the 4th band
+        // is actually an alpha channel. A 4-band RGBN raster (e.g. with a NIR
+        // band) must NOT be JPEG-compressed: the COG/JPEG path treats band 4
+        // as alpha and would lossily corrupt the spectral data. Fall back to
+        // LZW for such datasets.
+        return numBands == 3 ||
+               GDALGetRasterColorInterpretation(GDALGetRasterBand(hSrcDataset, 4)) == GCI_AlphaBand;
+    }
 
-            for (int n = 0; n < numBands; n++)
-            {
-                GDALRasterBandH b = GDALGetRasterBand(hSrcDataset, n + 1);
-                if (GDALGetRasterDataType(b) != GDT_Byte)
-                {
-                    all8Bit = false;
-                }
-            }
-            // Only treat a 4-band raster as JPEG-eligible RGBA when the 4th band
-            // is actually an alpha channel. A 4-band RGBN raster (e.g. with a NIR
-            // band) must NOT be JPEG-compressed: the COG/JPEG path treats band 4
-            // as alpha and would lossily corrupt the spectral data. Fall back to
-            // LZW for such datasets.
-            bool jpegEligible = all8Bit;
-            if (numBands == 4 &&
-                GDALGetRasterColorInterpretation(GDALGetRasterBand(hSrcDataset, 4)) != GCI_AlphaBand)
-            {
-                jpegEligible = false;
-            }
-            if (jpegEligible)
-            {
-                // JPEG quality: configurable via DDB_COG_JPEG_QUALITY (default: 75, matching GDAL default).
-                // PREDICTOR is not valid for JPEG and is intentionally omitted.
-                int jpegQuality = 75;
-                const char* envQuality = CPLGetConfigOption("DDB_COG_JPEG_QUALITY", nullptr);
-                if (envQuality) {
-                    jpegQuality = std::clamp(std::atoi(envQuality), 1, 100);
-                }
-                creation.compress(GtiffOptions::Codec::Jpeg).set("QUALITY", std::to_string(jpegQuality));
-            }
-            else
-            {
-                // LZW by default for non-8bit data
-                creation.compress(GtiffOptions::Codec::Lzw).predictorAuto();
-            }
+    // The GTiff compression of the COG: JPEG of `jpegQuality` when it is set, LZW otherwise
+    static GtiffOptions cogCompression(std::optional<int> jpegQuality)
+    {
+        GtiffOptions creation;
+        if (jpegQuality)
+        {
+            // PREDICTOR is not valid for JPEG and is intentionally omitted.
+            creation.compress(GtiffOptions::Codec::Jpeg).set("QUALITY", std::to_string(*jpegQuality));
         }
         else
         {
-            // LZW by default for data with nodata values or other band counts
+            // LZW by default for data with nodata values, other band counts or non-8bit data
             creation.compress(GtiffOptions::Codec::Lzw).predictorAuto();
         }
 
         // BigTIFF
         creation.bigTiffIfSafer();
         return creation;
+    }
+
+    // The GTiff compression of a COG warped to the tile grid: JPEG for 8-bit RGB and RGBA (no
+    // nodata), LZW otherwise
+    static GtiffOptions cogCreationOptions(GDALDatasetH hSrcDataset, bool hasNoData)
+    {
+        return cogCompression(jpegEligible(hSrcDataset, hasNoData) ? std::optional<int>(configuredJpegQuality())
+                                                                   : std::nullopt);
+    }
+
+    // The JPEG quality of a source compressed with JPEG ("JPEG", "YCbCr JPEG"): the one GDAL
+    // estimates from its quantization tables, or the configured one when GDAL reports none. None
+    // for a source with any other compression.
+    static std::optional<int> sourceJpegQuality(GDALDatasetH hSrcDataset)
+    {
+        const char* compression = GDALGetMetadataItem(hSrcDataset, "COMPRESSION", "IMAGE_STRUCTURE");
+        if (!compression || !strstr(compression, "JPEG"))
+            return std::nullopt;
+        const char* quality = GDALGetMetadataItem(hSrcDataset, "JPEG_QUALITY", "IMAGE_STRUCTURE");
+        const int reported = quality ? std::atoi(quality) : 0;
+        return reported > 0 ? std::min(reported, 100) : configuredJpegQuality();
+    }
+
+    // The GTiff compression of an optimized COG encoded again at its own grid. The source keeps
+    // its class of compression, so a source without loss is pixel-equal after the new encoding
+    // (warping it would compress 8-bit RGB with JPEG): JPEG only when the source is JPEG already,
+    // at its own quality, which moves a pixel by a fraction of a level on average where the
+    // default quality of a warp would move it by several, and only for three bands, as the COG
+    // driver would turn a 4th, alpha band of a JPEG into a mask; LZW otherwise.
+    static GtiffOptions cogOwnGridCreationOptions(GDALDatasetH hSrcDataset, bool hasNoData)
+    {
+        const std::optional<int> quality = sourceJpegQuality(hSrcDataset);
+        const bool jpeg = quality && GDALGetRasterCount(hSrcDataset) == 3 && jpegEligible(hSrcDataset, hasNoData);
+        return cogCompression(jpeg ? quality : std::nullopt);
     }
 
     // The arguments of the GDALWarp that writes the COG: Web Mercator, GoogleMapsCompatible tiles,
@@ -198,6 +224,29 @@ namespace ddb
         return targs;
     }
 
+    // The arguments of the GDALTranslate that encodes an optimized COG again at its own grid: the
+    // COG driver with the size, geotransform, coordinate system, bands and tiles of the source.
+    // Every pixel is decoded and encoded again, and the overviews (and those of the mask) are
+    // computed by GDAL from them, never copied from the source.
+    static CPLStringList cogOwnGridArgs(GDALDatasetH hSrcDataset, GDALRasterBandH hSrcBand1,
+                                        const std::string &numThreads)
+    {
+        int blockXSize = 0, blockYSize = 0;
+        GDALGetBlockSize(hSrcBand1, &blockXSize, &blockYSize);
+
+        CPLStringList targs;
+        targs.AddString("-of");
+        targs.AddString("COG");
+        targs.AddString("-co");
+        targs.AddString(numThreads.c_str());
+        targs.AddString("-co");
+        targs.AddString(("BLOCKSIZE=" + std::to_string(blockXSize)).c_str());
+        targs.AddString("-co");
+        targs.AddString("OVERVIEWS=IGNORE_EXISTING");
+        cogOwnGridCreationOptions(hSrcDataset, readBandNodata(hSrcBand1).has).appendTo(targs);
+        return targs;
+    }
+
     namespace raster
     {
 
@@ -214,9 +263,6 @@ namespace ddb
         // budget below is in place.
         const GDALDriverH sourceDriver = identifyUserRaster(input);
         const bool ownDecodeThreads = sourceDriver && decodesWithOwnThreads(GDALGetDriverShortName(sourceDriver));
-
-        // An input that is a COG already is built like any other: the output is always what
-        // GDAL wrote here, never a copy of the bytes of a file of a user
 
         // Threads, warp memory and block cache come from one budget so
         // that several builds running in one process stay within known bounds;
@@ -235,7 +281,7 @@ namespace ddb
 
         LOGD << "Building COG from " << input;
 
-        // Owned: the option list and GDALWarpAppOptionsNew below can throw
+        // Owned: the option lists and the options of the GDAL utilities below can throw
         auto srcDataset = openUserRaster(input);
 
         if (!srcDataset)
@@ -252,9 +298,14 @@ namespace ddb
         if (!hSrcBand1)
             throw GDALException("Cannot read band 1 from " + input);
 
-        LOGD << "COG warp and compression of " << input << ": " << numThreads;
+        // An optimized COG (Web Mercator, tiles, overviews) is encoded again at its own grid: GDAL
+        // decodes every pixel and writes it again, so the output is what GDAL wrote here, never a
+        // copy of the bytes of a file of a user, and a COG that is not on the tile grid keeps its
+        // pixels instead of being resampled to it. Any other raster is warped to the tile grid.
+        const bool ownGrid = isOptimizedCogDataset(hSrcDataset);
 
-        CPLStringList targs = cogWarpArgs(hSrcDataset, hSrcBand1, budget, numThreads, !ownDecodeThreads);
+        LOGD << "COG " << (ownGrid ? "encoding at its own grid" : "warp") << " and compression of " << input
+             << ": " << numThreads;
 
         // Scope GDAL's temporary directory (CPL_TMPDIR) to the output's own folder (the
         // per-build temp folder when called from the build pipeline). The COG driver
@@ -271,40 +322,49 @@ namespace ddb
         if (!outputFolder.empty())
             gdalTmpGuard.emplace("CPL_TMPDIR", outputFolder.c_str());
 
-        const GdalOptionsPtr<GDALWarpAppOptions> psOptions(
-            GDALWarpAppOptionsNew(targs.List(), nullptr));
-        if (!psOptions) throw GDALException("GDALWarpAppOptionsNew returned null");
-
         // Set the GDAL block cache to exactly the budget for the rest of the build:
         // raised on small hosts (fewer tile re-reads), lowered on large ones where
         // GDAL's 5%-of-RAM default made one warp peak at 12 GB without being faster.
         const ScopedGdalCacheMax cacheGuard(budget.cacheBytes);
 
-        // Progress for diagnostic logging during long warp operations; the warp stops when
-        // the build is canceled
+        // Progress for diagnostic logging during long warp and encoding operations; they stop
+        // when the build is canceled
         std::atomic<int> warpPct{0};
         cancel::GdalProgress progress([&warpPct, &reportProgress](double fraction) {
             reportWarpProgress(warpPct, fraction, reportProgress);
         });
-        progress.attach(psOptions.get());
 
         // Capture the OS write error immediately, before cleanup or logging can
         // replace it. Clearing errno before each write API avoids stale errors.
-        errno = 0;
-        auto newDataset = adoptDataset(GDALWarp(outputCog.c_str(),
-                                               nullptr,
-                                               1,
-                                               &hSrcDataset,
-                                               psOptions.get(),
-                                               nullptr));
-        const int warpSystemError = errno;
+        GDALDatasetUniquePtr newDataset;
+        int writeSystemError = 0;
+        if (ownGrid) {
+            CPLStringList targs = cogOwnGridArgs(hSrcDataset, hSrcBand1, numThreads);
+            const GdalOptionsPtr<GDALTranslateOptions> psOptions(GDALTranslateOptionsNew(targs.List(), nullptr));
+            if (!psOptions) throw GDALException("GDALTranslateOptionsNew returned null");
+            progress.attach(psOptions.get());
 
+            errno = 0;
+            newDataset = adoptDataset(GDALTranslate(outputCog.c_str(), hSrcDataset, psOptions.get(), nullptr));
+            writeSystemError = errno;
+        } else {
+            CPLStringList targs = cogWarpArgs(hSrcDataset, hSrcBand1, budget, numThreads, !ownDecodeThreads);
+            const GdalOptionsPtr<GDALWarpAppOptions> psOptions(GDALWarpAppOptionsNew(targs.List(), nullptr));
+            if (!psOptions) throw GDALException("GDALWarpAppOptionsNew returned null");
+            progress.attach(psOptions.get());
+
+            errno = 0;
+            newDataset = adoptDataset(GDALWarp(outputCog.c_str(), nullptr, 1, &hSrcDataset, psOptions.get(), nullptr));
+            writeSystemError = errno;
+        }
+
+        const std::string utility = ownGrid ? "GDALTranslate" : "GDALWarp";
         if (!newDataset) {
             cancel::throwIfCanceled();
-            if (warpSystemError == ENOSPC)
-                throw RetryableBuildException("GDALWarp ran out of space creating COG: " + outputCog,
+            if (writeSystemError == ENOSPC)
+                throw RetryableBuildException(utility + " ran out of space creating COG: " + outputCog,
                                               RetryableBuildReason::NoSpaceOnDevice);
-            throw GDALException("GDALWarp failed to create output COG: " + outputCog);
+            throw GDALException(utility + " failed to create output COG: " + outputCog);
         }
         const auto closed = closeOutput(std::move(newDataset));
         srcDataset.reset();

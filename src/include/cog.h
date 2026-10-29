@@ -14,7 +14,10 @@ namespace ddb {
 
 // Builds the cloud optimized GeoTIFF `outputCog` from a raster (a file of a user: the raster
 // helper reads it, raster_helper.h), always by decoding and encoding it again, also when it is a
-// COG already. The warp and the compression use the threads of one build: DDB_BUILD_THREADS,
+// COG already: a raster is warped to the tile grid of Web Mercator, while an optimized COG
+// (isOptimizedCog) is encoded again at its own grid, with the same size, geotransform and bands,
+// lossless when it was and JPEG of its own quality when it was JPEG, and overviews computed again.
+// The warp and the compression use the threads of one build: DDB_BUILD_THREADS,
 // lowered to options.threads, taken from the CPU pool of this process. Writes the statistics
 // next to it (generateCogStats). Throws what IRasterHelper::buildCog throws (a full device is
 // a RetryableBuildException, a process that prints nothing for the idle time one with the reason

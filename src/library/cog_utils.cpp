@@ -21,8 +21,11 @@ namespace ddb
             LOGD << "Cannot open " << inputPath << " for COG verification";
             return false;
         }
-        GDALDatasetH hDataset = datasetHandle(dataset);
+        return isOptimizedCogDataset(datasetHandle(dataset));
+    }
 
+    bool isOptimizedCogDataset(GDALDatasetH hDataset)
+    {
         bool isOptimized = false;
 
         try {

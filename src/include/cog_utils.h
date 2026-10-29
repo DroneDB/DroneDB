@@ -6,11 +6,16 @@
 
 #include <string>
 
+#include <gdal.h>
+
 namespace ddb {
 
-// Check if a GeoTIFF file is already an optimized Cloud Optimized GeoTIFF
-// Returns true if the file is already optimized and doesn't need rebuild
+// Check if a GeoTIFF file is already an optimized Cloud Optimized GeoTIFF: Web Mercator, square
+// tiles of 256 or 512 pixels, overviews, read by the GTiff or COG driver
 bool isOptimizedCog(const std::string& inputPath);
+
+// The same check on a dataset that is open already
+bool isOptimizedCogDataset(GDALDatasetH hDataset);
 
 // True for a raster driver that decodes on threads of its own (JPEG 2000). It sizes them from
 // GDAL_NUM_THREADS as the reading thread sees it, and uses every CPU when that is unset.

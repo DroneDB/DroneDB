@@ -861,22 +861,96 @@ namespace
         EXPECT_DOUBLE_EQ(forwarded.back(), 1.0);
     }
 
-    // A single-band raster of 16-bit values on the tile grid of Web Mercator, stored as a COG with
-    // another compression than the one libddb gives it
+    // A COG of `source` with another compression than the one libddb gives it, written by GDAL's
+    // COG driver at the grid of the source: an optimized COG (Web Mercator, tiles of 256 pixels,
+    // overviews) that is not on the tile grid of Web Mercator when the source is not
     fs::path writeForeignCog(const fs::path &folder, const fs::path &source)
     {
-        const fs::path onGrid = folder / "on-grid.tif";
-        raster::buildCogFile(source, onGrid, raster::CogParams(), raster::ProgressCallback());
-        const fs::path foreign = folder / "foreign-cog.tif";
-        GDALDatasetH grid = GDALOpen(io::toUtf8(onGrid).c_str(), GA_ReadOnly);
-        EXPECT_NE(grid, nullptr);
+        const fs::path foreign = folder / io::concat(source.stem(), "-foreign-cog.tif");
+        GDALDatasetH input = GDALOpen(io::toUtf8(source).c_str(), GA_ReadOnly);
+        EXPECT_NE(input, nullptr);
         char **options = CSLSetNameValue(nullptr, "COMPRESS", "DEFLATE");
-        GDALDatasetH copy = GDALCreateCopy(GDALGetDriverByName("COG"), io::toUtf8(foreign).c_str(), grid, FALSE, options, nullptr, nullptr);
+        options = CSLSetNameValue(options, "BLOCKSIZE", "256");
+        GDALDatasetH copy = GDALCreateCopy(GDALGetDriverByName("COG"), io::toUtf8(foreign).c_str(), input, FALSE, options, nullptr, nullptr);
         CSLDestroy(options);
         EXPECT_NE(copy, nullptr);
         GDALClose(copy);
-        GDALClose(grid);
+        GDALClose(input);
         return foreign;
+    }
+
+    // The grid, the coordinate system and every band (type, nodata, colour, all of its pixels) of
+    // `actual` are the ones of `expected`
+    void expectSameRaster(const fs::path &actual, const fs::path &expected)
+    {
+        GDALDatasetH a = GDALOpen(io::toUtf8(actual).c_str(), GA_ReadOnly);
+        GDALDatasetH e = GDALOpen(io::toUtf8(expected).c_str(), GA_ReadOnly);
+        ASSERT_NE(a, nullptr) << actual;
+        ASSERT_NE(e, nullptr) << expected;
+        const int width = GDALGetRasterXSize(e);
+        const int height = GDALGetRasterYSize(e);
+        EXPECT_EQ(GDALGetRasterXSize(a), width);
+        EXPECT_EQ(GDALGetRasterYSize(a), height);
+        double gtA[6] = {0}, gtE[6] = {0};
+        EXPECT_EQ(GDALGetGeoTransform(a, gtA), CE_None);
+        EXPECT_EQ(GDALGetGeoTransform(e, gtE), CE_None);
+        EXPECT_EQ(std::vector<double>(gtA, gtA + 6), std::vector<double>(gtE, gtE + 6));
+        EXPECT_TRUE(OSRIsSame(GDALGetSpatialRef(a), GDALGetSpatialRef(e)));
+        ASSERT_EQ(GDALGetRasterCount(a), GDALGetRasterCount(e));
+        if (GDALGetRasterXSize(a) == width && GDALGetRasterYSize(a) == height)
+            for (int b = 1; b <= GDALGetRasterCount(e); b++)
+            {
+                SCOPED_TRACE(b);
+                GDALRasterBandH bandA = GDALGetRasterBand(a, b);
+                GDALRasterBandH bandE = GDALGetRasterBand(e, b);
+                EXPECT_EQ(GDALGetRasterDataType(bandA), GDALGetRasterDataType(bandE));
+                EXPECT_EQ(GDALGetRasterColorInterpretation(bandA), GDALGetRasterColorInterpretation(bandE));
+                int hasA = 0, hasE = 0;
+                const double nodataA = GDALGetRasterNoDataValue(bandA, &hasA);
+                const double nodataE = GDALGetRasterNoDataValue(bandE, &hasE);
+                EXPECT_EQ(hasA, hasE);
+                if (hasA && hasE)
+                {
+                    EXPECT_EQ(nodataA, nodataE);
+                }
+                std::vector<double> pixelsA(static_cast<size_t>(width) * height);
+                std::vector<double> pixelsE(pixelsA.size());
+                ASSERT_EQ(GDALRasterIO(bandA, GF_Read, 0, 0, width, height, pixelsA.data(), width, height, GDT_Float64, 0, 0), CE_None);
+                ASSERT_EQ(GDALRasterIO(bandE, GF_Read, 0, 0, width, height, pixelsE.data(), width, height, GDT_Float64, 0, 0), CE_None);
+                EXPECT_TRUE(pixelsA == pixelsE) << "every pixel of the band is the one of the input";
+            }
+        GDALClose(a);
+        GDALClose(e);
+    }
+
+    // The compression GDAL reports for a raster (LZW, DEFLATE, JPEG, YCbCr JPEG...)
+    std::string compressionOf(const fs::path &file)
+    {
+        GDALDatasetH dataset = GDALOpen(io::toUtf8(file).c_str(), GA_ReadOnly);
+        EXPECT_NE(dataset, nullptr) << file;
+        if (dataset == nullptr)
+            return std::string();
+        const char *compression = GDALGetMetadataItem(dataset, "COMPRESSION", "IMAGE_STRUCTURE");
+        std::string result = compression ? compression : "";
+        GDALClose(dataset);
+        return result;
+    }
+
+    // Builds the COG of `input` with the program and checks it is an optimized COG at the grid of
+    // the input with all of its pixels, written again by GDAL with a lossless compression
+    void expectEncodedAgainAtItsOwnGrid(const fs::path &input, const fs::path &out)
+    {
+        ASSERT_TRUE(raster::probe(input, raster::ProbeParams()).isCog) << "the input is a COG already";
+
+        raster::GdalUtilHelper helper;
+        helper.buildCog(input, out, json::object(), raster::ProgressCallback());
+
+        EXPECT_NE(readFile(out), readFile(input)) << "a file of a user is never copied";
+        EXPECT_TRUE(raster::probe(out, raster::ProbeParams()).isCog);
+        // Not resampled to the tile grid: the same pixels at the same place
+        expectSameRaster(out, input);
+        EXPECT_EQ(compressionOf(out).find("JPEG"), std::string::npos) << "a lossless input stays lossless";
+        EXPECT_TRUE(fs::exists(io::concat(out, ".stats.json")));
     }
 
     TEST_F(GdalUtilToolTest, aCogIsEncodedAgainAndNeverCopied)
@@ -893,15 +967,27 @@ namespace
         spec.value = [](int, int x, int y) { return static_cast<double>((x * 7 + y * 13) % 4000); };
         const fs::path source = testutils::createGeoRaster(area_->getFolder() / "uint16.tif", spec);
         const fs::path foreign = writeForeignCog(area_->getFolder(), source);
-        ASSERT_TRUE(raster::probe(foreign, raster::ProbeParams()).isCog) << "the input is a COG already";
 
-        const fs::path out = area_->getFolder() / "again.tif";
-        raster::GdalUtilHelper helper;
-        helper.buildCog(foreign, out, json::object(), raster::ProgressCallback());
+        expectEncodedAgainAtItsOwnGrid(foreign, area_->getFolder() / "again.tif");
+    }
 
-        EXPECT_NE(readFile(out), readFile(foreign)) << "a file of a user is never copied";
-        // Lossless data is the same after the new encoding
-        EXPECT_EQ(describeRaster(out), describeRaster(foreign));
+    TEST_F(GdalUtilToolTest, anRgbCogWithoutLossIsEncodedAgainWithoutLoss)
+    {
+        // Eight-bit RGB, which libddb compresses with JPEG when it resamples a raster
+        testutils::GeoRasterSpec spec;
+        spec.width = 700;
+        spec.height = 500;
+        spec.bands = 3;
+        spec.type = GDT_Byte;
+        spec.epsg = 3857;
+        spec.originX = -10240777.0;
+        spec.originY = 5916486.0;
+        spec.pixelSize = 0.0731;
+        spec.value = [](int band, int x, int y) { return static_cast<double>((x * band + y * 3) % 256); };
+        const fs::path source = testutils::createGeoRaster(area_->getFolder() / "rgb.tif", spec);
+        const fs::path foreign = writeForeignCog(area_->getFolder(), source);
+
+        expectEncodedAgainAtItsOwnGrid(foreign, area_->getFolder() / "rgb-again.tif");
     }
 
     TEST_F(GdalUtilToolTest, aCogOfARasterWithoutProjectionIsUnreadable)
