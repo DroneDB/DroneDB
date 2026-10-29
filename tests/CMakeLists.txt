@@ -301,8 +301,10 @@ if(BUILD_TESTING)
     # libddb as it ships: the dataset flow of a host through the C API, in the probe's own process
     add_test(NAME shared.LibddbSmoke COMMAND ddbtest_shared_probe WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     # (label "shared", not "unit": the sanitizer job builds the unit tests and the CLI only)
+    # DDB_HOME: the probe has no test main that moves the profile and the caches of libddb into
+    # the test area (tests/main.cpp), so it gets a folder of the build tree, not the one of the user
     set_tests_properties(shared.LibddbSmoke PROPERTIES LABELS shared TIMEOUT 300
-        ENVIRONMENT "DDB_PROBE_INPUT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/contract/inputs;DDB_PROBE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shared_probe_dataset")
+        ENVIRONMENT "DDB_PROBE_INPUT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/contract/inputs;DDB_PROBE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shared_probe_dataset;DDB_HOME=${CMAKE_CURRENT_BINARY_DIR}/shared_probe_home")
 
     # Every export of ddb.h is called by a test: a new export without one fails here
     add_test(NAME c_abi.ExportsHaveTests
