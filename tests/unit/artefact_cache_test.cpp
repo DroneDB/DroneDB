@@ -15,6 +15,11 @@
 #include <thread>
 #include <vector>
 
+#ifdef __linux__
+#include <sys/inotify.h>
+#include <unistd.h>
+#endif
+
 #include "artefact_cache.h"
 #include "build_layout.h"
 #include "cpl_string.h"
@@ -431,6 +436,43 @@ namespace
         EXPECT_EQ(names, std::vector<std::string>{"normalized"});
         EXPECT_EQ(normalizedFiles(), std::vector<fs::path>{copy});
     }
+
+#ifdef __linux__
+    // Windows renames no file that a process holds open, so the host closes the copy it checked
+    // before it moves it to its name. Linux renames an open file: the file system says what was
+    // done to the file in the folder it is in at the time, and a copy closed after its rename would
+    // be closed in the folder of the copies.
+    TEST_F(ArtefactCache, theCopyIsClosedBeforeItIsMovedToItsName)
+    {
+        const fs::path source = makeRaster("raw.tif");
+        const fs::path folder = raster::normalizedDir();
+        const int events = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+        ASSERT_GE(events, 0);
+        ASSERT_GE(inotify_add_watch(events, io::toUtf8(folder).c_str(), IN_MOVED_TO | IN_OPEN | IN_CLOSE), 0);
+
+        const fs::path copy = raster::artefactFor(source);
+
+        std::vector<std::string> seen;
+        alignas(inotify_event) char buffer[4096];
+        for (ssize_t length; (length = read(events, buffer, sizeof(buffer))) > 0;)
+        {
+            for (ssize_t at = 0; at < length;)
+            {
+                const auto *event = reinterpret_cast<const inotify_event *>(buffer + at);
+                const std::string name = event->len > 0 ? event->name : "";
+                if (event->mask & IN_MOVED_TO)
+                    seen.push_back("moved " + name);
+                if (event->mask & IN_OPEN)
+                    seen.push_back("opened " + name);
+                if (event->mask & IN_CLOSE)
+                    seen.push_back("closed " + name);
+                at += static_cast<ssize_t>(sizeof(inotify_event) + event->len);
+            }
+        }
+        close(events);
+        EXPECT_EQ(seen, std::vector<std::string>{"moved " + io::toUtf8(copy.filename())});
+    }
+#endif
 
     TEST_F(ArtefactCache, callersThatAskAtTheSameTimeEachGetAWholeCopy)
     {
