@@ -156,9 +156,20 @@ namespace ddb
     // A new SRS from a PROJ string, with the traditional GIS axis order. Null when it does not
     // parse.
     SrsPtr srsFromProj4(const char *proj4);
-    // A new SRS from anything GDAL accepts ("EPSG:3857", a WKT, a PROJ string, a URN), with the
-    // traditional GIS axis order. Null when it does not parse.
+    // Reads into `srs` a coordinate system as a user writes it ("EPSG:3857", a WKT, PROJJSON, a
+    // PROJ string, a URN) and nothing else: GDAL would also read a file the text names (a path,
+    // a /vsi path) or fetch a URL ("http://..."), and the text comes from a user, a drawing or a
+    // file of a dataset, so those are refused (OGRSpatialReference::
+    // SET_FROM_USER_INPUT_LIMITATIONS). Every reading of such a text goes through it.
+    OGRErr setSrsFromUserInput(OGRSpatialReference &srs, const char *input);
+    // A new SRS read by setSrsFromUserInput, with the traditional GIS axis order. Null when the
+    // input is null or empty, or is not a coordinate system it reads.
     SrsPtr srsFromUserInput(const char *input);
+    // Throws InvalidArgsException ("Invalid <what>: <input>") unless setSrsFromUserInput reads the
+    // input: for a text from a user that goes to a GDAL utility (gdalwarp -t_srs, -te_srs, ...),
+    // which reads it with every way GDAL has, files and URLs included. What setSrsFromUserInput
+    // reads, a utility reads the same way: GDAL tries a file only for a text nothing else reads.
+    void requireSrsUserInput(const std::string &input, const std::string &what);
 
     // The C++ object behind an owned SRS handle (for the C++ API; the handle keeps ownership)
     inline const OGRSpatialReference &srsOf(const SrsPtr &srs) noexcept

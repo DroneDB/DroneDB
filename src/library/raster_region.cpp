@@ -258,6 +258,9 @@ namespace ddb
                 throw InvalidArgsException("renderRasterRegion: height out of range [1,4096]");
             if (request.bbox[0] >= request.bbox[2] || request.bbox[1] >= request.bbox[3])
                 throw InvalidArgsException("renderRasterRegion: invalid bbox order");
+            // gdalwarp reads it (-t_srs, -te_srs)
+            if (!request.bboxSrs.empty())
+                requireSrsUserInput(request.bboxSrs, "SRS");
         }
 
     } // anonymous namespace
@@ -272,6 +275,9 @@ namespace ddb
         validateInputs(request);
         if (!outBytes || !outSize)
             throw InvalidArgsException("renderRasterRegion: outBytes/outSize null");
+        // gdalwarp reads it (-t_srs)
+        if (!options.outputCrs.empty())
+            requireSrsUserInput(options.outputCrs, "output CRS");
 
         const std::string &inputPath = request.inputPath;
 

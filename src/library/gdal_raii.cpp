@@ -46,15 +46,27 @@ namespace ddb
         return srs;
     }
 
+    OGRErr setSrsFromUserInput(OGRSpatialReference &srs, const char *input)
+    {
+        return srs.SetFromUserInput(input, OGRSpatialReference::SET_FROM_USER_INPUT_LIMITATIONS_get());
+    }
+
     SrsPtr srsFromUserInput(const char *input)
     {
         if (input == nullptr || input[0] == '\0')
             return nullptr;
         SrsPtr srs(OSRNewSpatialReference(nullptr));
-        if (OSRSetFromUserInput(srs.get(), input) != OGRERR_NONE)
+        if (setSrsFromUserInput(*OGRSpatialReference::FromHandle(srs.get()), input) != OGRERR_NONE)
             return nullptr;
         OSRSetAxisMappingStrategy(srs.get(), OAMS_TRADITIONAL_GIS_ORDER);
         return srs;
+    }
+
+    void requireSrsUserInput(const std::string &input, const std::string &what)
+    {
+        OGRSpatialReference srs;
+        if (input.empty() || setSrsFromUserInput(srs, input.c_str()) != OGRERR_NONE)
+            throw InvalidArgsException("Invalid " + what + ": " + input);
     }
 
     OGRSpatialReference horizontalSrs(const OGRSpatialReference &srs)

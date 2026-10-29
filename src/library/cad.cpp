@@ -368,7 +368,7 @@ namespace ddb
 
             // Older or third-party writers: the definition itself may be WKT.
             OGRSpatialReference s;
-            if (s.SetFromUserInput(definition.c_str()) == OGRERR_NONE)
+            if (setSrsFromUserInput(s, definition.c_str()) == OGRERR_NONE)
                 return toWkt(s);
             return std::nullopt;
         }
@@ -453,7 +453,7 @@ namespace ddb
                 return "LOCAL_CS[\"Drawing\"]";
 
             OGRSpatialReference s;
-            if (input.empty() || s.SetFromUserInput(input.c_str()) != OGRERR_NONE)
+            if (input.empty() || setSrsFromUserInput(s, input.c_str()) != OGRERR_NONE)
                 throw InvalidArgsException("Not a coordinate system: " + input);
             if (s.IsLocal())
                 return "LOCAL_CS[\"Drawing\"]";
@@ -485,7 +485,7 @@ namespace ddb
             if (!base)
                 return std::nullopt;
             OGRSpatialReference s;
-            if (s.SetFromUserInput(base->c_str()) != OGRERR_NONE || !s.IsProjected())
+            if (setSrsFromUserInput(s, base->c_str()) != OGRERR_NONE || !s.IsProjected())
                 return std::nullopt;
             return localGridCrs(s, info);
         }
@@ -572,8 +572,8 @@ namespace ddb
                 const std::string content = str::trimCopy(ss.str());
                 OGRSpatialReference s;
                 if (content.empty() ||
-                    (s.SetFromUserInput(content.c_str()) != OGRERR_NONE &&
-                     s.SetFromUserInput(("ESRI::" + content).c_str()) != OGRERR_NONE))
+                    (setSrsFromUserInput(s, content.c_str()) != OGRERR_NONE &&
+                     setSrsFromUserInput(s, ("ESRI::" + content).c_str()) != OGRERR_NONE))
                     throw AppException("Cannot read the coordinate system in " + io::toUtf8(prj->filename()));
                 crs.source = "prj";
                 // A local (engineering) CRS, e.g. LOCAL_CS["Drawing"], says "these are
@@ -595,7 +595,7 @@ namespace ddb
             {
                 OGRSpatialReference s;
                 // For the label only (srsLabel of an empty SRS is ""): the CRS is the string itself
-                s.SetFromUserInput(srs->c_str());
+                setSrsFromUserInput(s, srs->c_str());
                 crs.georeferenced = true;
                 crs.source = "geodata";
                 crs.srs = *srs;
