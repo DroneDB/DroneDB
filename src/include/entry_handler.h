@@ -49,7 +49,8 @@ struct BuildArtifact {
     // Of the file a client opens: the file itself, or the index of a Directory. Hosts send it
     // as the Content-Type of the artifact (tests/contract pins the values)
     std::string mediaType;
-    // File name offered for a download of the artifact; empty when it is not downloadable
+    // File name offered for a download of the artifact; empty when it is not downloadable. A
+    // Directory is downloaded as a ZIP archive of what is in it, under this name
     std::string downloadName;
     // Directory artifacts: the descriptor file inside it ("metadata.json", "tileset.json")
     std::string index;
@@ -79,8 +80,9 @@ struct BuildArtifact {
     }
 
     static BuildArtifact directory(std::string role, std::string path, std::string mediaType,
-                                   std::string index) {
-        BuildArtifact a = file(std::move(role), std::move(path), std::move(mediaType));
+                                   std::string index, std::string downloadName = "") {
+        BuildArtifact a = file(std::move(role), std::move(path), std::move(mediaType),
+                               std::move(downloadName));
         a.kind = ArtifactKind::Directory;
         a.index = std::move(index);
         return a;

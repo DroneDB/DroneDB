@@ -92,10 +92,12 @@ class ModelEntryHandler : public EntryHandler {
                                     artifactPath(LegacyNexusBuildSubfolder, LegacyNexusFileName),
                                     "application/octet-stream")
                     .legacyFor("model.bm3d"),
+                // Offered as a ZIP: 3D Tiles is what other tools (Cesium, QGIS, ArcGIS) open
                 BuildArtifact::directory("model.3dtiles",
                                          Tiles3DBuildSubfolder,
                                          "application/json",
-                                         TilesetFileName)};
+                                         TilesetFileName,
+                                         "model.3dtiles.zip")};
     }
 
     // Lock order is primary Model lock then tiles lock. Recovery runs before the complete

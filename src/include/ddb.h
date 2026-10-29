@@ -885,6 +885,7 @@ extern "C"
      *   model.nexus      Nexus multiresolution mesh of models built before bm3d: legacy, listed
      *                    only while model.bm3d is missing
      *   model.3dtiles    OGC 3D Tiles of a Model or a .3tz: a directory, its index tileset.json
+     *                    (downloadable as a ZIP for a Model; a .3tz is that archive already)
      *   gsplat.lod       level-of-detail Gaussian Splat (Spark RAD, streamed with range requests;
      *                    downloadable)
      *   gsplat.spz       Gaussian Splat in SPZ: legacy, written by builds before gsplat.lod, listed
@@ -902,7 +903,9 @@ extern "C"
      *   kind          "file", or "dir" for a directory (index names its descriptor file; its
      *                 other files, e.g. tiles, are "<path>/<file>")
      *   mediaType     of the file a client opens: the file, or the index of a directory
-     *   downloadName  the file name to offer for a download; absent when the artifact is not one
+     *   downloadName  the file name to offer for a download; absent when the artifact is not one.
+     *                 A directory is offered as a ZIP archive of what is in it (tileset.json at
+     *                 its root), under this name
      *   index         the descriptor file of a directory, relative to path
      *   legacy        true for an output of an older layout: read when present, never written;
      *                 listed only while the role named by fallbackFor is not listed

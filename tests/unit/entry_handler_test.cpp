@@ -262,6 +262,22 @@ TEST(entryHandler, SplatArtifactsAreDownloadable) {
                                                          {"gsplat.export", "export.spz"}}));
 }
 
+// The 3D Tiles of a model are offered as a ZIP of the directory (other tools open 3D Tiles); the
+// meshes of the DroneDB viewer are not, and a .3tz is its own archive already
+TEST(entryHandler, ModelTilesAreDownloadableAsAnArchive) {
+    std::map<std::string, std::string> names;
+    for (const auto& a : entryHandler(EntryType::Model).artifacts())
+        names[a.role] = a.downloadName;
+    EXPECT_EQ(names, (std::map<std::string, std::string>{{"model.bm3d", ""},
+                                                         {"model.nexus", ""},
+                                                         {"model.3dtiles", "model.3dtiles.zip"}}));
+
+    const auto tiles3d = entryHandler(EntryType::Tiles3D).artifacts();
+    ASSERT_EQ(tiles3d.size(), 1u);
+    EXPECT_EQ(tiles3d[0].kind, ArtifactKind::Directory);
+    EXPECT_TRUE(tiles3d[0].downloadName.empty());
+}
+
 TEST(entryHandler, SidecarRulesArePinned) {
     EXPECT_EQ(entryHandler(EntryType::Vector).sidecarExtensions(),
               (std::vector<std::string>{"cpg", "dbf", "shx", "prj"}));

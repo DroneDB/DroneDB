@@ -152,8 +152,10 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   `gsplat.spz`, `gsplat.export` `application/octet-stream`, the JSON artifacts and directory indexes
   `application/json`.
 * `downloadName` is set for the artifacts a download offers: `cog.tif`, `cloud.copc.laz`,
-  `source.gpkg`, and for a Gaussian splat `model.rad` (`gsplat.lod`), `model.spz` (the legacy
-  `gsplat.spz`) and `export.spz` (`gsplat.export`).
+  `source.gpkg`, for a Gaussian splat `model.rad` (`gsplat.lod`), `model.spz` (the legacy
+  `gsplat.spz`) and `export.spz` (`gsplat.export`), and for a Model `model.3dtiles.zip`
+  (`model.3dtiles`, a directory: a host offers it as a ZIP archive of what is in it, `tileset.json`
+  at its root). The `model.3dtiles` of a `.3tz` has none: the uploaded file is that archive.
 * `state` reads the build lock without reclaiming it (`BuildLock::isHeld`), so a listing never
   changes the dataset.
 * `retryAfter` is the Unix second from which a pending build is retried by `DDBBuild` with
@@ -463,3 +465,10 @@ Registry has to adopt first.
   from run to run and is normalised to `"<volatile>"` in these fixtures; `build-artifacts-pending`
   lists no artifact and did not change. Registry's exact-JSON adapter tests of these outputs need
   the field before Registry moves to a libddb build that has it.
+
+* 2026-10-29: the `model.3dtiles` artifact of a Model gains a `downloadName`
+  (`model.3dtiles.zip`): the first directory artifact with one, which a host offers as a ZIP
+  archive of what is in it (`tileset.json` at its root). The `model.3dtiles` of a `.3tz` has none.
+  No fixture changed (none lists a Model build); a host that offers the first artifact with a
+  `downloadName` as the download of an entry now offers the 3D Tiles of a Model, so it must
+  serve a directory as a ZIP before it moves to a libddb build that has the field.

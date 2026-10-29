@@ -177,7 +177,7 @@
         "downloadName": {
           "type": "string",
           "minLength": 1,
-          "description": "File name offered for a download; absent when the artifact is not offered"
+          "description": "File name offered for a download; absent when the artifact is not offered. A directory is offered as a ZIP archive of its content under this name"
         },
         "index": {
           "type": "string",
