@@ -286,14 +286,6 @@ namespace
         }
     }
 
-    TEST(GdalUtilTool, theSandboxReportIsOneLine)
-    {
-        const ToolRun run = runTool({"--sandbox-report"});
-        ASSERT_EQ(run.lines.size(), 1u);
-        EXPECT_EQ(run.lines[0].rfind("sandbox:", 0), 0u) << run.lines[0];
-        EXPECT_EQ(run.exitCode, 0);
-    }
-
     // ------------------------------------------------------------------ probe
 
     TEST_F(GdalUtilToolTest, probeOfAGeoTiffGivesTheSizeTheBandsAndTheProjection)

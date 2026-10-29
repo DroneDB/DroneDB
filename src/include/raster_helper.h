@@ -42,6 +42,13 @@ namespace ddb
         inline constexpr std::chrono::seconds kThumbnailTimeout{30};
         inline constexpr std::chrono::seconds kConversionTimeout{120};
 
+        // The longest a build (cog, vector) may run in total, whatever the program prints: the
+        // variable that sets it in seconds, and its default. The host ends the program at that
+        // time and the program limits its own cpu time by it (tools::toolMaxRuntime reads the
+        // variable).
+        inline constexpr const char *kGdalUtilMaxSecondsEnv = "DDB_GDAL_UTIL_MAX_SECONDS";
+        inline constexpr std::chrono::seconds kGdalUtilDefaultMaxRuntime{12 * 60 * 60};
+
         // The longest thumbnail file the host accepts from the helper. A WebP of the largest
         // size the format holds (16383 x 16383) is far below it; a bigger file is not a thumbnail.
         inline constexpr size_t kMaxThumbnailBytes = 64u * 1024 * 1024;

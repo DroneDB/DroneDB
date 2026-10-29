@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_helper.h"
 
+#include <csignal>
 #include <cstring>
 #include <fstream>
 #include <system_error>
@@ -28,11 +29,6 @@ namespace ddb
 
             // What of the output of `gdal-util --version` goes to an error message
             constexpr size_t kVersionOutputInMessage = 300;
-
-            // The longest a build may run in total, whatever the program prints
-            // (tools::toolMaxRuntime reads the variable)
-            constexpr const char *kMaxSecondsEnv = "DDB_GDAL_UTIL_MAX_SECONDS";
-            constexpr std::chrono::seconds kDefaultMaxRuntime{12 * 60 * 60};
 
             // The environment every helper starts with: a bounded heap for each worker, and no
             // grid downloaded from the network by PROJ
@@ -142,6 +138,23 @@ namespace ddb
                     break;
                 }
                 throw RasterOpException(code, message);
+            }
+
+            // A one-shot process that used up the cpu time or the file size its sandbox allows is
+            // ended by the system with one of these signals and writes no response, where a
+            // worker of the server is told by the server (executor.cpp)
+            bool limitSignal(int signal)
+            {
+#ifdef SIGXCPU
+                if (signal == SIGXCPU)
+                    return true;
+#endif
+#ifdef SIGXFSZ
+                if (signal == SIGXFSZ)
+                    return true;
+#endif
+                (void)signal;
+                return false;
             }
 
             [[noreturn]] void raiseFailure(const char *op, const fs::path &path, const Response &response)
@@ -373,7 +386,7 @@ namespace ddb
             OneShotOutput output(progress);
             process::Options run;
             run.envOverrides = helperEnvironment();
-            run.maxRuntime = tools::toolMaxRuntime(kMaxSecondsEnv, kDefaultMaxRuntime);
+            run.maxRuntime = tools::toolMaxRuntime(kGdalUtilMaxSecondsEnv, kGdalUtilDefaultMaxRuntime);
             run.onOutputLine = [&output](const std::string &line) { output.onLine(line); };
             const process::Result result = runner.run(program, {"--request", encodeRequest(request)}, run);
 
@@ -409,7 +422,7 @@ namespace ddb
                     throw RasterNotReadException(ErrorCode::Timeout, text);
                 throw RetryableBuildException(text, RetryableBuildReason::IdleTimeout);
             }
-            raiseFailure(op, path, ErrorCode::Crashed, text);
+            raiseFailure(op, path, limitSignal(result.termSignal) ? ErrorCode::Limit : ErrorCode::Crashed, text);
         }
 
         // ---- the helper of the process

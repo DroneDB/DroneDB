@@ -38,6 +38,11 @@ namespace sandbox::detail
                     hard = current.rlim_max;
                 if (soft > hard)
                     soft = hard;
+                // A process that starts under a hard limit of its own (ulimit, a container) keeps
+                // the gap: with the two equal the kernel sends SIGKILL, not SIGXCPU, and the
+                // caller could not tell the limit from a crash
+                if (hardGap != 0 && soft >= hard && hard > static_cast<rlim_t>(hardGap))
+                    soft = hard - static_cast<rlim_t>(hardGap);
             }
             const rlimit wanted{soft, hard};
             if (setrlimit(resource, &wanted) != 0)

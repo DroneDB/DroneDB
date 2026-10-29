@@ -58,7 +58,7 @@ output folder is the one of the request.
 
 | Layer | What it does |
 |---|---|
-| `rlimits` | `RLIMIT_AS`, `RLIMIT_CPU`, `RLIMIT_FSIZE` and `RLIMIT_NOFILE` from the policy (0 means unlimited), `RLIMIT_CORE` 0 always. The CPU hard limit is one second above the soft one, so the process ends with `SIGXCPU` and not `SIGKILL`. |
+| `rlimits` | `RLIMIT_AS`, `RLIMIT_CPU`, `RLIMIT_FSIZE` and `RLIMIT_NOFILE` from the policy (0 means unlimited), `RLIMIT_CORE` 0 always. The CPU hard limit is one second above the soft one, so the process ends with `SIGXCPU` and not `SIGKILL`; under a hard limit the process already had (`ulimit`, a container) that is the limit it gets, and the soft one stays one second below it. |
 | `oom-score` | Writes 1000 to `/proc/self/oom_score_adj`: when a container runs out of memory, the helper is killed first and not the host. |
 | `no-new-privs` | `PR_SET_NO_NEW_PRIVS`: set-uid programs and file capabilities give nothing. seccomp and Landlock need it, and each sets it as well. |
 | `landlock` | Read access to `readPaths`, read and write access (create, delete, rename within, truncate) to `writePaths`, nothing else. Handles every right of the Landlock ABI the kernel reports (1 to 6 are used): refer (2), truncate (3), TCP bind and connect with no rule, so none is allowed (4), ioctl on devices (5), no signals to and no abstract unix sockets of processes outside the sandbox (6). Needs a kernel 5.13 or later with Landlock in the list of security modules. |
