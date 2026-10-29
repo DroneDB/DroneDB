@@ -1115,6 +1115,51 @@ namespace
                      RasterNotReadException);
     }
 
+    // A failure response whose message member also holds `levels` arrays, one inside the other
+    std::string deepFailureLine(int64_t id, size_t levels)
+    {
+        return R"({"id":)" + std::to_string(id) + R"(,"ok":false,"error":"internal","message":"deep","a":)" +
+               std::string(levels, '[') + std::string(levels, ']') + "}";
+    }
+
+    // Every line of a one-shot process is checked for its depth before it is parsed, as the lines
+    // of a served helper are: a line that nests deeper than the protocol allows is never a
+    // response, whether it comes before or after the real one, and the real one is kept
+    TEST(RasterOneShot, aLineThatNestsTooDeepIsNoResponse)
+    {
+        FakeRunner runner;
+        runner.handler = [](const std::vector<std::string> &args, const process::Options &options) {
+            const int64_t id = idOfRequest(args);
+            options.onOutputLine(deepFailureLine(id, 10000));
+            options.onOutputLine(R"({"id":)" + std::to_string(id) + R"(,"ok":true,"result":{}})");
+            options.onOutputLine(deepFailureLine(id, 10000));
+            options.onOutputLine("{" + std::string(10000, '['));
+            return exitedWith(0);
+        };
+        GdalUtilHelper helper = oneShotHelper(runner);
+        EXPECT_NO_THROW(helper.buildCog(fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback()));
+
+        // Only deep lines: no response at all
+        runner.handler = [](const std::vector<std::string> &args, const process::Options &options) {
+            options.onOutputLine(deepFailureLine(idOfRequest(args), 10000));
+            return exitedWith(0);
+        };
+        EXPECT_THROW(helper.buildCog(fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback()),
+                     RasterNotReadException);
+
+        // The decision itself: refused before it is parsed, while every other line that is no
+        // response is output of a library and passes silently
+        EXPECT_THROW(responseOfOutputLine(deepFailureLine(1, 10000)), ProtocolError);
+        EXPECT_THROW(responseOfOutputLine(deepFailureLine(1, kMaxNestingDepth)), ProtocolError);
+        const auto atTheLimit = responseOfOutputLine(deepFailureLine(1, kMaxNestingDepth - 1));
+        ASSERT_TRUE(atTheLimit.has_value());
+        EXPECT_EQ(atTheLimit->error, ErrorCode::Internal);
+        EXPECT_EQ(atTheLimit->message, "deep");
+        for (const char *other : {"", "a message of a library", "{not json", R"({"progress":0.5})", "[1]", R"({"id":1})"})
+            EXPECT_FALSE(responseOfOutputLine(other).has_value()) << other;
+        EXPECT_THROW(responseOfOutputLine(R"({"id":1,"ok":"yes"})"), ProtocolError);
+    }
+
     TEST(RasterOneShot, aProcessThatPrintsNothingForTheIdleTimeIsARetryableFailure)
     {
         FakeRunner runner;

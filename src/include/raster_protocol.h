@@ -225,6 +225,13 @@ namespace ddb
         // The fraction of a progress line; nullopt for any other line
         std::optional<double> decodeProgress(std::string_view line);
 
+        // The response a line of a one-shot process is: a JSON object with an `ok` member. Any
+        // other line (a message of a library, a progress line) is nullopt. The depth of the line is
+        // checked before it is parsed, as for every other line of a helper.
+        // @throws ProtocolError for a line that nests deeper than kMaxNestingDepth, and for an
+        // object with `ok` that is not a valid response
+        std::optional<Response> responseOfOutputLine(std::string_view line);
+
         // The params of a `cog`. The warp and the compression of the COG use the threads of one
         // build; the host holds the tokens of the CPU pool for them (parallel.h) and says how
         // many it got, since the helper has a pool of its own and could not know. Without

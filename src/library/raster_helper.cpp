@@ -340,19 +340,14 @@ namespace ddb
                             progress_(*fraction);
                         return;
                     }
-                    if (line.empty() || line.front() != '{')
-                        return;
-                    const json parsed = json::parse(line, nullptr, false);
-                    if (parsed.is_object() && parsed.contains("ok"))
+                    try
                     {
-                        try
-                        {
-                            response_ = decodeResponse(line);
-                        }
-                        catch (const ProtocolError &e)
-                        {
-                            LOGW << kGdalUtilName << " wrote a response that is not valid: " << e.what();
-                        }
+                        if (auto response = responseOfOutputLine(line))
+                            response_ = std::move(*response);
+                    }
+                    catch (const ProtocolError &e)
+                    {
+                        LOGW << kGdalUtilName << " wrote a response that is not valid: " << e.what();
                     }
                 }
 

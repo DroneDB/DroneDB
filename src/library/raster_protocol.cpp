@@ -376,9 +376,10 @@ namespace ddb
             return line.dump(-1, ' ', false, json::error_handler_t::replace);
         }
 
-        Response decodeResponse(std::string_view line)
+        // The response of a parsed line
+        // @throws ProtocolError
+        static Response responseOf(const json &parsed)
         {
-            const json parsed = parseObject(line, "the response");
             Response response;
             response.id = readId(parsed);
             const json &ok = required(parsed, "ok");
@@ -408,6 +409,24 @@ namespace ddb
                 response.message = message->get<std::string>();
             }
             return response;
+        }
+
+        Response decodeResponse(std::string_view line)
+        {
+            return responseOf(parseObject(line, "the response"));
+        }
+
+        std::optional<Response> responseOfOutputLine(std::string_view line)
+        {
+            if (line.empty() || line.front() != '{')
+                return std::nullopt;
+            if (nestsTooDeep(line))
+                throw ProtocolError("a line of the output nests deeper than " + std::to_string(kMaxNestingDepth) +
+                                    " levels");
+            const json parsed = json::parse(line.begin(), line.end(), nullptr, false);
+            if (!parsed.is_object() || !parsed.contains("ok"))
+                return std::nullopt;
+            return responseOf(parsed);
         }
 
         // ---- probe
