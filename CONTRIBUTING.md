@@ -106,6 +106,61 @@ with the new upstream port and carry the changes over.
   port of a PDAL release that contains the fix is the one the submodule builds, and the
   `CAbiLogPdal` tests pass with the stock port.
 
+## Helper programs
+
+libddb starts a few programs as child processes: `metadata-util` (EXIF and XMP, Exiv2), `bm3d`
+(multiresolution models) and `gdal-util` (reads the files of users with GDAL, behind the
+confinement of `vendor/sandbox`). Each lives in its own repository and is a git submodule in
+`vendor/` (`metadata-util`, `bm3d`) or `apps/` (`gdal-util`); the submodule is built inside this
+tree and nowhere else (`gdal-util` embeds libddb with `ddb_embed_library`). A program found by
+`DDB_METADATA_UTIL_PATH`, `DDB_BM3D_PATH` or `DDB_GDAL_UTIL_PATH`, next to the executable or on
+`PATH` is accepted when its protocol major version matches.
+
+To add a helper:
+
+1. Put its sources in `vendor/<name>` or `apps/<name>` with a `CMakeLists.txt` whose target is
+   named `<name>`, and add the subdirectory to `vendor/CMakeLists.txt` or `apps/CMakeLists.txt`.
+2. List it in `scripts/helper-tools.txt` as `<name> | <version source>`: `package` when it must
+   report the version of the package (`<name> --version` prints `<name> <version> ...`), or the
+   path of a file whose first line is its version. The CMake build (a name that is no target stops
+   the configure), the Debian and Windows packaging scripts, the package check
+   (`scripts/check-helper-tools.py`), the long path check and the clean-container smoke test of CI
+   all read that list, so nothing else names the program.
+3. List its licence text, and those of the code built into it, in `scripts/helper-licences.txt`
+   under a name that contains `.LICENSE`. A GPL helper must keep its code out of libddb and
+   `ddbcmd`: `scripts/check-gpl-linkage.py` (and the `.ps1` of it for Windows) fails on a helper
+   of the list that none of its rules covers, so say there which rule holds it.
+4. If it speaks a protocol, put `PROTOCOL.md` in its repository and a schema of the response in
+   `tests/contract/schemas`.
+
+## Bumping a helper submodule
+
+Move the submodule to the new commit (`git -C <path> checkout <tag>`, then commit the pointer in
+this repository), and in the same change:
+
+- **vendor/metadata-util**, **vendor/bm3d**: check the version the program reports against its
+  source in `scripts/helper-tools.txt`; for bm3d `scripts/check-bm3d-pin.sh` also checks the
+  release tag the source offer of `THIRD_PARTY_LICENSES.md` names.
+- **apps/gdal-util**: its `PROTOCOL.md` and `src/include/raster_protocol.h` describe the same
+  protocol and change together. A change of the protocol that older hosts or helpers cannot read
+  raises the major version in both, and `tests/contract/schemas/gdal-util-probe.schema.json` and
+  its fixture follow. The operations it runs are in libddb (`src/library/raster_ops.cpp`), so
+  a bump of the helper that changes what an operation reads or writes is a libddb change as well.
+- Run the unit tests and `scripts/check-helper-tools.py` against the new build.
+
+A release is not done before this is checked on the image that runs in production, because the
+confinement of `gdal-util` depends on the kernel and on the container settings of the host (Landlock,
+seccomp), and a layer that the host lacks is skipped in the default `best-effort` mode and
+reported only in the log:
+
+```
+docker exec <container> gdal-util --sandbox-report
+```
+
+Every layer the report lists must be active. `DDB_GDAL_SANDBOX=strict` makes `gdal-util` refuse to
+start when a layer is missing (use it where the host is known to support all of them);
+`best-effort` is the default; `off` applies nothing and is for tests and debugging only.
+
 ## Bumping vendor/spz and vendor/spark
 
 - **vendor/spz** (nianticlabs): bump by checking out a tagged commit, or a reviewed commit of

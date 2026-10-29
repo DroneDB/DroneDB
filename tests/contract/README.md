@@ -98,6 +98,7 @@ with ddb).
 | `capabilities` | `DDBGetCapabilities()` (no dataset): ABI version, error codes, error reasons, cancellable exports, the symbol manifest | `capabilities` | `version` |
 | `effective-config` | `DDBConfigure({"cacheDir": <cache>, "cpuPoolSize": 3, "ioThreads": 2, "minFreeDiskMb": 256})`, then `DDBGetEffectiveConfig()` (no dataset; see `ddb.h`, "Process configuration") | `effective-config` | `hardwareThreads` |
 | `normalize-path`, `normalize-path-rejected` | `DDBNormalizePath("photos\\2024/./a.jpg", "[\".uploads\"]")`, `DDBNormalizePath(".uploads/x", "[\".uploads\"]")` (no dataset) | `normalize-path` | - |
+| `gdal-util-probe` | The response line of `gdal-util --serve` to a `probe` request (kind raster) for `ortho.tif`: the footprint, the size and the other fields the host merges into the entry (`apps/gdal-util/PROTOCOL.md`, `src/include/raster_protocol.h`). The schema also covers the vector probe and the error response. Not an output of the C API: libddb and the helper program share the shape, and the fixture is checked by `tests/unit/gdal_util_tool_test.cpp` against the real program | `gdal-util-probe` | - |
 | `info-drone-image`, `get-drone-image`, `stac-item-drone-image` | `DDBInfo`, `DDBGet`, `DDBStac` of `DJI_0018.JPG` (integration) | `entries`, `entry`, `stac-item` | `depth` (info) |
 
 Each fixture file holds:

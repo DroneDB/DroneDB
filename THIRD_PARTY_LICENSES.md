@@ -28,17 +28,22 @@ processes. The Linux and Windows CI builds check this on the files they
 produce, each as far as its platform's tools allow:
 
 - On Linux, [`scripts/check-gpl-linkage.py`](scripts/check-gpl-linkage.py)
-  reads every symbol defined in `libddb.so` and `ddbcmd` (none may come
-  from Exiv2, bm3d, vcglib or corto) and the shared libraries they load
-  (neither may load `libexiv2` or `libbm3d`). It also checks that the
+  reads every symbol defined in `libddb.so`, `ddbcmd` and `gdal-util` (none
+  may come from Exiv2, bm3d, vcglib or corto) and the shared libraries they
+  load (none may load `libexiv2` or `libbm3d`). It also checks that the
   pattern used to find bm3d, vcglib and corto symbols does match symbols
   of the `bm3d` binary, which contains them, so that the check on
   `libddb.so` cannot pass because the pattern stopped matching; its
   `--self-test` runs the patterns and that control on made-up symbols.
 - On Windows, [`scripts/check-gpl-linkage.ps1`](scripts/check-gpl-linkage.ps1)
-  reads only the DLLs `ddb.dll` and `ddbcmd.exe` import
-  (`dumpbin /dependents`): neither may load `exiv2.dll` or a `bm3d` DLL. It
+  reads only the DLLs `ddb.dll`, `ddbcmd.exe` and `gdal-util.exe` import
+  (`dumpbin /dependents`): none may load `exiv2.dll` or a `bm3d` DLL. It
   does not look at symbols, so code compiled into them is not seen there.
+
+`gdal-util` is the helper program that reads the files of users with GDAL; it
+is part of DroneDB, under the same MPL-2.0 licence as `libddb` (its licence
+text ships as `gdal-util.LICENSE`), embeds `libddb` the way `ddbcmd` does and
+contains no GPL code, which is why it is held to the rules of `libddb`.
 
 Both also check that `bm3d` does not use Qt: on Linux by symbols and loaded
 libraries, on Windows by the DLLs it imports.

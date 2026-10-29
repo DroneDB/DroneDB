@@ -249,9 +249,11 @@ jobs:
           if nm -D --defined-only build/libddb.so | grep -E ' (dwg_|dxf_)[a-z_]+$' | grep -q .; then
             echo "::error::libddb.so exports LibreDWG symbols"; exit 1
           fi
-      - name: Verify no GPL code is linked into libddb or ddbcmd, and no Qt into bm3d
+      - name: Verify no GPL code is linked into libddb, ddbcmd or gdal-util, and no Qt into bm3d
         # Exiv2 (GPL) lives in metadata-util and bm3d (with the Nexus/vcglib/corto code it is made
-        # of) in the bm3d program, both run as child processes. Looks at every symbol (the version
+        # of) in the bm3d program, both run as child processes; gdal-util embeds libddb like ddbcmd
+        # and is held to the same rules. Also fails on a program of scripts/helper-tools.txt that no
+        # rule of the script covers. Looks at every symbol (the version
         # script hides the exports of linked-in code from nm -D) and at the NEEDED entries of the
         # shipped files. bm3d is held to the same check for Qt (and the X11/GL/dbus libraries it
         # loaded): it decodes textures with image codec libraries only. The same script fails when
@@ -789,10 +791,10 @@ jobs:
         # Visual Studio environment is needed for dumpbin) are exactly the manifest, as on Linux
         run: python scripts/check-abi.py exports --library build/ddb.dll
         shell: pwsh
-      - name: Verify no GPL code is linked into ddb.dll or ddbcmd.exe, and no Qt into bm3d.exe
+      - name: Verify no GPL code is linked into ddb.dll, ddbcmd.exe or gdal-util.exe, and no Qt into bm3d.exe
         # Exiv2 (GPL) lives in metadata-util.exe and bm3d (with the Nexus/vcglib/corto code it is
-        # made of) in bm3d.exe, both run as child processes: dumpbin /dependents of ddb.dll and
-        # ddbcmd.exe must not list exiv2.dll, a bm3d*.dll or Qt5*.dll, and that of bm3d.exe no
+        # made of) in bm3d.exe, both run as child processes: dumpbin /dependents of ddb.dll,
+        # ddbcmd.exe and gdal-util.exe must not list exiv2.dll, a bm3d*.dll or Qt5*.dll, and that of bm3d.exe no
         # Qt5*/Qt6* DLL
         run: .\scripts\check-gpl-linkage.ps1 -BuildDir build
         shell: pwsh
