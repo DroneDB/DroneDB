@@ -83,6 +83,29 @@ Take a look at the list of [open issues](https://github.com/uav4geo/ddb/issues) 
 
 This project adheres to the [Contributor Covenant](CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to the project maintainers.
 
+## Overlay ports (vcpkg-overlays)
+
+`vcpkg-overlays/` holds vcpkg ports that replace the ones of the vcpkg submodule
+(`vcpkg-configuration.json` lists the folder in `overlay-ports`). An overlay is a copy of the
+port with the patches DroneDB needs; every patch carries a comment in its `portfile.cmake` that
+says why it exists and when it can go. When the vcpkg submodule is bumped, compare each overlay
+with the new upstream port and carry the changes over.
+
+- **`vcpkg-overlays/pdal`**: PDAL 2.10.1 with `gdal-error-handler.patch`. Stock PDAL installs
+  its own GDAL error handler in `Stage::setupLog` and restores the saved one in the first
+  `Stage::stopLogging`; the `stopLogging` of the outer stage of a nested pair (the text reader
+  preview runs a statistics filter inside it) then restores a null handler, GDAL's default, and
+  an exception thrown between `startLogging` and `stopLogging` leaves PDAL's handler installed.
+  After either, the handler of libddb no longer receives GDAL errors, so the log callback of a
+  host misses them. The patch installs the handler once for the outermost running stage, restores
+  the saved handler when the last one stops, never installs a null handler, and keeps the start
+  and stop of the logging paired when an exception leaves a stage. The tests are in
+  `tests/unit/c_abi_log_test.cpp` (`CAbiLogPdal`).
+  The same change is pending as a pull request to the PDAL project (not opened yet; the link goes
+  here when it exists). Remove the overlay, and with it `vcpkg-overlays/pdal`, when the vcpkg
+  port of a PDAL release that contains the fix is the one the submodule builds, and the
+  `CAbiLogPdal` tests pass with the stock port.
+
 ## Bumping vendor/spz and vendor/spark
 
 - **vendor/spz** (nianticlabs): bump by checking out a tagged commit, or a reviewed commit of

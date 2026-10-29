@@ -17,6 +17,8 @@
 // Threads meet on latches; no test sleeps nor asserts on a duration.
 
 #include <atomic>
+#include <filesystem>
+#include <fstream>
 #include <latch>
 #include <mutex>
 #include <regex>
@@ -33,8 +35,10 @@
 #include "logger.h"
 #include "mio.h"
 #include "parallel.h"
+#include "pointcloud.h"
 #include "process_runner.h"
 #include "test.h"
+#include "testarea.h"
 
 namespace {
 
@@ -168,6 +172,91 @@ TEST_F(CAbiLog, gdalErrorOnTheCallingThread) {
     EXPECT_EQ(records[0].source, "gdal");
     EXPECT_EQ(records[0].opId, 9u);
     CPLErrorReset();
+}
+
+// PDAL installs its own GDAL error handler while one of its stages runs. It has to give the handler
+// of the host back when the last stage stops, wherever the stages nest and however they end, or
+// the GDAL errors of everything that runs afterwards (rasters, vectors, the log callback of the
+// host) go to PDAL's log or to the default handler.
+class CAbiLogPdal : public CAbiLog {
+   protected:
+    Received received;
+
+    void SetUp() override {
+        CAbiLog::SetUp();
+        ASSERT_DDB_OK(DDBSetLogCallback(&collect, DDB_LOG_TRACE, &received));
+    }
+
+    // A text point cloud: its reader's preview runs a statistics filter of its own inside it
+    static std::string writeTextCloud(const std::filesystem::path& folder, const std::string& name) {
+        const auto path = folder / name;
+        std::ofstream xyz(path);
+        for (int i = 0; i <= 10; i++)
+            xyz << i << " " << (i * 7) % 11 << " " << i % 3 << "\n";
+        return path.string();
+    }
+
+    void expectGdalFailureReachesTheCallback(const char* text) {
+        ASSERT_DDB_OK(capi::guarded([&] { CPLError(CE_Failure, CPLE_AppDefined, "%s", text); }));
+        const auto records = received.matching(text);
+        ASSERT_EQ(records.size(), 1u) << "the GDAL error did not reach the log callback";
+        EXPECT_EQ(records[0].level, DDB_LOG_ERROR);
+        EXPECT_EQ(records[0].source, "gdal");
+        CPLErrorReset();
+    }
+};
+
+TEST_F(CAbiLogPdal, gdalErrorReachesTheCallbackAfterANestedStagePreview) {
+    TestArea area(TEST_NAME, true);
+    const std::string cloud = writeTextCloud(area.getFolder(), "cloud.xyz");
+    PointCloudInfo info;
+    ASSERT_TRUE(getPointCloudInfo(cloud, info));
+    EXPECT_EQ(info.pointCount, 11u);
+
+    expectGdalFailureReachesTheCallback("log-test after preview");
+}
+
+TEST_F(CAbiLogPdal, gdalErrorReachesTheCallbackAfterAStageThatThrows) {
+    TestArea area(TEST_NAME, true);
+    const auto broken = area.getPath("broken.las");
+    {
+        std::ofstream(broken) << "this is not a LAS file";
+    }
+    PointCloudInfo info;
+    EXPECT_ANY_THROW(getPointCloudInfo(broken.string(), info));
+
+    expectGdalFailureReachesTheCallback("log-test after throw");
+}
+
+TEST_F(CAbiLogPdal, gdalErrorReachesTheCallbackAfterConcurrentStages) {
+    TestArea area(TEST_NAME, true);
+    constexpr int kThreads = 4;
+    constexpr int kRounds = 10;
+    std::vector<std::string> clouds;
+    for (int i = 0; i < kThreads; i++)
+        clouds.push_back(writeTextCloud(area.getFolder(), "cloud" + std::to_string(i) + ".xyz"));
+
+    std::latch started(kThreads);
+    std::atomic<int> failures{0};
+    std::vector<std::thread> threads;
+    for (int i = 0; i < kThreads; i++)
+        threads.emplace_back([&, i] {
+            started.arrive_and_wait();
+            for (int round = 0; round < kRounds; round++) {
+                PointCloudInfo info;
+                try {
+                    if (!getPointCloudInfo(clouds[i], info) || info.pointCount != 11u)
+                        failures++;
+                } catch (const std::exception&) {
+                    failures++;
+                }
+            }
+        });
+    for (auto& thread : threads)
+        thread.join();
+    EXPECT_EQ(failures.load(), 0);
+
+    expectGdalFailureReachesTheCallback("log-test after concurrent stages");
 }
 
 // Unregistering waits until no thread is inside the callback: afterwards it is never called
