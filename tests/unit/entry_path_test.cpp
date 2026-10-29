@@ -133,6 +133,24 @@ TEST(EntryPath, reservedSegmentIsDotDdbAsAFileSystemOpensIt) {
     EXPECT_FALSE(isEntryPathSeparator(':'));
 }
 
+// NTFS gives ".ddb" an 8.3 short name, "DDB~<n>", that opens the folder too: reserved on every
+// platform, in any case and with the same trailing dots, spaces and stream names dropped, while a
+// name that is no short name of ".ddb" stays ordinary
+TEST(EntryPath, theShortNameOfDotDdbIsReserved) {
+    for (const char* reserved : {"DDB~1", "ddb~1", "Ddb~2", "DDB~12", "ddb~0123456789", "DDB~1.", "DDB~1 ",
+                                 "DDB~1::$INDEX_ALLOCATION"}) {
+        EXPECT_TRUE(isReservedSegment(std::string_view(reserved))) << reserved;
+        EXPECT_TRUE(isReservedSegment(fs::path(reserved))) << reserved;
+    }
+    for (const char* ordinary : {"ddb", "ddb~", "ddb~x", "ddb~1x", "ddb~-1", "ddb~1.txt", "xddb~1", ".ddb~1", "ddb~ 1",
+                                 "DDB1", "ddb_1"}) {
+        EXPECT_FALSE(isReservedSegment(std::string_view(ordinary))) << ordinary;
+        EXPECT_FALSE(isReservedSegment(fs::path(ordinary))) << ordinary;
+    }
+    EXPECT_TRUE(containsDdbSegment(fs::path("a") / "DDB~1" / "build"));
+    EXPECT_EQ(normalizeEntryPath("DDB~1/build/x.tif", ReservedRules()).rejected, "reserved");
+}
+
 TEST(EntryPath, reservedJsonIsAnArrayOfSegments) {
     EXPECT_TRUE(ReservedRules::fromJson(nullptr).firstSegment.empty());
     EXPECT_TRUE(ReservedRules::fromJson("").firstSegment.empty());

@@ -217,7 +217,9 @@ dropped), `reserved` (a `.ddb` segment at any depth, or a caller name as the fir
 and `\` both separate segments, as in Registry. The `.ddb` segment is matched as the file
 systems a dataset may live on open it, on every platform alike: ASCII letters in any case,
 trailing dots and spaces dropped and what follows a `:` (an NTFS stream name) ignored, so
-`.DDB`, `.ddb.`, `.ddb ` and `.ddb::$INDEX_ALLOCATION` are reserved. Other names are compared
+`.DDB`, `.ddb.`, `.ddb ` and `.ddb::$INDEX_ALLOCATION` are reserved. So is the NTFS 8.3 short
+name of `.ddb`, `ddb~` and one or more digits, matched the same way (`DDB~1`, `ddb~2.`), while
+`ddb`, `ddb~` and `ddb~x` are no short name of it. Other names are compared
 byte for byte (`.ddbx` and `photos/.uploads/x` are ordinary) and are not Unicode-normalized. A JSON string
 cannot hold invalid UTF-8, so the `encoding` rejection is tested in `entry_path_test.cpp` only.
 
@@ -483,3 +485,11 @@ Registry has to adopt first.
   every platform: on Windows and macOS those names open the `.ddb` folder of the dataset, so an
   upload to `.DDB/build/<hash>/...` wrote into its builds. Registry's copy of the vectors takes
   the same change when it moves to a libddb build that has it.
+
+* 2026-10-29: `vectors/entry-paths.json`: the NTFS 8.3 short name of `.ddb` is reserved too:
+  `ddb~` followed by one or more digits, in any case, with trailing dots and spaces and an NTFS
+  stream name dropped as for `.ddb` (`DDB~1/build/x.tif`, `sub/ddb~2`, `DDB~12./x` are
+  `reserved`; they were accepted), on every platform: on an NTFS volume with short names
+  `DDB~1` opens the `.ddb` folder of the dataset. `ddb`, `ddb~`, `ddb~x`, `ddb~1x` and
+  `ddb~1.txt` stay ordinary. Registry's copy of the vectors takes the same change when it moves
+  to a libddb build that has it.

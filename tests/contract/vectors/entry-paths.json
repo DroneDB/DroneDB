@@ -132,6 +132,70 @@
       "note": "only trailing dots and spaces are dropped"
     },
     {
+      "input": "DDB~1/build/x.tif",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "the NTFS 8.3 short name of .ddb opens the folder on Windows: ddb~ and one or more digits, in any case, reserved on every platform"
+    },
+    {
+      "input": "sub/ddb~2",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "DDB~12./x",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "trailing dots and spaces and an NTFS stream name are dropped as for .ddb"
+    },
+    {
+      "input": "DDB~1::$INDEX_ALLOCATION/x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "ddb/x",
+      "expected": {
+        "path": "ddb/x"
+      }
+    },
+    {
+      "input": "ddb~/x",
+      "expected": {
+        "path": "ddb~/x"
+      },
+      "note": "without a number it is no short name"
+    },
+    {
+      "input": "ddb~x/a",
+      "expected": {
+        "path": "ddb~x/a"
+      }
+    },
+    {
+      "input": "ddb~1x/a",
+      "expected": {
+        "path": "ddb~1x/a"
+      }
+    },
+    {
+      "input": "ddb~1.txt",
+      "expected": {
+        "path": "ddb~1.txt"
+      },
+      "note": "a short name with an extension is another name"
+    },
+    {
+      "input": "xddb~1/a",
+      "expected": {
+        "path": "xddb~1/a"
+      }
+    },
+    {
       "input": " .ddb/a",
       "expected": {
         "path": " .ddb/a"

@@ -352,7 +352,8 @@ extern "C"
      * (entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):
      * '/' and '\' both separate segments; empty and "." segments are dropped; the result uses '/'
      * with no leading or trailing separator. Names are compared byte for byte, without Unicode
-     * normalization. ".ddb" is reserved as a segment at any depth.
+     * normalization. ".ddb" is reserved as a segment at any depth, as is its NTFS short name
+     * ("ddb~" and digits, e.g. "DDB~1").
      * The rejection codes, checked in this order: "empty" (""), "nul" (unreachable through this
      * NUL-terminated API), "encoding" (not valid UTF-8), "absolute" (leading '/' or '\', a UNC
      * path, a drive "X:"), "traversal" (a ".." segment), "empty" (nothing left, e.g. "./"),
@@ -441,11 +442,12 @@ extern "C"
      *               An input path that cannot be indexed is an error with code "INDEX":
      *               a name that contains a backslash or another path separator (the file must
      *               be renamed), or a reserved name. A name is reserved when a segment of the
-     *               path equals ".ddb" ignoring ASCII case, after dropping trailing dots and
-     *               spaces from it and anything from a ':' on (so ".DDB", ".ddb." and
-     *               ".ddb::$INDEX_ALLOCATION" are the ".ddb" folder, which the file systems
-     *               of Windows and macOS open under those spellings); a path inside it is
-     *               reserved too. With stopOnError the first such path fails the call instead.
+     *               path equals ".ddb", or "ddb~" followed by one or more digits (the NTFS short
+     *               name of ".ddb", e.g. "DDB~1"), ignoring ASCII case, after dropping trailing
+     *               dots and spaces from it and anything from a ':' on (so ".DDB", ".ddb.",
+     *               ".ddb::$INDEX_ALLOCATION" and "DDB~1" are the ".ddb" folder, which the file
+     *               systems of Windows and macOS open under those spellings); a path inside it
+     *               is reserved too. With stopOnError the first such path fails the call instead.
      *               Files found by walking a folder input are not reported when their name
      *               cannot be indexed: they are skipped silently.
      * @return DDBERR_NONE on success (even if options->stopOnError is false and some items

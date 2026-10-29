@@ -105,7 +105,15 @@ bool isReservedSegment(std::string_view segment) noexcept {
     while (!segment.empty() && (segment.back() == '.' || segment.back() == ' '))
         segment.remove_suffix(1);
     // A case-insensitive file system (Windows, macOS) opens ".DDB" as ".ddb"
-    return str::iequals(segment, DDB_FOLDER);
+    if (str::iequals(segment, DDB_FOLDER))
+        return true;
+    // NTFS gives ".ddb" an 8.3 short name, "DDB~1" (or ~2, ... when that one is taken), which
+    // opens the folder as well. Any number counts: which one a volume gave is not known here.
+    constexpr std::string_view kShortName = "ddb~";
+    if (segment.size() <= kShortName.size() || !str::iequals(segment.substr(0, kShortName.size()), kShortName))
+        return false;
+    const std::string_view number = segment.substr(kShortName.size());
+    return std::all_of(number.begin(), number.end(), [](char c) { return c >= '0' && c <= '9'; });
 }
 
 bool isReservedSegment(const fs::path& segment) {

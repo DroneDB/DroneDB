@@ -25,9 +25,10 @@
 //   5. "traversal" a segment is ".."
 //   6. "empty"     nothing is left once the empty and "." segments are dropped (".", "./", "//"
 //                  is "absolute" by rule 4, "a/.." is "traversal" by rule 5)
-//   7. "reserved"  a segment is reserved: ".ddb" at any depth (isReservedSegment), or the first
-//                  segment is one of the caller's ReservedRules::firstSegment (Registry passes
-//                  ".uploads", which exists at the dataset root only)
+//   7. "reserved"  a segment is reserved: ".ddb" (or its short name) at any depth
+//                  (isReservedSegment), or the first segment is one of the caller's
+//                  ReservedRules::firstSegment (Registry passes ".uploads", which exists at the
+//                  dataset root only)
 // An accepted path is returned with '/' between the segments, no leading, trailing or repeated
 // separator and no "." segment.
 //
@@ -38,7 +39,9 @@
 // The ".ddb" segment is matched as the file systems a dataset may live on open it, on every
 // platform alike (one rule, so a path is accepted or refused everywhere): ASCII letters in any
 // case, trailing dots and spaces dropped, and what follows a ':' (an NTFS stream name) ignored,
-// so ".DDB", ".Ddb", ".ddb.", ".ddb " and ".ddb::$INDEX_ALLOCATION" are reserved.
+// so ".DDB", ".Ddb", ".ddb.", ".ddb " and ".ddb::$INDEX_ALLOCATION" are reserved. So is the NTFS
+// 8.3 short name of ".ddb": "ddb~" and one or more digits, matched the same way ("DDB~1",
+// "ddb~2.", "DDB~1::$INDEX_ALLOCATION"); "ddb", "ddb~" and "ddb~x" are no short name of it.
 //
 // Not rules (deliberately): other names are compared byte for byte (".ddbx", ".ddb_notes.txt"
 // and "photos/.uploads/x" are ordinary, and so are the caller's names); no Unicode
@@ -73,7 +76,7 @@ void to_json(json& j, const EntryPathResult& result);
 bool isEntryPathSeparator(char c) noexcept;
 
 /// True when a path segment (one name, no separator) is reserved at any depth: ".ddb"
-/// (DDB_FOLDER) as a file system may open it (see above). libddb never indexes anything at or
+/// (DDB_FOLDER) as a file system may open it, its NTFS short name included (see above). libddb never indexes anything at or
 /// below such a segment.
 bool isReservedSegment(std::string_view segment) noexcept;
 /// The same rule for one component of a filesystem path (fs::path::filename(), or an element of
