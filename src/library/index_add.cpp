@@ -572,7 +572,8 @@ namespace ddb
             return; // Nothing to do
         const fs::path directory = db->rootDirectory();
         // Files with known hashes are indexed exactly as listed (see addPathsToIndex)
-        auto expanded = expandIndexPaths(directory, paths, true, /*recursive=*/knownHashes == nullptr);
+        const bool recursive = options.recursive && knownHashes == nullptr;
+        auto expanded = expandIndexPaths(directory, paths, true, recursive);
         reportRejectedPaths(expanded.rejected, directory, options.stopOnError, result);
         auto pathList = std::move(expanded.paths);
 

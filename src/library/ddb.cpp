@@ -283,6 +283,7 @@ static AddOptions toAddOptions(const DDBAddOptions *options) {
     AddOptions addOpts;
     addOpts.stopOnError = options->stopOnError;
     addOpts.maxConflictRetries = options->maxConflictRetries;
+    addOpts.recursive = options->recursive;
     return addOpts;
 }
 
@@ -304,21 +305,20 @@ DDBErr DDBAddWithOptions(const char* ddbPath,
         const auto db = ddb::open(std::string(ddbPath), true);
         const auto addOpts = toAddOptions(options);
 
+        // The listed paths go to addToIndexEx as they were listed, made absolute: it walks the
+        // folders itself (addOpts.recursive) and so tells a listed path, which it reports when it
+        // cannot be indexed, from a walked one, which it skips. A recursive add reports a missing
+        // listed path as an item error unless stopOnError, so it fails only itself.
         AddResult result;
         std::vector<std::string> expandedPaths;
-        // Expand paths per-item when stopOnError is false: expandPathList throws for a missing
-        // path, which would abort the entire batch and bypass per-item error capture.
-        if (addOpts.stopOnError) {
-            expandedPaths = ddb::expandPathList(pathList, options->recursive, 0);
-        } else {
-            for (const auto &p : pathList) {
-                try {
-                    auto partial = ddb::expandPathList({p}, options->recursive, 0);
-                    expandedPaths.insert(expandedPaths.end(), partial.begin(), partial.end());
-                } catch (const std::exception &ex) {
-                    addPathError(db.get(), p, ex, result);
-                }
+        expandedPaths.reserve(pathList.size());
+        for (const auto &p : pathList) {
+            const auto absolute = fs::absolute(io::fromUtf8(p));
+            if (options->recursive && !addOpts.stopOnError && !fs::exists(absolute)) {
+                addPathError(db.get(), p, FSException("Path does not exist: " + p), result);
+                continue;
             }
+            expandedPaths.push_back(io::toUtf8(absolute));
         }
 
         addToIndexEx(db.get(), expandedPaths, addOpts, result);

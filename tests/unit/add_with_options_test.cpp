@@ -6,6 +6,8 @@
 
 #include "gtest/gtest.h"
 #include "dbops.h"
+#include "ddb.h"
+#include "json.h"
 #include "exceptions.h"
 #include "mio.h"
 #include "test.h"
@@ -257,5 +259,108 @@ TEST(addToIndexEx, reportsExplicitPathInsideReservedFolder) {
     ASSERT_EQ(result.errors.size(), 1u);
     EXPECT_NE(result.errors[0].message.find("reserved"), std::string::npos) << result.errors[0].message;
 }
+
+// DDBAddWithOptions through the C API: the JSON result of adding `paths` (absolute) to `root`
+json addWithOptions(const fs::path &root, const std::vector<fs::path> &paths, bool recursive, bool stopOnError) {
+    std::vector<std::string> utf8;
+    for (const auto &p : paths) utf8.push_back(p.string());
+    std::vector<const char *> ptrs;
+    for (const auto &p : utf8) ptrs.push_back(p.c_str());
+    const DDBAddOptions opts{recursive, stopOnError, 2};
+
+    char *out = nullptr;
+    const auto err = DDBAddWithOptions(root.string().c_str(), ptrs.data(), static_cast<int>(ptrs.size()), &opts, &out);
+    const std::string text = out != nullptr ? out : "";
+    DDBFree(out);
+    EXPECT_EQ(err, DDBERR_NONE) << DDBGetLastError();
+    if (err == DDBERR_NONE)
+        return json::parse(text);
+    // The failed call, as an error of the result: the checks of the buckets still run
+    return json{{"entries", json::array()},
+                {"unchanged", json::array()},
+                {"errors", json::array({json{{"path", ""}, {"code", "CALL"}, {"message", DDBGetLastError()}}})}};
+}
+
+std::vector<std::string> pathsIn(const json &result, const char *bucket) {
+    std::vector<std::string> paths;
+    for (const auto &item : result[bucket])
+        paths.push_back(item["path"].get<std::string>());
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
+// A listed .ddb is reported by a recursive add as by any other: it must not vanish from the
+// result because the listed paths were walked before the add saw them.
+TEST(DDBAddWithOptions, recursiveReportsListedReservedName) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+    fileWriteAllText(root / "c.txt", "plain");
+    initIndex(root.string());
+
+    for (const bool recursive : {true, false}) {
+        const auto result = addWithOptions(root, {root / ".ddb", root / "c.txt"}, recursive, false);
+        ASSERT_EQ(result["errors"].size(), 1u) << result.dump();
+        EXPECT_EQ(result["errors"][0]["path"], ".ddb");
+        EXPECT_EQ(result["errors"][0]["code"], "INDEX");
+        EXPECT_EQ(pathsIn(result, "entries").size() + pathsIn(result, "unchanged").size(), 1u) << result.dump();
+    }
+}
+
+// A recursive add still reports a missing listed path as an item error and adds the others.
+TEST(DDBAddWithOptions, recursiveReportsMissingListedPath) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+    fileWriteAllText(root / "c.txt", "plain");
+    initIndex(root.string());
+
+    const auto result = addWithOptions(root, {root / "gone.txt", root / "c.txt"}, true, false);
+    EXPECT_EQ(pathsIn(result, "entries"), std::vector<std::string>{"c.txt"});
+    ASSERT_EQ(result["errors"].size(), 1u) << result.dump();
+    EXPECT_EQ(result["errors"][0]["path"], "gone.txt");
+    EXPECT_EQ(result["errors"][0]["code"], "FS");
+}
+
+// A listed folder is walked by a recursive add and indexed alone by a non-recursive one.
+TEST(DDBAddWithOptions, recursiveWalksListedFolder) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+    fs::create_directories(root / "d" / "e");
+    fileWriteAllText(root / "d" / "c.txt", "plain");
+    fileWriteAllText(root / "d" / "e" / "f.txt", "nested");
+    initIndex(root.string());
+
+    const auto flat = addWithOptions(root, {root / "d"}, false, true);
+    EXPECT_EQ(pathsIn(flat, "entries"), std::vector<std::string>{"d"});
+    EXPECT_TRUE(flat["errors"].empty()) << flat.dump();
+
+    const auto walked = addWithOptions(root, {root / "d"}, true, true);
+    EXPECT_EQ(pathsIn(walked, "entries"), (std::vector<std::string>{"d/c.txt", "d/e", "d/e/f.txt"}));
+    EXPECT_EQ(pathsIn(walked, "unchanged"), std::vector<std::string>{"d"});
+    EXPECT_TRUE(walked["errors"].empty()) << walked.dump();
+}
+
+#ifndef _WIN32
+// A file found by walking a listed folder is skipped when its name cannot be indexed, also by
+// a recursive add: it is not a listed path, so it is no error (and does not abort the add
+// under stopOnError).
+TEST(DDBAddWithOptions, recursiveSkipsWalkedFileWithSeparatorInName) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+    fs::create_directories(root / "d");
+    fileWriteAllText(root / "d" / "a\\b.txt", "backslash");
+    fileWriteAllText(root / "d" / "c.txt", "plain");
+    initIndex(root.string());
+
+    for (const bool stopOnError : {false, true}) {
+        const auto result = addWithOptions(root, {root / "d"}, true, stopOnError);
+        EXPECT_TRUE(result["errors"].empty()) << result.dump();
+        const auto entries = pathsIn(result, "entries");
+        EXPECT_EQ(std::count(entries.begin(), entries.end(), "d/a\\b.txt"), 0) << result.dump();
+    }
+    auto db = ddb::open(root.string(), false);
+    EXPECT_TRUE(getEntry(db.get(), "d/c.txt").has_value());
+    EXPECT_FALSE(getEntry(db.get(), "d/a\\b.txt").has_value());
+}
+#endif
 
 } // namespace

@@ -29,6 +29,9 @@ namespace ddb
     struct AddOptions {
         bool stopOnError = true;      // default == today's addToIndex() semantics
         int maxConflictRetries = 2;   // bounded re-plan passes on TOCTOU conflict
+        // A listed folder is walked and its files indexed (true), or indexed as the folder
+        // alone (false). Files listed with known hashes are never walked (see addToIndexEx).
+        bool recursive = true;
     };
 
     // One item-scoped failure (a corrupt/unreadable file), as opposed to a database-scoped
