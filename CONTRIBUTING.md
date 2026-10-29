@@ -171,9 +171,15 @@ The operations of the helper open user files with `openUserRaster` and `openUser
 `enableUserFileOpens()`. `scripts/check-gdal-opens.py` (run by CI before the build; `--self-test`
 checks the check) enforces both rules on the sources:
 
-- `GDALOpen*`, `GDALIdentifyDriver*`, `OGROpen*` and the string `/vsicurl` may appear in `src/` and
-  `apps/` (`apps/gdal-util` aside) only in the files of `ALLOWED_FILES`. Use the functions above;
-  a file that really needs a raw open is added to `ALLOWED_FILES` with a one-line reason that says
+- Every call of GDAL or OGR that opens a file by its name (`GDALOpen`, `GDALOpenEx`,
+  `GDALOpenShared`, `GDALDataset::Open`, `GDALOpenInfo`, `GDALIdentifyDriver`, `GDALIdentifyDriverEx`,
+  `OGROpen`, `OGROpenShared`, `OGR_Dr_Open`, `OGRSFDriverRegistrar::Open` and `GDALBuildVRT`, which
+  opens the files it is given by name) and every string literal that names a network or archive
+  file system of GDAL (`/vsicurl`, `/vsis3`, `/vsigs`, `/vsiaz`, `/vsiadls`, `/vsioss`, `/vsiswift`,
+  `/vsihdfs`, `/vsiwebhdfs`, `/vsizip`, `/vsitar`, `/vsi7z`, `/vsirar` and their `_streaming` forms;
+  `/vsimem` and `/vsigzip` are not among them) may appear in `src/` and `apps/` (`apps/gdal-util`
+  aside) only in the files of `ALLOWED_FILES`. Comments are ignored. Use the functions above; a
+  file that really needs a raw open is added to `ALLOWED_FILES` with a one-line reason that says
   why none of them fits, and the review reads it. An entry that no longer matches anything fails
   the check, so remove it with the open.
 - `enableUserFileOpens()` is called only by `gdal-util` at its start and by the test support that

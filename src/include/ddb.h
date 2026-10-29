@@ -404,7 +404,12 @@ extern "C"
      * @param paths array of paths to add to index
      * @param numPaths number of paths
      * @param output pointer to C-string where to store output
-     * @param recursive whether to recursively add folders
+     * @param recursive whether to recursively add folders. Legacy: the index step walks every
+     *                  listed folder in both cases (false does not keep a folder from being
+     *                  walked; DDBAddWithOptions does).
+     *                  A path that cannot be indexed (a segment that is the reserved ".ddb", see
+     *                  DDBAddWithOptions, or a file name with a backslash) is skipped silently,
+     *                  not reported; a path that does not exist fails the call.
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char **output, bool recursive);
 
@@ -426,16 +431,23 @@ extern "C"
      * @param paths array of paths to add to index
      * @param numPaths number of paths
      * @param options add behaviour; when options->stopOnError is false, a corrupt/unreadable
-     *                file fails only itself instead of aborting the whole batch
+     *                file fails only itself instead of aborting the whole batch.
+     *                options->recursive false: a listed folder is indexed as a folder entry only,
+     *                its content is not walked; true: the folder is walked (a walk never enters
+     *                the ".ddb" folder, nor hidden and system files on Windows).
      * @param output pointer to C-string where to store output JSON:
      *               { "entries": [...], "unchanged": [...], "errors": [...] } — every input
      *               path appears in exactly one of the three arrays
      *               An input path that cannot be indexed is an error with code "INDEX":
      *               a name that contains a backslash or another path separator (the file must
-     *               be renamed), or a reserved name (".ddb", or a path inside it). With
-     *               stopOnError the first such path fails the call instead. Files found by
-     *               walking a folder input are not reported when their name cannot be
-     *               indexed: they are skipped.
+     *               be renamed), or a reserved name. A name is reserved when a segment of the
+     *               path equals ".ddb" ignoring ASCII case, after dropping trailing dots and
+     *               spaces from it and anything from a ':' on (so ".DDB", ".ddb." and
+     *               ".ddb::$INDEX_ALLOCATION" are the ".ddb" folder, which the file systems
+     *               of Windows and macOS open under those spellings); a path inside it is
+     *               reserved too. With stopOnError the first such path fails the call instead.
+     *               Files found by walking a folder input are not reported when their name
+     *               cannot be indexed: they are skipped silently.
      * @return DDBERR_NONE on success (even if options->stopOnError is false and some items
      *         failed — check the "errors" array), an error otherwise */
     DDB_DLL DDBErr DDBAddWithOptions(const char *ddbPath, const char **paths, int numPaths,
