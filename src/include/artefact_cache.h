@@ -34,7 +34,8 @@ namespace ddb
         // cannot open the raster (Unreadable, Policy); RasterNotReadException when the raster has
         // more pixels than a copy can have (Limit; the message tells to build the dataset first)
         // or the helper fails; the other exceptions of IRasterHelper::normalize; GDALException
-        // when the helper wrote a file that is not a GeoTIFF
+        // when the helper wrote a file that is not a GeoTIFF; std::logic_error in the raster
+        // helper (gdalopen::userFileOpensEnabled), which never asks for a copy
         fs::path artefactFor(const fs::path &path);
 
         // Opens the raster at `path` (UTF-8) for reading through artefactFor(): what the analyses
@@ -42,6 +43,9 @@ namespace ddb
         // there is no such file (no artefact, for an artefact) or the raster cannot be opened; the
         // other failures are thrown
         // (artefactFor).
+        // In the raster helper, whose operations reach the same code (a thumbnail detects the
+        // sensor of its raster), the file itself is opened with openUserRaster: the helper reads
+        // the file of its request, never a copy that another helper would write into the cache.
         GDALDatasetUniquePtr openInputRaster(const std::string &path);
     } // namespace raster
 } // namespace ddb

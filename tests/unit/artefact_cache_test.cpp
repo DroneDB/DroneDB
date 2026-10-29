@@ -555,6 +555,42 @@ namespace
         EXPECT_FALSE(fs::exists(area_->getPath("wide-copy.tif")));
     }
 
+    // The files under the cache of the test, folders left out
+    std::vector<fs::path> filesUnder(const fs::path &folder)
+    {
+        std::vector<fs::path> files;
+        std::error_code ec;
+        for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator();
+             it.increment(ec))
+            if (it->is_regular_file())
+                files.push_back(it->path());
+        return files;
+    }
+
+    // The operations of the raster helper reach the code of the analyses that reads a raster by its
+    // path (the thumbnail of a raster detects its sensor): in the helper, that code reads the file of
+    // the request and asks no other helper for a copy in the cache, which a worker of the helper can
+    // neither start nor write to
+    USER_OPEN_TEST_F(ArtefactCache, theRasterHelperReadsTheFileOfItsRequestAndAsksForNoCopy)
+    {
+        const fs::path source = makeRaster("raw.tif", 4);
+
+        const auto opened = raster::openInputRaster(io::toUtf8(source));
+        ASSERT_TRUE(opened);
+        EXPECT_EQ(fs::path(opened->GetDescription()), source);
+        EXPECT_EQ(opened->GetRasterCount(), 4);
+        EXPECT_FALSE(raster::openInputRaster(io::toUtf8(area_->getPath("missing.tif"))));
+        EXPECT_THROW(raster::artefactFor(source), std::logic_error);
+
+        // The thumbnail of a raster whose sensor it detects
+        const fs::path out = area_->getPath("thumb.webp");
+        raster::thumbnail(source, out, raster::ThumbnailParams{32, ThumbVisParams()});
+        EXPECT_GT(fs::file_size(out), 0u);
+
+        EXPECT_EQ(helper_.requests, 0);
+        EXPECT_TRUE(filesUnder(cache_).empty()) << filesUnder(cache_).front();
+    }
+
     TEST_F(ArtefactCache, aFileThatIsNoRasterOpensAsNothing)
     {
         const fs::path text = area_->getPath("notes.tif");

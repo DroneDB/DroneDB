@@ -482,6 +482,42 @@ namespace
         EXPECT_NE(readFile(out), readFile(plain));
     }
 
+    // A thumbnail with visualisation parameters detects the sensor of the raster, a reading of the
+    // raster by its path that the host does through a copy in its cache. The program reads the file
+    // of its request itself: it starts no other program (the one it would start does not exist here)
+    // and writes nothing in the cache of the user, outside the folder of the request. The sandbox is
+    // off, so a write it would block is seen as written.
+    TEST_F(GdalUtilToolTest, aThumbnailThatDetectsTheSensorStartsNoOtherHelperAndWritesNoCopy)
+    {
+        const fs::path home = area_->getFolder() / "home";
+        fs::create_directories(home);
+        process::SessionOptions options;
+        options.envOverrides = {{"DDB_HOME", io::toUtf8(home)},
+                                {"DDB_GDAL_SANDBOX", "off"},
+                                {kToolEnv, io::toUtf8(area_->getFolder() / "no-such-gdal-util")}};
+        Server server(options);
+
+        testutils::GeoRasterSpec spec;
+        spec.width = 120;
+        spec.height = 80;
+        spec.bands = 4;
+        spec.type = GDT_UInt16;
+        spec.value = [](int band, int x, int y) { return static_cast<double>(1000 * band + x + y); };
+        const fs::path multispectral = testutils::createGeoRaster(area_->getFolder() / "multispectral.tif", spec);
+
+        int64_t id = 31;
+        for (const fs::path &raster : {geotiff_, multispectral})
+        {
+            const fs::path out = area_->getFolder() / (raster.stem().string() + "-vis.webp");
+            const auto response = server.ask(thumbnailRequest(id++, raster, out, raster::ThumbnailParams{32, ThumbVisParams()}));
+            ASSERT_TRUE(response.ok) << io::toUtf8(raster) << ": " << response.message;
+            EXPECT_GT(fs::file_size(out), 0u);
+        }
+
+        for (const auto &entry : fs::recursive_directory_iterator(home))
+            EXPECT_FALSE(entry.is_regular_file()) << "the helper wrote " << entry.path();
+    }
+
     TEST_F(GdalUtilToolTest, aThumbnailOfAFileThatIsNoRasterIsUnreadableAndWritesNothing)
     {
         const fs::path out = area_->getFolder() / "none.webp";

@@ -4,9 +4,11 @@
 #include "artefact_cache.h"
 
 #include <chrono>
+#include <stdexcept>
 #include <system_error>
 
 #include "exceptions.h"
+#include "gdal_open_policy.h"
 #include "logger.h"
 #include "mio.h"
 #include "raster_artefacts.h"
@@ -44,6 +46,12 @@ namespace ddb
 
         fs::path artefactFor(const fs::path &path)
         {
+            // A copy is made by a request to the raster helper and kept in the cache of the user:
+            // the helper itself must not ask another helper, and its workers can neither start a
+            // program nor write outside the folder of their request
+            if (gdalopen::userFileOpensEnabled())
+                throw std::logic_error("artefactFor runs in the host: the raster helper reads the file of its "
+                                       "request itself (openInputRaster)");
             if (isLibddbArtefact(path))
                 return path;
 
@@ -63,6 +71,12 @@ namespace ddb
 
         GDALDatasetUniquePtr openInputRaster(const std::string &path)
         {
+            // The raster helper is the process that reads files of users: the code of its
+            // operations that reads a raster by its path (the sensor a thumbnail detects, the
+            // filter of its formula) opens the file of the request, with the open policy
+            if (gdalopen::userFileOpensEnabled())
+                return openUserRaster(path);
+
             const fs::path file = io::fromUtf8(path);
             // A raster that is not there has no copy to make. An artefact is opened as it is, and
             // GDAL says in the log why it cannot (the COG of a build that is gone)
