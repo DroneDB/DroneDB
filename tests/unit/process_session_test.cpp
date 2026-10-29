@@ -93,6 +93,21 @@ class DefaultSigpipe {
 };
 #endif
 
+// The address space limit cannot be tested under a sanitizer: the instrumented child reserves
+// terabytes of shadow memory at start, so it dies from any limit, whatever it allocates.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define SKIP_UNDER_SANITIZER() GTEST_SKIP() << "an address space limit does not fit a sanitizer build"
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define SKIP_UNDER_SANITIZER() GTEST_SKIP() << "an address space limit does not fit a sanitizer build"
+#endif
+#endif
+#ifndef SKIP_UNDER_SANITIZER
+#define SKIP_UNDER_SANITIZER() \
+    do {                       \
+    } while (0)
+#endif
+
 }  // namespace
 
 TEST(processSession, lineRoundTripAndPipelinedRequests) {
@@ -222,6 +237,30 @@ TEST(processSession, exitCodeAndStderrDiagnosticAreKept) {
     EXPECT_EQ(session.exitStatus().exitCode, 3);
     EXPECT_EQ(session.describeExit(), "exited with code 3");
     EXPECT_EQ(session.stderrTail(), "boom\n");
+}
+
+TEST(processSession, memoryLimitFailsAChildThatNeedsMore) {
+    SKIP_UNDER_SANITIZER();
+    const auto exitOfAllocation = [](const char* mib, std::uint64_t limit) {
+        process::SessionOptions options;
+        options.maxMemoryBytes = limit;
+        Session session;
+        startChild(session, {"allocate", mib}, options);
+        EXPECT_TRUE(session.wait(patiently()));
+        return std::make_pair(session.exitStatus(), session.stderrTail());
+    };
+    constexpr std::uint64_t kLimit = 256ull * 1024 * 1024;
+
+    const auto unlimited = exitOfAllocation("1024", 0);
+    EXPECT_TRUE(unlimited.first.exited);
+    EXPECT_EQ(unlimited.first.exitCode, 0) << unlimited.second;
+
+    const auto within = exitOfAllocation("64", kLimit);
+    EXPECT_EQ(within.first.exitCode, 0) << within.second;
+
+    const auto beyond = exitOfAllocation("1024", kLimit);
+    EXPECT_NE(beyond.first.exitCode, 0);
+    EXPECT_NE(beyond.second.find("out of memory"), std::string::npos) << beyond.second;
 }
 
 TEST(processSession, writeToAnExitedChildFailsAndTheHostSurvives) {

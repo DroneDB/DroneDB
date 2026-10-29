@@ -148,6 +148,16 @@ add_subdirectory(src)
 # Add applications (main executable)
 add_subdirectory(apps)
 
+# Every helper named in scripts/helper-tools.txt must be a target by now: vendor/ and apps/ are
+# the places that define them, and the list is read earlier (vendor/CMakeLists.txt) because src/,
+# apps/ and tests/ make their targets depend on the helpers.
+foreach(_helper IN LISTS DDB_HELPER_TOOLS)
+    if(NOT TARGET ${_helper})
+        message(FATAL_ERROR "scripts/helper-tools.txt names '${_helper}', which is not a CMake target "
+                            "(no vendor/ or apps/ subdirectory defines it)")
+    endif()
+endforeach()
+
 # Add tests
 if(BUILD_TESTING)
     enable_testing()

@@ -198,6 +198,8 @@ namespace ddb
                 // are supervised by that thread). Long-lived children must not use it: hosts
                 // spawn from pool threads that come and go.
                 bool dieWithThread;
+                // RLIMIT_AS of the child in bytes; 0: unchanged
+                std::uint64_t maxMemoryBytes;
             };
 
             // fork() + execve() of the request, then the exec status: the pid, or -1 with `error`
@@ -221,6 +223,8 @@ namespace ddb
                 HANDLE stdOut;
                 HANDLE stdErr;
                 std::vector<HANDLE> inherit;
+                // Per-process memory limit of the child's job in bytes; 0: none
+                std::uint64_t maxMemoryBytes;
             };
 
             // A started child: the process and the kill-on-close job it runs in.

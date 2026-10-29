@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdint>
+#include <limits>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -106,6 +108,7 @@ namespace ddb
                 long maxFd = 1024;  // upper bound for the close() fallback loop
                 pid_t parentPid = 0;
                 bool dieWithThread = false; // PR_SET_PDEATHSIG (Linux)
+                std::uint64_t maxMemoryBytes = 0; // RLIMIT_AS of the child; 0: unchanged
             };
 
             // Runs in the forked child: only async-signal-safe calls from here on.
@@ -177,6 +180,19 @@ namespace ddb
                 {
                     for (long fd = firstToClose; fd < p.maxFd; ++fd)
                         ::close(static_cast<int>(fd));
+                }
+
+                // Last step before the new program: its address space is what the limit bounds.
+                // The limit cannot exceed the hard limit this process was given.
+                if (p.maxMemoryBytes > 0)
+                {
+                    struct rlimit rl;
+                    if (::getrlimit(RLIMIT_AS, &rl) != 0) fail(errno);
+                    const bool tighter = rl.rlim_max == RLIM_INFINITY ||
+                                         static_cast<std::uint64_t>(rl.rlim_max) > p.maxMemoryBytes;
+                    if (tighter) rl.rlim_max = static_cast<rlim_t>(p.maxMemoryBytes);
+                    rl.rlim_cur = rl.rlim_max;
+                    if (::setrlimit(RLIMIT_AS, &rl) != 0) fail(errno);
                 }
 
                 ::execve(p.path, p.argv, p.envp);
@@ -259,15 +275,22 @@ namespace ddb
                 return block;
             }
 
-            // Kill-on-close job: the child (and its descendants) die with us. Empty when the job
-            // cannot be made.
-            UniqueHandle makeKillOnCloseJob()
+            // Kill-on-close job: the child (and its descendants) die with us. A non-zero
+            // maxMemoryBytes also caps the memory each process of the job may commit. Empty when
+            // the job cannot be made.
+            UniqueHandle makeChildJob(std::uint64_t maxMemoryBytes)
             {
                 UniqueHandle job(CreateJobObjectW(nullptr, nullptr));
                 if (job)
                 {
                     JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
                     jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                    if (maxMemoryBytes > 0)
+                    {
+                        jeli.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+                        jeli.ProcessMemoryLimit = static_cast<SIZE_T>(
+                            std::min<std::uint64_t>(maxMemoryBytes, (std::numeric_limits<SIZE_T>::max)()));
+                    }
                     if (!SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &jeli,
                                                  sizeof(jeli)))
                         job.reset();
@@ -402,6 +425,7 @@ namespace ddb
                 plan.maxFd = computeMaxFd();
                 plan.parentPid = ::getpid();
                 plan.dieWithThread = req.dieWithThread;
+                plan.maxMemoryBytes = req.maxMemoryBytes;
 
                 const pid_t pid = ::fork();
                 if (pid < 0)
@@ -497,7 +521,7 @@ namespace ddb
                     flags |= CREATE_UNICODE_ENVIRONMENT;
                 }
 
-                child.job = makeKillOnCloseJob();
+                child.job = makeChildJob(req.maxMemoryBytes);
 
                 PROCESS_INFORMATION pi{};
                 const BOOL ok = CreateProcessW(wideBin.c_str(), wideCmd.data(), nullptr, nullptr, TRUE, flags,
@@ -515,8 +539,20 @@ namespace ddb
                 UniqueHandle childThread(pi.hThread);
                 child.inJob = child.job && AssignProcessToJobObject(child.job.get(), child.process.get());
                 if (!child.inJob)
-                    LOGD << "Could not assign child process to a job object (error " << GetLastError()
+                {
+                    const DWORD assignErr = GetLastError();
+                    // Without the job the memory limit would silently not apply: do not run the
+                    // child unbounded when the caller asked for a bound.
+                    if (req.maxMemoryBytes > 0)
+                    {
+                        TerminateProcess(child.process.get(), 1);
+                        error = "could not apply the memory limit to the child process (job object, error " +
+                                std::to_string(assignErr) + ")";
+                        return false;
+                    }
+                    LOGD << "Could not assign child process to a job object (error " << assignErr
                          << "); orphan protection is unavailable";
+                }
                 ResumeThread(childThread.get());
                 return true;
             }

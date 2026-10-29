@@ -109,6 +109,14 @@ namespace ddb
             // passed to onExtraData. Activity on it resets the idle timer.
             bool extraChannel = false;
             std::function<void(const char *, size_t)> onExtraData;
+
+            // Upper bound on the address space of the child (POSIX: RLIMIT_AS; Windows: the
+            // per-process memory limit of the job the child runs in), in bytes. A child that
+            // needs more fails its allocations and ends by itself, which the Result reports
+            // like any other failed exit. Zero: no limit (the default). Not a fit for children
+            // that reserve address space far above what they use (sanitizer builds, some
+            // language runtimes).
+            std::uint64_t maxMemoryBytes = 0;
         };
 
         struct Result
@@ -194,6 +202,9 @@ namespace ddb
             // thread that is using the session, inside write(), readLine() or wait(); an
             // exception it throws is swallowed.
             std::function<void(const std::string &)> onStderrLine;
+
+            // Upper bound on the address space of the child, as Options::maxMemoryBytes.
+            std::uint64_t maxMemoryBytes = 0;
         };
 
         class SessionImpl;

@@ -106,6 +106,23 @@ int floodStderr(int ms) {
     return 0;
 }
 
+// Takes `mib` MiB from the heap and writes to every page of it, so the memory is really used
+// and not only reserved. Exit 0 when it got them; when the allocation is refused (a memory limit
+// of the process) it says so and exits 3.
+int allocateMemory(size_t mib) {
+    const size_t bytes = mib * 1024 * 1024;
+    volatile char* block = static_cast<volatile char*>(std::malloc(bytes));
+    if (block == nullptr) {
+        std::fprintf(stderr, "out of memory: %zu MiB refused\n", mib);
+        return 3;
+    }
+    for (size_t offset = 0; offset < bytes; offset += 4096) block[offset] = 1;
+    std::printf("allocated %zu MiB\n", mib);
+    std::fflush(stdout);
+    std::free(const_cast<char*>(block));
+    return 0;
+}
+
 int descendantWorker(const std::string& activity, const std::string& extraId) {
     const std::string chunk(64 * 1024, 'x');
     for (;;) {
@@ -208,6 +225,7 @@ int main(int argc, char** argv) {
         delay(std::stoi(argv[4]));
         return std::stoi(argv[5]);
     }
+    if (mode == "allocate") return argc < 3 ? 2 : allocateMemory(std::stoul(argv[2]));
     if (mode == "echo") return serveLines(0);
     if (mode == "flood-echo") return argc < 3 ? 2 : serveLines(std::stoul(argv[2]));
     if (mode == "flood-stderr") return argc < 3 ? 2 : floodStderr(std::stoi(argv[2]));

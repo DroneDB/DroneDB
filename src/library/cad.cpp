@@ -13,13 +13,13 @@
 #include <regex>
 #include <sstream>
 
-#include "env.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "mio.h"
 #include "process_runner.h"
 #include "tool_locator.h"
+#include "tool_run_support.h"
 
 namespace ddb
 {
@@ -29,24 +29,10 @@ namespace ddb
         {
             constexpr const char *kConverterEnv = "DDB_DWG2DXF_PATH";
             constexpr const char *kMaxSecondsEnv = "DDB_DWG2DXF_MAX_SECONDS";
-            constexpr long long kDefaultMaxSeconds = 120;
+            constexpr auto kDefaultMaxRuntime = std::chrono::seconds(120);
             constexpr auto kIdleTimeout = std::chrono::seconds(60);
             const std::string kDxfAdvice =
                 ". Export the drawing as DXF from your CAD software and upload that.";
-
-            std::chrono::milliseconds maxRuntime()
-            {
-                const auto seconds = env::readIntegerOrWarn(kMaxSecondsEnv, 1, env::kDefaultMaxInteger);
-                return std::chrono::seconds(seconds ? static_cast<long long>(*seconds) : kDefaultMaxSeconds);
-            }
-
-            // One display line out of a tool's output tail.
-            std::string singleLine(std::string s)
-            {
-                for (auto &c : s)
-                    if (c == '\n' || c == '\r' || c == '\t') c = ' ';
-                return s;
-            }
 
             // DXF caret escapes in string values (^J newline, ^M CR, ^I tab, "^ " = ^).
             std::string decodeCaret(const std::string &v)
@@ -152,14 +138,14 @@ namespace ddb
 
             process::Options opts;
             opts.idleTimeout = kIdleTimeout;
-            opts.maxRuntime = maxRuntime();
+            opts.maxRuntime = tools::toolMaxRuntime(kMaxSecondsEnv, kDefaultMaxRuntime);
 
             LOGD << "Converting " << io::toUtf8(dwg) << " (" << version << ") to DXF with " << io::toUtf8(bin);
             const auto r = runner->run(bin, {"-y", "-o", io::toUtf8(outDxf), io::toUtf8(dwg)}, opts);
             if (!r.success())
             {
                 io::assureIsRemoved(outDxf);
-                throw AppException("DWG conversion failed (" + version + "): " + singleLine(r.failureText(300)) +
+                throw AppException("DWG conversion failed (" + version + "): " + tools::oneLine(r.failureText(300)) +
                                    kDxfAdvice);
             }
 

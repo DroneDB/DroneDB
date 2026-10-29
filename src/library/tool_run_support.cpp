@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <system_error>
 
+#include "env.h"
 #include "mio.h"
 
 namespace ddb
@@ -35,6 +36,20 @@ namespace ddb
                 failure.error += ": " + outcome.process.tail(run.tailLength);
             outcome.result = failure;
             return outcome;
+        }
+
+        std::chrono::milliseconds toolMaxRuntime(const char *envName, std::chrono::seconds defaultValue)
+        {
+            const auto seconds = env::readIntegerOrWarn(envName, 1, env::kDefaultMaxInteger);
+            return std::chrono::seconds(seconds ? static_cast<long long>(*seconds) : defaultValue.count());
+        }
+
+        std::string oneLine(std::string_view text)
+        {
+            std::string line(text);
+            for (auto &c : line)
+                if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+            return line;
         }
 
     } // namespace tools

@@ -3,8 +3,9 @@
 add_subdirectory("url")
 add_subdirectory("base64")
 # The helper programs libddb starts as child processes: scripts/helper-tools.txt is the only list
-# of them (the packaging scripts and the package check read it too). The names are checked below,
-# once their subdirectories have defined the targets.
+# of them (the packaging scripts and the package check read it too). The list is read here because
+# src/, apps/ and tests/ depend on the helpers; that every name is a target (defined in vendor/ or
+# apps/) is checked by the top-level CMakeLists.txt, once apps/ has been added.
 set(DDB_HELPER_TOOLS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/helper-tools.txt")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DDB_HELPER_TOOLS_FILE}")
 file(STRINGS "${DDB_HELPER_TOOLS_FILE}" _helper_lines)
@@ -28,12 +29,6 @@ add_subdirectory("bm3d")
 # a pipe (exif_helper_pool.h) and links none of its code. It takes APP_VERSION from here.
 add_subdirectory("metadata-util")
 
-foreach(_helper IN LISTS DDB_HELPER_TOOLS)
-    if(NOT TARGET ${_helper})
-        message(FATAL_ERROR "scripts/helper-tools.txt names '${_helper}', which is not a CMake target "
-                            "(no vendor/ subdirectory defines it)")
-    endif()
-endforeach()
 # metadata-util reads and writes the images of a dataset, wherever it lies (cmake/LongPathAware.cmake).
 # bm3d (a release of its own repository, 1.1.1 and later) declares itself long path aware in its
 # own CMakeLists.txt, so it is not given a second manifest here.

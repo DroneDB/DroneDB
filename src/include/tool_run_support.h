@@ -4,7 +4,9 @@
 #ifndef TOOL_RUN_SUPPORT_H
 #define TOOL_RUN_SUPPORT_H
 
+#include <chrono>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "fs.h"
@@ -42,6 +44,15 @@ namespace ddb
         // Both carry the tail of the tool's output, because that is where the tool says why.
         // Moving the file, classifying exit codes and retrying stay with the caller.
         ToolRunOutcome runToolProducingFile(const ToolRun &run, const process::IProcessRunner &runner);
+
+        // How long a run of a tool may take in total: the whole seconds in the environment
+        // variable envName (1 and up), or defaultValue when it is unset or invalid (the warning
+        // is logged). The value for process::Options::maxRuntime.
+        std::chrono::milliseconds toolMaxRuntime(const char *envName, std::chrono::seconds defaultValue);
+
+        // A tool's output tail as one display line: newlines, carriage returns and tabs become
+        // spaces.
+        std::string oneLine(std::string_view text);
 
     } // namespace tools
 } // namespace ddb

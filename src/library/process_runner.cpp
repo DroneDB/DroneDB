@@ -213,7 +213,8 @@ namespace ddb
                                                outPipe_[1].get(),
                                                outPipe_[1].get(),
                                                extraPipe_[1].get(),
-                                               true};
+                                               true,
+                                               opts_.maxMemoryBytes};
                     std::string error;
                     pid_ = spawnChild(request, error);
                     outPipe_[1].reset();
@@ -515,7 +516,8 @@ namespace ddb
 
                     std::string error;
                     const bool ok = spawnChild({binary_, commandLine, opts_.envOverrides, nul_.get(),
-                                                outWrite_.get(), outWrite_.get(), std::move(inherit)},
+                                                outWrite_.get(), outWrite_.get(), std::move(inherit),
+                                                opts_.maxMemoryBytes},
                                                child_, error);
 
                     // The parent never uses the child's ends.

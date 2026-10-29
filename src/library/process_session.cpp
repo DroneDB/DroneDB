@@ -308,7 +308,8 @@ namespace ddb
                                                outPipe[1].get(),
                                                errPipe[1].get(),
                                                -1,
-                                               false};
+                                               false,
+                                               options.maxMemoryBytes};
                     pid_ = spawnChild(request, error);
                     if (pid_ < 0) return false;
 
@@ -636,7 +637,8 @@ namespace ddb
                     const std::string commandLine = quotedCommandLine(binary, args);
                     // The child's ends close when this returns: the parent never uses them
                     return spawnChild({binary, commandLine, options.envOverrides, childIn.get(), childOut.get(),
-                                       childErr.get(), {childIn.get(), childOut.get(), childErr.get()}},
+                                       childErr.get(), {childIn.get(), childOut.get(), childErr.get()},
+                                       options.maxMemoryBytes},
                                       child_, error);
                 }
 
