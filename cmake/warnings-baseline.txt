@@ -30,7 +30,6 @@ src/library/exifeditor.cpp -Wshadow 1
 src/library/gdaltiler.cpp -Wshadow 4
 src/library/metamanager.cpp -Wshadow 1
 src/library/mio.cpp -Wshadow 1
-src/library/mzip.cpp -Wconversion 1
 src/library/mzip.cpp -Wdeprecated-declarations 1
 src/library/nxconv.cpp -Wdangling-else 1
 src/library/pctiler.cpp -Wfloat-conversion 1

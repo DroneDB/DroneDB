@@ -26,7 +26,7 @@ namespace {
 void parseGeoRasterMetadata(const fs::path &path, Entry &entry, FingerprintContext &ctx)
 {
     LOGV << "Processing GeoRaster file: " << io::toUtf8(path);
-    const raster::ProbeOutcome &outcome = raster::probeFile(ctx, path, raster::ProbeParams());
+    const raster::ProbeOutcome &outcome = raster::probeFile(ctx, path);
     if (outcome.result)
         raster::applyProbe(*outcome.result, entry);
     else if (outcome.notRead)

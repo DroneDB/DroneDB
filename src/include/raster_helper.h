@@ -249,6 +249,9 @@ namespace ddb
         // @throws RasterOpException (code Internal), HelperUnavailableException, FSException,
         // CanceledException
         const ProbeOutcome &probeFile(FingerprintContext &ctx, const fs::path &path, const ProbeParams &params);
+        // The raster probe with the default parameters (ProbeParams()), which the detection and the
+        // metadata step of an image or a GeoRaster ask for
+        const ProbeOutcome &probeFile(FingerprintContext &ctx, const fs::path &path);
 
         // The thumbnail of a photo or a raster as WebP bytes, made by the helper and checked: the
         // helper writes into a folder that only this request writes to (made here, mode 0700), and

@@ -58,7 +58,7 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
     {
         // One request for the file: the metadata step of a GeoRaster asks again and gets this
         // answer. A file GDAL cannot open, or the helper could not read, is not a GeoRaster.
-        const raster::ProbeOutcome &outcome = raster::probeFile(ctx, path, raster::ProbeParams());
+        const raster::ProbeOutcome &outcome = raster::probeFile(ctx, path);
         georaster = outcome.result && outcome.result->type == "GeoRaster";
     }
 

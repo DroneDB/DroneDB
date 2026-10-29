@@ -499,6 +499,12 @@ namespace ddb
             return *ctx.probe;
         }
 
+        const ProbeOutcome &probeFile(FingerprintContext &ctx, const fs::path &path)
+        {
+            const ProbeParams raster;
+            return probeFile(ctx, path, raster);
+        }
+
         // ---- thumbnails
 
         bool looksLikeThumbnail(const std::string &bytes)
