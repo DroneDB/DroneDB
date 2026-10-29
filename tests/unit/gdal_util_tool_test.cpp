@@ -230,6 +230,15 @@ namespace
             area_ = std::make_unique<TestArea>(std::string("GdalUtil.") +
                                                    ::testing::UnitTest::GetInstance()->current_test_info()->name(),
                                                true);
+#ifdef _WIN32
+            // The server confines itself at low integrity, and such a process writes only below
+            // a folder with a low integrity label: the host gives one to the folder of each of its
+            // requests (raster::makePrivateFolder), the tests to the folder they write their
+            // outputs in
+            std::string labelError;
+            ASSERT_TRUE(sandbox::windows::setLowIntegrityLabel(io::toUtf8(area_->getFolder()), &labelError))
+                << labelError;
+#endif
             testutils::GeoRasterSpec spec;
             spec.width = 200;
             spec.height = 120;
@@ -1230,13 +1239,13 @@ namespace
         EXPECT_FALSE(fs::exists(area_->getFolder() / "never"));
     }
 
-    // The files of a folder with their sizes, relative to it
+    // The files of a folder with their sizes, relative to it, with '/' separators
     std::map<std::string, std::uintmax_t> filesOf(const fs::path &folder)
     {
         std::map<std::string, std::uintmax_t> files;
         for (const auto &entry : fs::recursive_directory_iterator(folder))
             if (entry.is_regular_file())
-                files[io::toUtf8(entry.path().lexically_relative(folder))] = entry.file_size();
+                files[io::toGenericUtf8(entry.path().lexically_relative(folder))] = entry.file_size();
         return files;
     }
 
