@@ -280,10 +280,26 @@ jobs:
         run: |
           echo "Checking vendor/spark/rust/spark-lib/src/rad.rs against the reviewed pin..."
           sha256sum -c tests/data/spark-rad-format.sha256 || { echo "::error::rad.rs changed since the last verified pin: review encoding handling in src/library/rad.cpp, then refresh with: (cd $GITHUB_WORKSPACE && sha256sum vendor/spark/rust/spark-lib/src/rad.rs > tests/data/spark-rad-format.sha256)"; exit 1; }
+      - name: Report the confinement of gdal-util
+        # The tests below run gdal-util in strict mode, where a worker that a sandbox layer cannot
+        # confine is refused: every layer must be active on the runner, and this names the one
+        # that is not before the tests fail on it
+        env:
+          DDB_GDAL_SANDBOX: strict
+        run: |
+          cd build
+          report="$(./gdal-util --sandbox-report)"
+          echo "$report"
+          if grep -q ': missing' <<< "$report"; then
+            echo "::error::gdal-util lacks a sandbox layer on this runner (see the report above)"
+            exit 1
+          fi
       - name: Run unit tests
         # ddb_unit_tests: offline, self-contained tests (tests/unit/), one process per test in random
         # order, in parallel (initIndex publishes the empty-index template of a fresh profile
         # atomically: InitIndexTemplate.concurrentProcessesOnFreshProfile)
+        env:
+          DDB_GDAL_SANDBOX: strict
         run: cd build && ctest -L unit -j$(nproc) --output-on-failure --schedule-random
       - name: Check that every header compiles on its own
         # One translation unit per header; the installed ones also as C11 (ctest -L headers)
@@ -293,11 +309,16 @@ jobs:
           # Real-converter tests skip when the binary is absent (non-tag builds).
           DDB_DWG2DXF_PATH: ${{ github.workspace }}/build/dwg2dxf
           DDB_TEST_CACHE_DIR: ${{ runner.temp }}/ddb-test-cache
+          DDB_GDAL_SANDBOX: strict
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run CLI Exit Code Tests
+        env:
+          DDB_GDAL_SANDBOX: strict
         run: cd build && ctest -R '^cli\.' --output-on-failure
       - name: Run the shared library smoke test
         # The tests and the CLI contain the library objects; this runs libddb.so as a host loads it
+        env:
+          DDB_GDAL_SANDBOX: strict
         run: cd build && ctest -L shared --output-on-failure
       - name: Run Program Smoke Test
         run: cd build && ./ddbcmd --version --debug
