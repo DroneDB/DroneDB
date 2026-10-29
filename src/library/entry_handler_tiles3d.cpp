@@ -4,6 +4,7 @@
 
 // Tiles3D entries: OGC 3D Tiles archives (.3tz), extracted into a tileset folder.
 
+#include "build_internal.h"
 #include "build_layout.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
@@ -81,11 +82,17 @@ class Tiles3DEntryHandler : public EntryHandler {
         return fileExistsAndNonEmpty(baseOutputPath / Tiles3DBuildSubfolder / TilesetFileName);
     }
 
-    // Extraction is hardened against Zip-Slip / absolute paths in mzip::_extractAll. The
-    // archive is only valid when tileset.json is present at its root; the temp folder is
+    // Extraction is hardened in zip::extractAll: Zip-Slip / absolute paths, names Windows cannot
+    // create, and the default expansion limits (a .3tz is stored tiles, close to 1:1), and an
+    // archive whose declared size does not fit the free disk is refused before it is written.
+    // The archive is only valid when tileset.json is present at its root; the temp folder is
     // then renamed onto build/{hash}/3dtiles/ by the dispatcher.
     void build(const BuildContext& ctx) const override {
-        zip::extractAll(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder));
+        zip::ExtractOptions options;
+        options.beforeWrite = [&ctx](uint64_t declaredTotal) {
+            ensureSufficientDiskSpace(ctx.tempFolder, declaredTotal);
+        };
+        zip::extractAll(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder), options);
         if (!fileExistsAndNonEmpty(ctx.tempFolder / TilesetFileName))
             throw AppException("Invalid .3tz archive: tileset.json not found at root");
     }

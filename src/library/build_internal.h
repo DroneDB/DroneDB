@@ -175,9 +175,10 @@ void setMissingDependencyHookForTesting(std::function<void()> hook);
 
 // Throws RetryableBuildException(LowDiskSpace) when the filesystem of dir has less free space
 // than the free-disk floor (ProcessConfig::minFreeDiskMb: DDBConfigure "minFreeDiskMb", else
-// DDB_MIN_FREE_DISK_MB, else 512 MiB; 0 disables the check) before a build or a copy of build
-// artifacts writes to it.
-void ensureSufficientDiskSpace(const fs::path& dir);
+// DDB_MIN_FREE_DISK_MB, else 512 MiB; 0 disables the check) plus bytesToWrite, the size of what
+// the caller is about to write there when it knows it (an archive to extract), before a build or
+// a copy of build artifacts writes to it.
+void ensureSufficientDiskSpace(const fs::path& dir, std::uintmax_t bytesToWrite = 0);
 
 // ---- Pending markers (pending_markers.cpp) --------------------------------
 

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <fstream>
 
+#include "build_internal.h"
 #include "exceptions.h"
 #include "http_client.h"
 #include "mio.h"
@@ -140,7 +141,21 @@ void RegistryClient::downloadFiles(const std::string &organization, const std::s
         expectOk(withErrorBodyOf(res, tempFile));
 
         try {
-            zip::extractAll(io::toUtf8(tempFile), folder);
+            // The archive of a pull is what the user asked the Registry for, files of any kind (a
+            // raster that is mostly nodata deflates far beyond what a tile archive does), so
+            // the expansion ratio is not limited; the declared total has to fit the free disk and
+            // the other limits of an extraction (names, entry count, lying sizes) stay on. The
+            // files are the user's own, so a name the local file system takes ("scan 12:00.jpg"
+            // on Linux) is pulled as it is; only Windows refuses the names it cannot create.
+            zip::ExtractOptions options;
+            options.maxExpansionRatio = 0;
+#ifndef _WIN32
+            options.refuseWindowsUnsafeNames = false;
+#endif
+            options.beforeWrite = [&folder](uint64_t declaredTotal) {
+                ensureSufficientDiskSpace(io::fromUtf8(folder), declaredTotal);
+            };
+            zip::extractAll(io::toUtf8(tempFile), folder, options);
             io::assureIsRemoved(tempFile);
         } catch (const std::runtime_error &e) {
             io::assureIsRemoved(tempFile);

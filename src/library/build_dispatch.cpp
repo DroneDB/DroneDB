@@ -8,6 +8,7 @@
 #include "build.h"
 #include "randomutil.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <optional>
@@ -30,8 +31,9 @@ namespace ddb {
 
 // Free disk space required on the build scratch filesystem before a build is started: the
 // free-disk floor of the process configuration (DDBConfigure "minFreeDiskMb", else
-// DDB_MIN_FREE_DISK_MB, else 512 MiB); 0 turns the check off.
-void ensureSufficientDiskSpace(const fs::path& dir) {
+// DDB_MIN_FREE_DISK_MB, else 512 MiB) plus the bytes the caller is about to write there
+// (bytesToWrite, 0 when it does not know them); a floor of 0 turns the check off.
+void ensureSufficientDiskSpace(const fs::path& dir, std::uintmax_t bytesToWrite) {
     const uint64_t minMb = ProcessConfig::get().minFreeDiskMb();
     if (minMb == 0)
         return;  // explicitly disabled
@@ -41,13 +43,22 @@ void ensureSufficientDiskSpace(const fs::path& dir) {
     if (ec)
         return;  // cannot determine free space; do not block the build
 
-    const std::uintmax_t minBytes =
+    const std::uintmax_t floorBytes =
         static_cast<std::uintmax_t>(minMb) * 1024ULL * 1024ULL;
+    // Saturating: the bytes to write come from the header of an archive
+    const std::uintmax_t minBytes = bytesToWrite > UINTMAX_MAX - floorBytes
+                                        ? UINTMAX_MAX
+                                        : floorBytes + bytesToWrite;
     if (si.available < minBytes) {
+        constexpr std::uintmax_t MiB = 1024ULL * 1024ULL;
+        const std::string detail =
+            bytesToWrite == 0 ? std::string()
+                              : " (" + std::to_string(bytesToWrite / MiB) + " MB to write plus " +
+                                    std::to_string(minMb) + " MB of floor)";
         throw RetryableBuildException(
-            "Insufficient free disk space to build: " +
-            std::to_string(si.available / (1024ULL * 1024ULL)) + " MB available, " +
-            std::to_string(minMb) + " MB required on " + io::toUtf8(dir) +
+            "Insufficient free disk space to build: " + std::to_string(si.available / MiB) +
+            " MB available, " + std::to_string(minBytes / MiB) + " MB required" + detail +
+            " on " + io::toUtf8(dir) +
             ". Free up space or lower minFreeDiskMb (DDBConfigure, DDB_MIN_FREE_DISK_MB).",
             RetryableBuildReason::LowDiskSpace);
     }
