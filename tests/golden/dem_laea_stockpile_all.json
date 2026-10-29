@@ -3,14 +3,14 @@
  "sensitivityUsed": 0.5,
  "stockpiles": [
   {
-   "areaM2": 48900.0,
+   "areaM2": 48899.99992915423,
    "baseElevation": 104.14283752441406,
    "centroid": [
     9.735723388370035,
     45.60899562141723
    ],
    "confidence": 1.0,
-   "estimatedVolume": 53657.93661773205,
+   "estimatedVolume": 53657.936539993054,
    "id": 0,
    "pixelCount": 489,
    "polygon": {

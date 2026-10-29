@@ -115,9 +115,14 @@ ProfilePath buildPath(const DemContext &dem, const OGRLineString &line) {
             len = haversineMeters(line.getX(i), line.getY(i),
                                   line.getX(i + 1), line.getY(i + 1));
         } else {
-            const double dx = path.mapX[i + 1] - path.mapX[i];
-            const double dy = path.mapY[i + 1] - path.mapY[i];
-            len = std::sqrt(dx * dx + dy * dy); // assume linear unit = meter
+            // Measured on the ellipsoid: the map distance is in the linear unit of the CRS and
+            // stretched by its projection (Web Mercator makes the ground 1 / cos(latitude) shorter)
+            OGRLineString segment;
+            segment.addPoint(path.mapX[i], path.mapY[i]);
+            segment.addPoint(path.mapX[i + 1], path.mapY[i + 1]);
+            len = segment.get_GeodesicLength(&srsOf(dem.srs));
+            if (!(len >= 0.0))
+                throw AppException("Cannot measure the length of the profile on the ground");
         }
         path.segLenMeters[i] = len;
         path.totalLengthMeters += len;

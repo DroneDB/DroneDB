@@ -16,7 +16,7 @@
 
 namespace ddb
 {
-    // The size of a pixel in meters
+    // The size of a pixel on the ground, in meters
     struct PixelSize
     {
         double x = 0;
@@ -36,6 +36,7 @@ namespace ddb
         std::string projection;         // the WKT of the raster, "" when it has none
         SrsPtr srs;                     // null when the raster has no (readable) CRS
         bool isGeographic = false;      // the CRS is geographic: pixel sizes are in degrees
+        double zToMeters = 1.0;         // the factor of the elevations of `band` to meters (its unit type)
 
         GDALDatasetH handle() const noexcept { return GDALDataset::ToHandle(dataset.get()); }
 
@@ -48,16 +49,24 @@ namespace ddb
         // Whether a sample is an elevation: finite, and not the nodata of the band
         bool isValid(float v) const noexcept { return std::isfinite(v) && !isNodata(v, nodata); }
 
-        // The window (x, y, w, h) of the band, resampled to bufferW x bufferH, as floats. Throws
+        // The window (x, y, w, h) of the band, resampled to bufferW x bufferH, as floats, in meters
+        // (see zToMeters; the nodata of a band that is converted reads back as NaN). Throws
         // AppException("Cannot read raster data") when GDAL cannot read it.
         std::vector<float> readElevations(int x, int y, int w, int h, int bufferW, int bufferH) const;
         std::vector<float> readElevations(int x, int y, int w, int h) const { return readElevations(x, y, w, h, w, h); }
 
-        // The size of a pixel in meters. A projected CRS has its geotransform in meters already;
-        // a geographic one (or none) has it in degrees, converted with a local WGS84 approximation
-        // at `latitude`.
-        PixelSize pixelSizeMeters(double latitude) const;
+        // The size of a pixel on the ground, in meters, at the map coordinate (x, y) of the raster.
+        // A geographic CRS (or none) has its geotransform in degrees, converted with a local WGS84
+        // approximation at the latitude y. Any other CRS has it in its own linear unit (meters, feet,
+        // US survey feet) and distorts it with the projection (Web Mercator stretches the ground by
+        // 1 / cos(latitude)): the pixel is moved to the ellipsoid and measured there, so x * y is its
+        // true area. Throws AppException when the pixel cannot be measured.
+        PixelSize pixelSizeMeters(double x, double y) const;
     };
+
+    // The factor from the elevations of a raster band to meters, read from its unit type ("ft",
+    // "foot", "US survey foot", ...): 1 for meters, an unset unit and any unit that is not a length
+    double elevationUnitToMeters(const std::string &unitType);
 
     // Opens `path` for reading and checks that it can be used as a DEM: it has a geotransform and
     // the band `bandIndex` (1-based). Throws GDALException ("Cannot open raster: ...", "Raster has

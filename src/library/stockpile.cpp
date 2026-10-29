@@ -267,9 +267,8 @@ SearchWindow searchWindow(const DemContext &dem, double lat, double lon, double 
     if (w.centerCol < 0 || w.centerCol >= dem.width || w.centerRow < 0 || w.centerRow >= dem.height)
         throw InvalidArgsException("Click point is outside raster bounds");
 
-    // Convert radius (meters) to pixels. For projected CRS the pixel size is
-    // already in meters; for geographic CRS we approximate using lat.
-    w.pixel = dem.pixelSizeMeters(lat);
+    // Convert radius (meters) to pixels with the size of a pixel on the ground at the click.
+    w.pixel = dem.pixelSizeMeters(clickX, clickY);
     w.pixelMeters = 0.5 * (w.pixel.x + w.pixel.y);
     const int radiusPx = std::max(8, static_cast<int>(std::ceil(radiusMeters / w.pixelMeters)));
 
@@ -369,6 +368,16 @@ std::vector<uint8_t> componentAtClick(const DifferenceMap &map, int width, int h
     return component;
 }
 
+// The Douglas-Peucker tolerance, in map units, of a distance of `pixels` pixels of `groundPixel`
+// meters. The map units of a projected raster are its own: a distance of pixels is that many of its
+// pixels, however the projection stretches the ground. A geographic or CRS-less raster has always
+// taken the tolerance in meters, whatever its units.
+double simplifyTolerance(const DemContext &dem, double pixels, double groundPixel) {
+    if (dem.isGeographic || !dem.srs)
+        return pixels * groundPixel;
+    return pixels * 0.5 * (std::fabs(dem.gt[1]) + std::fabs(dem.gt[5]));
+}
+
 // Simplifies the contour (map coordinates) with Douglas-Peucker, closes the ring and moves it to
 // WGS84 (lon, lat)
 Ring wgs84Ring(const DemContext &dem, const Ring &contourMap, double epsilon) {
@@ -451,7 +460,7 @@ std::string detectStockpileJson(const std::string &rasterPath,
     // Douglas-Peucker in map units. Tune epsilon by sensitivity:
     // low sensitivity -> coarser polygon, high sensitivity -> finer polygon.
     const double epsPx = (1.0 - sensitivity) * 5.0 + 0.5;
-    const Ring ring = wgs84Ring(dem, contourMap, epsPx * win.pixelMeters);
+    const Ring ring = wgs84Ring(dem, contourMap, simplifyTolerance(dem, epsPx, win.pixelMeters));
 
     // --- Preliminary volume estimate inside the component ---
     const double pixelArea = win.pixel.x * win.pixel.y;
@@ -578,11 +587,11 @@ ScaledRaster readScaled(const DemContext &dem) {
     const int rasterW = dem.width;
     const int rasterH = dem.height;
 
-    // Approx pixel size in meters (for area/volume). A geographic raster uses its center latitude
-    // for the cosine factor.
-    const double centerY = dem.gt[3] + (rasterH / 2.0) * dem.gt[5];
+    // Pixel size in meters (for area/volume), measured on the ground at the center of the raster
+    const double centerX = dem.gt[0] + (rasterW / 2.0) * dem.gt[1] + (rasterH / 2.0) * dem.gt[2];
+    const double centerY = dem.gt[3] + (rasterW / 2.0) * dem.gt[4] + (rasterH / 2.0) * dem.gt[5];
     ScaledRaster r;
-    r.pixel = dem.pixelSizeMeters(centerY);
+    r.pixel = dem.pixelSizeMeters(centerX, centerY);
     const double pixelArea = r.pixel.x * r.pixel.y;
     if (!(pixelArea > 0))
         throw AppException("Cannot compute pixel area for raster");
@@ -709,8 +718,8 @@ public:
     DetectionBuilder(const DemContext &demContext, const ScaledRaster &scaled, const std::vector<float> &trendMap,
                      const std::vector<int32_t> &componentLabels, float sensitivity, double meanPositive)
         : dem(demContext), raster(scaled), trend(trendMap), labels(componentLabels), meanPos(meanPositive),
-          epsMeters(((1.0 - sensitivity) * 4.0 + 0.5) * 0.5 *
-                    (scaled.pixel.x * scaled.scale + scaled.pixel.y * scaled.scale)),
+          epsMeters(simplifyTolerance(demContext, ((1.0 - sensitivity) * 4.0 + 0.5) * scaled.scale,
+                                      0.5 * (scaled.pixel.x + scaled.pixel.y))),
           // Coord transformer raster->WGS84 (reused for all components)
           rasterToWgs(demContext.demToWgs84()) {}
 

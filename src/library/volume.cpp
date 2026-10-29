@@ -372,21 +372,19 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     const DemContext dem = openDem(rasterPath);
 
     // --- Reproject polygon WGS84 -> raster CRS (if needed) ---
-    // Capture polygon centroid latitude in WGS84 *before* any reprojection
-    // so we can convert pixel sizes to meters when the raster CRS is
-    // geographic (e.g. EPSG:4326).
-    double polyCentroidLat = 0.0;
-    {
-        OGREnvelope wgsEnv;
-        geom->getEnvelope(&wgsEnv);
-        polyCentroidLat = 0.5 * (wgsEnv.MinY + wgsEnv.MaxY);
-    }
-
     if (const auto wgsToRaster = dem.wgs84ToDem()) {
         if (OGR_G_Transform(OGRGeometry::ToHandle(geom.get()),
                             OGRCoordinateTransformation::ToHandle(wgsToRaster->get())) != OGRERR_NONE)
             throw AppException("Cannot reproject polygon into raster CRS");
     }
+
+    // The pixel size is measured on the ground at the polygon, whatever the CRS of the raster: the
+    // degrees of a geographic one, the feet of a foot-based one and the stretch of a Web Mercator one
+    // all have to end up as meters, or the documented m^2 / m^3 outputs would be off.
+    OGREnvelope rasterEnv;
+    geom->getEnvelope(&rasterEnv);
+    const PixelSize pixel = dem.pixelSizeMeters(0.5 * (rasterEnv.MinX + rasterEnv.MaxX),
+                                                0.5 * (rasterEnv.MinY + rasterEnv.MaxY));
 
     // --- Polygon envelope in pixel space, the raster window and the polygon mask ---
     const Window window = polygonWindow(dem, *geom);
@@ -397,11 +395,6 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     const Plane basePlane = computeBasePlane(method, flatElevation, collectPerimeter(dem, window, mask, elev));
 
     // --- Accumulate cut/fill/area ---
-    // For projected CRS the geotransform is already in meters; for geographic
-    // CRS (e.g. EPSG:4326) it is in degrees, so convert to meters using a
-    // local WGS84 approximation (same as stockpile.cpp). Without this the
-    // documented m^2 / m^3 outputs would be off by ~10^10.
-    const PixelSize pixel = dem.pixelSizeMeters(polyCentroidLat);
     const double pixelArea = pixel.x * pixel.y;
     const VolumeTotals totals = accumulateVolume(dem, window, mask, elev, basePlane, pixel);
 

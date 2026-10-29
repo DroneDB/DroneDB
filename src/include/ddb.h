@@ -1439,7 +1439,9 @@ extern "C"
     /** Sample a single-band raster along a GeoJSON LineString (WGS84) and
      * return a JSON profile with equispaced samples (distance in meters,
      * value, lon, lat). Supports DEM/DSM/DTM, thermal rasters and any single
-     * band raster with geotransform.
+     * band raster with geotransform. The values (and min/max/mean) are in the
+     * unit of the band as reported by "unit" (a DEM in feet gives feet, a
+     * thermal raster degrees Celsius); distances are ground meters.
      * @param filePath Path to the raster
      * @param geoJsonLineString GeoJSON geometry (type LineString) in WGS84
      * @param samples Requested number of samples (clamped to [2, 4096];
@@ -1456,7 +1458,11 @@ extern "C"
      * @param polygonGeoJSON GeoJSON Polygon or MultiPolygon in WGS84
      * @param baseMethod One of: "lowest_perimeter" (default), "average_perimeter",
      *                  "best_fit", "flat"
-     * @param flatElevation Elevation used when baseMethod == "flat"
+     * @param flatElevation Elevation used when baseMethod == "flat", in meters
+     *                      above the vertical datum of the DEM (the elevations of
+     *                      a band in feet are converted to meters before the
+     *                      comparison). The result is in meters too: volumes m^3,
+     *                      areas m^2, baseElevation m
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBCalculateVolume(const char *rasterPath,
@@ -1466,6 +1472,8 @@ extern "C"
                                       char **output);
 
     /** Auto-detect a stockpile footprint from a click on the raster.
+     * Elevations (baseElevation) are meters above the vertical datum of the
+     * DEM, volumes m^3 and areas m^2, whatever the units of the raster.
      * @param rasterPath Path to single-band elevation raster
      * @param lat Click latitude (WGS84)
      * @param lon Click longitude (WGS84)
@@ -1480,6 +1488,8 @@ extern "C"
                                       char **output);
 
     /** Auto-detect ALL stockpile footprints by full-DEM scan.
+     * Elevations (baseElevation) are meters above the vertical datum of the
+     * DEM, volumes m^3 and areas m^2, whatever the units of the raster.
      * @param rasterPath Path to single-band elevation raster
      * @param sensitivity Detail level in [0, 1]
      * @param minAreaM2 Minimum component area in square meters (>=0)

@@ -22,6 +22,10 @@ namespace ddb {
  *   - "best_fit"          (least-squares plane z = ax + by + c)
  *   - "flat"              (uses @p flatElevation)
  *
+ * Elevations are meters above the vertical datum of the DEM: a band whose unit
+ * type is feet or US survey feet is converted to meters when it is read, so
+ * @p flatElevation and the "baseElevation" of the result are meters as well.
+ *
  * Output JSON schema:
  * {
  *   "cutVolume":       m^3,
