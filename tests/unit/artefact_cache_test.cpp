@@ -24,7 +24,6 @@
 #include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "gtest/gtest.h"
-#include "in_process_raster_helper.h"
 #include "json.h"
 #include "mio.h"
 #include "raster_artefacts.h"
@@ -35,6 +34,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "tilerhelper.h"
+#include "user_open_child.h"
 #include "utils.h"
 
 namespace
@@ -43,17 +43,43 @@ namespace
 
     constexpr const char *kHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-    // Counts the requests for a normalized copy; the copies are made by the operation itself
-    class CountingHelper : public testutils::InProcessRasterHelper
+    // The real program, counting the requests for a normalized copy; the copies are made by the
+    // operation itself, in gdal-util
+    class CountingHelper : public raster::IRasterHelper
     {
       public:
+        raster::ProbeResult probe(const fs::path &path, const raster::ProbeParams &params) override
+        {
+            return real_.probe(path, params);
+        }
+        void thumbnail(const fs::path &path, const fs::path &out, const raster::ThumbnailParams &params) override
+        {
+            real_.thumbnail(path, out, params);
+        }
         void normalize(const fs::path &path, const fs::path &out, const json &params) override
         {
             requests++;
-            InProcessRasterHelper::normalize(path, out, params);
+            real_.normalize(path, out, params);
+        }
+        void geoproject(const fs::path &path, const fs::path &out, const json &params) override
+        {
+            real_.geoproject(path, out, params);
+        }
+        void buildCog(const fs::path &path, const fs::path &out, const json &params,
+                      const raster::ProgressCallback &progress) override
+        {
+            real_.buildCog(path, out, params, progress);
+        }
+        void buildVector(const fs::path &path, const fs::path &out, const json &params,
+                         const raster::ProgressCallback &progress) override
+        {
+            real_.buildVector(path, out, params, progress);
         }
 
         std::atomic<int> requests{0};
+
+      private:
+        raster::GdalUtilHelper real_;
     };
 
     // The cache of the test, apart from the one of the user
@@ -412,7 +438,9 @@ namespace
 
         constexpr int kCallers = 6;
         std::vector<fs::path> results(kCallers);
-        std::vector<bool> opened(kCallers, false);
+        // Not vector<bool>: its elements share words, so threads that each set their own would
+        // lose each other's writes
+        std::vector<char> opened(kCallers, 0);
         std::vector<std::thread> threads;
         for (int i = 0; i < kCallers; i++)
             threads.emplace_back([&, i] {
@@ -502,7 +530,8 @@ namespace
             EXPECT_EQ(entry.path().filename().string(), "normalized") << "a request left " << entry.path();
     }
 
-    TEST_F(ArtefactCache, aSizeThatDoesNotFitIn32BitsIsCountedInFull)
+    // The operation of the helper itself, run in the process of the test
+    USER_OPEN_TEST_F(ArtefactCache, aSizeThatDoesNotFitIn32BitsIsCountedInFull)
     {
         // 70000 x 70000 pixels: 4.9 billion, a sparse file of a few kilobytes
         const fs::path source = area_->getPath("wide.tif");

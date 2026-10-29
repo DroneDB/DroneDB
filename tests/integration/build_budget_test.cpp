@@ -20,6 +20,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "user_open_child.h"
 
 namespace
 {
@@ -150,7 +151,7 @@ namespace
     std::mutex WarpCacheProbe::mutex;
     std::vector<GIntBig> WarpCacheProbe::samples;
 
-    TEST(CogCacheBudget, cacheIsBoundedDuringBuild)
+    USER_OPEN_TEST(CogCacheBudget, cacheIsBoundedDuringBuild)
     {
         TestArea ta(TEST_NAME, true);
         const fs::path input = ta.downloadTestAsset(

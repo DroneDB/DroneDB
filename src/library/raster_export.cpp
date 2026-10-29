@@ -15,6 +15,7 @@
 #include "gtiff_options.h"
 #include "logger.h"
 #include "mio.h"
+#include "raster_artefacts.h"
 #include "parallel.h"
 #include "raster_utils.h"
 #include "sensorprofile.h"
@@ -432,7 +433,7 @@ void exportBands(const RasterExport &request, ExportSession &session, GDALDatase
     closeOutputOrThrow(std::move(out), outputPath);
     // Reopen in update mode to add internal overviews (efficient zoomed
     // reads). Best-effort: a failure here is non-fatal.
-    if (const auto ovr = adoptDataset(GDALOpen(outputPath, GA_Update)))
+    if (const auto ovr = raster::reopenWrittenRaster(io::fromUtf8(outputPath), raster::ArtefactAccess::Update))
     {
         buildInternalOverviews(datasetHandle(ovr), width, height);
     }

@@ -14,6 +14,7 @@
 #include "raster_ops.h"
 #include "logger.h"
 #include "mio.h"
+#include "raster_artefacts.h"
 #include "exceptions.h"
 #include "json.h"
 
@@ -405,7 +406,7 @@ namespace ddb
     }
 
     void generateCogStats(const std::string &cogPath) {
-        auto dataset = adoptDataset(GDALOpen(cogPath.c_str(), GA_ReadOnly));
+        auto dataset = raster::reopenWrittenRaster(io::fromUtf8(cogPath));
         if (!dataset) {
             LOGW << "Cannot open COG for stats generation: " << cogPath;
             return;

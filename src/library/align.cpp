@@ -666,7 +666,7 @@ static double computeZOffset(const std::string &alignedPath,
 
 void applyZOffset(const std::string &path, double zOffset) {
     if (std::abs(zOffset) < 1e-6) return;
-    const auto dataset = adoptDataset(GDALOpen(path.c_str(), GA_Update));
+    const auto dataset = raster::openArtefactRaster(io::fromUtf8(path), raster::ArtefactAccess::Update);
     if (!dataset) throw GDALException("Cannot open " + path + " to apply the vertical offset");
     GDALDatasetH hDs = datasetHandle(dataset);
     GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);

@@ -589,7 +589,7 @@ namespace
         // Drop the pixels of the source, keeping the header and the directory before them
         std::uintmax_t firstBlock = 0;
         {
-            const auto ds = openUserRaster(src.string());
+            const auto ds = adoptDataset(GDALOpen(src.string().c_str(), GA_ReadOnly));
             ASSERT_TRUE(ds);
             const char *offset = GDALGetMetadataItem(GDALGetRasterBand(datasetHandle(ds), 1),
                                                      "BLOCK_OFFSET_0_0", "TIFF");
@@ -597,7 +597,7 @@ namespace
             firstBlock = std::stoull(offset);
         }
         fs::resize_file(src, firstBlock);
-        ASSERT_TRUE(openUserRaster(src.string())) << "the truncated source must still open";
+        ASSERT_TRUE(adoptDataset(GDALOpen(src.string().c_str(), GA_ReadOnly))) << "the truncated source must still open";
 
         const int before = openDatasetCount();
         EXPECT_THROW(alignRaster(src.string(), ref.string(), ta.getPath("out.tif").string()), GDALException);

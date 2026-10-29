@@ -36,6 +36,7 @@
 #include "mask.h"
 #include "merge_multispectral.h"
 #include "raster_region.h"
+#include "user_open_child.h"
 
 namespace
 {
@@ -564,7 +565,7 @@ namespace
         golden::expectGolden("mask_borders_outputs", out);
     }
 
-    TEST_F(RasterGolden, buildCogOutputs)
+    USER_OPEN_TEST_F(RasterGolden, buildCogOutputs)
     {
         TestArea ta(TEST_NAME, true);
         json out = json::object();

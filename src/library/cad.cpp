@@ -4,6 +4,7 @@
 #include "cad.h"
 #include "stringutil.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <iomanip>
@@ -18,6 +19,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "process_runner.h"
+#include "raster_helper.h"
 #include "tool_locator.h"
 #include "tool_run_support.h"
 
@@ -33,6 +35,19 @@ namespace ddb
             constexpr auto kIdleTimeout = std::chrono::seconds(60);
             const std::string kDxfAdvice =
                 ". Export the drawing as DXF from your CAD software and upload that.";
+
+            // The features of the layers a vector probe lists (the layers without an extent, which
+            // have no feature, are not listed)
+            GIntBig featureCount(const raster::ProbeResult &probed)
+            {
+                GIntBig features = 0;
+                const auto vector = probed.properties.find("vector");
+                if (vector == probed.properties.end() || !vector->is_object() || !vector->contains("layers"))
+                    return features;
+                for (const auto &layer : (*vector)["layers"])
+                    features += std::max<int64_t>(0, layer.value("featureCount", int64_t{0}));
+                return features;
+            }
 
             // DXF caret escapes in string values (^J newline, ^M CR, ^I tab, "^ " = ^).
             std::string decodeCaret(const std::string &v)
@@ -149,27 +164,29 @@ namespace ddb
                                    kDxfAdvice);
             }
 
-            // dwg2dxf exits 0 on files it could not decode:
-            // only a DXF that GDAL opens and that has features counts as converted.
-            const char *drivers[] = {"DXF", nullptr};
-            auto dataset = adoptDataset(GDALOpenEx(io::toUtf8(outDxf).c_str(),
-                                                   GDAL_OF_VECTOR | GDAL_OF_READONLY, drivers,
-                                                   nullptr, nullptr));
-            if (!dataset)
+            // dwg2dxf exits 0 on files it could not decode: only a DXF that GDAL opens and that
+            // has features counts as converted. The DXF is what the drawing of a user became, so
+            // the raster helper reads it, not this process.
+            raster::ProbeParams probeParams;
+            probeParams.kind = raster::ProbeKind::Vector;
+            probeParams.source = outDxf;
+            probeParams.converted = true;
+            probeParams.sidecarDecided = true;
+            raster::ProbeResult probed;
+            try
+            {
+                probed = raster::rasterHelper().probe(outDxf, probeParams);
+            }
+            catch (const GDALException &)
             {
                 io::assureIsRemoved(outDxf);
                 throw AppException("DWG conversion failed (" + version +
                                    "): the converted drawing cannot be read" + kDxfAdvice);
             }
-            GIntBig features = 0;
-            GDALDatasetH ds = datasetHandle(dataset);
-            for (int i = 0; i < GDALDatasetGetLayerCount(ds); i++)
-            {
-                const GIntBig n = OGR_L_GetFeatureCount(GDALDatasetGetLayer(ds, i), TRUE);
-                if (n > 0) features += n;
-            }
-            dataset.reset();
-            if (features == 0)
+            // A drawing whose coordinate system GDAL cannot use is described in part (its
+            // layers are not listed): it was read, so it is not a failed conversion
+            const GIntBig features = featureCount(probed);
+            if (features == 0 && probed.warning.empty())
             {
                 io::assureIsRemoved(outDxf);
                 throw AppException("DWG conversion failed (" + version +

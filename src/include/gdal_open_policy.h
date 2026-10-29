@@ -20,10 +20,12 @@
 // with all of them: .tif opens as a TIFF, never as a VRT, netCDF or GeoPackage.
 //
 // Every open of a file that may come from a user goes through openUserRaster or
-// openUserVector. Files libddb wrote itself (its COGs, VRTs and overviews) are not user files
-// and open directly. While a user file opens, GDAL makes no HTTP request and its network file
-// systems (/vsicurl/, ...) open no other file than the one being opened, whatever URL the
-// file names.
+// openUserVector, and only the raster helper (gdal-util) makes them: a process that did not
+// declare itself that program (enableUserFileOpens) gets a std::logic_error, so a host (the
+// Registry, ddbcmd, the tests) cannot parse a file of a user with GDAL by mistake. The files
+// libddb wrote itself are not user files and open through raster_artefacts.h. While a user
+// file opens, GDAL makes no HTTP request and its network file systems (/vsicurl/, ...) open no
+// other file than the one being opened, whatever URL the file names.
 namespace ddb
 {
     namespace gdalopen
@@ -65,6 +67,7 @@ namespace ddb
         // as GDAL writes them, none a symbolic link nor naming another dataset in its metadata,
         // and the sidecars of a raster sidecar are checked in turn. A VRT named .tif.ovr is
         // refused.
+        // @throws std::logic_error in a process that is not the raster helper
         VrtVerdict validateSidecars(const std::string &path);
 
         // Whether a metadata domain lists datasets by file name or holds the name of the dataset
@@ -76,14 +79,45 @@ namespace ddb
 
         // Declares that this process is the one that parses user files: the raster helper
         // (gdal-util) calls it once, at start. Nothing else in the library may call it, so that
-        // a host process (the Registry, ddbcmd, the tests) can be told apart from the helper.
+        // a host process (the Registry, ddbcmd, the tests) can be told apart from the helper;
+        // scripts/check-gdal-opens.py fails when anything else does. A test that needs to open
+        // a user file does it in a child process that calls it (tests/user_open_child.h).
         void enableUserFileOpens();
 
         // Whether enableUserFileOpens() was called in this process
         bool userFileOpensEnabled();
+
+        // Throws std::logic_error naming `what` unless enableUserFileOpens() was called: the
+        // first line of every function that opens or identifies a file of a user
+        void requireUserFileOpens(const char *what);
+
+        // While one is alive, GDAL makes no HTTP request on this thread (the requests it
+        // would make fail) and its network file systems (/vsicurl/, /vsis3/, ...) open no
+        // other file than `path`: the files that GDAL opens may name any URL (the schemas a
+        // GML includes, the sources of a VRT), and the opens of libddb must not follow them.
+        // Every open of a file by GDAL in libddb (user files and artefacts) takes one.
+        class NoNetworkWhileOpening
+        {
+          public:
+            explicit NoNetworkWhileOpening(const std::string &path);
+            ~NoNetworkWhileOpening();
+            NoNetworkWhileOpening(const NoNetworkWhileOpening &) = delete;
+            NoNetworkWhileOpening &operator=(const NoNetworkWhileOpening &) = delete;
+
+          private:
+            bool pushed_;
+            ScopedThreadConfigOption onlyThisFile_;
+        };
+
+        // Whether an opened dataset names no other dataset in its metadata (the OVERVIEWS and
+        // GEOLOCATION domains, see openUserRaster): verdict.reason says which item otherwise.
+        // The check of every raster libddb opens, a copy that the helper wrote included, since
+        // the metadata of a copy comes from the file of the user.
+        VrtVerdict validateMetadataFiles(GDALDatasetH dataset);
     } // namespace gdalopen
 
-    // Opens a raster file of a user read-only with the drivers its extension allows. Null (as
+    // Opens a raster file of a user read-only with the drivers its extension allows.
+    // @throws std::logic_error in a process that is not the raster helper. Null (as
     // GDALOpen returns it) when no allowed driver opens it, the extension is not one libddb
     // reads, a sidecar next to it is not safe (validateSidecars), it is a VRT whose sources
     // are not safe (those inside the folder of the VRT are) or its metadata names another
@@ -94,10 +128,12 @@ namespace ddb
 
     // The driver that identifies a raster file of a user among those its extension allows, null
     // when none does (nothing is opened)
+    // @throws std::logic_error in a process that is not the raster helper
     GDALDriverH identifyUserRaster(const std::string &path);
 
     // Opens a vector file of a user read-only with the drivers its extension allows; null when
     // none opens it (an OGR VRT named .geojson is not opened)
+    // @throws std::logic_error in a process that is not the raster helper
     GDALDatasetUniquePtr openUserVector(const std::string &path);
 } // namespace ddb
 

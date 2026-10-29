@@ -32,6 +32,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
+#include "user_open_child.h"
 
 namespace {
 
@@ -201,7 +202,7 @@ struct RasterDataset {
     std::string root() const { return index.root.string(); }
 };
 
-TEST(DDBBuildEx, theCapReachesTheGdalThreadsOfARasterBuildThroughTheEntryHandler) {
+USER_OPEN_TEST(DDBBuildEx, theCapReachesTheGdalThreadsOfARasterBuildThroughTheEntryHandler) {
     RasterDataset ds(TEST_NAME);
     // The test reads the GDAL options of the warp from the log of the process that builds
     testutils::InProcessRasterHelper helper;

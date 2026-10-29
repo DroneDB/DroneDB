@@ -21,6 +21,7 @@
 #include "gdal_raii.h"
 #include "gtest/gtest.h"
 #include "mio.h"
+#include "raster_artefacts.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
@@ -30,6 +31,15 @@ namespace
     using namespace ddb;
 
     constexpr int Size = 256;
+
+    // Where applyZOffset may write: the artefacts folder of the cache, where align puts the
+    // raster it shifts. Made new, since the cache of the process outlives a test.
+    fs::path artefactPath(const std::string &name)
+    {
+        const fs::path path = raster::artefactsDir() / name;
+        fs::remove(path);
+        return path;
+    }
 
     // A Float32 raster with a projection and no geotransform
     fs::path writeWithoutGeoTransform(const fs::path &path)
@@ -152,8 +162,7 @@ namespace
 
     TEST(ZOffset, ShiftsEveryValueExceptNodata)
     {
-        TestArea ta(TEST_NAME, true);
-        const auto dem = writeCompressedDem(ta.getPath("dem.tif"));
+        const auto dem = writeCompressedDem(artefactPath("zoffset-shifts.tif"));
         const auto before = readRows(dem);
 
         applyZOffset(io::toUtf8(dem), 2.5);
@@ -171,8 +180,7 @@ namespace
 
     TEST(ZOffset, ATinyOffsetLeavesTheFileAlone)
     {
-        TestArea ta(TEST_NAME, true);
-        const auto dem = writeCompressedDem(ta.getPath("dem.tif"));
+        const auto dem = writeCompressedDem(artefactPath("zoffset-tiny.tif"));
         const auto before = readRows(dem);
         applyZOffset(io::toUtf8(dem), 1e-9);
         EXPECT_EQ(readRows(dem), before);
@@ -180,8 +188,7 @@ namespace
 
     TEST(ZOffset, ARasterWhoseRowsCannotBeReadIsAnErrorNotAShiftedBuffer)
     {
-        TestArea ta(TEST_NAME, true);
-        const auto dem = writeCompressedDem(ta.getPath("dem.tif"));
+        const auto dem = writeCompressedDem(artefactPath("zoffset-corrupt.tif"));
         corruptPixelData(dem);
         ASSERT_FALSE(bandIsReadable(dem)) << "the corruption must break the decoding for this test to mean anything";
 
@@ -190,8 +197,17 @@ namespace
 
     TEST(ZOffset, AMissingFileIsAnError)
     {
+        EXPECT_THROW(applyZOffset(io::toUtf8(artefactPath("zoffset-missing.tif")), 2.5), GDALException);
+    }
+
+    // The raster of a user is not one of libddb's: a shift is written to the files libddb made
+    TEST(ZOffset, AFileThatIsNoArtefactIsNotOpened)
+    {
         TestArea ta(TEST_NAME, true);
-        EXPECT_THROW(applyZOffset(io::toUtf8(ta.getPath("missing.tif")), 2.5), GDALException);
+        const auto dem = writeCompressedDem(ta.getPath("dem.tif"));
+        const auto before = readRows(dem);
+        EXPECT_THROW(applyZOffset(io::toUtf8(dem), 2.5), GDALException);
+        EXPECT_EQ(readRows(dem), before);
     }
 
     // An open GeoTIFF whose pixels are all still in GDAL's block cache: nothing is written until the

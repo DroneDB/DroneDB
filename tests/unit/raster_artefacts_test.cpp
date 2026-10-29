@@ -17,7 +17,10 @@
 #include "build_layout.h"
 #include "ddb.h"
 #include "exceptions.h"
+#include "cpl_http.h"
 #include "gdal_inc.h"
+#include "gdal_open_policy.h"
+#include "gdal_raii.h"
 #include "gdaltiler.h"
 #include "gtest/gtest.h"
 #include "json.h"
@@ -241,6 +244,135 @@ namespace
         EXPECT_EQ(GDALDatasetGetLayerCount(datasetHandle(layers)), 1);
 
         EXPECT_TRUE(raster::openArtefactRaster(real));
+    }
+
+    TEST_F(RasterArtefacts, aRasterWhoseMetadataNamesAnotherDatasetIsNotOpened)
+    {
+        // The metadata GDAL opens the named dataset from (the overviews of a raster, the arrays of
+        // a geolocation) came from a file of a user if it is in a copy: refused, as for a user file
+        const fs::path elsewhere = makeGeoTiff(area_->getPath("elsewhere.tif"));
+        const std::pair<const char *, const char *> items[] = {
+            {"OVERVIEWS", "OVERVIEW_FILE"}, {"GEOLOCATION", "X_DATASET"}, {"GEOLOCATION", "Y_DATASET"}};
+        for (const auto &[domain, item] : items)
+        {
+            SCOPED_TRACE(item);
+            const fs::path artefact = makeGeoTiff(raster::artefactsDir() / (std::string(item) + ".tif"));
+            {
+                auto update = adoptDataset(GDALOpenEx(io::toUtf8(artefact).c_str(), GDAL_OF_RASTER | GDAL_OF_UPDATE,
+                                                      nullptr, nullptr, nullptr));
+                ASSERT_TRUE(update);
+                ASSERT_EQ(GDALSetMetadataItem(datasetHandle(update), item, io::toUtf8(elsewhere).c_str(), domain),
+                          CE_None);
+            }
+            EXPECT_FALSE(raster::openArtefactRaster(artefact));
+            EXPECT_FALSE(raster::reopenWrittenRaster(artefact));
+        }
+        EXPECT_TRUE(raster::openArtefactRaster(makeGeoTiff(raster::artefactsDir() / "plain.tif")));
+    }
+
+    TEST_F(RasterArtefacts, theGuardOfTheOpenPolicyIsTheOneAnArtefactOpensWith)
+    {
+        const fs::path file = makeGeoTiff(raster::artefactsDir() / "guarded.tif");
+        EXPECT_EQ(CPLGetThreadLocalConfigOption("CPL_VSIL_CURL_ALLOWED_FILENAME", nullptr), nullptr);
+        {
+            const gdalopen::NoNetworkWhileOpening guard(io::toUtf8(file));
+            EXPECT_STREQ(CPLGetThreadLocalConfigOption("CPL_VSIL_CURL_ALLOWED_FILENAME", nullptr),
+                         io::toUtf8(file).c_str());
+            // A request is refused without reaching anything
+            CPLHTTPResult *result = CPLHTTPFetch("http://127.0.0.1:9/", nullptr);
+            ASSERT_NE(result, nullptr);
+            EXPECT_NE(result->nStatus, 0);
+            ASSERT_NE(result->pszErrBuf, nullptr);
+            EXPECT_NE(std::string(result->pszErrBuf).find("no request is made"), std::string::npos) << result->pszErrBuf;
+            CPLHTTPDestroyResult(result);
+        }
+        EXPECT_EQ(CPLGetThreadLocalConfigOption("CPL_VSIL_CURL_ALLOWED_FILENAME", nullptr), nullptr);
+    }
+
+    TEST_F(RasterArtefacts, aFileOfTheMemoryFileSystemIsAnArtefactAndOpensAsAGeoPackage)
+    {
+        EXPECT_TRUE(raster::isLibddbArtefact("/vsimem/ddb-abc.gpkg"));
+        EXPECT_FALSE(raster::isLibddbArtefact("/vsimem/../etc/passwd"));
+        EXPECT_FALSE(raster::isLibddbArtefact("/vsimemory/a.gpkg"));
+        EXPECT_FALSE(raster::isLibddbArtefact("/vsicurl/http://example.com/a.tif"));
+
+        const VsiMemFile memory = VsiMemFile::unique("artefact-test-", ".gpkg");
+        {
+            GDALDatasetH dataset = GDALCreate(GDALGetDriverByName("GPKG"), memory.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
+            ASSERT_NE(dataset, nullptr);
+            GDALDatasetCreateLayer(dataset, "points", nullptr, wkbPoint, nullptr);
+            GDALClose(dataset);
+        }
+        const auto layers = raster::openArtefactVector(io::fromUtf8(memory.path()));
+        ASSERT_TRUE(layers);
+        EXPECT_EQ(GDALDatasetGetLayerCount(datasetHandle(layers)), 1);
+    }
+
+    TEST_F(RasterArtefacts, aLinkedFolderInThePlaceOfARoleFolderIsNotAnArtefact)
+    {
+#ifdef _WIN32
+        GTEST_SKIP() << "creating a link needs a privilege on Windows";
+#else
+        // The folder of the COG of a build is a link to a folder somebody else wrote
+        const fs::path outside = area_->getPath("outside");
+        makeGeoTiff(outside / CogFileName);
+        fs::create_directories(build_);
+        fs::create_directory_symlink(outside, build_ / CogBuildSubfolder);
+        EXPECT_FALSE(raster::isLibddbArtefact(build_ / CogBuildSubfolder / CogFileName));
+        EXPECT_THROW(raster::openArtefactRaster(build_ / CogBuildSubfolder / CogFileName), GDALException);
+
+        // The build folder itself, and the dataset above it
+        const fs::path real = makeGeoTiff(dataset_ / "real-build" / CogBuildSubfolder / CogFileName);
+        fs::create_directory_symlink(dataset_ / "real-build", dataset_ / DDB_FOLDER / DDB_BUILD_PATH / "linked");
+        EXPECT_FALSE(raster::isLibddbArtefact(dataset_ / DDB_FOLDER / DDB_BUILD_PATH / "linked" / CogBuildSubfolder / CogFileName));
+        EXPECT_FALSE(raster::isLibddbArtefact(real));
+#endif
+    }
+
+    TEST_F(RasterArtefacts, aPathThatClimbsOutOfTheBuildFolderIsJudgedByWhereItLeads)
+    {
+        const fs::path planted = makeGeoTiff(area_->getPath("outside") / "x" / CogBuildSubfolder / CogFileName);
+        // The role path of a build, reached from another build by dot segments: that build's
+        EXPECT_TRUE(raster::isLibddbArtefact(build_ / ".." / kHash / CogBuildSubfolder / CogFileName));
+        // Out of the build root into a folder that only looks like one
+        EXPECT_FALSE(raster::isLibddbArtefact(build_ / ".." / ".." / ".." / ".." / "outside" / "x" / CogBuildSubfolder / CogFileName));
+        EXPECT_FALSE(raster::isLibddbArtefact(build_ / CogBuildSubfolder / ".." / ".." / ".." / ".." / ".." / "outside" / "x" / CogBuildSubfolder / CogFileName));
+        EXPECT_FALSE(raster::isLibddbArtefact(planted));
+        EXPECT_THROW(raster::openArtefactRaster(planted), GDALException);
+    }
+
+    TEST_F(RasterArtefacts, anArtefactOpensForUpdateAndAFileJustWrittenReopensWhereverItIs)
+    {
+        const fs::path artefact = makeGeoTiff(raster::artefactsDir() / "update.tif");
+        {
+            const auto update = raster::openArtefactRaster(artefact, raster::ArtefactAccess::Update);
+            ASSERT_TRUE(update);
+            GDALRasterBandH band = GDALGetRasterBand(datasetHandle(update), 1);
+            EXPECT_EQ(GDALSetRasterNoDataValue(band, 7.0), CE_None);
+        }
+        {
+            const auto read = raster::openArtefactRaster(artefact);
+            ASSERT_TRUE(read);
+            int hasNoData = 0;
+            EXPECT_EQ(GDALGetRasterNoDataValue(GDALGetRasterBand(datasetHandle(read), 1), &hasNoData), 7.0);
+            EXPECT_TRUE(hasNoData);
+        }
+
+        // Not an artefact by place, and not refused for it: it is what the caller wrote just now
+        const fs::path written = makeGeoTiff(area_->getPath("export.tif"));
+        EXPECT_THROW(raster::openArtefactRaster(written, raster::ArtefactAccess::Update), GDALException);
+        EXPECT_TRUE(raster::reopenWrittenRaster(written, raster::ArtefactAccess::Update));
+        EXPECT_TRUE(raster::reopenWrittenRaster(written));
+
+        // Only a regular file, and with the drivers of the artefacts
+        EXPECT_FALSE(raster::reopenWrittenRaster(area_->getPath("missing.tif")));
+        EXPECT_FALSE(raster::reopenWrittenRaster(area_->getPath("outside")));
+        writeFile(area_->getPath("list.vrt"), "<VRTDataset rasterXSize=\"1\" rasterYSize=\"1\"/>");
+        EXPECT_FALSE(raster::reopenWrittenRaster(area_->getPath("list.vrt")));
+#ifndef _WIN32
+        fs::create_symlink(written, area_->getPath("link.tif"));
+        EXPECT_FALSE(raster::reopenWrittenRaster(area_->getPath("link.tif")));
+#endif
     }
 
     // ------------------------------------------------------------------ names and folders

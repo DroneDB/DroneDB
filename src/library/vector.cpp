@@ -632,9 +632,7 @@ namespace ddb
             if (anyGeometryToNormalize || anyLayerNeedsSanitization(hSrcDS))
             {
                 sanitized = buildSanitizedGpkg(hSrcDS, normalizeGeometries);
-                sanitizedDS = adoptDataset(GDALOpenEx(sanitized.c_str(),
-                                                      GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                                                      nullptr, nullptr, nullptr));
+                sanitizedDS = raster::openArtefactVector(io::fromUtf8(sanitized.c_str()));
                 if (!sanitizedDS)
                     throw AppException(
                         "Cannot open sanitized GPKG for MVT translation: " +

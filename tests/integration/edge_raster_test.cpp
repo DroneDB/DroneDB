@@ -9,6 +9,7 @@
 #include "ddb.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
+#include "user_open_child.h"
 
 #include <sstream>
 
@@ -146,7 +147,7 @@ TEST_F(EdgeRasterTest, PolarAntarctic) {
     runFullPipeline("vestfold.tif");
 }
 
-TEST_F(EdgeRasterTest, CogNsidc) {
+USER_OPEN_TEST_F(EdgeRasterTest, CogNsidc) {
     TestArea ta("EdgeRaster_CogNsidc");
     fs::path input = download(ta, "bremen_sea_ice_conc_2022_9_9.tif");
 
@@ -162,7 +163,7 @@ TEST_F(EdgeRasterTest, CogNsidc) {
     validateTiling(ta, cogOutput, "tiles");
 }
 
-TEST_F(EdgeRasterTest, CogAustralianAlbers) {
+USER_OPEN_TEST_F(EdgeRasterTest, CogAustralianAlbers) {
     TestArea ta("EdgeRaster_CogAustralianAlbers");
     fs::path input = download(ta, "ga_ls_tc_pc_cyear_3_x17y37_2022--P1Y_final_wet_pc_50_LQ.tif");
 
@@ -198,7 +199,7 @@ TEST_F(EdgeRasterTest, TinyRasterCog) {
     runFullPipeline("gfw-azores.tif");
 }
 
-TEST_F(EdgeRasterTest, WebMercatorNonCog) {
+USER_OPEN_TEST_F(EdgeRasterTest, WebMercatorNonCog) {
     TestArea ta("EdgeRaster_WebMercatorNonCog");
     fs::path input = download(ta, "gadas.tif");
 

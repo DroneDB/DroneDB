@@ -41,6 +41,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "thumbs.h"
+#include "user_open_child.h"
 #include "vector.h"
 
 namespace
@@ -177,7 +178,7 @@ namespace
 
     // ---- The files of the attack -------------------------------------------------------------
 
-    TEST(gdalOpenPolicy, vrtNamedTifWithAnAbsoluteSourceIsNotARaster)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtNamedTifWithAnAbsoluteSourceIsNotARaster)
     {
         Scene s(TEST_NAME);
         const fs::path poc = s.dataset / "disguised.tif";
@@ -187,7 +188,7 @@ namespace
         EXPECT_NE(typeOf(poc, s.dataset), EntryType::GeoRaster);
     }
 
-    TEST(gdalOpenPolicy, vrtNamedTifWithAnUrlSourceIsNotOpenedNorRequested)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtNamedTifWithAnUrlSourceIsNotOpenedNorRequested)
     {
         Scene s(TEST_NAME);
         const fs::path poc = s.dataset / "disguised-url.tif";
@@ -197,7 +198,7 @@ namespace
         EXPECT_NE(typeOf(poc, s.dataset), EntryType::GeoRaster);
     }
 
-    TEST(gdalOpenPolicy, vrtNamedJp2AndJ2kAreNotRasters)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtNamedJp2AndJ2kAreNotRasters)
     {
         Scene s(TEST_NAME);
         for (const char *name : {"disguised.jp2", "disguised.j2k", "DISGUISED.TIFF"})
@@ -209,7 +210,7 @@ namespace
         }
     }
 
-    TEST(gdalOpenPolicy, ogrVrtNamedGeoJsonIsNotOpenedNorBuilt)
+    USER_OPEN_TEST(gdalOpenPolicy, ogrVrtNamedGeoJsonIsNotOpenedNorBuilt)
     {
         Scene s(TEST_NAME);
         const fs::path poc = s.dataset / "disguised.geojson";
@@ -227,7 +228,7 @@ namespace
         EXPECT_FALSE(fs::exists(out / "vec" / "source.gpkg"));
     }
 
-    TEST(gdalOpenPolicy, vrtWithATraversalIsNotOpened)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtWithATraversalIsNotOpened)
     {
         Scene s(TEST_NAME);
         const fs::path poc = s.dataset / "traversal.vrt";
@@ -239,7 +240,7 @@ namespace
         EXPECT_NE(verdict.reason.find("outside"), std::string::npos) << verdict.reason;
     }
 
-    TEST(gdalOpenPolicy, vrtWithAPythonPixelFunctionIsNotOpenedAndPythonIsOff)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtWithAPythonPixelFunctionIsNotOpenedAndPythonIsOff)
     {
         Scene s(TEST_NAME);
         const fs::path marker = s.area.getFolder("sec") / "PWNED";
@@ -265,7 +266,7 @@ namespace
         EXPECT_STREQ(CPLGetConfigOption("GDAL_VRT_ENABLE_PYTHON", ""), "NO");
     }
 
-    TEST(gdalOpenPolicy, otherRasterFormatsNamedTifAndJp2AreNotRasters)
+    USER_OPEN_TEST(gdalOpenPolicy, otherRasterFormatsNamedTifAndJp2AreNotRasters)
     {
         Scene s(TEST_NAME);
 
@@ -294,7 +295,7 @@ namespace
 
     // ---- What keeps opening ------------------------------------------------------------------
 
-    TEST(gdalOpenPolicy, rastersKeepOpeningAndKeepTheirType)
+    USER_OPEN_TEST(gdalOpenPolicy, rastersKeepOpeningAndKeepTheirType)
     {
         Scene s(TEST_NAME);
         const fs::path tif = writeGeoTiff(s.dataset / "dsm.tif");
@@ -339,7 +340,7 @@ namespace
         }
     }
 
-    TEST(gdalOpenPolicy, vectorsKeepOpeningAndKeepTheirType)
+    USER_OPEN_TEST(gdalOpenPolicy, vectorsKeepOpeningAndKeepTheirType)
     {
         Scene s(TEST_NAME);
 
@@ -367,7 +368,7 @@ namespace
         EXPECT_EQ(typeOf(shp, s.dataset), EntryType::Vector);
     }
 
-    TEST(gdalOpenPolicy, anExtensionThatIsNotReadIsNotOpened)
+    USER_OPEN_TEST(gdalOpenPolicy, anExtensionThatIsNotReadIsNotOpened)
     {
         Scene s(TEST_NAME);
         const fs::path asc = s.dataset / "grid.asc";
@@ -396,7 +397,7 @@ namespace
 
     // ---- The VRTs that are opened ------------------------------------------------------------
 
-    TEST(gdalOpenPolicy, vrtOverFilesInItsFolderOpens)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtOverFilesInItsFolderOpens)
     {
         Scene s(TEST_NAME);
         writeGeoTiff(s.dataset / "tiles" / "a.tif");
@@ -410,7 +411,7 @@ namespace
         EXPECT_EQ(dataset->GetRasterXSize(), 32);
     }
 
-    TEST(gdalOpenPolicy, vrtSourcesAreChecked)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtSourcesAreChecked)
     {
         Scene s(TEST_NAME);
         writeGeoTiff(s.dataset / "a.tif");
@@ -452,7 +453,7 @@ namespace
         EXPECT_FALSE(gdalopen::validateVrt(vrt, s.dataset).ok);
     }
 
-    TEST(gdalOpenPolicy, vrtSourceThatIsAVrtNamedTifIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtSourceThatIsAVrtNamedTifIsRefused)
     {
         // A check of names alone accepts outer.vrt -> inner.tif, a VRT that reads the outside
         Scene s(TEST_NAME);
@@ -465,7 +466,7 @@ namespace
         EXPECT_EQ(openUserRaster(io::toUtf8(outer)), nullptr);
     }
 
-    TEST(gdalOpenPolicy, vrtSourceThatIsAVrtIsCheckedInTurn)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtSourceThatIsAVrtIsCheckedInTurn)
     {
         Scene s(TEST_NAME);
         writeGeoTiff(s.dataset / "a.tif");
@@ -475,7 +476,7 @@ namespace
         EXPECT_FALSE(gdalopen::validateVrt(outer, s.dataset).ok);
     }
 
-    TEST(gdalOpenPolicy, vrtNestingStopsAtTwoLevels)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtNestingStopsAtTwoLevels)
     {
         Scene s(TEST_NAME);
         writeGeoTiff(s.dataset / "a.tif");
@@ -492,7 +493,7 @@ namespace
         EXPECT_NE(verdict.reason.find("nested"), std::string::npos) << verdict.reason;
     }
 
-    TEST(gdalOpenPolicy, vrtSymlinkOutOfTheFolderIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtSymlinkOutOfTheFolderIsRefused)
     {
         Scene s(TEST_NAME);
         std::error_code ec;
@@ -562,7 +563,7 @@ namespace
         return suffixes;
     }
 
-    TEST(gdalOpenPolicy, vrtNamedAsTheOverviewsOrMaskOfARasterIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtNamedAsTheOverviewsOrMaskOfARasterIsRefused)
     {
         Scene s(TEST_NAME);
         const fs::path secret = writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -596,7 +597,7 @@ namespace
         }
     }
 
-    TEST(gdalOpenPolicy, vrtNamedAsTheOverviewsOfASidecarIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtNamedAsTheOverviewsOfASidecarIsRefused)
     {
         Scene s(TEST_NAME);
         const fs::path secret = writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -609,7 +610,7 @@ namespace
         EXPECT_EQ(openUserRaster(io::toUtf8(tif)), nullptr);
     }
 
-    TEST(gdalOpenPolicy, vrtBehindAnErdasAuxHeaderIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtBehindAnErdasAuxHeaderIsRefused)
     {
         if (!hasDriver("HFA"))
             GTEST_SKIP() << "No HFA driver";
@@ -633,7 +634,7 @@ namespace
         EXPECT_NE(openUserRaster(io::toUtf8(tif)), nullptr);
     }
 
-    TEST(gdalOpenPolicy, vrtSourceWithAnUnsafeSidecarIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtSourceWithAnUnsafeSidecarIsRefused)
     {
         Scene s(TEST_NAME);
         const fs::path secret = writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -646,7 +647,7 @@ namespace
         EXPECT_EQ(openUserRaster(io::toUtf8(vrt)), nullptr);
     }
 
-    TEST(gdalOpenPolicy, sidecarThatIsASymbolicLinkIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, sidecarThatIsASymbolicLinkIsRefused)
     {
         Scene s(TEST_NAME);
         const fs::path tif = writeGeoTiff(s.dataset / "a.tif");
@@ -660,7 +661,7 @@ namespace
         EXPECT_EQ(openUserRaster(io::toUtf8(tif)), nullptr);
     }
 
-    TEST(gdalOpenPolicy, geoTiffOverviewsAndMaskNextToARasterKeepWorking)
+    USER_OPEN_TEST(gdalOpenPolicy, geoTiffOverviewsAndMaskNextToARasterKeepWorking)
     {
         Scene s(TEST_NAME);
         const fs::path tif = writeGeoTiff(s.dataset / "a.tif");
@@ -687,7 +688,7 @@ namespace
 
     // GDAL resolves only the path after a driver prefix (GTIFF_DIR:1:<path>) against the folder
     // of the VRT, so the prefix must not pass for a folder a ".." climbs out of
-    TEST(gdalOpenPolicy, vrtSourcesWithADriverPrefixOrInlineAreRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtSourcesWithADriverPrefixOrInlineAreRefused)
     {
         Scene s(TEST_NAME);
         writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -730,7 +731,7 @@ namespace
     // The attack on a POSIX file system: a folder named like the prefix, with a decoy raster
     // inside, makes the source look like a file of the dataset, while GDAL reads
     // <folder of the VRT>/../outside/secret-constant.tif
-    TEST(gdalOpenPolicy, vrtSourceWithADriverPrefixDoesNotClimbOutBehindADecoyFolder)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtSourceWithADriverPrefixDoesNotClimbOutBehindADecoyFolder)
     {
         Scene s(TEST_NAME);
         writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -755,7 +756,7 @@ namespace
     // includes (always, whatever the configuration) and, for a WFS response, the
     // DescribeFeatureType URL of its schemaLocation. A GML of a user names any URL, so opening
     // one must request none.
-    TEST(gdalOpenPolicy, gmlRequestsNoUrlWhileItOpens)
+    USER_OPEN_TEST(gdalOpenPolicy, gmlRequestsNoUrlWhileItOpens)
     {
         if (!hasDriver("GML"))
             GTEST_SKIP() << "No GML driver";
@@ -838,7 +839,7 @@ namespace
         EXPECT_FALSE(fs::exists(thumb));
     }
 
-    TEST(gdalOpenPolicy, overviewFileInTheMetadataOfARasterIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, overviewFileInTheMetadataOfARasterIsRefused)
     {
         Scene s(TEST_NAME);
         const fs::path secret = writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -866,7 +867,7 @@ namespace
         }
     }
 
-    TEST(gdalOpenPolicy, overviewFileInTheMetadataOfASidecarIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, overviewFileInTheMetadataOfASidecarIsRefused)
     {
         Scene s(TEST_NAME);
         const fs::path secret = writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -995,7 +996,7 @@ namespace
     };
 #endif
 
-    TEST(gdalOpenPolicy, overviewFileThatIsAnUrlIsRefusedWithoutARequest)
+    USER_OPEN_TEST(gdalOpenPolicy, overviewFileThatIsAnUrlIsRefusedWithoutARequest)
     {
         Scene s(TEST_NAME);
 #ifndef _WIN32
@@ -1019,7 +1020,7 @@ namespace
 #endif
     }
 
-    TEST(gdalOpenPolicy, overviewFileInTheMetadataOfAJpeg2000IsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, overviewFileInTheMetadataOfAJpeg2000IsRefused)
     {
         if (!hasDriver("JP2OpenJPEG"))
             GTEST_SKIP() << "No JP2OpenJPEG driver";
@@ -1053,7 +1054,7 @@ namespace
         expectNoThumbnail(jp2, s.area);
     }
 
-    TEST(gdalOpenPolicy, vrtSourceWhoseMetadataNamesAnOverviewFileIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtSourceWhoseMetadataNamesAnOverviewFileIsRefused)
     {
         Scene s(TEST_NAME);
         const fs::path secret = writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -1076,7 +1077,7 @@ namespace
         EXPECT_EQ(openUserRaster(io::toUtf8(vrt)), nullptr);
     }
 
-    TEST(gdalOpenPolicy, geolocationArraysInTheMetadataOfARasterAreRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, geolocationArraysInTheMetadataOfARasterAreRefused)
     {
         Scene s(TEST_NAME);
         const fs::path secret = writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -1098,7 +1099,7 @@ namespace
 
     // A GeoTIFF band reads its attribute table from <name>.vat.dbf, opened with all the vector
     // drivers of GDAL: an OGR VRT under that name reads the layer it lists
-    TEST(gdalOpenPolicy, attributeTableThatIsNotADbaseTableIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, attributeTableThatIsNotADbaseTableIsRefused)
     {
         if (!hasDriver("OGR_VRT"))
             GTEST_SKIP() << "No OGR_VRT driver";
@@ -1119,7 +1120,7 @@ namespace
         EXPECT_EQ(openUserRaster(io::toUtf8(tif)), nullptr);
     }
 
-    TEST(gdalOpenPolicy, attributeTableThatIsADbaseTableKeepsWorking)
+    USER_OPEN_TEST(gdalOpenPolicy, attributeTableThatIsADbaseTableKeepsWorking)
     {
         if (!hasDriver("ESRI Shapefile"))
             GTEST_SKIP() << "No ESRI Shapefile driver";
@@ -1202,7 +1203,7 @@ namespace
                zeros18 + "</MDI></Metadata></RPCTransformer>";
     }
 
-    TEST(gdalOpenPolicy, vrtThatWarpsWithArraysOrADemOutsideIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtThatWarpsWithArraysOrADemOutsideIsRefused)
     {
         Scene s(TEST_NAME);
         writeGeoTiff(s.dataset / "a.tif");
@@ -1219,7 +1220,7 @@ namespace
     }
 
     // What a VRT names that GDAL would read, smuggled past a check of the elements it expects
-    TEST(gdalOpenPolicy, vrtWithAnythingAPlainVrtDoesNotReadIsRefused)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtWithAnythingAPlainVrtDoesNotReadIsRefused)
     {
         Scene s(TEST_NAME);
         writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -1292,7 +1293,7 @@ namespace
     }
 
     // The VRTs GDAL writes and what a plain VRT holds keep opening
-    TEST(gdalOpenPolicy, vrtsThatGdalWritesKeepOpening)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtsThatGdalWritesKeepOpening)
     {
         Scene s(TEST_NAME);
         const fs::path a = writeGeoTiff(s.dataset / "tiles" / "a.tif");
@@ -1372,7 +1373,7 @@ namespace
     // The files a VRT names request nothing while it opens: neither the transformer of a
     // warped VRT, nor the overviews its metadata names, which GDAL opens as early as the open
     // of a VRT with an OverviewList
-    TEST(gdalOpenPolicy, vrtRequestsNoUrlItsTransformerOrMetadataNames)
+    USER_OPEN_TEST(gdalOpenPolicy, vrtRequestsNoUrlItsTransformerOrMetadataNames)
     {
         Scene s(TEST_NAME);
         writeGeoTiff(s.dataset / "a.tif");
@@ -1409,7 +1410,7 @@ namespace
 
     // The GML driver reads the schemas the .xsd next to a GML includes with VSI, so a
     // /vsicurl/ schema is requested by curl itself, not through the HTTP callbacks GDAL offers
-    TEST(gdalOpenPolicy, gmlRequestsNoSchemaThroughANetworkFileSystem)
+    USER_OPEN_TEST(gdalOpenPolicy, gmlRequestsNoSchemaThroughANetworkFileSystem)
     {
         if (!hasDriver("GML"))
             GTEST_SKIP() << "No GML driver";
@@ -1434,7 +1435,7 @@ namespace
 
     // A remote raster libddb opens by its URL (a tile source, a thumbnail) still opens over the
     // network: the file being opened is the one file the network file systems open meanwhile
-    TEST(gdalOpenPolicy, theFileBeingOpenedIsStillReadOverTheNetwork)
+    USER_OPEN_TEST(gdalOpenPolicy, theFileBeingOpenedIsStillReadOverTheNetwork)
     {
         Scene s(TEST_NAME);
         NotFoundServer server;

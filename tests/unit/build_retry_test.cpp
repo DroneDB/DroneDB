@@ -23,11 +23,12 @@
 #include "testarea.h"
 #include "untwine_runner.h"
 #include "vector.h"
+#include "user_open_child.h"
 
 namespace {
 using namespace ddb;
 
-TEST(BuildRetryClassification, VectorTranslateAndClosePropagateStructuredNoSpace) {
+USER_OPEN_TEST(BuildRetryClassification, VectorTranslateAndClosePropagateStructuredNoSpace) {
     // The test makes the write of a GDAL driver of this process fail
     testutils::InProcessRasterHelper helper;
     const raster::ScopedRasterHelper installed(helper);

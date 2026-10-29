@@ -15,6 +15,10 @@ namespace testutils
     // tests that look into the process while an operation runs (its GDAL log, a write of a GDAL
     // driver that the test makes fail, the cache of GDAL). The tests that only need the result use
     // the program. Install it with ddb::raster::ScopedRasterHelper.
+    //
+    // The operations open files of users, which only the helper does: a test that uses this class
+    // runs its body in a child that plays the helper (USER_OPEN_TEST in user_open_child.h), so the
+    // log, the hooks and the cache it looks into are the child's own.
     class InProcessRasterHelper : public ddb::raster::IRasterHelper
     {
     public:

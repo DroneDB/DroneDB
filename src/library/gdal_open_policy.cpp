@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <initializer_list>
+#include <stdexcept>
 #include <string_view>
 
 #include "logger.h"
@@ -21,46 +22,6 @@ namespace ddb
 {
     namespace
     {
-        // Some drivers request URLs the file names while they open it: the GML driver fetches
-        // the schemas its .xsd includes, whatever the configuration, and the targets of its
-        // xlinks when the host turns their resolution on. A file of a user names any URL it
-        // likes, so while one opens, every HTTP request GDAL makes on this thread fails
-        // (the callbacks are per thread). The network file systems of GDAL (/vsicurl/,
-        // /vsis3/, ...) do not request through those callbacks but through curl itself, and
-        // a schema the .xsd includes may be a /vsicurl/ path: while a file opens, they open
-        // no other file than the one being opened (a remote raster libddb opens by its URL),
-        // a configuration option of this thread alone.
-        class NoHttpWhileOpening
-        {
-          public:
-            explicit NoHttpWhileOpening(const std::string &path)
-                : pushed_(CPLHTTPPushFetchCallback(&refuse, nullptr) != FALSE),
-                  onlyThisFile_("CPL_VSIL_CURL_ALLOWED_FILENAME", path.c_str())
-            {
-            }
-            ~NoHttpWhileOpening()
-            {
-                if (pushed_)
-                    CPLHTTPPopFetchCallback();
-            }
-            NoHttpWhileOpening(const NoHttpWhileOpening &) = delete;
-            NoHttpWhileOpening &operator=(const NoHttpWhileOpening &) = delete;
-
-          private:
-            static CPLHTTPResult *refuse(const char *url, CSLConstList, GDALProgressFunc, void *,
-                                         CPLHTTPFetchWriteFunc, void *, void *)
-            {
-                LOGW << "Refused to request " << url << " while opening a file";
-                auto *result = static_cast<CPLHTTPResult *>(CPLCalloc(1, sizeof(CPLHTTPResult)));
-                result->nStatus = 1;
-                result->pszErrBuf = CPLStrdup("no request is made while a file of a user opens");
-                return result;
-            }
-
-            bool pushed_;
-            ScopedThreadConfigOption onlyThisFile_;
-        };
-
         GDALDatasetUniquePtr openWith(const std::string &path, const std::vector<std::string> &drivers,
                                       unsigned int kind)
         {
@@ -70,7 +31,7 @@ namespace ddb
                 return nullptr;
             }
             const CPLStringList allowed = cslFromStrings(drivers);
-            const NoHttpWhileOpening noHttp(path);
+            const gdalopen::NoNetworkWhileOpening noNetwork(path);
             return adoptDataset(GDALOpenEx(path.c_str(), kind | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
                                            allowed.List(), nullptr, nullptr));
         }
@@ -185,15 +146,6 @@ namespace ddb
                 {"GEOLOCATION", "Y_DATASET"},
             };
 
-            // Whether the opened dataset names no other dataset in its metadata
-            VrtVerdict validateMetadataFiles(GDALDataset &dataset)
-            {
-                for (const auto &[domain, item] : MetadataFiles)
-                    if (const char *file = dataset.GetMetadataItem(item, domain); file != nullptr)
-                        return refuse(std::string("its ") + domain + " metadata names the file " + file);
-                return {true, {}};
-            }
-
             // Opens a file as a user file is opened, with `drivers` alone, and checks that its
             // metadata names no other dataset; refused when it does not open or names one
             VrtVerdict validateOpened(const std::string &file, const std::vector<std::string> &drivers,
@@ -202,7 +154,7 @@ namespace ddb
                 const auto dataset = openWith(file, drivers, kind);
                 if (!dataset)
                     return refuse(file + " does not open as a file of its kind");
-                if (const auto v = validateMetadataFiles(*dataset); !v.ok)
+                if (const auto v = validateMetadataFiles(datasetHandle(dataset)); !v.ok)
                     return refuse(file + ": " + v.reason);
                 return {true, {}};
             }
@@ -595,12 +547,14 @@ namespace ddb
 
         VrtVerdict validateVrt(const fs::path &path, const fs::path &root)
         {
+            requireUserFileOpens("validateVrt");
             // Absolute, so a VRT given as a bare file name still has a folder
             return validateVrtAt(fs::absolute(path), fs::absolute(root), 0);
         }
 
         VrtVerdict validateSidecars(const std::string &path)
         {
+            requireUserFileOpens("validateSidecars");
             return validateSidecars(path, 0);
         }
 
@@ -628,10 +582,61 @@ namespace ddb
         {
             return userFileOpens.load();
         }
+
+        void requireUserFileOpens(const char *what)
+        {
+            if (!userFileOpensEnabled())
+                throw std::logic_error(std::string(what) +
+                                       " opens a file of a user, which only the raster helper (gdal-util) does: "
+                                       "ask the helper (raster_helper.h) instead");
+        }
+
+        // Some drivers request URLs the file names while they open it: the GML driver fetches
+        // the schemas its .xsd includes, whatever the configuration, and the targets of its
+        // xlinks when the host turns their resolution on. A file of a user names any URL it
+        // likes, so while one opens, every HTTP request GDAL makes on this thread fails
+        // (the callbacks are per thread). The network file systems of GDAL (/vsicurl/,
+        // /vsis3/, ...) do not request through those callbacks but through curl itself, and
+        // a schema the .xsd includes may be a /vsicurl/ path: while a file opens, they open
+        // no other file than the one being opened (a remote raster libddb opens by its URL),
+        // a configuration option of this thread alone.
+        namespace
+        {
+            CPLHTTPResult *refuseRequest(const char *url, CSLConstList, GDALProgressFunc, void *,
+                                         CPLHTTPFetchWriteFunc, void *, void *)
+            {
+                LOGW << "Refused to request " << url << " while opening a file";
+                auto *result = static_cast<CPLHTTPResult *>(CPLCalloc(1, sizeof(CPLHTTPResult)));
+                result->nStatus = 1;
+                result->pszErrBuf = CPLStrdup("no request is made while a file opens");
+                return result;
+            }
+        } // namespace
+
+        NoNetworkWhileOpening::NoNetworkWhileOpening(const std::string &path)
+            : pushed_(CPLHTTPPushFetchCallback(&refuseRequest, nullptr) != FALSE),
+              onlyThisFile_("CPL_VSIL_CURL_ALLOWED_FILENAME", path.c_str())
+        {
+        }
+
+        NoNetworkWhileOpening::~NoNetworkWhileOpening()
+        {
+            if (pushed_)
+                CPLHTTPPopFetchCallback();
+        }
+
+        VrtVerdict validateMetadataFiles(GDALDatasetH dataset)
+        {
+            for (const auto &[domain, item] : MetadataFiles)
+                if (const char *file = GDALGetMetadataItem(dataset, item, domain); file != nullptr)
+                    return refuse(std::string("its ") + domain + " metadata names the file " + file);
+            return {true, {}};
+        }
     } // namespace gdalopen
 
     GDALDatasetUniquePtr openUserRaster(const std::string &path)
     {
+        gdalopen::requireUserFileOpens("openUserRaster");
         const auto drivers = gdalopen::rasterDrivers(path);
         if (drivers.empty())
             return openWith(path, drivers, GDAL_OF_RASTER);
@@ -656,7 +661,7 @@ namespace ddb
         // for or it is warped: refused before anything can ask
         if (dataset)
         {
-            if (const auto verdict = gdalopen::validateMetadataFiles(*dataset); !verdict.ok)
+            if (const auto verdict = gdalopen::validateMetadataFiles(datasetHandle(dataset)); !verdict.ok)
             {
                 LOGW << "Not opening " << path << ": " << verdict.reason;
                 return nullptr;
@@ -667,6 +672,7 @@ namespace ddb
 
     GDALDriverH identifyUserRaster(const std::string &path)
     {
+        gdalopen::requireUserFileOpens("identifyUserRaster");
         const auto drivers = gdalopen::rasterDrivers(path);
         if (drivers.empty())
             return nullptr;
@@ -676,6 +682,7 @@ namespace ddb
 
     GDALDatasetUniquePtr openUserVector(const std::string &path)
     {
+        gdalopen::requireUserFileOpens("openUserVector");
         return openWith(path, gdalopen::vectorDrivers(path), GDAL_OF_VECTOR);
     }
 } // namespace ddb

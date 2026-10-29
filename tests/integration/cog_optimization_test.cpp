@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 #include "gdal_inc.h"
+#include "user_open_child.h"
 
 namespace {
 
@@ -24,7 +25,7 @@ class CogOptimizationTest : public ::testing::Test {
   }
 };
 
-TEST_F(CogOptimizationTest, TestCogDetection) {
+USER_OPEN_TEST_F(CogOptimizationTest, TestCogDetection) {
     TestArea ta("CogOptimizationTest");
 
     // Download test files from DroneDB test data repository
@@ -46,7 +47,7 @@ TEST_F(CogOptimizationTest, TestCogDetection) {
         << "Non-COG file should not be detected as optimized";
 }
 
-TEST_F(CogOptimizationTest, TestBuildCogOptimization) {
+USER_OPEN_TEST_F(CogOptimizationTest, TestBuildCogOptimization) {
     TestArea ta("CogOptimizationTest");
 
     // Download COG test file: 1913 x 1860 RGB pixels of 7.3 cm in Web Mercator, YCbCr JPEG of
@@ -121,7 +122,7 @@ TEST_F(CogOptimizationTest, TestBuildCogOptimization) {
     GDALClose(input);
 }
 
-TEST_F(CogOptimizationTest, TestBuildCogFromNonOptimized) {
+USER_OPEN_TEST_F(CogOptimizationTest, TestBuildCogFromNonOptimized) {
     TestArea ta("CogOptimizationTest");
 
     // Download non-COG test file
@@ -145,7 +146,7 @@ TEST_F(CogOptimizationTest, TestBuildCogFromNonOptimized) {
         << "Output from non-COG should be optimized after rebuild";
 }
 
-TEST_F(CogOptimizationTest, TestInvalidFiles) {
+USER_OPEN_TEST_F(CogOptimizationTest, TestInvalidFiles) {
     // Test with non-existent file
     EXPECT_FALSE(ddb::isOptimizedCog("non_existent_file.tif"))
         << "Non-existent file should return false";

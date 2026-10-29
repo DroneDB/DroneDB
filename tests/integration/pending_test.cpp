@@ -36,6 +36,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
+#include "user_open_child.h"
 
 namespace {
 
@@ -575,7 +576,7 @@ TEST(PendingBuild, ShapefileSidecarInSubfolderBuildsMainFile) {
     EXPECT_TRUE(fs::exists(out / "mvt" / "metadata.json"));
 }
 
-TEST(PendingBuild, VectorNoSpaceRetainsReleasedPendingMarkerWithFreshTimestamp) {
+USER_OPEN_TEST(PendingBuild, VectorNoSpaceRetainsReleasedPendingMarkerWithFreshTimestamp) {
     for (const std::string driver : {"MVT", "GPKG"})
         for (const bool onClose : {false, true}) {
             SCOPED_TRACE(driver + (onClose ? " close" : " translate"));

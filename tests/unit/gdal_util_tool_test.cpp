@@ -37,6 +37,7 @@
 #include "raster_test_utils.h"
 #include "testarea.h"
 #include "tool_locator.h"
+#include "user_open_child.h"
 
 namespace
 {
@@ -377,7 +378,7 @@ namespace
 
     // The entry of a file is built from the probe: the helper must tell exactly what the library
     // finds in the process, down to the last digit of a coordinate
-    TEST_F(GdalUtilToolTest, theProbeOfTheHelperEqualsTheProbeInTheProcess)
+    USER_OPEN_TEST_F(GdalUtilToolTest, theProbeOfTheHelperEqualsTheProbeInTheProcess)
     {
         Server server;
         const std::vector<std::pair<fs::path, raster::ProbeParams>> files = {
@@ -443,7 +444,7 @@ namespace
 
     // ------------------------------------------------------------------ thumbnail
 
-    TEST_F(GdalUtilToolTest, aJpegThumbnailIsAValidWebpFileEqualToTheOneInTheProcess)
+    USER_OPEN_TEST_F(GdalUtilToolTest, aJpegThumbnailIsAValidWebpFileEqualToTheOneInTheProcess)
     {
         const fs::path out = area_->getFolder() / "photo.webp";
         raster::ThumbnailParams params;
@@ -467,7 +468,7 @@ namespace
         EXPECT_EQ(bytes, readFile(expected));
     }
 
-    TEST_F(GdalUtilToolTest, aThumbnailWithVisualisationParametersEqualsTheOneInTheProcess)
+    USER_OPEN_TEST_F(GdalUtilToolTest, aThumbnailWithVisualisationParametersEqualsTheOneInTheProcess)
     {
         const fs::path out = area_->getFolder() / "bands.webp";
         raster::ThumbnailParams params;
@@ -686,7 +687,7 @@ namespace
 
     // ------------------------------------------------------------------ --request
 
-    TEST_F(GdalUtilToolTest, oneRequestOnTheCommandLineGivesOneResponseLine)
+    USER_OPEN_TEST_F(GdalUtilToolTest, oneRequestOnTheCommandLineGivesOneResponseLine)
     {
         const ToolRun run = runTool({"--request", raster::encodeRequest(probeRequest(41, geotiff_))});
         ASSERT_EQ(run.lines.size(), 1u) << run.stderrText;
@@ -737,7 +738,7 @@ namespace
         return dxf;
     }
 
-    TEST_F(GdalUtilToolTest, theHostClientProbesThroughTheRealProgramWhatTheProcessFinds)
+    USER_OPEN_TEST_F(GdalUtilToolTest, theHostClientProbesThroughTheRealProgramWhatTheProcessFinds)
     {
         raster::GdalUtilHelper helper;
 
@@ -763,7 +764,7 @@ namespace
         helper.shutdown();
     }
 
-    TEST_F(GdalUtilToolTest, anEntryMadeThroughTheRealProgramHasWhatTheProcessFinds)
+    USER_OPEN_TEST_F(GdalUtilToolTest, anEntryMadeThroughTheRealProgramHasWhatTheProcessFinds)
     {
         Entry entry;
         parseEntry(geotiff_, area_->getFolder(), entry, false);
@@ -777,7 +778,7 @@ namespace
         EXPECT_EQ(entry.polygon_geom.toWkt(), expected.polygon_geom.toWkt());
     }
 
-    TEST_F(GdalUtilToolTest, aThumbnailMadeThroughTheRealProgramEqualsTheOneInTheProcess)
+    USER_OPEN_TEST_F(GdalUtilToolTest, aThumbnailMadeThroughTheRealProgramEqualsTheOneInTheProcess)
     {
         raster::ThumbnailParams plain{32, std::nullopt};
         const fs::path expected = area_->getFolder() / "expected.webp";
@@ -891,7 +892,7 @@ namespace
         return stats;
     }
 
-    TEST_F(GdalUtilToolTest, aCogBuiltByTheProgramEqualsTheCogBuiltInTheProcess)
+    USER_OPEN_TEST_F(GdalUtilToolTest, aCogBuiltByTheProgramEqualsTheCogBuiltInTheProcess)
     {
         const fs::path inProcess = area_->getFolder() / "in-process.tif";
         raster::buildCogFile(geotiff_, inProcess, raster::CogParams(), raster::ProgressCallback());
@@ -1030,7 +1031,7 @@ namespace
         EXPECT_TRUE(fs::exists(io::concat(out, ".stats.json")));
     }
 
-    TEST_F(GdalUtilToolTest, aCogIsEncodedAgainAndNeverCopied)
+    USER_OPEN_TEST_F(GdalUtilToolTest, aCogIsEncodedAgainAndNeverCopied)
     {
         testutils::GeoRasterSpec spec;
         spec.width = 600;
@@ -1048,7 +1049,7 @@ namespace
         expectEncodedAgainAtItsOwnGrid(foreign, area_->getFolder() / "again.tif");
     }
 
-    TEST_F(GdalUtilToolTest, anRgbCogWithoutLossIsEncodedAgainWithoutLoss)
+    USER_OPEN_TEST_F(GdalUtilToolTest, anRgbCogWithoutLossIsEncodedAgainWithoutLoss)
     {
         // Eight-bit RGB, which libddb compresses with JPEG when it resamples a raster
         testutils::GeoRasterSpec spec;
@@ -1108,7 +1109,7 @@ namespace
         return files;
     }
 
-    TEST_F(GdalUtilToolTest, theVectorOutputsOfTheProgramAreTheOnesBuiltInTheProcess)
+    USER_OPEN_TEST_F(GdalUtilToolTest, theVectorOutputsOfTheProgramAreTheOnesBuiltInTheProcess)
     {
         const fs::path inProcess = area_->getFolder() / "stage-process";
         const fs::path byProgram = area_->getFolder() / "stage-program";
@@ -1167,7 +1168,7 @@ namespace
         return params;
     }
 
-    TEST_F(GdalUtilToolTest, aPhotoIsGeoprojectedByTheProgramLikeInTheProcess)
+    USER_OPEN_TEST_F(GdalUtilToolTest, aPhotoIsGeoprojectedByTheProgramLikeInTheProcess)
     {
         const fs::path inProcess = area_->getFolder() / "projected-process.tif";
         raster::geoprojectImage(jpeg_, inProcess, photoParams());

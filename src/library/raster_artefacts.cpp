@@ -3,9 +3,6 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_artefacts.h"
 
-#include <cpl_conv.h>
-#include <cpl_http.h>
-
 #include <algorithm>
 #include <iomanip>
 #include <optional>
@@ -18,6 +15,7 @@
 #include "entry_handler.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
+#include "gdal_open_policy.h"
 #include "hash.h"
 #include "logger.h"
 #include "randomutil.h"
@@ -38,6 +36,14 @@ namespace ddb
             // other files to read, and an artefact is one file.
             const std::vector<std::string> kRasterDrivers = {"GTiff", "COG"};
             const std::vector<std::string> kVectorDrivers = {"GPKG"};
+
+            // A file of the memory file system of GDAL: what is in it was written by this process
+            // (a segment ".." would leave the file system)
+            bool isMemoryFile(const fs::path &path)
+            {
+                const std::string text = io::toUtf8(path);
+                return text.rfind("/vsimem/", 0) == 0 && text.find("..") == std::string::npos;
+            }
 
             // The scratch folders of the helper requests are named with this
             constexpr const char *kRequestFolderMark = "req-";
@@ -92,52 +98,38 @@ namespace ddb
                 return false;
             }
 
-            // While an artefact opens GDAL makes no HTTP request and its network file systems
-            // (/vsicurl/ ...) open no other file than the one being opened, as when a file of a
-            // user opens (gdal_open_policy.cpp): an artefact is a file libddb wrote, but what the
-            // helper copied into it came from a file of a user
-            class NoNetworkWhileOpening
+            // Opens `path` read-only or for update with `drivers` alone. While it opens GDAL makes
+            // no HTTP request and opens no other file through its network file systems, as when
+            // a file of a user opens: an artefact is a file libddb wrote, but what the helper
+            // copied into it came from a file of a user. A dataset whose metadata names another
+            // dataset is not opened either, since GDAL would open that one later with all its
+            // drivers: the copy of a raster leaves none of those items, and one found here was
+            // put there by something other than libddb.
+            GDALDatasetUniquePtr openWithDrivers(const std::string &utf8, const std::vector<std::string> &drivers,
+                                                 unsigned int kind, bool update)
             {
-              public:
-                explicit NoNetworkWhileOpening(const std::string &path)
-                    : pushed_(CPLHTTPPushFetchCallback(&refuse, nullptr) != FALSE),
-                      onlyThisFile_("CPL_VSIL_CURL_ALLOWED_FILENAME", path.c_str())
+                const CPLStringList allowed = cslFromStrings(drivers);
+                const gdalopen::NoNetworkWhileOpening noNetwork(utf8);
+                auto dataset = adoptDataset(GDALOpenEx(
+                    utf8.c_str(), kind | (update ? GDAL_OF_UPDATE : GDAL_OF_READONLY) | GDAL_OF_VERBOSE_ERROR,
+                    allowed.List(), nullptr, nullptr));
+                if (!dataset)
+                    return dataset;
+                if (const auto verdict = gdalopen::validateMetadataFiles(datasetHandle(dataset)); !verdict.ok)
                 {
+                    LOGW << "Not opening " << utf8 << ": " << verdict.reason;
+                    return nullptr;
                 }
-                ~NoNetworkWhileOpening()
-                {
-                    if (pushed_)
-                        CPLHTTPPopFetchCallback();
-                }
-                NoNetworkWhileOpening(const NoNetworkWhileOpening &) = delete;
-                NoNetworkWhileOpening &operator=(const NoNetworkWhileOpening &) = delete;
-
-              private:
-                static CPLHTTPResult *refuse(const char *url, CSLConstList, GDALProgressFunc, void *,
-                                             CPLHTTPFetchWriteFunc, void *, void *)
-                {
-                    LOGW << "Refused to request " << url << " while opening an artefact";
-                    auto *result = static_cast<CPLHTTPResult *>(CPLCalloc(1, sizeof(CPLHTTPResult)));
-                    result->nStatus = 1;
-                    result->pszErrBuf = CPLStrdup("no request is made while an artefact opens");
-                    return result;
-                }
-
-                bool pushed_;
-                ScopedThreadConfigOption onlyThisFile_;
-            };
+                return dataset;
+            }
 
             GDALDatasetUniquePtr openArtefact(const fs::path &path, const std::vector<std::string> &drivers,
-                                              unsigned int kind)
+                                              unsigned int kind, bool update)
             {
                 if (!isLibddbArtefact(path))
                     throw GDALException("Refusing to open " + io::toUtf8(path) +
                                         ": it is not a file libddb wrote (build the dataset, or copy it with the raster helper, first)");
-                const std::string utf8 = io::toUtf8(path);
-                const CPLStringList allowed = cslFromStrings(drivers);
-                const NoNetworkWhileOpening noNetwork(utf8);
-                return adoptDataset(GDALOpenEx(utf8.c_str(), kind | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
-                                               allowed.List(), nullptr, nullptr));
+                return openWithDrivers(io::toUtf8(path), drivers, kind, update);
             }
         } // namespace
 
@@ -155,6 +147,8 @@ namespace ddb
         {
             if (path.empty())
                 return false;
+            if (isMemoryFile(path))
+                return true;
             std::error_code ec;
             const fs::path resolved = fs::weakly_canonical(fs::absolute(path, ec), ec);
             if (ec)
@@ -178,14 +172,25 @@ namespace ddb
             return Hash::strCRC64(key.str());
         }
 
-        GDALDatasetUniquePtr openArtefactRaster(const fs::path &path)
+        GDALDatasetUniquePtr openArtefactRaster(const fs::path &path, ArtefactAccess access)
         {
-            return openArtefact(path, kRasterDrivers, GDAL_OF_RASTER);
+            return openArtefact(path, kRasterDrivers, GDAL_OF_RASTER, access == ArtefactAccess::Update);
         }
 
         GDALDatasetUniquePtr openArtefactVector(const fs::path &path)
         {
-            return openArtefact(path, kVectorDrivers, GDAL_OF_VECTOR);
+            return openArtefact(path, kVectorDrivers, GDAL_OF_VECTOR, false);
+        }
+
+        GDALDatasetUniquePtr reopenWrittenRaster(const fs::path &path, ArtefactAccess access)
+        {
+            std::error_code ec;
+            if (!fs::is_regular_file(fs::symlink_status(path, ec)) || ec)
+            {
+                LOGW << "Not reopening " << io::toUtf8(path) << ": it is not a regular file";
+                return nullptr;
+            }
+            return openWithDrivers(io::toUtf8(path), kRasterDrivers, GDAL_OF_RASTER, access == ArtefactAccess::Update);
         }
 
         io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix)
