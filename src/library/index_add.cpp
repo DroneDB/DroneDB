@@ -53,6 +53,9 @@ namespace ddb
 
     const char *addErrorCode(const std::exception &ex) noexcept
     {
+        // A helper program that cannot be used is no problem of the item: the batch stops, whatever
+        // else the exception is
+        if (dynamic_cast<const HelperUnavailableException *>(&ex)) return nullptr;
         if (dynamic_cast<const FSException *>(&ex)) return "FS";
         if (dynamic_cast<const GDALException *>(&ex)) return "GDAL";
         if (dynamic_cast<const PDALException *>(&ex)) return "PDAL";

@@ -6,20 +6,17 @@
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <memory>
-#include <mutex>
-#include <optional>
 #include <string>
 #include <vector>
 
 #include "exif_metadata.h"
 #include "exif_protocol.h"
 #include "fs.h"
+#include "helper_pool.h"
 
 namespace ddb
 {
@@ -54,7 +51,9 @@ namespace ddb
         };
 
         // Reads and writes metadata through a pool of metadata-util processes (`metadata-util --serve`,
-        // vendor/metadata-util).
+        // vendor/metadata-util). The pool itself (helper_pool.h) is generic; this class is the
+        // metadata protocol on top of it: the requests and responses (exif_protocol.h), the
+        // accepted protocol versions, the mapping of a broken helper to an IndexException.
         //
         //   - A helper serves one request at a time and is held by one caller at a time; between
         //     requests it waits idle in the pool.
@@ -120,61 +119,33 @@ namespace ddb
             // for all of them, then a kill for the ones still there. Helpers held by a caller
             // are closed when it returns them. The pool can be used again afterwards. Returns the
             // number of helpers closed.
-            size_t shutdown();
+            size_t shutdown() { return pool_.shutdown(); }
 
             // What the tests observe the pool through: how many processes it started and how
             // many requests it sent over the life of the object, the helpers waiting and the
             // helpers held right now, the callers queued for a helper, and the process ids of the
             // idle helpers. awaitWaiters() blocks until `count` callers are queued (false after
             // the timeout), so a test queues callers in a known order without sleeping.
-            size_t startedHelpers() const { return started_.load(); }
-            size_t requestsSent() const { return requests_.load(); }
-            size_t idleHelpers() const;
-            size_t busyHelpers() const;
-            size_t queuedCallers() const;
-            bool awaitWaiters(size_t count, std::chrono::milliseconds timeout) const;
-            std::vector<unsigned long> idleHelperPids() const;
+            size_t startedHelpers() const { return pool_.startedHelpers(); }
+            size_t requestsSent() const { return pool_.requestsSent(); }
+            size_t idleHelpers() const { return pool_.idleHelpers(); }
+            size_t busyHelpers() const { return pool_.busyHelpers(); }
+            size_t queuedCallers() const { return pool_.queuedCallers(); }
+            bool awaitWaiters(size_t count, std::chrono::milliseconds timeout) const
+            {
+                return pool_.awaitWaiters(count, timeout);
+            }
+            std::vector<unsigned long> idleHelperPids() const { return pool_.idleHelperPids(); }
 
           private:
-            struct Helper;
-            class Lease;
-            struct Failure;
-            struct VerifiedProgram;
             struct Exchange;
             class PendingHelperRead;
 
-            using HelperList = std::vector<std::unique_ptr<Helper>>;
-
-            // Takes a helper (idle, or a new one) for the caller, waiting its turn
-            Lease acquire();
-            // The same without waiting: empty when the caller would wait, because no helper is
-            // idle and the pool is full, or because callers are queued (they came first)
-            std::optional<Lease> tryAcquire();
-            // What both do; `waitTurn`: queue and wait instead of returning empty
-            std::optional<Lease> take(bool waitTurn);
-            // Under the lock: a helper is idle, or the limit leaves room to start one
-            bool hasRoom() const;
-            // Under the lock: moves the idle helpers that are too old, or of another program than
-            // `program`, to `retired`
-            void collectRetired(const fs::path &program, HelperList &retired);
-            fs::path locateProgram() const;
-            std::unique_ptr<Helper> startHelper(const fs::path &program);
-            // checkVersion() of `program`, once for the file as it is now
-            protocol::Version verifiedVersion(const fs::path &program);
-            // The protocol version `program` reports. @throws MetadataHelperException when it does
-            // not run, reports none, or is not accepted (protocol::isAccepted)
-            protocol::Version checkVersion(const fs::path &program) const;
-
-            // Gives back a helper the caller held (keep: it is healthy and goes idle if the pool
-            // has room and no shutdown() happened since the caller took it, `generation`), or
-            // only its place when there is none
-            void release(std::unique_ptr<Helper> helper, bool keep, uint64_t generation) noexcept;
-            // Closes helpers that are out of the pool; returns how many
-            size_t retire(HelperList &helpers) const;
+            using Lease = helper::Pool::Lease;
 
             // One request and its response on a helper of the pool: receive(send(...)). Both
-            // throw Failure (after the helper is discarded and logged) when the helper breaks;
-            // the failure of a file (ok: false with an error that names the file) is a
+            // throw helper::Failure (after the helper is discarded and logged) when the helper
+            // breaks; the failure of a file (ok: false with an error that names the file) is a
             // response.
             protocol::Response serve(const fs::path &file, protocol::Operation operation,
                                      const std::string &request, int64_t id);
@@ -183,36 +154,11 @@ namespace ddb
                           const std::string &request, int64_t id);
             // Reads and checks the response; the helper goes back to the pool when it is good
             protocol::Response receive(Exchange &exchange);
-            // Kills and drops the helper of `lease`, logs why, and throws Failure(reason).
-            // `mayHaveEnded`: the helper may have exited by itself, so its exit status is worth
-            // a short wait.
-            [[noreturn]] void fail(Lease &lease, const fs::path &file, protocol::Operation operation,
-                                   const std::string &reason, bool mayHaveEnded) const;
 
-            const Options options_;
-            const std::function<fs::path()> locate_;
-            const std::function<size_t()> limit_;
-            const std::function<Clock::time_point()> now_;
-
-            mutable std::mutex mutex_;
-            mutable std::condition_variable changed_;
-            // The oldest first: callers take the newest
-            HelperList idle_;
-            // Callers hold a helper, or the place for one they are starting
-            size_t busy_ = 0;
-            // The callers waiting for a helper, first come first served
-            std::deque<uint64_t> queue_;
-            uint64_t nextTicket_ = 0;
-            // Helpers of an older generation (before a shutdown()) are closed when returned
-            uint64_t generation_ = 0;
-
-            // The programs whose version was accepted; held while a version is checked
-            std::timed_mutex versionMutex_;
-            std::vector<VerifiedProgram> verified_;
-
+            // The time a request may take to be written, and a response to arrive
+            const std::chrono::milliseconds requestTimeout_;
+            helper::Pool pool_;
             std::atomic<int64_t> nextId_{1};
-            std::atomic<size_t> started_{0};
-            std::atomic<size_t> requests_{0};
         };
 
     } // namespace exif

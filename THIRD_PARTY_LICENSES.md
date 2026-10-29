@@ -250,8 +250,10 @@ JSON-lines protocol ([`vendor/metadata-util/PROTOCOL.md`](vendor/metadata-util/P
 a request line per file, a response line with the tags), which is the
 whole boundary between the two programs. The client side is DroneDB's
 own MPL-licensed code:
+[`src/library/helper_pool.cpp`](src/library/helper_pool.cpp)
+starts and reuses the helper processes, and
 [`src/library/exif_helper_pool.cpp`](src/library/exif_helper_pool.cpp)
-starts and reuses the `metadata-util` processes,
+applies it to `metadata-util`,
 [`src/library/exif_protocol.cpp`](src/library/exif_protocol.cpp) writes
 the requests and decodes the responses, and
 [`src/include/exif_metadata.h`](src/include/exif_metadata.h) with
