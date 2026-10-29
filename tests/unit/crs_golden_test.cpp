@@ -25,6 +25,7 @@
 #include "entry.h"
 #include "gdal_inc.h"
 #include "gdaltiler.h"
+#include "tilerhelper.h"
 #include "raster_region.h"
 #include "vector.h"
 #include "vector_query.h"
@@ -116,7 +117,7 @@ namespace
         for (const auto &place : kPlaces)
         {
             const fs::path ortho = makeOrtho(ta.getPath(std::string(place.name) + ".tif"), place);
-            GDALTiler tiler(ortho.string(), "", 256, false);
+            GDALTiler tiler(TilerHelper::toGeoTIFF(ortho).string(), "", 256, false);
             const auto zooms = tiler.getMinMaxZ();
             out[place.name]["zooms"] = {zooms.min, zooms.max};
             for (const int z : {zooms.min, zooms.max})

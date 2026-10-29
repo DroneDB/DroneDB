@@ -25,7 +25,10 @@
 #include "mvt.h"
 #include "logger.h"
 #include "mio.h"
+#include "raster_artefacts.h"
 #include "raster_cache.h"
+#include "raster_helper.h"
+#include "raster_ops.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 
@@ -824,6 +827,40 @@ namespace ddb
 
     } // anonymous namespace
 
+    namespace raster
+    {
+
+        void buildVectorFiles(const fs::path &path, const fs::path &outFolder, const VectorParams &params)
+        {
+            // The file the user named: a DWG whose conversion `path` is gives the drawing its
+            // sidecars (the .prj next to it) and its name
+            const fs::path original = params.source.empty() ? path : params.source;
+            const std::string input = io::toUtf8(original);
+            const std::string openPath = io::toUtf8(path);
+            const bool isCad = cad::isCadFile(original);
+
+            // Open the source once, reuse it for both branches
+            const auto srcDS = openUserVector(openPath);
+            if (!srcDS)
+                throw RasterOpException(ErrorCode::Unreadable, "Cannot open vector source: " + input);
+            GDALDatasetH hSrcDS = datasetHandle(srcDS);
+
+            // Layers without an SRS: EPSG:4326 for non-CAD inputs (historical
+            // behaviour), the drawing's CRS for CAD, nothing for a local drawing.
+            const VectorSourceCrs source = resolveSourceCrs(input, openPath, isCad, hSrcDS);
+
+            const fs::path stagingVec = outFolder / VectorBuildSubfolder;
+            const fs::path stagingMvt = outFolder / MvtBuildSubfolder;
+            io::assureFolderExists(stagingVec);
+            // MVT driver creates its own output dir; ensure parent exists
+            // and the target child does not (pre-empt leftovers).
+            io::assureIsRemoved(stagingMvt);
+
+            stageOutputs(hSrcDS, input, source, stagingVec, stagingMvt);
+        }
+
+    } // namespace raster
+
     void buildVector(const std::string &input,
                      const std::string &baseOutputPath,
                      bool overwrite)
@@ -844,24 +881,6 @@ namespace ddb
         const fs::path basePath = io::fromUtf8(baseOutputPath);
         io::assureFolderExists(basePath);
 
-        // Step 2: CAD drawings: a DWG is converted to a temporary DXF (staged
-        // next to the outputs), and the CRS comes from the drawing (cad.h).
-        const bool isCad = cad::isCadFile(io::fromUtf8(input));
-        std::optional<cad::CadSource> cadSource;
-        if (isCad)
-            cadSource.emplace(io::fromUtf8(input), nullptr, basePath);
-        const std::string openPath = isCad ? io::toUtf8(cadSource->dxfPath()) : input;
-
-        // Step 3: open source once, reuse for both branches
-        const auto srcDS = openUserVector(openPath);
-        if (!srcDS)
-            throw AppException("Cannot open vector source: " + input);
-        GDALDatasetH hSrcDS = datasetHandle(srcDS);
-
-        // Layers without an SRS: EPSG:4326 for non-CAD inputs (historical
-        // behaviour), the drawing's CRS for CAD, nothing for a local drawing.
-        const VectorSourceCrs source = resolveSourceCrs(input, openPath, isCad, hSrcDS);
-
         const fs::path vecDir = basePath / VectorBuildSubfolder;
         const fs::path mvtDir = basePath / MvtBuildSubfolder;
 
@@ -870,9 +889,7 @@ namespace ddb
         // the MVT tileset metadata.json, or local.json for a local drawing)
         // so we don't silently skip and produce a broken state.
         const bool vecExists = fs::exists(vecDir / VectorGpkgFileName);
-        const bool upToDate = source.local ? fs::exists(vecDir / VectorLocalFileName)
-                                           : fs::exists(mvtDir / MvtMetadataFileName) &&
-                                                 !fs::exists(vecDir / VectorLocalFileName);
+        const bool upToDate = fs::exists(vecDir / VectorLocalFileName) || fs::exists(mvtDir / MvtMetadataFileName);
 
         if (vecExists && upToDate && !overwrite)
         {
@@ -880,22 +897,32 @@ namespace ddb
             return;
         }
 
-        // Stage both outputs under a single sibling directory so that a
-        // crash partway through leaves at most one orphan directory to
-        // clean up. The publish step then promotes the children with a
-        // best-effort rollback if a rename fails.
-        // Removed on any throw from here on.
-        const io::ScopedTempDir staging = io::ScopedTempDir::create(basePath, VectorStagingPrefix);
-        const fs::path &stagingDir = staging.path();
-        const fs::path stagingVec = stagingDir / VectorBuildSubfolder;
-        const fs::path stagingMvt = stagingDir / MvtBuildSubfolder;
-        io::assureFolderExists(stagingVec);
-        // MVT driver creates its own output dir; ensure parent exists
-        // and the target child does not (pre-empt leftovers).
-        io::assureIsRemoved(stagingMvt);
+        // Step 2: CAD drawings: a DWG is converted to a temporary DXF (staged
+        // next to the outputs) here, with the converter program; the helper
+        // reads the DXF, and the CRS comes from the drawing (cad.h).
+        const bool isCad = cad::isCadFile(io::fromUtf8(input));
+        std::optional<cad::CadSource> cadSource;
+        if (isCad)
+            cadSource.emplace(io::fromUtf8(input), nullptr, basePath);
+        const fs::path openPath = isCad ? cadSource->dxfPath() : io::fromUtf8(input);
 
-        stageOutputs(hSrcDS, input, source, stagingVec, stagingMvt);
-        publishStaged(basePath, stagingDir, source.local);
+        // Step 3: the helper reads the file and stages both outputs under a single sibling
+        // directory, so that a crash partway through leaves at most one orphan directory
+        // to clean up. The publish step then promotes the children with a best-effort
+        // rollback if a rename fails. Removed on any throw from here on.
+        const io::ScopedTempDir staging = raster::makePrivateFolder(basePath, VectorStagingPrefix);
+        const fs::path &stagingDir = staging.path();
+
+        raster::VectorParams params;
+        if (isCad)
+            params.source = io::fromUtf8(input);
+        raster::rasterHelper().buildVector(openPath, stagingDir, raster::toJson(params), raster::ProgressCallback());
+
+        // A local drawing has no MVT pyramid: local.json says so
+        const bool local = fs::exists(stagingDir / VectorBuildSubfolder / VectorLocalFileName);
+        if (!fs::exists(stagingDir / VectorBuildSubfolder / VectorGpkgFileName))
+            throw AppException(std::string(raster::kGdalUtilName) + " built no GeoPackage for " + input);
+        publishStaged(basePath, stagingDir, local);
     }
 
 } // namespace ddb

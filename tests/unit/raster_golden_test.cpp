@@ -32,6 +32,7 @@
 #include "synthetic_raster_support.h"
 #include "gdal_inc.h"
 #include "gdaltiler.h"
+#include "tilerhelper.h"
 #include "mask.h"
 #include "merge_multispectral.h"
 #include "raster_region.h"
@@ -390,7 +391,7 @@ namespace
         }
 
         // Every tile of the raster at its deepest zoom level
-        GDALTiler tiler(ms.string(), "", 256, false);
+        GDALTiler tiler(TilerHelper::toGeoTIFF(ms).string(), "", 256, false);
         const auto zooms = tiler.getMinMaxZ();
         const auto bounds = tiler.getMinMaxCoordsForZ(zooms.max);
         for (const auto &f : kFormulas)

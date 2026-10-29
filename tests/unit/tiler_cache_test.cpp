@@ -34,7 +34,7 @@ namespace
     // Every tile of the deepest zoom of the raster (XYZ)
     std::vector<TileRef> maxZoomTiles(const fs::path &raster)
     {
-        GDALTiler t(raster.string(), "", 256);
+        GDALTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
         const int z = t.getMinMaxZ().max;
         auto b = t.getMinMaxCoordsForZ(z);
         std::vector<TileRef> tiles;
@@ -134,8 +134,10 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("float.tif"), floatRamp(0, 500));
-        // The COG build writes this sidecar; here it claims a range twice the data's
-        std::ofstream(raster.string() + ".stats.json")
+        // The COG the tiles come from has the sidecar the COG build writes; here it claims a
+        // range twice the data's
+        const auto cog = TilerHelper::toGeoTIFF(raster);
+        std::ofstream(cog.string() + ".stats.json")
             << R"({"bands":{"1":{"min":0,"max":1000,"mean":500,"std":100,"p2":20,"p98":980}}})";
 
         const auto before = RasterStatsProvider::instance().counters();
@@ -194,12 +196,13 @@ namespace
         spec.value = [](int, int, int) { return 10.0; };
         const auto raster = createGeoRaster(ta.getPath("rebuilt.tif"), spec);
         const auto tile = fullTile(raster);
-        EXPECT_EQ(maxOfBand(decodeImage(memoryTile(raster, tile)), 0), 10);
+        // The tiles come from a JPEG compressed COG: the values are near the ones written
+        EXPECT_NEAR(maxOfBand(decodeImage(memoryTile(raster, tile)), 0), 10, 3);
 
         // Rebuilt in place, as a COG build replaces its output
         spec.value = [](int, int, int) { return 200.0; };
         createGeoRaster(raster, spec);
-        EXPECT_EQ(maxOfBand(decodeImage(memoryTile(raster, tile)), 0), 200);
+        EXPECT_NEAR(maxOfBand(decodeImage(memoryTile(raster, tile)), 0), 200, 3);
     }
 
     TEST(TilerCache, releaseClosesIdleRasters)

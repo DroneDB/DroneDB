@@ -15,7 +15,7 @@
 
 #include "entry.h"
 #include "exceptions.h"
-#include "gdal_open_policy.h"
+#include "raster_artefacts.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "mio.h"
@@ -125,16 +125,11 @@ namespace ddb
 
     void GDALTiler::open()
     {
-        std::string openPath = inputPath;
-        if (io::isNetworkPath(openPath))
-        {
-            CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
-            CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff");
-
-            openPath = "/vsicurl/" + openPath;
-        }
-
-        fileDataset = openUserRaster(openPath);
+        // The tiler reads files that libddb wrote (a COG, a geoprojected photo), never a file of a
+        // user and never the network: TilerHelper converts a raster and downloads a remote one
+        // first
+        const std::string &openPath = inputPath;
+        fileDataset = raster::openArtefactRaster(io::fromUtf8(openPath));
         if (!fileDataset)
             throw GDALException("Cannot open " + openPath);
         inputDataset = datasetHandle(fileDataset);

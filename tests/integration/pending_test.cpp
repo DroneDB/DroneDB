@@ -29,8 +29,10 @@
 #include "gdal_write_failure.h"
 #include "gtest/gtest.h"
 #include "helpers/process_test_utils.h"
+#include "in_process_raster_helper.h"
 #include "ogr_api.h"
 #include "ogr_srs_api.h"
+#include "raster_helper.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
@@ -581,6 +583,9 @@ TEST(PendingBuild, VectorNoSpaceRetainsReleasedPendingMarkerWithFreshTimestamp) 
             // the Windows CreateDirectory limit (MAX_PATH - 12).
             Dataset ds("PendingBuild-VecNoSpace-" + driver + (onClose ? "-close" : "-translate"));
             deferShapefileInSubfolder(ds); // dependency was missing, then arrived
+            // The test makes the write of a GDAL driver of this process fail
+            testutils::InProcessRasterHelper helper;
+            const raster::ScopedRasterHelper installed(helper);
             const auto before = ddb::currentUnixTimestamp();
             {
                 EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");

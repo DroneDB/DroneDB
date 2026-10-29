@@ -14,7 +14,9 @@
 #include "build_budget.h"
 #include "cog.h"
 #include "gdal_inc.h"
+#include "in_process_raster_helper.h"
 #include "parallel.h"
+#include "raster_helper.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
@@ -153,6 +155,10 @@ namespace
         TestArea ta(TEST_NAME, true);
         const fs::path input = ta.downloadTestAsset(
             testDataUrl("ortho/brighton-beach.tif"), "brighton-beach.tif");
+
+        // The cache of GDAL is the one of the process that builds: this one
+        testutils::InProcessRasterHelper helper;
+        const raster::ScopedRasterHelper installed(helper);
 
         ConfigSnapshot snap({"DDB_COG_CACHE_MB", "CPL_DEBUG"});
         CPLSetConfigOption("DDB_COG_CACHE_MB", "64");

@@ -88,7 +88,8 @@
         },
         "wkt": { "type": "string", "minLength": 1 },
         "pointGeom": { "$ref": "#/$defs/point" },
-        "polygonGeom": { "$ref": "#/$defs/polygon" }
+        "polygonGeom": { "$ref": "#/$defs/polygon" },
+        "warning": { "type": "string", "minLength": 1 }
       }
     },
     "coordinate": {

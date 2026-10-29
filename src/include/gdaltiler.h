@@ -30,8 +30,9 @@ namespace ddb
         GeoExtent w;
     };
 
-    /// Renders web-map tiles from a georeferenced raster. The constructor opens the
-    /// raster and prepares it (SRS, warped VRT to EPSG:3857, bands, zoom range); every
+    /// Renders web-map tiles from a georeferenced raster that libddb wrote (an artefact,
+    /// raster_artefacts.h: a COG, a geoprojected photo; TilerHelper makes one from a file of a
+    /// user). The constructor opens the raster and prepares it (SRS, warped VRT to EPSG:3857, bands, zoom range); every
     /// tile then reads a window of it. An instance must not be used by two threads at
     /// once: RasterCache hands out one per caller and keeps them for the next tiles.
     class GDALTiler : public Tiler

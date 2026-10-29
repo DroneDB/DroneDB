@@ -24,6 +24,11 @@ namespace ddb
      * rebuilt so callers always observe a consistent pair.
      * Throws on failure; partial outputs are cleaned up.
      *
+     * The source is read by the raster helper (raster_helper.h): it builds both outputs in a
+     * private staging folder next to them, and this function publishes the folder. Whether the
+     * build is up to date is told by the outputs it finds (vec/source.gpkg and mvt/metadata.json,
+     * or vec/local.json for a drawing without a coordinate system).
+     *
      * Multi-layer sources (GPKG, KMZ, GPX) keep every layer that holds a
      * feature in BOTH outputs; empty layers are left out (all of them are
      * kept when every layer is empty).

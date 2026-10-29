@@ -15,8 +15,10 @@
 #include "gdal_write_failure.h"
 #include "gtest/gtest.h"
 #include "helpers/process_test_utils.h"
+#include "in_process_raster_helper.h"
 #include "mio.h"
 #include "plyconv.h"
+#include "raster_helper.h"
 #include "test.h"
 #include "testarea.h"
 #include "untwine_runner.h"
@@ -26,6 +28,9 @@ namespace {
 using namespace ddb;
 
 TEST(BuildRetryClassification, VectorTranslateAndClosePropagateStructuredNoSpace) {
+    // The test makes the write of a GDAL driver of this process fail
+    testutils::InProcessRasterHelper helper;
+    const raster::ScopedRasterHelper installed(helper);
     for (const std::string driver : {"MVT", "GPKG"})
         for (const bool onClose : {false, true}) {
             SCOPED_TRACE(driver + (onClose ? " close" : " translate"));

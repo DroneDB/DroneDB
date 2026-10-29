@@ -12,8 +12,13 @@
 
 namespace ddb {
 
-// Builds the cloud optimized GeoTIFF `outputCog` from a raster. The warp and the compression use
-// the threads of one build: DDB_BUILD_THREADS, lowered to options.threads.
+// Builds the cloud optimized GeoTIFF `outputCog` from a raster (a file of a user: the raster
+// helper reads it, raster_helper.h), always by decoding and encoding it again, also when it is a
+// COG already. The warp and the compression use the threads of one build: DDB_BUILD_THREADS,
+// lowered to options.threads, taken from the CPU pool of this process. Writes the statistics
+// next to it (generateCogStats). Throws what IRasterHelper::buildCog throws (a full device is
+// a RetryableBuildException, a process that prints nothing for the idle time one with the reason
+// IdleTimeout).
 void buildCog(const std::string& input, const std::string& outputCog, const BuildOptions& options = {});
 void generateCogStats(const std::string& cogPath);
 

@@ -25,6 +25,7 @@
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "gdaltiler.h"
+#include "tilerhelper.h"
 #include "mio.h"
 #include "pointcloud.h"
 #include "test.h"
@@ -53,6 +54,9 @@ namespace
         OSRDestroySpatialReference(srs);
         std::vector<int16_t> row(w);
         GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+        // The tiles come from the COG of the raster, whose grid of Web Mercator tiles is wider than the
+        // raster: the cells around it are nodata, and zero (a valid value) without one
+        GDALSetRasterNoDataValue(band, -32768);
         for (int y = 0; y < h; y++)
         {
             for (int x = 0; x < w; x++)
@@ -87,7 +91,7 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createNegativeRaster(ta.getPath("neg.tif"), 512, 512);
-        GDALTiler t(raster.string(), "", 256);
+        GDALTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
         const int tz = t.getMinMaxZ().max;
         const auto b = t.getMinMaxCoordsForZ(tz);
         // The brightest valid pixel over all tiles must be stretched to (close to)

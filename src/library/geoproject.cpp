@@ -14,6 +14,9 @@
 #include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
+#include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "raster_ops.h"
 
 namespace ddb
 {
@@ -42,20 +45,13 @@ namespace ddb
             return outputToDir;
         }
 
-        // Adds the -outsize arguments of `outsize` ("N" pixels of width, or "N%") for an image
-        // `width` pixels wide and returns the scale it stands for. Throws InvalidArgsException
-        // for text that is not a positive number.
-        double appendOutsize(CPLStringList &targs, const std::string &outsize, int width, int height)
+        // The scale `outsize` ("N" pixels of width, or "N%") stands for an image `width` pixels
+        // wide. Throws InvalidArgsException for text that is not a positive number.
+        double outsizeRatio(const std::string &outsize, int width)
         {
-            double ratio = 1.0;
-
-            targs.AddString("-outsize");
-            targs.AddString(outsize.c_str());
             try {
                 if (outsize.back() == '%')
                 {
-                    targs.AddString(outsize.c_str());
-
                     // Validate percentage format before conversion
                     std::string percentValue = outsize.substr(0, outsize.length() - 1);
                     for (char c : percentValue)
@@ -66,47 +62,59 @@ namespace ddb
                     if (value <= 0)
                         throw InvalidArgsException("Percentage must be positive: " + outsize);
 
-                    ratio = value / 100.0;
+                    return value / 100.0;
                 }
-                else
-                {
-                    // Validate numeric format before conversion
-                    for (char c : outsize)
-                        if (!str::isDigitChar(c) && c != '.' && c != '-' && c != '+')
-                            throw InvalidArgsException("Invalid numeric format: " + outsize);
 
-                    double value = std::stod(outsize);
-                    if (value <= 0)
-                        throw InvalidArgsException("Size must be positive: " + outsize);
+                // Validate numeric format before conversion
+                for (char c : outsize)
+                    if (!str::isDigitChar(c) && c != '.' && c != '-' && c != '+')
+                        throw InvalidArgsException("Invalid numeric format: " + outsize);
 
-                    ratio = value / width;
-                    targs.AddString(std::format("{:.6f}", ratio * height).c_str());
-                }
+                double value = std::stod(outsize);
+                if (value <= 0)
+                    throw InvalidArgsException("Size must be positive: " + outsize);
+
+                return value / width;
             } catch (const std::invalid_argument&) {
                 throw InvalidArgsException("Invalid size format: " + outsize);
             } catch (const std::out_of_range&) {
                 throw InvalidArgsException("Size value out of range: " + outsize);
             }
+        }
+
+        // Adds the -outsize arguments of `outsize` for an image `width` pixels wide and `height`
+        // high and returns the scale it stands for
+        double appendOutsize(CPLStringList &targs, const std::string &outsize, int width, int height)
+        {
+            const double ratio = outsizeRatio(outsize, width);
+
+            targs.AddString("-outsize");
+            targs.AddString(outsize.c_str());
+            if (outsize.back() == '%')
+                targs.AddString(outsize.c_str());
+            else
+                targs.AddString(std::format("{:.6f}", ratio * height).c_str());
             return ratio;
         }
 
         // One -gcp: the pixel (column, row) of the scaled image is at the ground point
-        void appendGcp(CPLStringList &targs, int column, int row, const Point &ground)
+        void appendGcp(CPLStringList &targs, int column, int row, const std::array<double, 2> &ground)
         {
             targs.AddString("-gcp");
             targs.AddString(std::to_string(column).c_str());
             targs.AddString(std::to_string(row).c_str());
-            targs.AddString(std::format("{:.13f}", ground.x).c_str());
-            targs.AddString(std::format("{:.13f}", ground.y).c_str());
+            targs.AddString(std::format("{:.13f}", ground[0]).c_str());
+            targs.AddString(std::format("{:.13f}", ground[1]).c_str());
         }
 
         // The image as a MEM dataset that carries the four GCPs of its footprint (upper left,
         // lower left, lower right, upper right) and EPSG:4326; scaled to `outsize` when given
-        GDALDatasetUniquePtr translateWithGcps(GDALDatasetH hSrc, Entry &e, const fs::path &p,
-                                               const std::string &outsize, cancel::GdalProgress &progress)
+        GDALDatasetUniquePtr translateWithGcps(GDALDatasetH hSrc, const raster::GeoprojectParams &params,
+                                               const fs::path &p, cancel::GdalProgress &progress)
         {
-            const int width = e.properties["width"].get<int>();
-            const int height = e.properties["height"].get<int>();
+            const int width = params.width;
+            const int height = params.height;
+            const std::string &outsize = params.outsize;
 
             // The intermediate (GCPs + SRS) stays in a MEM dataset: no /vsimem file to name or unlink
             CPLStringList targs;
@@ -129,10 +137,10 @@ namespace ddb
                 LOGD << "Scaled height: " << scaledHeight;
             }
 
-            appendGcp(targs, 0, 0, e.polygon_geom.getPoint(0));
-            appendGcp(targs, 0, scaledHeight, e.polygon_geom.getPoint(1));
-            appendGcp(targs, scaledWidth, scaledHeight, e.polygon_geom.getPoint(2));
-            appendGcp(targs, scaledWidth, 0, e.polygon_geom.getPoint(3));
+            appendGcp(targs, 0, 0, params.footprint[0]);
+            appendGcp(targs, 0, scaledHeight, params.footprint[1]);
+            appendGcp(targs, scaledWidth, scaledHeight, params.footprint[2]);
+            appendGcp(targs, scaledWidth, 0, params.footprint[3]);
 
             const GdalOptionsPtr<GDALTranslateOptions> psOptions(
                 GDALTranslateOptionsNew(targs.List(), nullptr));
@@ -197,6 +205,23 @@ namespace ddb
 
     } // namespace
 
+    namespace raster
+    {
+
+        void geoprojectImage(const fs::path &path, const fs::path &outFile, const GeoprojectParams &params)
+        {
+            // Owned: the outsize parsing in translateWithGcps throws InvalidArgsException after the open
+            auto srcDataset = openUserRaster(io::toUtf8(path));
+            if (!srcDataset)
+                throw RasterOpException(ErrorCode::Unreadable, "Cannot project " + io::toUtf8(path) + ", cannot open raster");
+
+            cancel::GdalProgress progress;
+            auto dstDataset = translateWithGcps(datasetHandle(srcDataset), params, path, progress);
+            warpToFile(srcDataset, dstDataset, io::toUtf8(outFile), path, progress);
+        }
+
+    } // namespace raster
+
     void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError, const GeoProjectCallback &callback)
     {
         const bool outputToDir = prepareOutput(images, output);
@@ -239,25 +264,44 @@ namespace ddb
                 outFile = output;
             }
 
-            // Unique per call so concurrent processes sharing a cache don't clobber each other
-            std::string tmpOutFile = io::toUtf8(io::fromUtf8(outFile).replace_extension("." + randomString(8) + ".tif.tmp"));
-
-            // Owned: the outsize parsing below throws InvalidArgsException after the open
-            auto srcDataset = openUserRaster(io::toUtf8(p));
-            if (!srcDataset)
+            // The position of the picture comes from its EXIF, read here: the helper reads none
+            raster::GeoprojectParams params;
+            params.width = e.properties["width"].get<int>();
+            params.height = e.properties["height"].get<int>();
+            for (int corner = 0; corner < 4; corner++)
             {
+                const Point ground = e.polygon_geom.getPoint(corner);
+                params.footprint[corner] = {ground.x, ground.y};
+            }
+            params.outsize = outsize;
+            // Fail on a size that makes no sense before any process is started
+            if (!outsize.empty())
+                outsizeRatio(outsize, params.width);
+
+            // The helper writes the GeoTIFF into a folder only this call writes to; it is
+            // moved to its name once it is known to be a GeoTIFF (publishing it is one rename, so
+            // processes that share a cache never see half of a file or clobber each other)
+            const io::ScopedTempDir request = raster::makeArtefactRequestFolder("geoproject-");
+            const fs::path produced = request.path() / "geoprojected.tif";
+            try
+            {
+                raster::rasterHelper().geoproject(p, produced, raster::toJson(params));
+            }
+            catch (const raster::RasterOpException &failure)
+            {
+                // A failure of the helper itself is not a picture that cannot be opened
+                if (failure.code() == raster::ErrorCode::Internal)
+                    throw;
                 if (stopOnError)
                     throw FSException("Cannot project " + io::toUtf8(p) + ", cannot open raster");
-                else
-                    LOGW << "Cannot project " << io::toUtf8(p) << ", cannot open raster: skipping";
+                LOGW << "Cannot project " << io::toUtf8(p) << ", cannot open raster: skipping";
                 continue;
             }
 
-            cancel::GdalProgress progress;
-            auto dstDataset = translateWithGcps(datasetHandle(srcDataset), e, p, outsize, progress);
-            warpToFile(srcDataset, dstDataset, tmpOutFile, p, progress);
-
-            io::rename(io::fromUtf8(tmpOutFile), io::fromUtf8(outFile));
+            if (!raster::openArtefactRaster(produced))
+                throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": " + raster::kGdalUtilName +
+                                    " wrote a file that is not a GeoTIFF");
+            raster::publishArtefact(produced, io::fromUtf8(outFile));
 
             if (callback)
             {

@@ -13,6 +13,7 @@
 #include "http_client.h"
 #include "logger.h"
 #include "mio.h"
+#include "raster_artefacts.h"
 #include "tool_locator.h"
 #include "tool_run_support.h"
 
@@ -305,18 +306,16 @@ namespace ddb
 
                 void onLine(const std::string &line)
                 {
+                    if (const auto fraction = decodeProgress(line))
+                    {
+                        if (progress_)
+                            progress_(*fraction);
+                        return;
+                    }
                     if (line.empty() || line.front() != '{')
                         return;
                     const json parsed = json::parse(line, nullptr, false);
-                    if (!parsed.is_object())
-                        return;
-                    if (const auto it = parsed.find("progress"); it != parsed.end())
-                    {
-                        if (it->is_number() && progress_)
-                            progress_(it->get<double>());
-                        return;
-                    }
-                    if (parsed.contains("ok"))
+                    if (parsed.is_object() && parsed.contains("ok"))
                     {
                         try
                         {
@@ -381,7 +380,16 @@ namespace ddb
             if (output.response() && output.response()->id == std::optional<int64_t>(request.id))
             {
                 if (!output.response()->ok)
+                {
+                    // A build that runs out of space is retried when there is some again, as
+                    // every build reports it
+                    if (output.response()->error == ErrorCode::NoSpace)
+                    {
+                        logFailure(op, path, ErrorCode::NoSpace, output.response()->message);
+                        throw RetryableBuildException(output.response()->message, RetryableBuildReason::NoSpaceOnDevice);
+                    }
                     raiseFailure(op, path, *output.response());
+                }
                 return;
             }
 
@@ -501,18 +509,6 @@ namespace ddb
 
         namespace
         {
-            // A folder only the user of the process can enter: the helper writes its result in it,
-            // and nobody else can swap the file between the helper and the check
-            io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix)
-            {
-                io::ScopedTempDir folder = io::ScopedTempDir::create(parent, prefix);
-                std::error_code ec;
-                fs::permissions(folder.path(), fs::perms::owner_all, fs::perm_options::replace, ec);
-                if (ec)
-                    throw FSException("Cannot restrict the access to " + io::toUtf8(folder.path()), ec);
-                return folder;
-            }
-
             // The content of the file the helper wrote: a regular file (not a link to another one)
             // of a size a thumbnail can have
             std::string readHelperOutput(const fs::path &file)
@@ -543,7 +539,7 @@ namespace ddb
             // In the temp folder of the system, not in the thumbnail cache: the destination of a
             // thumbnail is whatever the caller names (and the memory API has none), and the copy
             // into it is made by the caller as any thumbnail is written (atomically)
-            const io::ScopedTempDir request = makePrivateFolder(fs::temp_directory_path(), "ddb-thumb-");
+            const io::ScopedTempDir request = raster::makePrivateFolder(fs::temp_directory_path(), "ddb-thumb-");
 
             fs::path input = path;
             const std::string utf8 = io::toUtf8(path);
@@ -554,7 +550,7 @@ namespace ddb
                 downloadInput(utf8, input);
             }
 
-            const io::ScopedTempDir outputFolder = makePrivateFolder(request.path(), "out-");
+            const io::ScopedTempDir outputFolder = raster::makePrivateFolder(request.path(), "out-");
             const fs::path output = outputFolder.path() / "thumbnail.webp";
             rasterHelper().thumbnail(input, output, params);
 

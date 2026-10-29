@@ -19,19 +19,31 @@
 #include <thread>
 #include <vector>
 
+#include "build_budget.h"
+#include "build_layout.h"
 #include "cancellation.h"
 #include "cpl_conv.h"
+#include "cog.h"
 #include "dbops.h"
 #include "entry.h"
+#include "entry_handler.h"
 #include "exceptions.h"
+#include "geoproject.h"
 #include "fs.h"
 #include "gtest/gtest.h"
 #include "mio.h"
+#include "parallel.h"
 #include "process_runner.h"
+#include "raster_artefacts.h"
 #include "raster_helper.h"
+#include "raster_test_utils.h"
+#include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "thumbs.h"
+#include "userprofile.h"
 #include "utils.h"
+#include "vector.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -809,7 +821,7 @@ namespace
     TEST(RasterOneShot, aFailureResponseIsMappedLikeAnyOther)
     {
         const std::vector<std::pair<std::string, std::string>> cases = {
-            {"limit", "notread"}, {"unreadable", "op"}, {"internal", "op"}, {"nospace", "fs"}};
+            {"limit", "notread"}, {"unreadable", "op"}, {"internal", "op"}, {"nospace", "retryable"}};
         for (const auto &[code, expected] : cases)
         {
             SCOPED_TRACE(code);
@@ -823,8 +835,19 @@ namespace
             const auto build = [&] { helper.buildCog(fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback()); };
             if (expected == "notread")
                 EXPECT_THROW(build(), RasterNotReadException);
-            else if (expected == "fs")
-                EXPECT_THROW(build(), FSException);
+            else if (expected == "retryable")
+            {
+                // A build that runs out of space is retried when there is some, as every build says it
+                try
+                {
+                    build();
+                    FAIL() << "no exception";
+                }
+                catch (const RetryableBuildException &e)
+                {
+                    EXPECT_EQ(e.reason(), RetryableBuildReason::NoSpaceOnDevice);
+                }
+            }
             else
                 EXPECT_THROW(build(), RasterOpException);
         }
@@ -913,6 +936,403 @@ namespace
         GdalUtilHelper helper = oneShotHelper(runner);
         EXPECT_THROW(helper.buildVector(fs::absolute("a.geojson"), fs::absolute("o"), json::object(), ProgressCallback()),
                      HelperUnavailableException);
+    }
+
+
+    // ------------------------------------------------------------------ the params of the builds
+
+    TEST(RasterBuildParams, theParamsOfABuildAreWhatTheHostSentAfterTheTrip)
+    {
+        CogParams cog;
+        EXPECT_EQ(toJson(cog), json::object());
+        cog.threads = 6;
+        EXPECT_EQ(cogParamsFromJson(toJson(cog)).threads, std::optional<int>(6));
+        EXPECT_FALSE(cogParamsFromJson(json::object()).threads.has_value());
+
+        VectorParams vector;
+        EXPECT_EQ(toJson(vector), json::object());
+        vector.source = "/data/ds/drawing.dwg";
+        EXPECT_EQ(vectorParamsFromJson(toJson(vector)).source, fs::path("/data/ds/drawing.dwg"));
+
+        GeoprojectParams photo;
+        photo.width = 4000;
+        photo.height = 3000;
+        photo.footprint = {{{9.1, 45.3}, {9.1, 45.2}, {9.2, 45.2}, {9.2, 45.3}}};
+        photo.outsize = "25%";
+        const GeoprojectParams back = geoprojectParamsFromJson(toJson(photo));
+        EXPECT_EQ(back.width, 4000);
+        EXPECT_EQ(back.height, 3000);
+        EXPECT_EQ(back.footprint, photo.footprint);
+        EXPECT_EQ(back.outsize, "25%");
+    }
+
+    TEST(RasterBuildParams, paramsThatAreNotWhatTheOperationTakesAreRefused)
+    {
+        EXPECT_THROW(cogParamsFromJson(json::array()), ProtocolError);
+        EXPECT_THROW(cogParamsFromJson(json{{"threads", 0}}), ProtocolError);
+        EXPECT_THROW(cogParamsFromJson(json{{"threads", 5000}}), ProtocolError);
+        EXPECT_THROW(cogParamsFromJson(json{{"threads", "4"}}), ProtocolError);
+        EXPECT_THROW(vectorParamsFromJson(json{{"source", 3}}), ProtocolError);
+
+        const json valid = toJson([] {
+            GeoprojectParams photo;
+            photo.width = 10;
+            photo.height = 10;
+            return photo;
+        }());
+        EXPECT_NO_THROW(geoprojectParamsFromJson(valid));
+        for (const char *member : {"width", "height", "footprint"})
+        {
+            SCOPED_TRACE(member);
+            json missing = valid;
+            missing.erase(member);
+            EXPECT_THROW(geoprojectParamsFromJson(missing), ProtocolError);
+        }
+        json badSize = valid;
+        badSize["width"] = 0;
+        EXPECT_THROW(geoprojectParamsFromJson(badSize), ProtocolError);
+        json threeCorners = valid;
+        threeCorners["footprint"].erase(3);
+        EXPECT_THROW(geoprojectParamsFromJson(threeCorners), ProtocolError);
+        json badCorner = valid;
+        badCorner["footprint"][1] = json::array({1, "north"});
+        EXPECT_THROW(geoprojectParamsFromJson(badCorner), ProtocolError);
+        json badOutsize = valid;
+        badOutsize["outsize"] = 5;
+        EXPECT_THROW(geoprojectParamsFromJson(badOutsize), ProtocolError);
+    }
+
+    TEST(RasterBuildParams, aProgressLineIsAFractionBetweenZeroAndOne)
+    {
+        EXPECT_EQ(decodeProgress(encodeProgress(0.25)), std::optional<double>(0.25));
+        EXPECT_EQ(decodeProgress(encodeProgress(7.0)), std::optional<double>(1.0));
+        EXPECT_EQ(decodeProgress(encodeProgress(-1.0)), std::optional<double>(0.0));
+        EXPECT_EQ(decodeProgress(R"({"progress":1})"), std::optional<double>(1.0));
+        EXPECT_FALSE(decodeProgress(R"({"id":1,"ok":true})").has_value());
+        EXPECT_FALSE(decodeProgress("a message of a library").has_value());
+        EXPECT_FALSE(decodeProgress(R"({"progress":"half"})").has_value());
+        EXPECT_FALSE(decodeProgress("").has_value());
+    }
+
+    // ------------------------------------------------------------------ the builds of the host
+
+    // A raster helper that does what the test says for each operation and records nothing else
+    class ScriptedHelper : public IRasterHelper
+    {
+      public:
+        std::function<void(const fs::path &, const fs::path &, const json &)> onCog;
+        std::function<void(const fs::path &, const fs::path &, const json &)> onVector;
+        std::function<void(const fs::path &, const fs::path &, const json &)> onGeoproject;
+
+        ProbeResult probe(const fs::path &, const ProbeParams &) override
+        {
+            ADD_FAILURE() << "no probe is asked for";
+            return ProbeResult();
+        }
+        void thumbnail(const fs::path &, const fs::path &, const ThumbnailParams &) override
+        {
+            ADD_FAILURE() << "no thumbnail is asked for";
+        }
+        void normalize(const fs::path &, const fs::path &, const json &) override
+        {
+            ADD_FAILURE() << "no normalization is asked for";
+        }
+        void geoproject(const fs::path &path, const fs::path &out, const json &params) override
+        {
+            ASSERT_TRUE(onGeoproject) << "no photo is projected";
+            onGeoproject(path, out, params);
+        }
+        void buildCog(const fs::path &path, const fs::path &out, const json &params, const ProgressCallback &) override
+        {
+            ASSERT_TRUE(onCog) << "no COG is built";
+            onCog(path, out, params);
+        }
+        void buildVector(const fs::path &path, const fs::path &out, const json &params, const ProgressCallback &) override
+        {
+            ASSERT_TRUE(onVector) << "no vector is built";
+            onVector(path, out, params);
+        }
+    };
+
+    class RasterBuildsTest : public ::testing::Test
+    {
+      protected:
+        void SetUp() override
+        {
+            area_ = std::make_unique<TestArea>(std::string("RasterBuilds.") +
+                                                   ::testing::UnitTest::GetInstance()->current_test_info()->name(),
+                                               true);
+            config_ = std::make_unique<ScopedProcessConfig>(json{{"cacheDir", io::toUtf8(area_->getPath("cache"))}}.dump());
+        }
+
+        std::unique_ptr<TestArea> area_;
+        std::unique_ptr<ScopedProcessConfig> config_;
+    };
+
+    TEST_F(RasterBuildsTest, theCogBuildGivesTheHelperTheOutputAndHoldsTheTokensOfTheThreadsItTold)
+    {
+        ScriptedHelper helper;
+        fs::path seenPath, seenOut;
+        int threads = 0;
+        size_t tokensDuring = 0;
+        helper.onCog = [&](const fs::path &path, const fs::path &out, const json &params) {
+            seenPath = path;
+            seenOut = out;
+            threads = cogParamsFromJson(params).threads.value_or(0);
+            tokensDuring = parallel::cpuTokensInUse();
+        };
+        const ScopedRasterHelper installed(helper);
+
+        const size_t tokensBefore = parallel::cpuTokensInUse();
+        buildCog(io::toUtf8(fs::absolute("input.tif")), io::toUtf8(fs::absolute("out/cog.tif")), BuildOptions::withThreads(3));
+
+        EXPECT_EQ(seenPath, fs::absolute("input.tif"));
+        EXPECT_EQ(seenOut, fs::absolute("out/cog.tif"));
+        ASSERT_GE(threads, 1);
+        EXPECT_LE(threads, 3) << "the cap of the caller lowers the threads";
+        // The tokens of the CPU pool of the host stay taken for as long as the helper works: the
+        // calling thread is one of the threads
+        EXPECT_EQ(tokensDuring, tokensBefore + static_cast<size_t>(threads - 1));
+        EXPECT_EQ(parallel::cpuTokensInUse(), tokensBefore);
+    }
+
+    // The build of a GeoRaster entry, as the dispatcher runs it
+    void buildGeoRaster(const fs::path &input, const fs::path &tempFolder)
+    {
+        Entry entry;
+        entry.type = EntryType::GeoRaster;
+        const BuildContext ctx{nullptr, entry, input, {}, {}, {}, tempFolder};
+        entryHandler(EntryType::GeoRaster).build(ctx);
+    }
+
+    TEST_F(RasterBuildsTest, theBuildOfAGeoRasterGoesToTheHelperAndKeepsItsRetryableFailures)
+    {
+        ScriptedHelper helper;
+        fs::path seenOut;
+        helper.onCog = [&](const fs::path &, const fs::path &out, const json &) { seenOut = out; };
+        const ScopedRasterHelper installed(helper);
+
+        const fs::path temp = area_->getPath("cog-temp-x");
+        buildGeoRaster(area_->getPath("in.tif"), temp);
+        EXPECT_EQ(seenOut, temp / CogFileName);
+
+        // A helper that was silent for the idle time is a build to retry
+        helper.onCog = [](const fs::path &, const fs::path &, const json &) {
+            throw RetryableBuildException("gdal-util printed nothing for 60 minutes", RetryableBuildReason::IdleTimeout);
+        };
+        try
+        {
+            buildGeoRaster(area_->getPath("in.tif"), temp);
+            FAIL() << "no exception";
+        }
+        catch (const RetryableBuildException &e)
+        {
+            EXPECT_EQ(e.reason(), RetryableBuildReason::IdleTimeout);
+        }
+
+        // A raster the helper cannot read is a failure of GDAL, as before
+        helper.onCog = [](const fs::path &, const fs::path &, const json &) {
+            throw RasterOpException(ErrorCode::Unreadable, "Cannot open the raster");
+        };
+        EXPECT_THROW(buildGeoRaster(area_->getPath("in.tif"), temp), GDALException);
+    }
+
+    TEST_F(RasterBuildsTest, aVectorIsStagedByTheHelperInAPrivateFolderAndPublishedByTheHost)
+    {
+        const fs::path source = area_->getPath("layer.geojson");
+        std::ofstream(source) << "{}";
+        const fs::path base = area_->getPath("build");
+
+        ScriptedHelper helper;
+        int builds = 0;
+        fs::path stage;
+        helper.onVector = [&](const fs::path &path, const fs::path &out, const json &params) {
+            builds++;
+            stage = out;
+            EXPECT_EQ(path, source);
+            EXPECT_EQ(out.parent_path(), base);
+            EXPECT_EQ(out.filename().string().rfind(VectorStagingPrefix, 0), 0u);
+            EXPECT_TRUE(vectorParamsFromJson(params).source.empty()) << "only a drawing has a source";
+#ifndef _WIN32
+            EXPECT_EQ(fs::status(out).permissions() & fs::perms::all, fs::perms::owner_all);
+#endif
+            fs::create_directories(out / VectorBuildSubfolder);
+            fs::create_directories(out / MvtBuildSubfolder);
+            std::ofstream(out / VectorBuildSubfolder / VectorGpkgFileName) << "gpkg " << builds;
+            std::ofstream(out / MvtBuildSubfolder / MvtMetadataFileName) << "{}";
+        };
+        const ScopedRasterHelper installed(helper);
+
+        buildVector(io::toUtf8(source), io::toUtf8(base));
+
+        EXPECT_EQ(builds, 1);
+        EXPECT_TRUE(fs::exists(base / VectorBuildSubfolder / VectorGpkgFileName));
+        EXPECT_TRUE(fs::exists(base / MvtBuildSubfolder / MvtMetadataFileName));
+        EXPECT_FALSE(fs::exists(stage)) << "the staging folder is gone";
+
+        // What is built is not built again, unless it is asked
+        buildVector(io::toUtf8(source), io::toUtf8(base));
+        EXPECT_EQ(builds, 1);
+        buildVector(io::toUtf8(source), io::toUtf8(base), true);
+        EXPECT_EQ(builds, 2);
+        std::ifstream gpkg(base / VectorBuildSubfolder / VectorGpkgFileName);
+        std::string text;
+        std::getline(gpkg, text);
+        EXPECT_EQ(text, "gpkg 2");
+    }
+
+    TEST_F(RasterBuildsTest, aLocalDrawingPublishesNoTilesAndRetiresTheOldOnes)
+    {
+        const fs::path source = area_->getPath("drawing.dxf");
+        std::ofstream(source) << "0\nEOF\n";
+        const fs::path base = area_->getPath("build");
+        fs::create_directories(base / MvtBuildSubfolder);
+        std::ofstream(base / MvtBuildSubfolder / MvtMetadataFileName) << "{}";
+
+        ScriptedHelper helper;
+        helper.onVector = [&](const fs::path &, const fs::path &out, const json &params) {
+            EXPECT_EQ(vectorParamsFromJson(params).source, source) << "a drawing tells the helper which file it is";
+            fs::create_directories(out / VectorBuildSubfolder);
+            std::ofstream(out / VectorBuildSubfolder / VectorGpkgFileName) << "gpkg";
+            std::ofstream(out / VectorBuildSubfolder / VectorLocalFileName) << "{}";
+        };
+        const ScopedRasterHelper installed(helper);
+
+        buildVector(io::toUtf8(source), io::toUtf8(base), true);
+
+        EXPECT_TRUE(fs::exists(base / VectorBuildSubfolder / VectorLocalFileName));
+        EXPECT_FALSE(fs::exists(base / MvtBuildSubfolder));
+    }
+
+    TEST_F(RasterBuildsTest, aFailedVectorBuildLeavesNothingBehind)
+    {
+        const fs::path source = area_->getPath("layer.geojson");
+        std::ofstream(source) << "{}";
+        const fs::path base = area_->getPath("build");
+
+        ScriptedHelper helper;
+        helper.onVector = [](const fs::path &, const fs::path &out, const json &) {
+            fs::create_directories(out / VectorBuildSubfolder);
+            std::ofstream(out / VectorBuildSubfolder / VectorGpkgFileName) << "half";
+            throw RasterOpException(ErrorCode::Unreadable, "Cannot open vector source");
+        };
+        const ScopedRasterHelper installed(helper);
+
+        EXPECT_THROW(buildVector(io::toUtf8(source), io::toUtf8(base)), GDALException);
+        EXPECT_TRUE(fs::is_empty(base));
+
+        // A helper that reports success and leaves nothing is no success
+        helper.onVector = [](const fs::path &, const fs::path &, const json &) {};
+        EXPECT_THROW(buildVector(io::toUtf8(source), io::toUtf8(base)), AppException);
+        EXPECT_TRUE(fs::is_empty(base));
+    }
+
+    class GeoprojectTest : public RasterBuildsTest
+    {
+      protected:
+        void SetUp() override
+        {
+            RasterBuildsTest::SetUp();
+            photo_ = area_->downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
+            testutils::GeoRasterSpec spec;
+            spec.width = 40;
+            spec.height = 30;
+            spec.bands = 4;
+            spec.epsg = 4326;
+            spec.originX = 9.0;
+            spec.originY = 45.0;
+            spec.pixelSize = 0.001;
+            projected_ = testutils::createGeoRaster(area_->getPath("projected.tif"), spec);
+        }
+
+        fs::path photo_;
+        fs::path projected_;
+    };
+
+    TEST_F(GeoprojectTest, thePositionOfThePhotoFromItsExifGoesToTheHelperAndTheResultIsPublishedWhole)
+    {
+        Entry exif;
+        parseEntry(photo_, area_->getFolder(), exif, false);
+        ASSERT_EQ(exif.type, EntryType::GeoImage);
+
+        ScriptedHelper helper;
+        fs::path seenPath, seenOut;
+        GeoprojectParams seen;
+        helper.onGeoproject = [&](const fs::path &path, const fs::path &out, const json &params) {
+            seenPath = path;
+            seenOut = out;
+            seen = geoprojectParamsFromJson(params);
+            EXPECT_TRUE(isLibddbArtefact(out)) << "the helper writes where the host checks the file";
+            fs::copy_file(projected_, out);
+        };
+        const ScopedRasterHelper installed(helper);
+
+        const fs::path target = area_->getPath("out") / "photo.tif";
+        fs::create_directories(target.parent_path());
+        std::vector<std::string> written;
+        geoProject({io::toUtf8(photo_)}, io::toUtf8(target), "10%", true, [&](const std::string &file) {
+            written.push_back(file);
+            return true;
+        });
+
+        EXPECT_EQ(seenPath, photo_);
+        EXPECT_EQ(seen.width, exif.properties.at("width").get<int>());
+        EXPECT_EQ(seen.height, exif.properties.at("height").get<int>());
+        for (int corner = 0; corner < 4; corner++)
+        {
+            EXPECT_DOUBLE_EQ(seen.footprint[corner][0], exif.polygon_geom.getPoint(corner).x);
+            EXPECT_DOUBLE_EQ(seen.footprint[corner][1], exif.polygon_geom.getPoint(corner).y);
+        }
+        EXPECT_EQ(seen.outsize, "10%");
+        EXPECT_EQ(written, std::vector<std::string>{io::toUtf8(target)});
+        EXPECT_EQ(readFile(target), readFile(projected_));
+        EXPECT_FALSE(fs::exists(seenOut)) << "moved to its name";
+        EXPECT_FALSE(fs::exists(seenOut.parent_path())) << "and the folder of the request is gone";
+    }
+
+    TEST_F(GeoprojectTest, anOutsizeThatMakesNoSenseIsRefusedBeforeAnyRequest)
+    {
+        ScriptedHelper helper;
+        const ScopedRasterHelper installed(helper);
+        EXPECT_THROW(geoProject({io::toUtf8(photo_)}, io::toUtf8(area_->getPath("never.tif")), "abc", true), InvalidArgsException);
+        EXPECT_FALSE(fs::exists(area_->getPath("never.tif")));
+    }
+
+    TEST_F(GeoprojectTest, aFileThatIsNoGeoTiffIsNotPublished)
+    {
+        ScriptedHelper helper;
+        helper.onGeoproject = [](const fs::path &, const fs::path &out, const json &) { std::ofstream(out) << "not a GeoTIFF"; };
+        const ScopedRasterHelper installed(helper);
+
+        const fs::path target = area_->getPath("photo.tif");
+        EXPECT_THROW(geoProject({io::toUtf8(photo_)}, io::toUtf8(target), "100%", true), GDALException);
+        EXPECT_FALSE(fs::exists(target));
+        EXPECT_TRUE(fs::is_empty(artefactsDir())) << "nothing is left in the cache";
+    }
+
+    TEST_F(GeoprojectTest, aPhotoTheHelperCannotOpenIsSkippedOrAnErrorAsTheCallerAsks)
+    {
+        ScriptedHelper helper;
+        helper.onGeoproject = [](const fs::path &, const fs::path &, const json &) {
+            throw RasterOpException(ErrorCode::Unreadable, "Cannot open the photo");
+        };
+        const ScopedRasterHelper installed(helper);
+
+        const fs::path target = area_->getPath("photo.tif");
+        bool called = false;
+        geoProject({io::toUtf8(photo_)}, io::toUtf8(target), "100%", false, [&](const std::string &) {
+            called = true;
+            return true;
+        });
+        EXPECT_FALSE(called);
+        EXPECT_THROW(geoProject({io::toUtf8(photo_)}, io::toUtf8(target), "100%", true), FSException);
+
+        // A failure of the helper itself is an error either way
+        helper.onGeoproject = [](const fs::path &, const fs::path &, const json &) {
+            throw RasterOpException(ErrorCode::Internal, "the helper failed");
+        };
+        EXPECT_THROW(geoProject({io::toUtf8(photo_)}, io::toUtf8(target), "100%", false), RasterOpException);
+        EXPECT_FALSE(fs::exists(target));
     }
 
 } // namespace

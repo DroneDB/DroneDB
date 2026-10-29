@@ -13,6 +13,8 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <algorithm>
+#include <map>
 #include <memory>
 #include <regex>
 #include <string>
@@ -394,6 +396,21 @@ namespace
         }
     }
 
+    TEST_F(GdalUtilToolTest, theSchemaTakesTheWarningOfAProbeThatDescribesTheFileOnlyInPart)
+    {
+        testutils::JsonSchemaCheck check(contract::contractDir() / "schemas");
+        Server server;
+        json line = json::parse(raster::encodeResponse(server.ask(probeRequest(1, geojson_, vectorParams()))));
+        ASSERT_TRUE(check.validate(line, "gdal-util-probe.schema.json").empty());
+
+        line["result"]["warning"] = "the coordinate system of the drawing cannot be used";
+        EXPECT_TRUE(check.validate(line, "gdal-util-probe.schema.json").empty());
+        line["result"]["warning"] = "";
+        EXPECT_FALSE(check.validate(line, "gdal-util-probe.schema.json").empty()) << "a warning has some text";
+        line["result"]["warning"] = 7;
+        EXPECT_FALSE(check.validate(line, "gdal-util-probe.schema.json").empty());
+    }
+
     TEST(GdalUtilTool, theProbeResponseOfAContractRasterIsPinned)
     {
         ASSERT_FALSE(tool().empty());
@@ -498,10 +515,10 @@ namespace
         EXPECT_EQ(response.error, raster::ErrorCode::Internal);
     }
 
-    TEST_F(GdalUtilToolTest, anUnknownOperationAndOnesNotYetAvailableAreInternalErrors)
+    TEST_F(GdalUtilToolTest, anUnknownOperationAndOneNotYetAvailableAreInternalErrors)
     {
         Server server;
-        for (const char *op : {"bogus", "cog", "vector", "normalize", "geoproject"})
+        for (const char *op : {"bogus", "normalize"})
         {
             SCOPED_TRACE(op);
             raster::Request request = probeRequest(1, geotiff_);
@@ -748,5 +765,268 @@ namespace
         parseEntry(dxf, area_->getFolder(), withoutPrj, false);
         EXPECT_FALSE(withoutPrj.properties.at("georeferenced").get<bool>());
         EXPECT_TRUE(withoutPrj.polygon_geom.empty());
+    }
+
+    // ------------------------------------------------------------------ the builds
+
+    raster::Request buildRequest(int64_t id, const char *op, const fs::path &path, const fs::path &out, const json &params)
+    {
+        raster::Request request;
+        request.id = id;
+        request.op = op;
+        request.path = path;
+        request.out = out;
+        request.params = params;
+        return request;
+    }
+
+    // What two builds of the same raster must share: size, bands, geotransform, projection and the
+    // pixels of every band (GDAL's checksum of the whole band)
+    json describeRaster(const fs::path &file)
+    {
+        GDALDatasetH dataset = GDALOpen(io::toUtf8(file).c_str(), GA_ReadOnly);
+        EXPECT_NE(dataset, nullptr) << file;
+        if (dataset == nullptr)
+            return json::object();
+        double gt[6] = {0};
+        GDALGetGeoTransform(dataset, gt);
+        json bands = json::array();
+        for (int b = 1; b <= GDALGetRasterCount(dataset); b++)
+        {
+            GDALRasterBandH band = GDALGetRasterBand(dataset, b);
+            bands.push_back({{"type", GDALGetDataTypeName(GDALGetRasterDataType(band))},
+                             {"checksum", GDALChecksumImage(band, 0, 0, GDALGetRasterXSize(dataset), GDALGetRasterYSize(dataset))}});
+        }
+        json result = {{"size", {GDALGetRasterXSize(dataset), GDALGetRasterYSize(dataset)}},
+                       {"geotransform", std::vector<double>(gt, gt + 6)},
+                       {"projection", GDALGetProjectionRef(dataset)},
+                       {"overviews", GDALGetOverviewCount(GDALGetRasterBand(dataset, 1))},
+                       {"bands", bands}};
+        GDALClose(dataset);
+        return result;
+    }
+
+    // The statistics sidecar of a COG without the time it was computed at
+    json statsOf(const fs::path &cog)
+    {
+        json stats = json::parse(readFile(io::concat(cog, ".stats.json")));
+        stats.erase("computedAt");
+        return stats;
+    }
+
+    TEST_F(GdalUtilToolTest, aCogBuiltByTheProgramEqualsTheCogBuiltInTheProcess)
+    {
+        const fs::path inProcess = area_->getFolder() / "in-process.tif";
+        raster::buildCogFile(geotiff_, inProcess, raster::CogParams(), raster::ProgressCallback());
+
+        const fs::path byProgram = area_->getFolder() / "by-program.tif";
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(51, raster::op::kCog, geotiff_, byProgram, json::object()))});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        const auto response = raster::decodeResponse(run.lines.back());
+        ASSERT_TRUE(response.ok) << response.message;
+        EXPECT_EQ(run.exitCode, 0);
+
+        const json expected = describeRaster(inProcess);
+        EXPECT_EQ(describeRaster(byProgram), expected);
+        EXPECT_NE(expected.at("projection").get<std::string>().find("3857"), std::string::npos) << "Web Mercator";
+        EXPECT_EQ(expected.at("bands").size(), 3u);
+        EXPECT_EQ(statsOf(byProgram), statsOf(inProcess));
+    }
+
+    TEST_F(GdalUtilToolTest, theProgressOfACogReachesTheHostBeforeTheResponse)
+    {
+        const fs::path out = area_->getFolder() / "progress.tif";
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(52, raster::op::kCog, geotiff_, out, json::object()))});
+        ASSERT_GE(run.lines.size(), 2u) << run.stderrText;
+
+        std::vector<double> progress;
+        for (size_t i = 0; i + 1 < run.lines.size(); i++)
+        {
+            const auto fraction = raster::decodeProgress(run.lines[i]);
+            ASSERT_TRUE(fraction.has_value()) << "only progress lines come before the response: " << run.lines[i];
+            progress.push_back(*fraction);
+        }
+        EXPECT_TRUE(std::is_sorted(progress.begin(), progress.end()));
+        EXPECT_GE(progress.front(), 0.0);
+        EXPECT_DOUBLE_EQ(progress.back(), 1.0);
+        EXPECT_FALSE(raster::decodeProgress(run.lines.back()).has_value());
+        EXPECT_TRUE(raster::decodeResponse(run.lines.back()).ok);
+
+        // And the host client forwards them
+        raster::GdalUtilHelper helper;
+        std::vector<double> forwarded;
+        helper.buildCog(geotiff_, area_->getFolder() / "forwarded.tif", json::object(),
+                        [&forwarded](double fraction) { forwarded.push_back(fraction); });
+        ASSERT_FALSE(forwarded.empty());
+        EXPECT_DOUBLE_EQ(forwarded.back(), 1.0);
+    }
+
+    // A single-band raster of 16-bit values on the tile grid of Web Mercator, stored as a COG with
+    // another compression than the one libddb gives it
+    fs::path writeForeignCog(const fs::path &folder, const fs::path &source)
+    {
+        const fs::path onGrid = folder / "on-grid.tif";
+        raster::buildCogFile(source, onGrid, raster::CogParams(), raster::ProgressCallback());
+        const fs::path foreign = folder / "foreign-cog.tif";
+        GDALDatasetH grid = GDALOpen(io::toUtf8(onGrid).c_str(), GA_ReadOnly);
+        EXPECT_NE(grid, nullptr);
+        char **options = CSLSetNameValue(nullptr, "COMPRESS", "DEFLATE");
+        GDALDatasetH copy = GDALCreateCopy(GDALGetDriverByName("COG"), io::toUtf8(foreign).c_str(), grid, FALSE, options, nullptr, nullptr);
+        CSLDestroy(options);
+        EXPECT_NE(copy, nullptr);
+        GDALClose(copy);
+        GDALClose(grid);
+        return foreign;
+    }
+
+    TEST_F(GdalUtilToolTest, aCogIsEncodedAgainAndNeverCopied)
+    {
+        testutils::GeoRasterSpec spec;
+        spec.width = 600;
+        spec.height = 600;
+        spec.bands = 1;
+        spec.type = GDT_UInt16;
+        spec.epsg = 3857;
+        spec.originX = 1000000.0;
+        spec.originY = 5000000.0;
+        spec.pixelSize = 50.0;
+        spec.value = [](int, int x, int y) { return static_cast<double>((x * 7 + y * 13) % 4000); };
+        const fs::path source = testutils::createGeoRaster(area_->getFolder() / "uint16.tif", spec);
+        const fs::path foreign = writeForeignCog(area_->getFolder(), source);
+        ASSERT_TRUE(raster::probe(foreign, raster::ProbeParams()).isCog) << "the input is a COG already";
+
+        const fs::path out = area_->getFolder() / "again.tif";
+        raster::GdalUtilHelper helper;
+        helper.buildCog(foreign, out, json::object(), raster::ProgressCallback());
+
+        EXPECT_NE(readFile(out), readFile(foreign)) << "a file of a user is never copied";
+        // Lossless data is the same after the new encoding
+        EXPECT_EQ(describeRaster(out), describeRaster(foreign));
+    }
+
+    TEST_F(GdalUtilToolTest, aCogOfARasterWithoutProjectionIsUnreadable)
+    {
+        const fs::path noProjection = area_->getFolder() / "plain.tif";
+        {
+            GDALDatasetH dataset = GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(noProjection).c_str(), 16, 16, 1, GDT_Byte, nullptr);
+            ASSERT_NE(dataset, nullptr);
+            GDALClose(dataset);
+        }
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(53, raster::op::kCog, noProjection,
+                                                                                    area_->getFolder() / "none.tif", json::object()))});
+        ASSERT_FALSE(run.lines.empty());
+        const auto response = raster::decodeResponse(run.lines.back());
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Unreadable);
+        EXPECT_EQ(run.exitCode, 1);
+    }
+
+    TEST_F(GdalUtilToolTest, theLongBuildsRunOnlyOneShot)
+    {
+        Server server;
+        for (const char *op : {"cog", "vector"})
+        {
+            SCOPED_TRACE(op);
+            const auto response = server.ask(buildRequest(1, op, geotiff_, area_->getFolder() / "never", json::object()));
+            EXPECT_FALSE(response.ok);
+            EXPECT_EQ(response.error, raster::ErrorCode::Internal);
+            EXPECT_NE(response.message.find("--request"), std::string::npos) << response.message;
+        }
+        EXPECT_FALSE(fs::exists(area_->getFolder() / "never"));
+    }
+
+    // The files of a folder with their sizes, relative to it
+    std::map<std::string, std::uintmax_t> filesOf(const fs::path &folder)
+    {
+        std::map<std::string, std::uintmax_t> files;
+        for (const auto &entry : fs::recursive_directory_iterator(folder))
+            if (entry.is_regular_file())
+                files[io::toUtf8(entry.path().lexically_relative(folder))] = entry.file_size();
+        return files;
+    }
+
+    TEST_F(GdalUtilToolTest, theVectorOutputsOfTheProgramAreTheOnesBuiltInTheProcess)
+    {
+        const fs::path inProcess = area_->getFolder() / "stage-process";
+        const fs::path byProgram = area_->getFolder() / "stage-program";
+        fs::create_directories(inProcess);
+        fs::create_directories(byProgram);
+        raster::buildVectorFiles(geojson_, inProcess, raster::VectorParams());
+
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(54, raster::op::kVector, geojson_, byProgram, json::object()))});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        ASSERT_TRUE(raster::decodeResponse(run.lines.back()).ok) << run.lines.back();
+
+        const auto expected = filesOf(inProcess);
+        EXPECT_TRUE(expected.count("vec/source.gpkg"));
+        EXPECT_TRUE(expected.count("mvt/metadata.json"));
+        // The tiles are the same files; the GeoPackage has the same layers and features
+        const auto produced = filesOf(byProgram);
+        for (const auto &[name, size] : expected)
+        {
+            if (name != "vec/source.gpkg")
+            {
+                EXPECT_EQ(produced.at(name), size) << name;
+            }
+        }
+        EXPECT_EQ(produced.size(), expected.size());
+
+        for (const fs::path &stage : {inProcess, byProgram})
+        {
+            GDALDatasetH gpkg = GDALOpenEx(io::toUtf8(stage / "vec" / "source.gpkg").c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
+            ASSERT_NE(gpkg, nullptr);
+            ASSERT_EQ(GDALDatasetGetLayerCount(gpkg), 1);
+            EXPECT_EQ(OGR_L_GetFeatureCount(GDALDatasetGetLayer(gpkg, 0), TRUE), 2);
+            GDALClose(gpkg);
+        }
+    }
+
+    TEST_F(GdalUtilToolTest, aVectorFileThatIsNoVectorIsUnreadableAndLeavesNothing)
+    {
+        const fs::path stage = area_->getFolder() / "stage-none";
+        fs::create_directories(stage);
+        writeFile(area_->getFolder() / "bad.geojson", "this is not a vector");
+        const ToolRun bad = runTool({"--request", raster::encodeRequest(buildRequest(56, raster::op::kVector, area_->getFolder() / "bad.geojson", stage, json::object()))});
+        ASSERT_FALSE(bad.lines.empty());
+        const auto response = raster::decodeResponse(bad.lines.back());
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Unreadable);
+        EXPECT_TRUE(filesOf(stage).empty()) << "nothing is left to publish";
+    }
+
+    raster::GeoprojectParams photoParams()
+    {
+        raster::GeoprojectParams params;
+        params.width = 96;
+        params.height = 64;
+        params.footprint = {{{9.100, 45.300}, {9.100, 45.299}, {9.102, 45.299}, {9.102, 45.300}}};
+        params.outsize = "100%";
+        return params;
+    }
+
+    TEST_F(GdalUtilToolTest, aPhotoIsGeoprojectedByTheProgramLikeInTheProcess)
+    {
+        const fs::path inProcess = area_->getFolder() / "projected-process.tif";
+        raster::geoprojectImage(jpeg_, inProcess, photoParams());
+
+        const fs::path byProgram = area_->getFolder() / "projected-program.tif";
+        Server server;
+        const auto response = server.ask(buildRequest(57, raster::op::kGeoproject, jpeg_, byProgram, raster::toJson(photoParams())));
+        ASSERT_TRUE(response.ok) << response.message;
+
+        const json expected = describeRaster(inProcess);
+        EXPECT_EQ(describeRaster(byProgram), expected);
+        EXPECT_EQ(expected.at("bands").size(), 4u) << "RGB and alpha";
+        EXPECT_NE(expected.at("projection").get<std::string>().find("4326"), std::string::npos);
+    }
+
+    TEST_F(GdalUtilToolTest, aGeoprojectRequestWithoutTheFootprintOfThePhotoIsRefused)
+    {
+        Server server;
+        const auto response = server.ask(buildRequest(58, raster::op::kGeoproject, jpeg_, area_->getFolder() / "none.tif",
+                                                      json{{"width", 96}, {"height", 64}}));
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Internal);
+        EXPECT_FALSE(fs::exists(area_->getFolder() / "none.tif"));
     }
 }

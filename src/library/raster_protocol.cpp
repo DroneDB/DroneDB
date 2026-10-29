@@ -518,5 +518,118 @@ namespace ddb
             return result;
         }
 
+        // ---- builds
+
+        std::string encodeProgress(double fraction)
+        {
+            if (!(fraction > 0.0))
+                fraction = 0.0;
+            else if (fraction > 1.0)
+                fraction = 1.0;
+            return json{{"progress", fraction}}.dump();
+        }
+
+        std::optional<double> decodeProgress(std::string_view line)
+        {
+            if (line.empty() || line.front() != '{')
+                return std::nullopt;
+            const json parsed = json::parse(line.begin(), line.end(), nullptr, false);
+            if (!parsed.is_object())
+                return std::nullopt;
+            const json *progress = member(parsed, "progress");
+            if (progress == nullptr || !progress->is_number())
+                return std::nullopt;
+            return progress->get<double>();
+        }
+
+        json toJson(const CogParams &params)
+        {
+            json result = json::object();
+            if (params.threads)
+                result["threads"] = *params.threads;
+            return result;
+        }
+
+        CogParams cogParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the cog params are not an object");
+            CogParams result;
+            if (const json *threads = member(params, "threads"))
+            {
+                if (!threads->is_number_integer() || threads->get<int64_t>() < 1 || threads->get<int64_t>() > 4096)
+                    throw ProtocolError("'threads' is not an integer from 1 to 4096");
+                result.threads = threads->get<int>();
+            }
+            return result;
+        }
+
+        json toJson(const VectorParams &params)
+        {
+            json result = json::object();
+            if (!params.source.empty())
+                setText(result, "source", io::toUtf8(params.source));
+            return result;
+        }
+
+        VectorParams vectorParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the vector params are not an object");
+            VectorParams result;
+            result.source = getPath(params, "source");
+            return result;
+        }
+
+        json toJson(const GeoprojectParams &params)
+        {
+            json footprint = json::array();
+            for (const auto &corner : params.footprint)
+                footprint.push_back(json::array({corner[0], corner[1]}));
+            json result = {{"width", params.width}, {"height", params.height}, {"footprint", footprint}};
+            if (!params.outsize.empty())
+                result["outsize"] = params.outsize;
+            return result;
+        }
+
+        GeoprojectParams geoprojectParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the geoproject params are not an object");
+            GeoprojectParams result;
+            for (const char *name : {"width", "height"})
+            {
+                const json &size = required(params, name);
+                if (!size.is_number_integer() || size.get<int64_t>() < 1 || size.get<int64_t>() > 1'000'000)
+                    throw ProtocolError(std::string("'") + name + "' is not an integer from 1 to 1000000");
+            }
+            result.width = required(params, "width").get<int>();
+            result.height = required(params, "height").get<int>();
+
+            const json &footprint = required(params, "footprint");
+            if (!footprint.is_array() || footprint.size() != result.footprint.size())
+                throw ProtocolError("'footprint' is not an array of four corners");
+            for (size_t i = 0; i < result.footprint.size(); i++)
+            {
+                const json &corner = footprint[i];
+                if (!corner.is_array() || corner.size() != 2 || !corner[0].is_number() || !corner[1].is_number())
+                    throw ProtocolError("a corner of 'footprint' is not [longitude, latitude]");
+                for (size_t axis = 0; axis < 2; axis++)
+                {
+                    const double value = corner[axis].get<double>();
+                    if (!std::isfinite(value))
+                        throw ProtocolError("a corner of 'footprint' is not a finite number");
+                    result.footprint[i][axis] = value;
+                }
+            }
+            if (const json *outsize = member(params, "outsize"))
+            {
+                if (!outsize->is_string())
+                    throw ProtocolError("'outsize' is not a string");
+                result.outsize = outsize->get<std::string>();
+            }
+            return result;
+        }
+
     } // namespace raster
 } // namespace ddb

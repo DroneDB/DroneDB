@@ -38,7 +38,7 @@ TEST(testTiler, RGB) {
         "ortho.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    GDALTiler t(ortho.string(), tileDir.string());
+    GDALTiler t(TilerHelper::toGeoTIFF(ortho).string(), tileDir.string());
 
     t.tile(19, 128168, 339545);
 
@@ -52,7 +52,7 @@ TEST(testTiler, DSM) {
                              "dsm.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    GDALTiler t(dsm.string(), tileDir.string());
+    GDALTiler t(TilerHelper::toGeoTIFF(dsm).string(), tileDir.string());
     t.tile(21, 512674, 1358189);
     t.tile(20, 256337, 679094);
 
@@ -60,7 +60,7 @@ TEST(testTiler, DSM) {
     EXPECT_TRUE(fs::exists(tileDir / "20" / "256337" / "679094.png"));
 
     fs::path tmsTileDir = ta.getFolder("tmsTiles");
-    GDALTiler tms(dsm.string(), tmsTileDir.string(), 256, true);
+    GDALTiler tms(TilerHelper::toGeoTIFF(dsm).string(), tmsTileDir.string(), 256, true);
     tms.tile(20, 256337, 369481);
 
     EXPECT_TRUE(fs::exists(tmsTileDir / "20" / "256337" / "369481.png"));
@@ -80,7 +80,7 @@ TEST(testTiler, DeepZoomNotBlank) {
         "ortho.tif");
 
     for (const auto &[tz, tileSize] : std::vector<std::pair<int, int>>{{24, 256}, {23, 512}, {26, 256}}) {
-        GDALTiler t(ortho.string(), "", tileSize);
+        GDALTiler t(TilerHelper::toGeoTIFF(ortho).string(), "", tileSize);
         const auto b = t.getMinMaxCoordsForZ(tz);
         const int tx = (b.min.x + b.max.x) / 2;
         const int ty = (b.min.y + b.max.y) / 2;
@@ -249,7 +249,7 @@ TEST(testTiler, MultipleZoomLevels) {
         "wro.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    GDALTiler t(ortho.string(), tileDir.string(), 256, true);
+    GDALTiler t(TilerHelper::toGeoTIFF(ortho).string(), tileDir.string(), 256, true);
 
     // Test tiles from the provided table
     struct TileTest {
@@ -304,7 +304,7 @@ TEST(testTilerHelper, FailedDownloadIsNotCached) {
         rl.rlim_cur = rl.rlim_max = 64 * 1024;
         setrlimit(RLIMIT_FSIZE, &rl);
         try {
-            TilerHelper::toGeoTIFF(url, 256, false);
+            TilerHelper::toGeoTIFF(url);
             _exit(1);  // a >64 KB transfer truncated at 64 KB must not succeed
         } catch (const NetException&) {
             _exit(0);

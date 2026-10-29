@@ -5,7 +5,9 @@
 #define RASTER_PROTOCOL_H
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -195,6 +197,61 @@ namespace ddb
         json toJson(const ThumbnailParams &params);
         // @throws ProtocolError
         ThumbnailParams thumbnailParamsFromJson(const json &params);
+
+        // ---- builds
+
+        // Receives the fraction (0 to 1) of a long operation that is done
+        using ProgressCallback = std::function<void(double)>;
+
+        // The line a one-shot process writes before its response while it works:
+        // {"progress":<fraction>}, the fraction clamped to 0..1 (without the line feed)
+        std::string encodeProgress(double fraction);
+
+        // The fraction of a progress line; nullopt for any other line
+        std::optional<double> decodeProgress(std::string_view line);
+
+        // The params of a `cog`. The warp and the compression of the COG use the threads of one
+        // build; the host holds the tokens of the CPU pool for them (parallel.h) and says how
+        // many it got, since the helper has a pool of its own and could not know. Without
+        // `threads` the build takes what the configuration (DDB_BUILD_THREADS) allows.
+        struct CogParams
+        {
+            std::optional<int> threads;
+        };
+
+        json toJson(const CogParams &params);
+        // @throws ProtocolError
+        CogParams cogParamsFromJson(const json &params);
+
+        // The params of a `vector` build. `source` is the file the user named when `path` is a
+        // conversion of it (a DWG converted to a DXF by the host): its sidecars give the drawing
+        // its coordinate system. Empty for any other file.
+        struct VectorParams
+        {
+            fs::path source;
+        };
+
+        json toJson(const VectorParams &params);
+        // @throws ProtocolError
+        VectorParams vectorParamsFromJson(const json &params);
+
+        // The params of a `geoproject`: what the host knows of a photo from its EXIF, since the
+        // helper reads none. `footprint` is the ground position of the corners of the picture
+        // (upper left, lower left, lower right, upper right) as longitude and latitude in
+        // EPSG:4326, `width` and `height` its size in pixels, `outsize` the size of the result
+        // as gdal_translate -outsize takes it ("100%" or a number of pixels of width; empty: as
+        // the picture).
+        struct GeoprojectParams
+        {
+            int width = 0;
+            int height = 0;
+            std::array<std::array<double, 2>, 4> footprint{};
+            std::string outsize;
+        };
+
+        json toJson(const GeoprojectParams &params);
+        // @throws ProtocolError
+        GeoprojectParams geoprojectParamsFromJson(const json &params);
 
     } // namespace raster
 } // namespace ddb

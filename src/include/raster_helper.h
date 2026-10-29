@@ -65,9 +65,6 @@ namespace ddb
         // The warning of an entry whose file the helper could not read
         std::string notReadWarning(const std::string &reason);
 
-        // Receives the fraction (0 to 1) of a conversion that is done
-        using ProgressCallback = std::function<void(double)>;
-
         // What the host asks the raster helper. Each operation takes a file a user supplied and
         // returns plain data or writes the file it is given; a failure is thrown as follows:
         //   - RasterOpException, code Unreadable or Policy: GDAL cannot open the file (as what the
@@ -92,7 +89,9 @@ namespace ddb
             // The operations below take the members the protocol defines for them in `params`
             virtual void normalize(const fs::path &path, const fs::path &out, const json &params) = 0;
             virtual void geoproject(const fs::path &path, const fs::path &out, const json &params) = 0;
-            // Long conversions: one process each, which writes progress as it goes
+            // Long conversions: one process each, which writes progress as it goes. A full device
+            // is a RetryableBuildException (NoSpaceOnDevice), as any build reports it; an idle
+            // process one with the reason IdleTimeout.
             virtual void buildCog(const fs::path &path, const fs::path &out, const json &params,
                                   const ProgressCallback &progress) = 0;
             virtual void buildVector(const fs::path &path, const fs::path &out, const json &params,

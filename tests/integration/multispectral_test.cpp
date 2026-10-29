@@ -601,7 +601,7 @@ TEST(multispectral, tileWithBandSelection) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_tile.tif", 256, 256, 5, GDT_UInt16);
     // Use empty outputFolder for in-memory tile generation
-    GDALTiler tiler(rasterPath.string(), "", 256, false);
+    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
 
     // Get valid tile coords from tiler info
     auto info = tiler.getMinMaxZ();
@@ -659,7 +659,7 @@ TEST(multispectral, tileWithFormula) {
     }
 
     // Use empty outputFolder for in-memory tile generation
-    GDALTiler tiler(rasterPath.string(), "", 256, false);
+    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
     auto info = tiler.getMinMaxZ();
 
     ThumbVisParams visParams;
@@ -690,7 +690,7 @@ TEST(multispectral, tileNoVisParamsFallback) {
     fs::path rasterPath = createGeoRaster(ta, "rgb_tile.tif", 256, 256, 3, GDT_Byte);
 
     // Use empty outputFolder for in-memory tile generation
-    GDALTiler tiler(rasterPath.string(), "", 256, false);
+    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
     auto info = tiler.getMinMaxZ();
 
     // Empty vis params should fall through to standard tile
@@ -717,7 +717,7 @@ TEST(multispectral, cApiMemoryTileEx) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_capi.tif", 256, 256, 5, GDT_UInt16);
 
-    GDALTiler tiler(rasterPath.string(), "", 256, false);
+    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
     auto info = tiler.getMinMaxZ();
     auto bounds = tiler.getMinMaxCoordsForZ(info.max);
 
@@ -739,7 +739,7 @@ TEST(multispectral, cApiMemoryTileExFormula) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_capi_formula.tif", 256, 256, 5, GDT_UInt16);
 
-    GDALTiler tiler(rasterPath.string(), "", 256, false);
+    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
     auto info = tiler.getMinMaxZ();
     auto bounds = tiler.getMinMaxCoordsForZ(info.max);
 

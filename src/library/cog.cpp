@@ -10,6 +10,8 @@
 #include "build_budget.h"
 #include "parallel.h"
 #include "cog_utils.h"
+#include "raster_helper.h"
+#include "raster_ops.h"
 #include "logger.h"
 #include "mio.h"
 #include "exceptions.h"
@@ -28,44 +30,19 @@
 
 namespace ddb
 {
-    // Logs warp progress every ~5% to aid diagnostics. Uses an atomic counter to throttle
-    // log output (GDAL may call this very frequently, from its own threads too).
-    static void logWarpProgress(std::atomic<int>& lastPct, double dfComplete) {
+    // Reports the warp to the caller at every whole percent and logs it every 5%, to aid
+    // diagnostics. Uses an atomic counter to throttle (GDAL may call this very frequently, from
+    // its own threads too).
+    static void reportWarpProgress(std::atomic<int>& lastPct, double dfComplete, const raster::ProgressCallback& progress) {
         const int pct = static_cast<int>(dfComplete * 100.0);
         int prev = lastPct.load();
-        if (pct >= prev + 5 && lastPct.compare_exchange_strong(prev, pct)) {
+        if (pct < prev + 1 || !lastPct.compare_exchange_strong(prev, pct))
+            return;
+        if (progress)
+            progress(dfComplete);
+        if (pct / 5 != prev / 5) {
             LOGD << "COG warp progress: " << pct << "%";
         }
-    }
-
-    // Copies the input when it is an optimized COG already (true, with its stats sidecar written).
-    // False when it needs the rebuild, or when the copy failed for another reason than a full disk.
-    static bool copyOptimizedCog(const std::string &input, const std::string &outputCog)
-    {
-        if (!isOptimizedCog(input))
-            return false;
-
-        LOGD << "Input file " << input << " is already an optimized COG, copying instead of rebuilding";
-
-        // Simply copy the file instead of rebuilding
-        try {
-            // The filesystem wrapper carries the actual write error code.
-            // A full disk must escape the fallback and preserve pending work.
-            io::copy(io::fromUtf8(input), io::fromUtf8(outputCog));
-
-            LOGD << "Successfully copied optimized COG from " << input << " to " << outputCog;
-            generateCogStats(outputCog);
-            return true;
-        } catch (const FSException& e) {
-            if (e.code() == std::errc::no_space_on_device)
-                throw;
-            LOGW << "Failed to copy COG file: " << e.what() << ". Falling back to rebuild.";
-            // Fall through to normal rebuild process
-        } catch (const std::exception& e) {
-            LOGW << "Failed to copy COG file: " << e.what() << ". Falling back to rebuild.";
-            // Fall through to normal rebuild process
-        }
-        return false;
     }
 
     // How GDALWarp keeps the transparency of the source: its nodata value, or a destination alpha
@@ -221,17 +198,25 @@ namespace ddb
         return targs;
     }
 
-    void buildCog(const std::string &input, const std::string &outputCog, const BuildOptions &options)
+    namespace raster
     {
+
+    void buildCogFile(const fs::path &path, const fs::path &outFile, const CogParams &params,
+                      const ProgressCallback &reportProgress)
+    {
+        const std::string input = io::toUtf8(path);
+        const std::string outputCog = io::toUtf8(outFile);
+        BuildOptions options;
+        options.threads = params.threads;
+
         // A JPEG 2000 decodes on threads of its own, one per CPU unless GDAL_NUM_THREADS says
         // otherwise, and starts them when it is opened. It is never a COG: no open before the
         // budget below is in place.
         const GDALDriverH sourceDriver = identifyUserRaster(input);
         const bool ownDecodeThreads = sourceDriver && decodesWithOwnThreads(GDALGetDriverShortName(sourceDriver));
 
-        // Check if input is already an optimized COG
-        if (!ownDecodeThreads && copyOptimizedCog(input, outputCog))
-            return;
+        // An input that is a COG already is built like any other: the output is always what
+        // GDAL wrote here, never a copy of the bytes of a file of a user
 
         // Threads, warp memory and block cache come from one budget so
         // that several builds running in one process stay within known bounds;
@@ -248,8 +233,7 @@ namespace ddb
         if (ownDecodeThreads)
             decodeThreadsGuard.emplace("GDAL_NUM_THREADS", std::to_string(cpu.threads()).c_str());
 
-        // Normal rebuild process for files that need optimization
-        LOGD << "Building COG from " << input << " (requires optimization)";
+        LOGD << "Building COG from " << input;
 
         // Owned: the option list and GDALWarpAppOptionsNew below can throw
         auto srcDataset = openUserRaster(input);
@@ -299,7 +283,9 @@ namespace ddb
         // Progress for diagnostic logging during long warp operations; the warp stops when
         // the build is canceled
         std::atomic<int> warpPct{0};
-        cancel::GdalProgress progress([&warpPct](double fraction) { logWarpProgress(warpPct, fraction); });
+        cancel::GdalProgress progress([&warpPct, &reportProgress](double fraction) {
+            reportWarpProgress(warpPct, fraction, reportProgress);
+        });
         progress.attach(psOptions.get());
 
         // Capture the OS write error immediately, before cleanup or logging can
@@ -331,6 +317,31 @@ namespace ddb
 
         // Generate stats.json sidecar
         generateCogStats(outputCog);
+    }
+
+    } // namespace raster
+
+    void buildCog(const std::string &input, const std::string &outputCog, const BuildOptions &options)
+    {
+        // The threads of the build come from the CPU pool of this process, which bounds all the
+        // builds it runs: the helper has a pool of its own and is told how many it may use. The
+        // tokens are held until the helper is done.
+        const BuildResourceBudget budget = BuildResourceBudget::fromConfig(options);
+        const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
+
+        raster::CogParams params;
+        params.threads = static_cast<int>(cpu.threads());
+
+        std::atomic<int> lastPct{0};
+        const raster::ProgressCallback logProgress = [&lastPct](double fraction) {
+            const int pct = static_cast<int>(fraction * 100.0);
+            int prev = lastPct.load();
+            if (pct / 5 != prev / 5 && lastPct.compare_exchange_strong(prev, pct)) {
+                LOGD << "COG build progress: " << pct << "%";
+            }
+        };
+        raster::rasterHelper().buildCog(io::fromUtf8(input), io::fromUtf8(outputCog), raster::toJson(params),
+                                        logProgress);
     }
 
     void generateCogStats(const std::string &cogPath) {

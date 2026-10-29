@@ -17,8 +17,8 @@ namespace ddb
     // The operations that read a file a user supplied with GDAL: what the raster helper
     // (gdal-util) runs for a request of apps/gdal-util/PROTOCOL.md. Each takes the file and its
     // params and returns plain data (raster_protocol.h) or writes the file it is given; none
-    // reads EXIF or other tags, which stay with the metadata helper. Until the host sends them to
-    // the helper, the entry handlers call them in the process.
+    // reads EXIF or other tags, which stay with the metadata helper. The host does not call them:
+    // it asks the helper (raster_helper.h), which runs them in a process of its own.
     namespace raster
     {
         // A file that cannot be read as what the operation needs: GDAL opens none of the drivers
@@ -56,6 +56,33 @@ namespace ddb
 
         // The same thumbnail, written to outFile as the thumbnails are (WebP)
         void thumbnail(const fs::path &path, const fs::path &outFile, const ThumbnailParams &params);
+
+        // The long operations below run in a process of their own (`gdal-util --request`). The
+        // COG build reports how far it is through `progress` (called from any thread, at most
+        // once per percent), which may be empty.
+
+        // Builds the Cloud Optimized GeoTIFF outFile (Web Mercator, tiled, with overviews) from a
+        // raster with a projection, and the statistics next to it (<outFile>.stats.json). Always
+        // decodes and encodes the raster, also when it is a COG already: the file a COG build
+        // leaves is what GDAL wrote here, never a copy of a file of a user.
+        // @throws RasterOpException when the file cannot be opened; GDALException when it has
+        // no projection or GDAL fails; RetryableBuildException when the device is full
+        void buildCogFile(const fs::path &path, const fs::path &outFile, const CogParams &params,
+                          const ProgressCallback &progress);
+
+        // Builds the vector outputs of a file in the folder outFolder, which exists and is
+        // empty: vec/source.gpkg and, unless the file is a CAD drawing without a coordinate
+        // system, the MVT tiles in mvt/ (a drawing without one gets vec/local.json instead).
+        // A DWG is converted by the caller; `path` is the DXF then (VectorParams::source).
+        // @throws RasterOpException when the file cannot be opened; AppException,
+        // RetryableBuildException
+        void buildVectorFiles(const fs::path &path, const fs::path &outFolder, const VectorParams &params);
+
+        // Writes the GeoTIFF outFile of a photo placed on the ground by the corners of
+        // GeoprojectParams (JPEG compressed, with an alpha band)
+        // @throws RasterOpException when the file cannot be opened; GDALException,
+        // InvalidArgsException for an outsize that is not a positive number
+        void geoprojectImage(const fs::path &path, const fs::path &outFile, const GeoprojectParams &params);
 
     } // namespace raster
 } // namespace ddb

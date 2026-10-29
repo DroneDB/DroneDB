@@ -19,7 +19,10 @@
 #include "entry.h"
 #include "entry_handler.h"
 #include "exceptions.h"
+#include "cog.h"
 #include "geoproject.h"
+#include "raster_artefacts.h"
+#include "raster_helper.h"
 #include "hash.h"
 #include "json.h"
 #include "logger.h"
@@ -111,7 +114,7 @@ namespace ddb
             if (factory != nullptr)
                 return factory->create(localPath, source.outputFolder, source.tileSize, source.tms);
 
-            const fs::path fileToTile = toGeoTIFF(localPath, source.tileSize, source.forceRecreate, "", source.pathHash);
+            const fs::path fileToTile = toGeoTIFF(localPath, source.forceRecreate, source.pathHash);
             return std::make_unique<GDALTiler>(io::toUtf8(fileToTile), io::toUtf8(source.outputFolder), source.tileSize,
                                                source.tms);
         });
@@ -179,26 +182,7 @@ namespace ddb
                 {
                     // Download to a temp file so a failed transfer never lands in the cache
                     const fs::path tmpPath = io::concat(localTileablePath, ".download-" + randomString(16));
-                    HttpResponse res;
-                    bool writeOk = false;
-                    {
-                        std::ofstream of(tmpPath, std::ios::binary);
-                        HttpRequest request;
-                        request.url = io::toUtf8(tileablePath);
-                        res = defaultHttpClient().download(request, of);
-                        // A disk-full or I/O failure stops the transfer, and also shows on the
-                        // stream state
-                        of.close();
-                        writeOk = !of.fail();
-                    }
-
-                    if (!writeOk || res.hasTransportError() || res.status < 200 || res.status >= 300)
-                    {
-                        io::assureIsRemoved(tmpPath);
-                        throw NetException("Cannot download " + io::toUtf8(tileablePath) + " (HTTP " +
-                                           std::to_string(res.status) + "): " +
-                                           (writeOk ? res.transportMessage : std::string("write error")));
-                    }
+                    raster::downloadInput(io::toUtf8(tileablePath), tmpPath);
 
                     // Tilers kept open on the previous download would block the replace on Windows
                     RasterCache::instance().release(localTileablePath);
@@ -214,70 +198,93 @@ namespace ddb
         return localTileablePath;
     }
 
-    fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
-                                    bool forceRecreate,
-                                    const fs::path &outputGeotiff,
+    namespace
+    {
+        // The artefact `target` for a tiler: the one that is there, else the one `produce` makes
+        // (a forced call always makes it). One thread at a time makes it, and the file appears
+        // whole, by a rename.
+        fs::path artefactOnce(const fs::path &target, bool forceRecreate, const std::function<void()> &produce)
+        {
+            std::error_code ec;
+            if (!forceRecreate && fs::exists(target))
+            {
+                // A file in use stays: the cleanup removes what was not touched for days. A
+                // statistics sidecar next to it is touched with it, since it counts only while it
+                // is not older than the raster (raster_stats.h)
+                const auto now = fs::file_time_type::clock::now();
+                fs::last_write_time(target, now, ec);
+                fs::last_write_time(io::concat(target, ".stats.json"), now, ec);
+                return target;
+            }
+
+            ThreadLock lock(io::toUtf8(target));
+
+            // Another thread may have made it while we waited (it is published by a rename)
+            if (forceRecreate || !fs::exists(target))
+                produce();
+            return target;
+        }
+
+        // The COG of a raster of a user, in the artefacts of the cache: built by the raster
+        // helper, checked, and moved to the name the raster and its state give. Its statistics
+        // stay behind: the tiles are stretched with statistics computed on the whole COG, as
+        // they are for any raster without a sidecar, not with the approximate ones of a build.
+        void produceCogArtefact(const fs::path &raster, const fs::path &target)
+        {
+            const io::ScopedTempDir request = raster::makeArtefactRequestFolder("cog-");
+            const fs::path produced = request.path() / "cog.tif";
+            buildCog(io::toUtf8(raster), io::toUtf8(produced));
+            if (!raster::openArtefactRaster(produced))
+                throw GDALException(std::string(raster::kGdalUtilName) + " wrote a COG of " + io::toUtf8(raster) +
+                                    " that cannot be opened");
+
+            // A tiler kept open on the previous file would block the replace on Windows
+            RasterCache::instance().release(target);
+            raster::publishArtefact(produced, target);
+        }
+    } // namespace
+
+    fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, bool forceRecreate,
                                     const std::string &tileablePathHash)
     {
         const fs::path localTileablePath = toLocalFile(tileablePath, tileablePathHash);
 
+        // A file libddb wrote (the COG of a build) is tiled as it is
+        if (raster::isLibddbArtefact(localTileablePath))
+            return localTileablePath;
+
+        if (oneIn(1000))
+            cleanupUserCache();
+
+        // The tiler reads only what libddb wrote, so a file of a user (or a download) is read
+        // once, by the raster helper, and the tiles come from what it writes
+        const fs::path key = raster::artefactsDir() / raster::artefactKey(localTileablePath);
         if (entryHandler(fingerprint(localTileablePath)).tilesWithoutReprojection())
         {
-            // Georasters can be tiled directly
-            return localTileablePath;
+            // Georasters are converted to a COG
+            const fs::path target = io::concat(key, ".tif");
+            return artefactOnce(target, forceRecreate, [&] { produceCogArtefact(localTileablePath, target); });
         }
-        else
-        {
-            fs::path outputPath = outputGeotiff;
 
-            if (outputGeotiff.empty())
-            {
-                // Store in user cache if user doesn't specify a preference
-                if (oneIn(1000))
-                    cleanupUserCache();
-                const time_t modifiedTime = io::Path(localTileablePath).getModifiedTime();
-                const fs::path tileCacheFolder =
-                    UserProfile::get()->getTilesDir() /
-                    getCacheFolderName(localTileablePath, modifiedTime, tileSize);
-                io::assureFolderExists(tileCacheFolder);
-
-                outputPath = tileCacheFolder / "geoprojected.tif";
-            }
-            else
-            {
-                // Just make sure the parent path exists
-                io::assureFolderExists(outputGeotiff.parent_path());
-            }
-
-            // We need to (attempt) to geoproject the file first
-            if (!fs::exists(outputPath) || forceRecreate)
-            {
-                // Multiple threads could be generating the geoprojected
-                // file at the same time, so we place a lock
-                {
-                    ThreadLock lock(io::toUtf8(outputPath));
-
-                    // Another thread may have generated the file while we waited
-                    // (geoProject publishes it via an atomic rename)
-                    if (forceRecreate || !fs::exists(outputPath))
-                    {
-                        ddb::geoProject({io::toUtf8(localTileablePath)}, io::toUtf8(outputPath),
-                                        "100%", true);
-                    }
-                }
-            }
-
-            return outputPath;
-        }
+        // Other images are geoprojected first. Multiple threads could be generating the
+        // geoprojected file at the same time, so artefactOnce places a lock (geoProject
+        // publishes it via an atomic rename)
+        const fs::path target = io::concat(key, "-geoprojected.tif");
+        return artefactOnce(target, forceRecreate, [&] {
+            ddb::geoProject({io::toUtf8(localTileablePath)}, io::toUtf8(target), "100%", true);
+        });
     }
 
     void TilerHelper::cleanupUserCache()
     {
         LOGD << "Cleaning up tiles user cache";
 
-        const time_t threshold =
-            currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
+        constexpr time_t maxAge = 60 * 60 * 24 * 5; // 5 days
+        const time_t threshold = currentUnixTimestamp() - maxAge;
         const fs::path tilesDir = UserProfile::get()->getTilesDir();
+
+        // What the raster helper wrote for the tiles: the same rule
+        raster::cleanupArtefacts(maxAge);
 
         // Iterate directories
         for (auto d = fs::recursive_directory_iterator(tilesDir);
@@ -310,7 +317,7 @@ namespace ddb
         else
         {
             // Assume image/geotiff
-            fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, run.tileSize, true);
+            fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input);
             tiler = std::make_unique<GDALTiler>(io::toUtf8(geotiff), io::toUtf8(output), run.tileSize, run.tms);
         }
 

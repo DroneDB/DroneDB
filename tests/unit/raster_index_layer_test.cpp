@@ -29,6 +29,7 @@
 #include "ddb.h"
 #include "synthetic_raster_support.h"
 #include "gdaltiler.h"
+#include "tilerhelper.h"
 #include "raster_region.h"
 #include "raster_utils.h"
 #include "vegetation.h"
@@ -727,7 +728,7 @@ namespace
         // A tile of the formula: a floating-point raster has one, an integer one is refused
         for (const fs::path &raster : {f32, u16})
         {
-            GDALTiler tiler(raster.string(), "", 256, false);
+            GDALTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
             const auto info = tiler.getMinMaxZ();
             const auto bounds = tiler.getMinMaxCoordsForZ(info.max);
             ThumbVisParams visParams;

@@ -26,6 +26,8 @@
 #include "mio.h"
 #include "obj2tiles_runner.h"
 #include "parallel.h"
+#include "in_process_raster_helper.h"
+#include "raster_helper.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
@@ -201,6 +203,9 @@ struct RasterDataset {
 
 TEST(DDBBuildEx, theCapReachesTheGdalThreadsOfARasterBuildThroughTheEntryHandler) {
     RasterDataset ds(TEST_NAME);
+    // The test reads the GDAL options of the warp from the log of the process that builds
+    testutils::InProcessRasterHelper helper;
+    const raster::ScopedRasterHelper installed(helper);
     const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
     EnvVarGuard budget("DDB_BUILD_THREADS", "4");
 
