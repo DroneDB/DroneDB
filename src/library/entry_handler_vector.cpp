@@ -13,9 +13,10 @@
 #include "cad.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
-#include "raster_ops.h"
+#include "raster_helper.h"
 #include "vector.h"
 
 namespace ddb {
@@ -23,10 +24,11 @@ namespace ddb {
 namespace {
 
 // Layers, extent and footprint in WGS84 (and the coordinate system of a CAD drawing), found by
-// GDAL (raster_ops.h) and put in the entry.
+// GDAL in the raster helper (raster_helper.h) and put in the entry.
 // Best-effort: any failure leaves the entry indexed without geometry but
-// never aborts the parse (a corrupted vector file should not block ddb add).
-void parseVectorMetadata(const fs::path &path, Entry &entry)
+// never aborts the parse (a corrupted vector file should not block ddb add). What does stop
+// the batch is a helper that cannot be used, a full disk and a canceled run.
+void parseVectorMetadata(const fs::path &path, Entry &entry, FingerprintContext &ctx)
 {
     // Declared outside try: the CAD source outlives the dataset (a converted DXF is
     // deleted only once closed).
@@ -46,15 +48,31 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
         {
             params.source = path;
             params.converted = cadSource->converted();
+            // The helper cannot see which .prj this thread ignores (cad.h IgnoredSidecarScope)
+            params.sidecarDecided = true;
+            params.sidecar = cad::findPrjSidecar(path).value_or(fs::path());
         }
-        raster::applyProbe(raster::probe(openPath, params), entry);
+
+        const raster::ProbeOutcome &outcome = raster::probeFile(ctx, openPath, params);
+        if (outcome.result)
+            raster::applyProbe(*outcome.result, entry);
+        else if (outcome.notRead)
+            setEntryWarning(entry, raster::notReadWarning(*outcome.notRead));
+        else
+            LOGD << "Vector parse: GDAL cannot open " << io::toUtf8(path);
     }
-    catch (const raster::RasterOpException &)
+    catch (const HelperUnavailableException &)
     {
-        LOGD << "Vector parse: GDAL cannot open " << io::toUtf8(path);
+        throw;
+    }
+    catch (const CanceledException &)
+    {
+        throw;
     }
     catch (const std::exception &e)
     {
+        if (raster::classify(e) == raster::ErrorCode::NoSpace)
+            throw;
         LOGD << "Vector parse warning: " << e.what();
         setEntryWarning(entry, std::string("vector parse failed: ") + e.what());
     }
@@ -68,8 +86,8 @@ class VectorEntryHandler : public EntryHandler {
         return {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx"};
     }
 
-    void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& /*ctx*/) const override {
-        parseVectorMetadata(path, entry);
+    void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& ctx) const override {
+        parseVectorMetadata(path, entry, ctx);
     }
 
     std::string subfolder() const override { return VectorBuildSubfolder; }

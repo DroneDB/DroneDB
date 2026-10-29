@@ -208,11 +208,18 @@ namespace ddb
         std::optional<double> captureTimeFromGeoTimezone();
     };
 
+    namespace raster
+    {
+        struct ProbeOutcome; // raster_helper.h
+    }
+
     /**
      * @brief Context for caching the parsed metadata of an image between fingerprint and parseEntry.
      *
      * fingerprint() and parseEntry() share the outcome of the metadata read, so the file is read
-     * once: the ExifParser that owns the metadata, or the answer that the file has none.
+     * once: the ExifParser that owns the metadata, or the answer that the file has none. They
+     * share what the raster helper found in the file the same way (probe): one request for the
+     * file, whichever step asks first.
      */
     struct FingerprintContext
     {
@@ -227,6 +234,10 @@ namespace ddb
         // (EntryHandler::prefetch), so the reader works while the file is hashed: detection
         // takes its result instead of reading. Empty outside parseEntry.
         exif::PendingRead pendingRead;
+        // What the raster helper found in the file (raster::probeFile): the detection of an
+        // entry and its metadata step both need it. Null when the file was not probed in this
+        // pass.
+        std::shared_ptr<const raster::ProbeOutcome> probe;
 
         FingerprintContext() = default;
 

@@ -28,6 +28,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_cache.h"
+#include "raster_helper.h"
 #include "diagnostics.h"
 
 using namespace ddb;
@@ -284,8 +285,10 @@ namespace ddb
         const size_t rasters = RasterCache::instance().clear();
         // The metadata helper processes (metadata-util): input closed, then killed after 2 s if they stay
         const size_t helpers = exif::closeMetadataHelpers();
-        LOGD << "Closed " << connections << " pooled index connections, " << rasters << " cached rasters and "
-             << helpers << " metadata helpers";
+        // The raster helper processes (gdal-util), the same way
+        const size_t rasterHelpers = raster::closeRasterHelpers();
+        LOGD << "Closed " << connections << " pooled index connections, " << rasters << " cached rasters, "
+             << helpers << " metadata helpers and " << rasterHelpers << " raster helpers";
     }
 
     void finalizeProcess()

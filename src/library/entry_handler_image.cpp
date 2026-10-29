@@ -10,7 +10,7 @@
 #include "entry.h"
 #include "entry_handlers_builtin.h"
 #include "mio.h"
-#include "raster_ops.h"
+#include "raster_helper.h"
 #include "thermal.h"
 
 namespace ddb {
@@ -56,14 +56,10 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
 
     if (gdalRaster)
     {
-        try
-        {
-            georaster = raster::probe(path, raster::ProbeParams()).type == "GeoRaster";
-        }
-        catch (const raster::RasterOpException &)
-        {
-            LOGD << "Cannot open " << io::toUtf8(path) << " for georaster test";
-        }
+        // One request for the file: the metadata step of a GeoRaster asks again and gets this
+        // answer. A file GDAL cannot open, or the helper could not read, is not a GeoRaster.
+        const raster::ProbeOutcome &outcome = raster::probeFile(ctx, path, raster::ProbeParams());
+        georaster = outcome.result && outcome.result->type == "GeoRaster";
     }
 
     bool image = (gdalRaster || isOtherImage(p)) && !georaster;
@@ -352,6 +348,10 @@ class ImageEntryHandler : public EntryHandler {
 
     void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& ctx) const override {
         parseImageMetadata(path, entry, ctx);
+        // The helper could not read the file within its limits: the entry is an image without
+        // what it would have found, and says so
+        if (ctx.probe && ctx.probe->notRead && ctx.probe->path == path)
+            setEntryWarning(entry, raster::notReadWarning(*ctx.probe->notRead));
     }
 
     // Images and panoramas are rendered from the file (a panorama is an image twice as wide as

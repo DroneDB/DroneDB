@@ -371,6 +371,8 @@ namespace ddb
                 setText(result, "source", io::toUtf8(params.source));
             if (params.converted)
                 result["converted"] = true;
+            if (params.sidecarDecided)
+                setText(result, "sidecar", io::toUtf8(params.sidecar));
             return result;
         }
 
@@ -393,6 +395,11 @@ namespace ddb
                     throw ProtocolError("'converted' is not a boolean");
                 result.converted = converted->get<bool>();
             }
+            if (const auto sidecar = getText(params, "sidecar"))
+            {
+                result.sidecarDecided = true;
+                result.sidecar = io::fromUtf8(*sidecar);
+            }
             return result;
         }
 
@@ -405,6 +412,8 @@ namespace ddb
                 out["pointGeom"] = pointGeometryJson(result.pointGeom);
             if (!result.polygonGeom.empty())
                 out["polygonGeom"] = polygonGeometryJson(result.polygonGeom);
+            if (!result.warning.empty())
+                out["warning"] = cutAtCharacter(result.warning, kMaxMessageBytes);
             return out;
         }
 
@@ -438,6 +447,12 @@ namespace ddb
                 out.pointGeom = pointGeometryFromJson(*point);
             if (const json *polygon = member(result, "polygonGeom"))
                 out.polygonGeom = polygonGeometryFromJson(*polygon);
+            if (const json *warning = member(result, "warning"))
+            {
+                if (!warning->is_string())
+                    throw ProtocolError("'warning' is not a string");
+                out.warning = cutAtCharacter(warning->get<std::string>(), kMaxMessageBytes);
+            }
             return out;
         }
 

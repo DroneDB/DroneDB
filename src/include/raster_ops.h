@@ -45,7 +45,8 @@ namespace ddb
         // coordinate system cannot be read
         ProbeResult probe(const fs::path &path, const ProbeParams &params);
 
-        // Adds what a probe found to the entry: its properties, the projection and the geometries
+        // Adds what a probe found to the entry: its properties, the projection, the geometries
+        // and its warning
         void applyProbe(const ProbeResult &result, Entry &entry);
 
         // The thumbnail of a photo or a raster, in memory

@@ -136,11 +136,20 @@ namespace ddb
         // The params of a probe. For a vector, `source` is the file the user named when `path`
         // is a conversion of it (a DWG converted to a DXF): its sidecars give the coordinate
         // system. `converted` says it is one. Both stay empty for any other file.
+        //
+        // The .prj next to `source` gives a drawing its coordinate system, unless the sender
+        // ignores it (the index re-reads a drawing right after its .prj was removed from the
+        // index, while the file is still on disk: cad.h IgnoredSidecarScope). That rule lives in
+        // the sender's thread, which the receiver cannot see, so a sender that applies it says
+        // what it decided: `sidecarDecided`, and in `sidecar` the .prj that counts (empty: none
+        // does). A receiver that is not told reads the .prj it finds.
         struct ProbeParams
         {
             ProbeKind kind = ProbeKind::Raster;
             fs::path source;
             bool converted = false;
+            bool sidecarDecided = false;
+            fs::path sidecar;
         };
 
         json toJson(const ProbeParams &params);
@@ -162,6 +171,10 @@ namespace ddb
             std::string wkt;
             BasicPointGeometry pointGeom;
             BasicPolygonGeometry polygonGeom;
+            // What the entry shows as its warning when the probe could only describe the file in
+            // part (a CAD drawing whose coordinate system GDAL cannot use keeps its properties
+            // but has no footprint); empty when the probe is whole. At most kMaxMessageBytes.
+            std::string warning;
         };
 
         json toJson(const ProbeResult &result);

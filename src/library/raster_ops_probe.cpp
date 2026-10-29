@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <system_error>
+#include <vector>
 
 #include "cad.h"
 #include "cog_utils.h"
@@ -340,6 +342,34 @@ VectorLayers describeLayers(GDALDatasetH hDS, OGRSpatialReferenceH fallbackSrs)
     return out;
 }
 
+bool sameFile(const fs::path &a, const fs::path &b)
+{
+    std::error_code ec;
+    return fs::equivalent(a, b, ec);
+}
+
+// The coordinate system of a CAD drawing. The .prj that counts is the one the sender decided on
+// when it says so (ProbeParams): every other .prj found next to the drawing is ignored here, as
+// the sender ignores it in its own thread, which this one cannot see.
+cad::CadCrs resolveDrawingCrs(const ProbeParams &params, const fs::path &source, GDALDatasetH hDS,
+                              const cad::DxfInfo &info)
+{
+    if (!params.sidecarDecided)
+        return cad::resolveCadCrs(source, hDS, info);
+
+    std::vector<fs::path> ignored;
+    for (;;)
+    {
+        const cad::IgnoredSidecarScope scope(ignored);
+        const auto found = cad::findPrjSidecar(source);
+        if (!found || (!params.sidecar.empty() && sameFile(*found, params.sidecar)))
+            break;
+        ignored.push_back(*found);
+    }
+    const cad::IgnoredSidecarScope scope(ignored);
+    return cad::resolveCadCrs(source, hDS, info);
+}
+
 ProbeResult probeVector(const fs::path &path, const ProbeParams &params)
 {
     // The drawing the user named; `path` is what GDAL reads (a DXF made from a DWG)
@@ -358,7 +388,7 @@ ProbeResult probeVector(const fs::path &path, const ProbeParams &params)
     if (cad::isCadFile(source))
     {
         const auto info = cad::readDxfInfo(path);
-        const auto crs = cad::resolveCadCrs(source, hDS, info);
+        const auto crs = resolveDrawingCrs(params, source, hDS, info);
         cadJson = {{"crs", {{"source", crs.source}, {"label", crs.label}}},
                    {"units", cad::insUnitsName(info.insUnits)}};
         if (params.converted) cadJson["converter"] = "dwg2dxf";
@@ -374,7 +404,12 @@ ProbeResult probeVector(const fs::path &path, const ProbeParams &params)
         {
             cadSrs = srsFromUserInput(crs.srs.c_str());
             if (!cadSrs)
-                throw GDALException("Invalid CAD coordinate system " + crs.label);
+            {
+                // The drawing says it is georeferenced but GDAL cannot use its coordinate
+                // system: the entry keeps that and says why it has no footprint
+                result.warning = "vector parse failed: Invalid CAD coordinate system " + crs.label;
+                return result;
+            }
         }
     }
 
@@ -419,6 +454,8 @@ void applyProbe(const ProbeResult &result, Entry &entry)
         entry.point_geom.addPoint(p.x, p.y, p.z);
     for (const auto &p : result.polygonGeom.points)
         entry.polygon_geom.addPoint(p.x, p.y, p.z);
+    if (!result.warning.empty())
+        setEntryWarning(entry, result.warning);
 }
 
 }  // namespace raster

@@ -334,6 +334,7 @@ namespace ddb
         ctx.metadataRead = false;
         ctx.hasGeo = false;
         ctx.parser.reset();
+        ctx.probe.reset();
 
         if (const EntryHandler *handler = findEntryHandlerByExtension(path))
             return handler->detect(path, ctx);

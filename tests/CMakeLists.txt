@@ -58,6 +58,11 @@ if(BUILD_TESTING)
     add_executable(ddbtest_fake_exif helpers/fake_exif_helper.cpp)
     target_link_libraries(ddbtest_fake_exif PRIVATE ddb_warnings)
 
+    # A gdal-util stand-in for the raster helper client tests: speaks the protocol of apps/gdal-util/PROTOCOL.md
+    # and answers or fails the way the start of the name of the file in a request says.
+    add_executable(ddbtest_fake_gdal helpers/fake_gdal_helper.cpp)
+    target_link_libraries(ddbtest_fake_gdal PRIVATE ddb_warnings)
+
     # A helper that speaks in lines, for the generic helper pool tests: it answers the request it
     # reads the way the request says (echo, crash, hang, a line of any size, its memory limit...).
     add_executable(ddbtest_fake_line helpers/fake_line_helper.cpp)
@@ -95,6 +100,7 @@ if(BUILD_TESTING)
         DDB_CONFIG_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_config_probe>"
         DDB_LOG_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_log_probe>"
         DDB_FAKE_EXIF_NAME="$<TARGET_FILE_NAME:ddbtest_fake_exif>"
+        DDB_FAKE_GDAL_HELPER_NAME="$<TARGET_FILE_NAME:ddbtest_fake_gdal>"
         DDB_FAKE_LINE_NAME="$<TARGET_FILE_NAME:ddbtest_fake_line>")
     target_link_libraries(ddb_test_support PUBLIC ddb_static_api GTest::gtest cpr::cpr GDAL::GDAL boolinq
         PRIVATE ddb_warnings)
@@ -165,7 +171,7 @@ if(BUILD_TESTING)
         # tool locator looks: the tests that build a bm3d file or read the metadata of an image
         # run them
         add_dependencies(${name} ddbtest_child ddbtest_signal_probe ddbtest_config_probe ddbtest_log_probe
-            ddbtest_shared_probe ddbtest_fake_exif ddbtest_fake_line ${DDB_HELPER_TOOLS})
+            ddbtest_shared_probe ddbtest_fake_exif ddbtest_fake_gdal ddbtest_fake_line ${DDB_HELPER_TOOLS})
 
         gtest_discover_tests(${name}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

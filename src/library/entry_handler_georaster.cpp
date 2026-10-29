@@ -14,18 +14,25 @@
 #include "entry_handlers_builtin.h"
 #include "logger.h"
 #include "mio.h"
-#include "raster_ops.h"
+#include "raster_helper.h"
 
 namespace ddb {
 
 namespace {
 
-// Size, geotransform, projection, WGS84 footprint and bands: what GDAL finds in the file
-// (raster_ops.h), put in the entry
-void parseGeoRasterMetadata(const fs::path &path, Entry &entry)
+// Size, geotransform, projection, WGS84 footprint and bands: what GDAL finds in the file, as the
+// raster helper tells it (raster_helper.h), put in the entry. The detection of the Image handler
+// asked already: its answer is in the context.
+void parseGeoRasterMetadata(const fs::path &path, Entry &entry, FingerprintContext &ctx)
 {
     LOGV << "Processing GeoRaster file: " << io::toUtf8(path);
-    raster::applyProbe(raster::probe(path, raster::ProbeParams()), entry);
+    const raster::ProbeOutcome &outcome = raster::probeFile(ctx, path, raster::ProbeParams());
+    if (outcome.result)
+        raster::applyProbe(*outcome.result, entry);
+    else if (outcome.notRead)
+        setEntryWarning(entry, raster::notReadWarning(*outcome.notRead));
+    else
+        throw raster::RasterOpException(raster::ErrorCode::Unreadable, "Cannot open " + io::toUtf8(path) + " for reading");
     LOGV << "GeoRaster processing completed successfully";
 }
 
@@ -33,8 +40,8 @@ class GeoRasterEntryHandler : public EntryHandler {
   public:
     GeoRasterEntryHandler() : EntryHandler(EntryType::GeoRaster, "GeoRaster") {}
 
-    void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& /*ctx*/) const override {
-        parseGeoRasterMetadata(path, entry);
+    void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& ctx) const override {
+        parseGeoRasterMetadata(path, entry, ctx);
     }
 
     std::string subfolder() const override { return CogBuildSubfolder; }

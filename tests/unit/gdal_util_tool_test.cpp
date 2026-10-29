@@ -26,6 +26,9 @@
 #include "json_schema_check.h"
 #include "mio.h"
 #include "process_runner.h"
+#include "cad.h"
+#include "entry.h"
+#include "raster_helper.h"
 #include "raster_ops.h"
 #include "raster_protocol.h"
 #include "raster_test_utils.h"
@@ -619,5 +622,131 @@ namespace
         EXPECT_FALSE(response.ok);
         EXPECT_EQ(response.error, raster::ErrorCode::Internal);
         EXPECT_EQ(run.exitCode, 1);
+    }
+
+    // ------------------------------------------------------------------ the host client on the real program
+
+    // A DXF with one point at UTM coordinates of zone 32N: GDAL's DXF driver ignores a same-name
+    // .prj, DroneDB reads it, so the point is on the map with the .prj and in drawing coordinates
+    // without
+    fs::path writeDrawing(const fs::path &dxf, bool withPrj)
+    {
+        writeFile(dxf,
+                  "0\nSECTION\n2\nHEADER\n0\nENDSEC\n"
+                  "0\nSECTION\n2\nENTITIES\n0\nPOINT\n8\n0\n10\n500000.0\n20\n5000000.0\n30\n0.0\n0\nENDSEC\n0\nEOF\n");
+        if (withPrj)
+        {
+            fs::path prj = dxf;
+            prj.replace_extension(".prj");
+            writeFile(prj, cad::prjContent("EPSG:32632"));
+        }
+        return dxf;
+    }
+
+    TEST_F(GdalUtilToolTest, theHostClientProbesThroughTheRealProgramWhatTheProcessFinds)
+    {
+        raster::GdalUtilHelper helper;
+
+        const raster::ProbeResult raster = helper.probe(geotiff_, raster::ProbeParams());
+        EXPECT_EQ(raster.type, "GeoRaster");
+        EXPECT_EQ(toJson(raster), toJson(ddb::raster::probe(geotiff_, raster::ProbeParams())));
+
+        const raster::ProbeResult vector = helper.probe(geojson_, vectorParams());
+        EXPECT_EQ(vector.type, "Vector");
+        EXPECT_EQ(toJson(vector), toJson(ddb::raster::probe(geojson_, vectorParams())));
+
+        try
+        {
+            helper.probe(fakeRaster_, raster::ProbeParams());
+            FAIL() << "no exception";
+        }
+        catch (const raster::RasterOpException &e)
+        {
+            EXPECT_EQ(e.code(), raster::ErrorCode::Unreadable);
+        }
+        // One helper served all three: a failure of a file is no failure of the helper
+        EXPECT_EQ(helper.startedHelpers(), 1u);
+        helper.shutdown();
+    }
+
+    TEST_F(GdalUtilToolTest, anEntryMadeThroughTheRealProgramHasWhatTheProcessFinds)
+    {
+        Entry entry;
+        parseEntry(geotiff_, area_->getFolder(), entry, false);
+        EXPECT_EQ(entry.type, EntryType::GeoRaster);
+
+        Entry expected;
+        raster::applyProbe(raster::probe(geotiff_, raster::ProbeParams()), expected);
+        for (const auto &[key, value] : expected.properties.items())
+            EXPECT_EQ(entry.properties.at(key), value) << key;
+        EXPECT_EQ(entry.point_geom.toWkt(), expected.point_geom.toWkt());
+        EXPECT_EQ(entry.polygon_geom.toWkt(), expected.polygon_geom.toWkt());
+    }
+
+    TEST_F(GdalUtilToolTest, aThumbnailMadeThroughTheRealProgramEqualsTheOneInTheProcess)
+    {
+        raster::ThumbnailParams plain{32, std::nullopt};
+        const fs::path expected = area_->getFolder() / "expected.webp";
+        raster::thumbnail(jpeg_, expected, plain);
+        EXPECT_EQ(raster::renderThumbnailWebp(jpeg_, plain), readFile(expected));
+
+        raster::ThumbnailParams bands{48, ThumbVisParams()};
+        bands.vis->bands = "3,2,1";
+        raster::thumbnail(geotiff_, expected, bands);
+        EXPECT_EQ(raster::renderThumbnailWebp(geotiff_, bands), readFile(expected));
+    }
+
+    TEST_F(GdalUtilToolTest, aThumbnailOfAFileThatIsNoRasterIsAnExceptionAndNoFile)
+    {
+        const fs::path out = area_->getFolder() / "none.webp";
+        EXPECT_THROW(generateThumb(fakeRaster_, 32, out, true, nullptr, nullptr), raster::RasterOpException);
+        EXPECT_FALSE(fs::exists(out));
+    }
+
+    // The .prj the host ignores in its thread (the index re-reads a drawing right after the .prj
+    // left the index, while the file is still on disk) must not count in the helper either
+    TEST_F(GdalUtilToolTest, theSidecarThatTheHostDecidedIsTheOneThatGivesTheDrawingItsCoordinateSystem)
+    {
+        const fs::path dxf = writeDrawing(area_->getFolder() / "site.dxf", true);
+        fs::path prj = dxf;
+        prj.replace_extension(".prj");
+
+        raster::GdalUtilHelper helper;
+        raster::ProbeParams params = vectorParams();
+        params.source = dxf;
+
+        // Not told: the helper reads the .prj it finds
+        raster::ProbeResult found = helper.probe(dxf, params);
+        EXPECT_TRUE(found.properties.at("georeferenced").get<bool>());
+        EXPECT_EQ(found.properties.at("vector").at("crs").at("source"), "prj");
+        EXPECT_FALSE(found.polygonGeom.empty());
+
+        // Told that none counts
+        params.sidecarDecided = true;
+        raster::ProbeResult ignored = helper.probe(dxf, params);
+        EXPECT_FALSE(ignored.properties.at("georeferenced").get<bool>());
+        EXPECT_TRUE(ignored.polygonGeom.empty());
+
+        // Told which one counts
+        params.sidecar = prj;
+        EXPECT_TRUE(helper.probe(dxf, params).properties.at("georeferenced").get<bool>());
+        helper.shutdown();
+    }
+
+    TEST_F(GdalUtilToolTest, aDrawingWhoseSidecarTheIndexIgnoresIsLocalThroughTheRealProgram)
+    {
+        const fs::path dxf = writeDrawing(area_->getFolder() / "site.dxf", true);
+        fs::path prj = dxf;
+        prj.replace_extension(".prj");
+
+        Entry withPrj;
+        parseEntry(dxf, area_->getFolder(), withPrj, false);
+        EXPECT_TRUE(withPrj.properties.at("georeferenced").get<bool>());
+
+        cad::IgnoredSidecarScope ignore({prj});
+        Entry withoutPrj;
+        parseEntry(dxf, area_->getFolder(), withoutPrj, false);
+        EXPECT_FALSE(withoutPrj.properties.at("georeferenced").get<bool>());
+        EXPECT_TRUE(withoutPrj.polygon_geom.empty());
     }
 }
