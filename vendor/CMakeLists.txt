@@ -2,6 +2,8 @@
 # never be installed in host processes that load libddb (DDB-11 B6).
 add_subdirectory("url")
 add_subdirectory("base64")
+# Confinement layers shared by the helper programs (gdal-util, metadata-util); no libddb code
+add_subdirectory("sandbox")
 # The helper programs libddb starts as child processes: scripts/helper-tools.txt is the only list
 # of them (the packaging scripts and the package check read it too). The list is read here because
 # src/, apps/ and tests/ depend on the helpers; that every name is a target (defined in vendor/ or

@@ -213,7 +213,8 @@ if(BUILD_TESTING)
         LABEL unit
         TIMEOUT 300
         SOURCES ${DDB_UNIT_TEST_SOURCES} $<TARGET_OBJECTS:ddb_c11_header>
-        LINK ddb_cli_commands
+        # ddb_sandbox: the library of the helper programs, tested on its own (unit/sandbox_test.cpp)
+        LINK ddb_cli_commands ddb_sandbox
         SERIAL DeltaDiff.isLinear
     )
     # The C API's private headers (src/library/c_api_util.h), for the unit tests of its mapper;
