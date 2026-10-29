@@ -178,36 +178,46 @@ namespace
 
     // ---- The files of the attack -------------------------------------------------------------
 
-    USER_OPEN_TEST(gdalOpenPolicy, vrtNamedTifWithAnAbsoluteSourceIsNotARaster)
+    // The tests below check a file twice: the open policy, in a child that plays the helper
+    // (runWithUserFileOpens), and the type the host gives its entry, in the test process, which reads
+    // the tags of an image and asks the real helper (gdal-util) about the rest
+
+    TEST(gdalOpenPolicy, vrtNamedTifWithAnAbsoluteSourceIsNotARaster)
     {
         Scene s(TEST_NAME);
         const fs::path poc = s.dataset / "disguised.tif";
         write(poc, vrtOf(io::toUtf8(s.outsideTif), "0"));
 
-        EXPECT_EQ(openUserRaster(io::toUtf8(poc)), nullptr);
+        testutils::runWithUserFileOpens([&] { EXPECT_EQ(openUserRaster(io::toUtf8(poc)), nullptr); });
         EXPECT_NE(typeOf(poc, s.dataset), EntryType::GeoRaster);
     }
 
-    USER_OPEN_TEST(gdalOpenPolicy, vrtNamedTifWithAnUrlSourceIsNotOpenedNorRequested)
+    TEST(gdalOpenPolicy, vrtNamedTifWithAnUrlSourceIsNotOpenedNorRequested)
     {
         Scene s(TEST_NAME);
         const fs::path poc = s.dataset / "disguised-url.tif";
         write(poc, vrtOf("/vsicurl/http://127.0.0.1:1/dsm.tif", "0"));
 
-        EXPECT_EQ(openUserRaster(io::toUtf8(poc)), nullptr);
+        testutils::runWithUserFileOpens([&] { EXPECT_EQ(openUserRaster(io::toUtf8(poc)), nullptr); });
         EXPECT_NE(typeOf(poc, s.dataset), EntryType::GeoRaster);
     }
 
-    USER_OPEN_TEST(gdalOpenPolicy, vrtNamedJp2AndJ2kAreNotRasters)
+    TEST(gdalOpenPolicy, vrtNamedJp2AndJ2kAreNotRasters)
     {
         Scene s(TEST_NAME);
+        std::vector<fs::path> pocs;
         for (const char *name : {"disguised.jp2", "disguised.j2k", "DISGUISED.TIFF"})
         {
-            const fs::path poc = s.dataset / name;
-            write(poc, vrtOf(io::toUtf8(s.outsideTif), "0"));
-            EXPECT_EQ(openUserRaster(io::toUtf8(poc)), nullptr) << name;
-            EXPECT_NE(typeOf(poc, s.dataset), EntryType::GeoRaster) << name;
+            pocs.push_back(s.dataset / name);
+            write(pocs.back(), vrtOf(io::toUtf8(s.outsideTif), "0"));
         }
+
+        testutils::runWithUserFileOpens([&] {
+            for (const auto &poc : pocs)
+                EXPECT_EQ(openUserRaster(io::toUtf8(poc)), nullptr) << poc;
+        });
+        for (const auto &poc : pocs)
+            EXPECT_NE(typeOf(poc, s.dataset), EntryType::GeoRaster) << poc;
     }
 
     USER_OPEN_TEST(gdalOpenPolicy, ogrVrtNamedGeoJsonIsNotOpenedNorBuilt)
@@ -266,7 +276,7 @@ namespace
         EXPECT_STREQ(CPLGetConfigOption("GDAL_VRT_ENABLE_PYTHON", ""), "NO");
     }
 
-    USER_OPEN_TEST(gdalOpenPolicy, otherRasterFormatsNamedTifAndJp2AreNotRasters)
+    TEST(gdalOpenPolicy, otherRasterFormatsNamedTifAndJp2AreNotRasters)
     {
         Scene s(TEST_NAME);
 
@@ -276,41 +286,42 @@ namespace
         const fs::path asJp2 = s.dataset / "fake_gpkg.jp2";
         fs::copy_file(gpkg, asTif);
         fs::copy_file(gpkg, asJp2);
-
-        for (const auto &f : {asTif, asJp2})
-        {
-            EXPECT_EQ(openUserRaster(io::toUtf8(f)), nullptr) << f;
-            EXPECT_NE(typeOf(f, s.dataset), EntryType::GeoRaster) << f;
-        }
+        std::vector<fs::path> disguised = {asTif, asJp2};
 
         if (hasDriver("netCDF"))
         {
             const fs::path nc = writeAs("netCDF", s.dataset / "raster.nc");
             const fs::path ncAsTif = s.dataset / "fake_nc.tif";
             fs::copy_file(nc, ncAsTif);
-            EXPECT_EQ(openUserRaster(io::toUtf8(ncAsTif)), nullptr);
-            EXPECT_NE(typeOf(ncAsTif, s.dataset), EntryType::GeoRaster);
+            disguised.push_back(ncAsTif);
         }
+
+        testutils::runWithUserFileOpens([&] {
+            for (const auto &f : disguised)
+                EXPECT_EQ(openUserRaster(io::toUtf8(f)), nullptr) << f;
+        });
+        for (const auto &f : disguised)
+            EXPECT_NE(typeOf(f, s.dataset), EntryType::GeoRaster) << f;
     }
 
     // ---- What keeps opening ------------------------------------------------------------------
 
-    USER_OPEN_TEST(gdalOpenPolicy, rastersKeepOpeningAndKeepTheirType)
+    TEST(gdalOpenPolicy, rastersKeepOpeningAndKeepTheirType)
     {
         Scene s(TEST_NAME);
+        // Each file with the type of its entry
+        std::vector<std::pair<fs::path, EntryType>> rasters;
         const fs::path tif = writeGeoTiff(s.dataset / "dsm.tif");
-        EXPECT_NE(openUserRaster(io::toUtf8(tif)), nullptr);
-        EXPECT_EQ(typeOf(tif, s.dataset), EntryType::GeoRaster);
+        rasters.emplace_back(tif, EntryType::GeoRaster);
 
         // The extension is read in any case
         const fs::path upper = s.dataset / "DSM2.TIF";
         fs::copy_file(tif, upper);
-        EXPECT_NE(openUserRaster(io::toUtf8(upper)), nullptr);
-        EXPECT_EQ(typeOf(upper, s.dataset), EntryType::GeoRaster);
+        rasters.emplace_back(upper, EntryType::GeoRaster);
 
         const fs::path tiff = s.dataset / "dsm.tiff";
         fs::copy_file(tif, tiff);
-        EXPECT_NE(openUserRaster(io::toUtf8(tiff)), nullptr);
+        rasters.emplace_back(tiff, EntryType::GeoRaster);
 
         // A TIFF without a projection stays an image
         const fs::path plain = s.dataset / "plain.tif";
@@ -319,25 +330,23 @@ namespace
                                                          1, GDT_Byte, nullptr));
             ASSERT_NE(created, nullptr);
         }
-        EXPECT_NE(openUserRaster(io::toUtf8(plain)), nullptr);
-        EXPECT_EQ(typeOf(plain, s.dataset), EntryType::Image);
-
-        const fs::path jpg = writeAs("JPEG", s.dataset / "photo.jpg");
-        EXPECT_NE(openUserRaster(io::toUtf8(jpg)), nullptr);
-        EXPECT_EQ(typeOf(jpg, s.dataset), EntryType::Image);
-
-        const fs::path png = writeAs("PNG", s.dataset / "picture.PNG");
-        EXPECT_NE(openUserRaster(io::toUtf8(png)), nullptr);
-        EXPECT_EQ(typeOf(png, s.dataset), EntryType::Image);
+        rasters.emplace_back(plain, EntryType::Image);
+        rasters.emplace_back(writeAs("JPEG", s.dataset / "photo.jpg"), EntryType::Image);
+        rasters.emplace_back(writeAs("PNG", s.dataset / "picture.PNG"), EntryType::Image);
 
         if (hasDriver("JP2OpenJPEG"))
         {
             testutils::GeoRasterSpec spec;
             spec.width = spec.height = 32;
-            const fs::path jp2 = testutils::createGeoJp2(s.dataset / "ortho.jp2", spec);
-            EXPECT_NE(openUserRaster(io::toUtf8(jp2)), nullptr);
-            EXPECT_EQ(typeOf(jp2, s.dataset), EntryType::GeoRaster);
+            rasters.emplace_back(testutils::createGeoJp2(s.dataset / "ortho.jp2", spec), EntryType::GeoRaster);
         }
+
+        testutils::runWithUserFileOpens([&] {
+            for (const auto &[file, type] : rasters)
+                EXPECT_NE(openUserRaster(io::toUtf8(file)), nullptr) << file;
+        });
+        for (const auto &[file, type] : rasters)
+            EXPECT_EQ(typeOf(file, s.dataset), type) << file;
     }
 
     USER_OPEN_TEST(gdalOpenPolicy, vectorsKeepOpeningAndKeepTheirType)
@@ -839,7 +848,7 @@ namespace
         EXPECT_FALSE(fs::exists(thumb));
     }
 
-    USER_OPEN_TEST(gdalOpenPolicy, overviewFileInTheMetadataOfARasterIsRefused)
+    TEST(gdalOpenPolicy, overviewFileInTheMetadataOfARasterIsRefused)
     {
         Scene s(TEST_NAME);
         const fs::path secret = writeSecret(s.area.getFolder("outside") / "secret-constant.tif");
@@ -849,6 +858,7 @@ namespace
         // outside one.
         const std::pair<const char *, std::string> cases[] = {
             {"a.tif", io::toUtf8(secret)}, {"b.tif", ":::BASE:::../outside/secret-constant.tif"}};
+        std::vector<fs::path> tifs;
         for (const auto &[name, target] : cases)
         {
             SCOPED_TRACE(target);
@@ -860,8 +870,16 @@ namespace
                 ASSERT_EQ(itemOf(*plain, "OVERVIEWS", "OVERVIEW_FILE"), target);
                 ASSERT_TRUE(servesTheSecret(*plain));
             }
+            tifs.push_back(tif);
+        }
 
-            EXPECT_EQ(openUserRaster(io::toUtf8(tif)), nullptr);
+        testutils::runWithUserFileOpens([&] {
+            for (const auto &tif : tifs)
+                EXPECT_EQ(openUserRaster(io::toUtf8(tif)), nullptr) << tif;
+        });
+        for (const auto &tif : tifs)
+        {
+            SCOPED_TRACE(io::toUtf8(tif));
             expectNoThumbnail(tif, s.area);
             EXPECT_NE(typeOf(tif, s.dataset), EntryType::GeoRaster);
         }

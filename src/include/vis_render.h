@@ -62,12 +62,14 @@ namespace ddb
     };
 
     /// Resolves formulaId, the band filter (bandFilter, "" = detected from the sensor profile of
-    /// rasterPath) and, with withColormap, the colormap (colormapId, "" = "rdylgn"). Throws
+    /// rasterPath, VegetationEngine::autoDetectFilter with thermalTags) and, with withColormap, the
+    /// colormap (colormapId, "" = "rdylgn"). Throws
     /// InvalidArgsException for an unknown formula or colormap, and for a formula that needs
     /// reflectance over a raster whose data is not floating point (SAVI, OSAVI, EVI over UInt16):
     /// every render of a formula plans it here, so none can skip the rule.
     FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
-                            const std::string &bandFilter, const std::string &colormapId, bool withColormap);
+                            const std::string &bandFilter, const std::string &colormapId, bool withColormap,
+                            std::optional<bool> thermalTags = std::nullopt);
 
     /// The same with the band filter already resolved
     FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
@@ -125,9 +127,11 @@ namespace ddb
                                                   NodataMask mask = NodataMask::AnyBand);
 
     /// Renders visParams.formula (a vegetation index) over window of ds with its
-    /// colormap: RGBA interleaved, outPixels() * 4 bytes, nodata transparent.
+    /// colormap: RGBA interleaved, outPixels() * 4 bytes, nodata transparent. thermalTags as
+    /// planFormula takes it.
     std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
-                                           const RasterWindow &window, const ThumbVisParams &visParams);
+                                           const RasterWindow &window, const ThumbVisParams &visParams,
+                                           std::optional<bool> thermalTags = std::nullopt);
 }
 
 #endif // VIS_RENDER_H

@@ -136,11 +136,12 @@ namespace ddb
     }
 
     FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
-                            const std::string &bandFilter, const std::string &colormapId, bool withColormap)
+                            const std::string &bandFilter, const std::string &colormapId, bool withColormap,
+                            std::optional<bool> thermalTags)
     {
         const BandFilter filter = !bandFilter.empty()
                                       ? VegetationEngine::parseFilter(bandFilter, GDALGetRasterCount(ds))
-                                      : VegetationEngine::instance().autoDetectFilter(rasterPath);
+                                      : VegetationEngine::instance().autoDetectFilter(rasterPath, thermalTags);
         return planFormula(ds, formulaId, filter, colormapId, withColormap);
     }
 
@@ -254,10 +255,11 @@ namespace ddb
     }
 
     std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
-                                           const RasterWindow &window, const ThumbVisParams &visParams)
+                                           const RasterWindow &window, const ThumbVisParams &visParams,
+                                           std::optional<bool> thermalTags)
     {
         const FormulaPlan plan = planFormula(ds, rasterPath, visParams.formula, visParams.bandFilter,
-                                             visParams.colormap, true);
+                                             visParams.colormap, true, thermalTags);
         return renderPlannedFormulaRgba(ds, plan, window, visParams.rescale);
     }
 }

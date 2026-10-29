@@ -31,11 +31,16 @@
 #include "process_runner.h"
 #include "cad.h"
 #include "entry.h"
+#include "exif_metadata.h"
+#include "in_process_raster_helper.h"
 #include "raster_helper.h"
 #include "raster_ops.h"
 #include "raster_protocol.h"
 #include "raster_test_utils.h"
+#include "sandbox/sandbox.h"
 #include "testarea.h"
+#include "thermal.h"
+#include "vegetation.h"
 #include "tool_locator.h"
 #include "user_open_child.h"
 
@@ -65,16 +70,16 @@ namespace
         return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     }
 
-    // A JPEG of 96 x 64 pixels, written with GDAL's JPEG driver
-    fs::path writeJpeg(const fs::path &path)
+    // A JPEG of 96 x 64 pixels, written with GDAL's JPEG driver: RGB, or grey with one band
+    fs::path writeJpeg(const fs::path &path, int bands = 3)
     {
         GDALDriverH memory = GDALGetDriverByName("MEM");
         GDALDriverH jpeg = GDALGetDriverByName("JPEG");
         EXPECT_NE(memory, nullptr);
         EXPECT_NE(jpeg, nullptr);
-        GDALDatasetH source = GDALCreate(memory, "", 96, 64, 3, GDT_Byte, nullptr);
+        GDALDatasetH source = GDALCreate(memory, "", 96, 64, bands, GDT_Byte, nullptr);
         std::vector<uint8_t> row(96);
-        for (int band = 1; band <= 3; band++)
+        for (int band = 1; band <= bands; band++)
             for (int y = 0; y < 64; y++)
             {
                 for (int x = 0; x < 96; x++)
@@ -516,6 +521,104 @@ namespace
 
         for (const auto &entry : fs::recursive_directory_iterator(home))
             EXPECT_FALSE(entry.is_regular_file()) << "the helper wrote " << entry.path();
+    }
+
+    // Whether every layer of the sandbox is there to confine a worker in strict mode
+    bool strictModeAvailable()
+    {
+        const auto layers = sandbox::probe().layers;
+        return !layers.empty() &&
+               std::all_of(layers.begin(), layers.end(), [](const auto &layer) { return layer.active; });
+    }
+
+    // A formula over a single-band raster of no known sensor asks whether the raster is thermal:
+    // its GDAL metadata, which the program reads, and its tags, which the host reads and says in the
+    // request (thermalTags). The program reads no tags: a worker in strict mode cannot start
+    // metadata-util, and here there is none to start. Its thumbnails are the ones of the process.
+    USER_OPEN_TEST_F(GdalUtilToolTest, aFormulaOverASingleBandRasterIsRenderedInTheSandboxWithoutReadingTags)
+    {
+        process::SessionOptions options;
+        options.envOverrides = {{"DDB_GDAL_SANDBOX", strictModeAvailable() ? "strict" : "best-effort"},
+                                {"DDB_METADATA_UTIL_PATH", io::toUtf8(area_->getFolder() / "no-such-metadata-util")}};
+        Server server(options);
+
+        testutils::GeoRasterSpec spec;
+        spec.width = 60;
+        spec.height = 40;
+        spec.bands = 1;
+        spec.type = GDT_Float32;
+        spec.value = [](int, int x, int y) { return 15.0 + 0.25 * x + 0.1 * y; };
+        spec.bandNames = {"surface temperature"};
+        const fs::path labelled = testutils::createGeoRaster(area_->getFolder() / "labelled.tif", spec);
+        spec.bandNames.clear();
+        const fs::path unlabelled = testutils::createGeoRaster(area_->getFolder() / "unlabelled.tif", spec);
+
+        const json celsius = {{"size", 32}, {"vis", {{"formula", "CELSIUS"}}}};
+        json tagged = celsius;
+        tagged["thermalTags"] = true;
+
+        // Thermal by its metadata, and by its tags as the host found them
+        int64_t id = 41;
+        for (const auto &[raster, params] : {std::pair(labelled, celsius), std::pair(unlabelled, tagged)})
+        {
+            const fs::path out = area_->getFolder() / (raster.stem().string() + "-celsius.webp");
+            raster::Request request = thumbnailRequest(id++, raster, out, raster::ThumbnailParams{});
+            request.params = params;
+            const auto response = server.ask(request);
+            ASSERT_TRUE(response.ok) << io::toUtf8(raster) << ": " << response.message;
+
+            const fs::path expected = area_->getFolder() / (raster.stem().string() + "-expected.webp");
+            raster::thumbnail(raster, expected, raster::thumbnailParamsFromJson(params));
+            EXPECT_EQ(readFile(out), readFile(expected)) << io::toUtf8(raster);
+        }
+
+        // The band the formula reads: the thermal one of the labelled raster, and of the unlabelled
+        // one only when the tags say it is thermal
+        const auto &engine = VegetationEngine::instance();
+        EXPECT_EQ(engine.autoDetectFilter(io::toUtf8(labelled), false).id, "T");
+        EXPECT_EQ(engine.autoDetectFilter(io::toUtf8(unlabelled), true).id, "T");
+        EXPECT_EQ(engine.autoDetectFilter(io::toUtf8(unlabelled), false).id, "RGB");
+    }
+
+    // The real program, recording the thumbnail params the host sends it
+    class RecordingHelper : public testutils::InProcessRasterHelper
+    {
+      public:
+        void thumbnail(const fs::path &path, const fs::path &out, const raster::ThumbnailParams &params) override
+        {
+            sent.push_back(params);
+            program.thumbnail(path, out, params);
+        }
+
+        std::vector<raster::ThumbnailParams> sent;
+        raster::GdalUtilHelper program;
+    };
+
+    // The host reads the tags of the file it asks a thumbnail of when the rendering asks whether the
+    // file is thermal (a formula whose band filter is detected), and says in the request what they
+    // say: a grey JPEG whose camera is a thermal one, the same JPEG without the tag
+    TEST_F(GdalUtilToolTest, theHostSendsWhatTheTagsOfTheFileSayWhenTheFormulaAsksWhetherItIsThermal)
+    {
+        const fs::path thermal = writeJpeg(area_->getFolder() / "thermal.jpg", 1);
+        const fs::path grey = writeJpeg(area_->getFolder() / "grey.jpg", 1);
+        const auto written = exif::metadataReader().write(thermal, {{"Exif.Image.Make", "FLIR"}});
+        ASSERT_TRUE(written.ok) << written.message;
+
+        RecordingHelper helper;
+        const raster::ScopedRasterHelper installed(helper);
+        raster::ThumbnailParams celsius{32, ThumbVisParams()};
+        celsius.vis->formula = "CELSIUS";
+        raster::ThumbnailParams filtered = celsius;
+        filtered.vis->bandFilter = "RGB";
+        for (const auto &[file, params] : {std::pair(thermal, celsius), std::pair(grey, celsius), std::pair(thermal, filtered)})
+            EXPECT_EQ(raster::renderThumbnailWebp(file, params).substr(0, 4), "RIFF") << io::toUtf8(file);
+
+        ASSERT_EQ(helper.sent.size(), 3u);
+        EXPECT_TRUE(helper.sent[0].thermalTags);
+        EXPECT_FALSE(helper.sent[1].thermalTags);
+        // A filter that is given detects nothing: no tag is read for it
+        EXPECT_FALSE(helper.sent[2].thermalTags);
+        helper.program.shutdown();
     }
 
     TEST_F(GdalUtilToolTest, aThumbnailOfAFileThatIsNoRasterIsUnreadableAndWritesNothing)

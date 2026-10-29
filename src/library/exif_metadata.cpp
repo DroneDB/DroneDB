@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "exif_helper_pool.h"
+#include "gdal_open_policy.h"
 
 namespace ddb
 {
@@ -91,6 +92,12 @@ namespace ddb
 
         IMetadataReader &metadataReader()
         {
+            // The tags are read by the host: the raster helper reads the file of its request with
+            // GDAL only, gets what the tags say in the request, and its workers can start no
+            // program (metadata-util included)
+            if (gdalopen::userFileOpensEnabled())
+                throw std::logic_error("metadataReader runs in the host: the raster helper reads no tags, the host "
+                                       "reads them with metadata-util and sends what a request needs");
             if (IMetadataReader *reader = g_override.load(std::memory_order_acquire))
                 return *reader;
             return HelperMetadataReader::instance();

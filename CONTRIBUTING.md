@@ -177,9 +177,11 @@ checks the check) enforces both rules on the sources:
   why none of them fits, and the review reads it. An entry that no longer matches anything fails
   the check, so remove it with the open.
 - `enableUserFileOpens()` is called only by `gdal-util` at its start and by the test support that
-  runs a test body in a forked child (`tests/user_open_child.cpp`, the `USER_OPEN_TEST` macros).
-  A test that needs to open a user file uses those macros or the real `gdal-util`; nothing else
-  calls it.
+  runs a test body in a child process (`tests/user_open_child.cpp`, the `USER_OPEN_TEST` macros and
+  `testutils::runWithUserFileOpens`). The child is a new process of the test binary, started again
+  with a filter that runs only that test, never a fork of the test process. A test that needs to
+  open a user file uses those macros or the real `gdal-util`; nothing else calls it. Code of the
+  host (parsing an entry, reading tags) stays outside the body: in the child, reading tags throws.
 
 ## Bumping vendor/spz and vendor/spark
 

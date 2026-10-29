@@ -11,6 +11,8 @@
 #include <string>
 
 #include "cog_utils.h"
+#include "exif.h"
+#include "exif_metadata.h"
 #include "gdal_open_policy.h"
 #include "gtest/gtest-spi.h"
 #include "gtest/gtest.h"
@@ -19,6 +21,7 @@
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
+#include "thermal.h"
 #include "user_open_child.h"
 #include "utils.h"
 
@@ -64,8 +67,6 @@ namespace
 
     TEST(UserOpenGate, theHostDoesNotOpenAFileOfAUserAndTheHelperDoes)
     {
-        if (gdalopen::userFileOpensEnabled())
-            GTEST_SKIP() << "this process was made the helper by an earlier test (a platform without fork)";
         TestArea ta(TEST_NAME, true);
         const Files files = writeFiles(ta);
 
@@ -105,13 +106,37 @@ namespace
     // The test can fail: a body that expects the host's refusal fails in the helper
     TEST(UserOpenGate, aTestInTheChildSeesTheGateOpenAndItsFailuresReachTheTest)
     {
-        if (gdalopen::userFileOpensEnabled())
-            GTEST_SKIP() << "this process was made the helper by an earlier test (a platform without fork)";
         TestArea ta(TEST_NAME, true);
         const Files files = writeFiles(ta);
         // A failure in the child is a failure of this test: expected here, and counted
         EXPECT_NONFATAL_FAILURE(testutils::runWithUserFileOpens(
                                     [&] { EXPECT_THROW(openUserRaster(io::toUtf8(files.raster)), std::logic_error); }),
                                 "In the child that opens user files");
+    }
+
+    // The tags of a file are read by the host with metadata-util: the helper gets what they say in
+    // its request, and its workers can start no program. In the helper, the code that would read
+    // them refuses at once, so a code path of an operation that reaches it fails its tests instead
+    // of starting metadata-util (which the sandbox of the worker forbids)
+    USER_OPEN_TEST(UserOpenGate, theHelperReadsNoTagsAndStartsNoMetadataReader)
+    {
+        TestArea ta(TEST_NAME, true);
+        const Files files = writeFiles(ta);
+
+        EXPECT_THROW(exif::metadataReader(), std::logic_error);
+        EXPECT_THROW(readExifParser(files.raster), std::logic_error);
+        EXPECT_THROW(hasThermalTags(io::toUtf8(files.raster)), std::logic_error);
+        try
+        {
+            exif::metadataReader();
+        }
+        catch (const std::logic_error &e)
+        {
+            EXPECT_NE(std::string(e.what()).find("metadata-util"), std::string::npos) << e.what();
+        }
+
+        // The detection of a thermal raster that is given what the tags say reads none
+        EXPECT_FALSE(isThermalImage(io::toUtf8(files.raster), false));
+        EXPECT_TRUE(isThermalImage(io::toUtf8(files.raster), true));
     }
 } // namespace

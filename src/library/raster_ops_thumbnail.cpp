@@ -269,8 +269,10 @@ RasterImage renderPlainThumbnail(const fs::path& imagePath, int thumbSize) {
 }
 
 // The thumbnail the visualisation parameters describe: a formula with its colormap, or the bands
-// they choose with a stretch
-RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, const ThumbVisParams& visParams) {
+// they choose with a stretch. thermalTags is what the host found in the tags of the file: the
+// helper reads none.
+RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, const ThumbVisParams& visParams,
+                                      bool thermalTags) {
     const auto src = openUserRaster(io::toUtf8(imagePath));
     if (!src)
         throw raster::RasterOpException(raster::ErrorCode::Unreadable, "Cannot open " + io::toUtf8(imagePath) + " for reading");
@@ -287,7 +289,7 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
     // Formula mode: vegetation index rendered with its colormap
     if (!visParams.formula.empty()) {
         const RasterWindow window{0, 0, width, height, targetWidth, targetHeight};
-        const auto rgba = renderFormulaRgba(hSrc, io::toUtf8(imagePath), window, visParams);
+        const auto rgba = renderFormulaRgba(hSrc, io::toUtf8(imagePath), window, visParams, thermalTags);
 
         RasterImage image(targetWidth, targetHeight, 3, true);
         for (size_t i = 0; i < image.pixels(); i++) {
@@ -332,7 +334,7 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
 namespace raster {
 
 RasterImage renderThumbnail(const fs::path& imagePath, const ThumbnailParams& params) {
-    return params.vis ? renderVisualisedThumbnail(imagePath, params.size, *params.vis)
+    return params.vis ? renderVisualisedThumbnail(imagePath, params.size, *params.vis, params.thermalTags)
                       : renderPlainThumbnail(imagePath, params.size);
 }
 

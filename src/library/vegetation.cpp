@@ -182,7 +182,7 @@ const VegetationFormula* VegetationEngine::getFormula(const std::string &id) con
     return nullptr;
 }
 
-BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) const {
+BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath, std::optional<bool> thermalTags) const {
     auto det = SensorProfileManager::instance().detectSensor(rasterPath);
     if (det.detected && !det.bands.empty()) {
         BandFilter bf;
@@ -228,7 +228,7 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) con
     if (auto dataset = raster::openInputRaster(rasterPath)) {
         const int nBands = dataset->GetRasterCount();
         dataset.reset();
-        if (nBands == 1 && isThermalImage(rasterPath)) {
+        if (nBands == 1 && isThermalImage(rasterPath, thermalTags)) {
             bf.id = "T";
             bf.T = 0;
             return bf;

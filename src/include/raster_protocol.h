@@ -192,7 +192,16 @@ namespace ddb
         {
             int size = 0;
             std::optional<ThumbVisParams> vis;
+            // What the tags of the file say (hasThermalTags, thermal.h): whether a single-band
+            // raster of no known sensor renders a formula with its band as the thermal one. The
+            // helper reads no tags, so the host reads them and says it here; needsThermalTags
+            // says when.
+            bool thermalTags = false;
         };
+
+        // Whether the rendering of these params asks whether the file is thermal: a formula whose
+        // band filter is detected from the file
+        bool needsThermalTags(const ThumbnailParams &params);
 
         json toJson(const ThumbnailParams &params);
         // @throws ProtocolError

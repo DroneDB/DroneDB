@@ -13,6 +13,8 @@
 #include "sensorprofile.h"
 #include "mio.h"
 
+#include <functional>
+#include <memory>
 #include <optional>
 #include <gdal_priv.h>
 #include <cpl_conv.h>
@@ -100,12 +102,16 @@ static std::optional<size_t> findFlirMagic(const std::vector<uint8_t> &data) {
     return std::nullopt;
 }
 
+// The tags of the file whose FLIR segment is looked for, read only if the segment is there: null
+// when the file has none, or when the caller reads no tags (the raster helper)
+using FlirTags = std::function<ExifParser *()>;
+
 // The dimensions of the raw thermal image: from the FLIR XMP, else the largest of the common
 // thermal camera resolutions that fits in the data after the FLIR header (remainingData bytes)
-static void findRawDimensions(const std::string &filePath, size_t remainingData, FlirSegmentInfo &info) {
+static void findRawDimensions(const FlirTags &tags, size_t remainingData, FlirSegmentInfo &info) {
     // Try to extract width/height from XMP/EXIF first. A reader that cannot work (no metadata-util)
     // is not a problem of this file and propagates.
-    if (const auto parser = readExifParser(io::fromUtf8(filePath))) {
+    if (ExifParser *parser = tags()) {
         try {
             // FLIR stores raw dimensions in XMP
             auto rawWidthIt = parser->findXmpKey({"Xmp.FLIR.RawThermalImageWidth"});
@@ -169,7 +175,7 @@ static void locateRawData(const std::vector<uint8_t> &data, size_t flirSegmentSt
 // parsed: the segment after the magic and 3 index bytes holds the raw values directly (DJI) or
 // FFF sub-segments, so the block is found by its size (from the XMP, or a common sensor size)
 // and the range of its values.
-static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
+static FlirSegmentInfo findFlirSegment(const std::string &filePath, const FlirTags &tags) {
     FlirSegmentInfo info;
 
     std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
@@ -198,7 +204,7 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
     // Parse FFF header
     if (pos + 64 > fileSize) return info;
 
-    findRawDimensions(filePath, fileSize - pos, info);
+    findRawDimensions(tags, fileSize - pos, info);
     if (info.rawWidth == 0 || info.rawHeight == 0) return info;
 
     locateRawData(data, *flirSegmentStart, info);
@@ -211,7 +217,11 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
     RawThermalData result;
 
     // Method 1: Try FLIR APP1 segment extraction (FLIR R-JPEG format)
-    FlirSegmentInfo seg = findFlirSegment(filePath);
+    std::unique_ptr<ExifParser> tags;
+    FlirSegmentInfo seg = findFlirSegment(filePath, [&] {
+        tags = readExifParser(io::fromUtf8(filePath));
+        return tags.get();
+    });
     if (seg.found) {
         std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
         if (!file.is_open()) return result;
@@ -424,26 +434,22 @@ bool isDirectTemperatureRaster(const std::string &filePath) {
 namespace {
 
 // Methods 1-3: the EXIF make and model, the FLIR XMP namespace, the DJI thermal tags
-bool hasThermalExifOrXmp(const std::string &filePath) {
-    // A reader that cannot work (no metadata-util) is not a problem of this file and propagates
-    const auto parser = readExifParser(io::fromUtf8(filePath));
-    if (!parser) return false;
-
+bool tagsSayThermal(ExifParser &parser) {
     try {
-        std::string make = parser->extractMake();
-        std::string model = parser->extractModel();
+        std::string make = parser.extractMake();
+        std::string model = parser.extractModel();
 
         if (isThermalImageFromExif(make, model)) return true;
 
         // Method 2: Check for FLIR XMP namespace
-        auto flirIt = parser->findXmpKey({"Xmp.FLIR.PlanckR1",
-                                          "Xmp.FLIR.Emissivity",
-                                          "Xmp.FLIR.ThermalMeasureMode"});
+        auto flirIt = parser.findXmpKey({"Xmp.FLIR.PlanckR1",
+                                         "Xmp.FLIR.Emissivity",
+                                         "Xmp.FLIR.ThermalMeasureMode"});
         if (flirIt) return true;
 
         // Method 3: Check for DJI thermal tags
-        auto djiIt = parser->findXmpKey({"Xmp.drone-dji.ThermalMeasureMode",
-                                         "Xmp.drone-dji.ThermalObjectEmissivity"});
+        auto djiIt = parser.findXmpKey({"Xmp.drone-dji.ThermalMeasureMode",
+                                        "Xmp.drone-dji.ThermalObjectEmissivity"});
         if (djiIt) return true;
     } catch (const std::exception &e) {
         LOGD << "isThermalImage: EXIF/XMP probing failed: " << e.what();
@@ -593,17 +599,31 @@ bool isThermalByGdalMetadata(const std::string &filePath) {
     return looksThermal(signals);
 }
 
+// Methods 4-5: what the file holds besides its tags, the FLIR segment of an R-JPEG and the GDAL
+// metadata of a single-band raster
+bool contentSaysThermal(const std::string &filePath, const FlirTags &tags) {
+    if (findFlirSegment(filePath, tags).found) return true;
+    return isThermalByGdalMetadata(filePath);
+}
+
 } // anonymous namespace
 
-bool isThermalImage(const std::string &filePath) {
-    // Methods 1-3: EXIF Make/Model, FLIR XMP namespace, DJI thermal tags
-    if (hasThermalExifOrXmp(filePath)) return true;
+bool hasThermalTags(const std::string &filePath) {
+    // A reader that cannot work (no metadata-util) is not a problem of this file and propagates
+    const auto parser = readExifParser(io::fromUtf8(filePath));
+    return parser && tagsSayThermal(*parser);
+}
 
-    // Method 4: Check for FLIR APP1 segment
-    FlirSegmentInfo seg = findFlirSegment(filePath);
-    if (seg.found) return true;
+bool isThermalImage(const std::string &filePath, std::optional<bool> thermalTags) {
+    if (thermalTags) {
+        // The tags were read by the host: the segment is found by the common sensor sizes
+        return *thermalTags || contentSaysThermal(filePath, [] { return static_cast<ExifParser *>(nullptr); });
+    }
 
-    return isThermalByGdalMetadata(filePath);
+    // A reader that cannot work (no metadata-util) is not a problem of this file and propagates
+    const auto parser = readExifParser(io::fromUtf8(filePath));
+    if (parser && tagsSayThermal(*parser)) return true;
+    return contentSaysThermal(filePath, [&parser] { return parser.get(); });
 }
 
 // ---- Helper: read temperature data from file (R-JPEG or GeoTIFF) ----

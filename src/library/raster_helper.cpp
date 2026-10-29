@@ -15,6 +15,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_artefacts.h"
+#include "thermal.h"
 #include "tool_locator.h"
 #include "tool_run_support.h"
 
@@ -563,9 +564,14 @@ namespace ddb
                 downloadInput(utf8, input);
             }
 
+            // The helper reads no tags: what they say of the file goes in the request
+            ThumbnailParams sent = params;
+            if (needsThermalTags(sent))
+                sent.thermalTags = hasThermalTags(io::toUtf8(input));
+
             const io::ScopedTempDir outputFolder = raster::makePrivateFolder(request.path(), "out-");
             const fs::path output = outputFolder.path() / "thumbnail.webp";
-            rasterHelper().thumbnail(input, output, params);
+            rasterHelper().thumbnail(input, output, sent);
 
             std::string bytes = readHelperOutput(output);
             if (!looksLikeThumbnail(bytes))

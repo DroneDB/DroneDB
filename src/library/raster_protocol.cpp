@@ -112,6 +112,17 @@ namespace ddb
                 return *value;
             }
 
+            // The boolean `name` of object, `absent` when it is not there
+            bool optionalBool(const json &object, const char *name, bool absent)
+            {
+                const json *value = member(object, name);
+                if (!value)
+                    return absent;
+                if (!value->is_boolean())
+                    throw ProtocolError(std::string("'") + name + "' is not a boolean");
+                return value->get<bool>();
+            }
+
             std::string requiredString(const json &object, const char *name)
             {
                 const json &value = required(object, name);
@@ -389,12 +400,7 @@ namespace ddb
             else
                 throw ProtocolError("unknown probe kind '" + kind + "'");
             result.source = getPath(params, "source");
-            if (const json *converted = member(params, "converted"))
-            {
-                if (!converted->is_boolean())
-                    throw ProtocolError("'converted' is not a boolean");
-                result.converted = converted->get<bool>();
-            }
+            result.converted = optionalBool(params, "converted", false);
             if (const auto sidecar = getText(params, "sidecar"))
             {
                 result.sidecarDecided = true;
@@ -426,12 +432,7 @@ namespace ddb
             if (out.type != kTypeGeoRaster && out.type != kTypeRaster && out.type != kTypeVector)
                 throw ProtocolError("unknown probe type '" + out.type + "'");
 
-            if (const json *isCog = member(result, "isCog"))
-            {
-                if (!isCog->is_boolean())
-                    throw ProtocolError("'isCog' is not a boolean");
-                out.isCog = isCog->get<bool>();
-            }
+            out.isCog = optionalBool(result, "isCog", false);
             const json &properties = required(result, "properties");
             if (!properties.is_object())
                 throw ProtocolError("'properties' is not an object");
@@ -473,6 +474,11 @@ namespace ddb
                 {"colormap", &ThumbVisParams::colormap},     {"rescale", &ThumbVisParams::rescale}};
         } // namespace
 
+        bool needsThermalTags(const ThumbnailParams &params)
+        {
+            return params.vis && !params.vis->formula.empty() && params.vis->bandFilter.empty();
+        }
+
         json toJson(const ThumbnailParams &params)
         {
             json result = {{"size", params.size}};
@@ -487,6 +493,8 @@ namespace ddb
                 }
                 result["vis"] = vis;
             }
+            if (params.thermalTags)
+                result["thermalTags"] = true;
             return result;
         }
 
@@ -515,6 +523,7 @@ namespace ddb
                 }
                 result.vis = parsed;
             }
+            result.thermalTags = optionalBool(params, "thermalTags", false);
             return result;
         }
 

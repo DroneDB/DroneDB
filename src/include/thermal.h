@@ -4,6 +4,7 @@
 #ifndef THERMAL_H
 #define THERMAL_H
 
+#include <optional>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -36,7 +37,18 @@ struct RawThermalData {
 };
 
 // Detection
-bool isThermalImage(const std::string &filePath);
+
+// Whether the tags of an image say it is thermal: the make and model of its camera (EXIF), the
+// FLIR XMP namespace or the thermal tags of DJI. The tags are read with metadata-util, which the
+// host starts and the raster helper never does: the helper gets this answer in its request.
+bool hasThermalTags(const std::string &filePath);
+
+// Whether an image or a raster is thermal: its tags (hasThermalTags), the FLIR segment of an
+// R-JPEG, or the GDAL metadata of a single-band raster (thermal keywords, a temperature unit, the
+// scale and offset of Landsat). thermalTags is what hasThermalTags says of the file when the caller
+// knows it: then no tag is read, and the FLIR segment is found by the sizes of the common thermal
+// sensors (this is how the raster helper asks). Without it the tags are read here, on the host.
+bool isThermalImage(const std::string &filePath, std::optional<bool> thermalTags = std::nullopt);
 bool isThermalImageFromExif(const std::string &make, const std::string &model);
 
 // Calibration extraction

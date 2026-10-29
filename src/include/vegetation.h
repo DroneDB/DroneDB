@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <optional>
 #include <functional>
 #include <cstdint>
 #include <tuple>
@@ -98,8 +99,10 @@ public:
 
     const VegetationFormula* getFormula(const std::string &id) const;
 
-    // Auto-detect band filter from sensor profile
-    BandFilter autoDetectFilter(const std::string &rasterPath) const;
+    // Auto-detect band filter from sensor profile; a single-band raster of no known sensor is
+    // thermal (T) when isThermalImage says so, with thermalTags (thermal.h): what the tags of the
+    // raster say, which the raster helper gets from the host because it reads no tags
+    BandFilter autoDetectFilter(const std::string &rasterPath, std::optional<bool> thermalTags = std::nullopt) const;
 
     // Parse a band filter string like "RGB", "RGBNRe" into a BandFilter struct
     static BandFilter parseFilter(const std::string &filterStr, int bandCount);
