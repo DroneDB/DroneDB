@@ -116,6 +116,15 @@ jobs:
         # src/include or apps gains a raw path.string(), fs::path(<string>) or ANSI Win32 call
         # (cmake/narrow-paths-baseline.txt). A text search, so it runs before the build.
         run: python3 scripts/check-narrow-paths.py
+      - name: Check that the host opens no file of a user with GDAL
+        # Only gdal-util parses the files of users: fails when GDALOpen*, GDALIdentifyDriver*, OGROpen*
+        # or "/vsicurl" appear in src/ or apps/ outside the allow-list of scripts/check-gdal-opens.py,
+        # or when anything but the start of gdal-util calls enableUserFileOpens(). A text search, so
+        # it runs before the build; --self-test checks the check on built-in fixtures.
+        shell: bash
+        run: |
+          python3 scripts/check-gdal-opens.py --self-test
+          python3 scripts/check-gdal-opens.py
       - name: Pin test_data (tests/test-data.sha)
         # The DroneDB/test_data commit the tests read their assets from (testDataUrl, tests/testfs.h);
         # the smoke tests below download from the same commit
