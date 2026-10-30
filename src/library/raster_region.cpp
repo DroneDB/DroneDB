@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -161,15 +162,23 @@ namespace ddb
             }
         }
 
+        // What gdalwarp writes where the raster has no data: nothing (the bands as they are), an
+        // alpha band, or white in every band (JPEG has no alpha)
+        enum class WarpBackground
+        {
+            None,
+            Alpha,
+            White
+        };
+
         // The gdalwarp arguments of a region render, without the warper's threads: the window
         // (bbox in srs, size in pixels) in the CRS tSrs, with the format's creation options when
-        // gdalwarp writes the file itself, the bands requested, and the transparency of the format
-        std::vector<std::string> regionWarpArgs(const RegionRequest &request, const RegionOptions &options,
-                                                const FormatInfo &fi, GDALDatasetH hSrc, const std::string &srs,
-                                                const std::string &tSrs)
+        // gdalwarp writes the file itself, the bands (none: all of them) and the background
+        std::vector<std::string> regionWarpArgs(const RegionRequest &request, const FormatInfo &fi, GDALDatasetH hSrc,
+                                                const std::vector<int> &bands, WarpBackground background,
+                                                const std::string &srs, const std::string &tSrs)
         {
             const auto &bbox = request.bbox;
-            const std::vector<int> &bands = options.bands;
             const bool directOutput = std::string(fi.driver) == "GTiff";
 
             std::vector<std::string> argStore;
@@ -192,17 +201,14 @@ namespace ddb
                     argStore.emplace_back(co);
                 }
             }
+            // gdalwarp still reads the alpha band of the raster to know where it has no data
             for (int b : bands) {
                 argStore.emplace_back("-b");
                 argStore.emplace_back(std::to_string(b));
             }
-            // Append an alpha mask only when the caller did not pin a specific band
-            // layout. When @p bands is non-empty the output must match exactly the
-            // requested bands (WCS RangeSubset semantics).
-            if (fi.wantsAlpha && bands.empty())
+            if (background == WarpBackground::Alpha)
                 argStore.emplace_back("-dstalpha");
-            if (fi.jpegCompositing) {
-                // JPEG has no alpha: use white background for nodata regions.
+            if (background == WarpBackground::White) {
                 // Build one nodata value per output band to satisfy gdalwarp
                 // (single-band grayscale outputs reject a 3-value "255 255 255").
                 const int outBandCount = bands.empty()
@@ -213,6 +219,56 @@ namespace ddb
                 argStore.emplace_back("-dstnodata"); argStore.emplace_back(nodataStr);
             }
             return argStore;
+        }
+
+        // The 8-bit image of a warped render whose bands are not 8-bit: every band but the last
+        // (the alpha band of the warp) stretched from range to 0-255, and the alpha band, or for an
+        // image without alpha (JPEG), white where the alpha is 0
+        GDALDatasetUniquePtr stretchedImage(GDALDatasetH warped, const std::pair<double, double> &range, bool white)
+        {
+            const int width = GDALGetRasterXSize(warped), height = GDALGetRasterYSize(warped);
+            const int colorBands = GDALGetRasterCount(warped) - 1;
+            const int outBands = colorBands + (white ? 0 : 1);
+            GDALDriverH mem = GDALGetDriverByName("MEM");
+            if (!mem)
+                throw GDALException("Driver not available: MEM");
+            auto image = adoptDataset(GDALCreate(mem, "", width, height, outBands, GDT_Byte, nullptr));
+            if (!image)
+                throw GDALException("Cannot create the image of a render");
+            GDALDatasetH hImage = datasetHandle(image);
+
+            const size_t pixels = static_cast<size_t>(width) * height;
+            std::vector<float> alpha(pixels), values(pixels);
+            std::vector<uint8_t> bytes(pixels);
+            const auto read = [&](int band, std::vector<float> &out) {
+                if (GDALRasterIO(GDALGetRasterBand(warped, band), GF_Read, 0, 0, width, height, out.data(), width,
+                                 height, GDT_Float32, 0, 0) != CE_None)
+                    throw GDALException("Cannot read band " + std::to_string(band) + " of a render");
+            };
+            const auto write = [&](int band) {
+                if (GDALRasterIO(GDALGetRasterBand(hImage, band), GF_Write, 0, 0, width, height, bytes.data(), width,
+                                 height, GDT_Byte, 0, 0) != CE_None)
+                    throw GDALException("Cannot write band " + std::to_string(band) + " of a render");
+            };
+            read(colorBands + 1, alpha);
+            for (int b = 1; b <= colorBands; b++)
+            {
+                read(b, values);
+                for (size_t i = 0; i < pixels; i++)
+                    bytes[i] = white && alpha[i] <= 0.f ? 255 : stretchToByte(values[i], range.first, range.second);
+                write(b);
+                GDALSetRasterColorInterpretation(GDALGetRasterBand(hImage, b),
+                                                 colorBands < 3 ? GCI_GrayIndex
+                                                                : static_cast<GDALColorInterp>(GCI_RedBand + b - 1));
+            }
+            if (!white)
+            {
+                for (size_t i = 0; i < pixels; i++)
+                    bytes[i] = static_cast<uint8_t>(std::clamp(alpha[i], 0.f, 255.f));
+                write(outBands);
+                GDALSetRasterColorInterpretation(GDALGetRasterBand(hImage, outBands), GCI_AlphaBand);
+            }
+            return image;
         }
 
         // The value of the pixel in every band, with the band's nodata value when it has one: null
@@ -298,7 +354,27 @@ namespace ddb
         const bool directOutput = std::string(fi.driver) == "GTiff";
         const VsiMemFile out = VsiMemFile::unique("ddb-render-", std::string(".") + fi.vsiExt);
 
-        std::vector<std::string> argStore = regionWarpArgs(request, options, fi, hSrc, srs, tSrs);
+        // An image (PNG, JPEG, WebP) holds 8-bit grey or RGB: unless the caller pinned the bands
+        // (WCS RangeSubset semantics: exactly those, with no alpha), it shows the raster as the
+        // map tiles do, its first three data bands (or its first) stretched to 8 bits when they
+        // are not. A multispectral or a DEM raster as it is (6 bands, Float32) cannot be encoded.
+        std::vector<int> bands = options.bands;
+        std::optional<std::pair<double, double>> stretch;
+        if (!directOutput && bands.empty())
+        {
+            bands = defaultDisplayBands(hSrc);
+            if (GDALGetRasterDataType(GDALGetRasterBand(hSrc, bands[0])) != GDT_Byte)
+                stretch = displayRange(inputPath, hSrc, bands);
+        }
+        WarpBackground background = WarpBackground::None;
+        if (stretch)
+            background = WarpBackground::Alpha; // the stretch makes JPEG's white from it
+        else if (fi.jpegCompositing)
+            background = WarpBackground::White;
+        else if (fi.wantsAlpha && options.bands.empty())
+            background = WarpBackground::Alpha;
+
+        std::vector<std::string> argStore = regionWarpArgs(request, fi, hSrc, bands, background, srs, tSrs);
         const RenderInFlight inFlight;
         parallel::CpuTokens warpTokens;
         for (const auto &arg : warpThreadArgs(inFlight, warpTokens))
@@ -321,6 +397,8 @@ namespace ddb
         }
 
         if (!directOutput) {
+            if (stretch)
+                warped = stretchedImage(datasetHandle(warped), *stretch, fi.jpegCompositing);
             encodeDataset(datasetHandle(warped), fi, outBytes, outSize, inputPath);
             return;
         }

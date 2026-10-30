@@ -4,6 +4,7 @@
 #ifndef VIS_RENDER_H
 #define VIS_RENDER_H
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -43,6 +44,27 @@ namespace ddb
 
     /// Display range of a band: mean ± 2.33 σ (≈ p2-p98) clipped to [min, max]
     std::pair<double, double> stretchRange(const BandStatistics &s);
+
+    /// The bands of ds that hold data: all but a last band that is alpha (by its color
+    /// interpretation or the mask of the raster, or the 2nd of 2 and the 4th of 4 bands)
+    int dataBandCount(GDALDatasetH ds);
+
+    /// How a raster shows without visualisation parameters: the map tiles and the WMS map draw
+    /// its first three data bands as RGB (its first band as grey when it has fewer), and when they
+    /// are not 8-bit, stretch them together over the range of their statistics (displayRange)
+    std::vector<int> defaultDisplayBands(GDALDatasetH ds);
+
+    /// The range that bands of the raster at path (ds, open) are stretched over to show them: the
+    /// lowest minimum to the highest maximum of their statistics, one range for all so their
+    /// colours keep their balance. Throws GDALException when it is empty.
+    std::pair<double, double> displayRange(const std::string &path, GDALDatasetH ds, const std::vector<int> &bands);
+
+    /// v stretched from [lo, hi] to 0-255, clipped
+    inline uint8_t stretchToByte(double v, double lo, double hi)
+    {
+        const double c = std::max(lo, std::min(hi, v));
+        return static_cast<uint8_t>(255.0 * (c - lo) / (hi - lo));
+    }
 
     /// The type of the data bands of ds (the alpha band does not count): floating point when every
     /// one is Float32 or Float64. What decides whether a formula that needs reflectance can be

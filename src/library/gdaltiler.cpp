@@ -54,19 +54,9 @@ namespace ddb
 
     int GDALTiler::dataBandsCount(const GDALDatasetH &dataset)
     {
-        const GDALRasterBandH raster = GDALGetRasterBand(dataset, 1);
-        const GDALRasterBandH alphaBand = GDALGetMaskBand(raster);
-        const int bandsCount = GDALGetRasterCount(dataset);
-        const GDALRasterBandH lastBand = GDALGetRasterBand(dataset, bandsCount);
-
-        if (GDALGetMaskFlags(alphaBand) & GMF_ALPHA || bandsCount == 4 ||
-            bandsCount == 2 || GDALGetRasterColorInterpretation(lastBand) == GCI_AlphaBand)
-        {
-            return bandsCount - 1;
-        }
-
-        return bandsCount;
+        return dataBandCount(dataset);
     }
+
     namespace
     {
         // Maps the values of a window (band-sequential, windowPixels per band) to 0-255
@@ -75,17 +65,6 @@ namespace ddb
         void rescaleInto(const uint8_t *buffer, int bands, const GQResult &g, double bMin, double bMax,
                          RasterImage &image)
         {
-            // Avoid divide by zero
-            if (bMin == bMax)
-                bMax += 0.1;
-
-            LOGD << "Min: " << bMin << " | Max: " << bMax;
-
-            // Can still happen according to GDAL for very large values
-            if (bMin == bMax)
-                throw GDALException("Cannot scale values due to source min/max being equal");
-
-            const double deltamm = bMax - bMin;
             const T *src = reinterpret_cast<const T *>(buffer);
             const size_t windowPixels = static_cast<size_t>(g.w.xsize) * g.w.ysize;
 
@@ -98,8 +77,7 @@ namespace ddb
                     uint8_t *out = dst + static_cast<size_t>(g.w.y + row) * image.width + g.w.x;
                     for (int col = 0; col < g.w.xsize; col++)
                     {
-                        const double v = std::max(bMin, std::min(bMax, static_cast<double>(in[col])));
-                        out[col] = static_cast<uint8_t>(255.0 * (v - bMin) / deltamm);
+                        out[col] = stretchToByte(static_cast<double>(in[col]), bMin, bMax);
                     }
                 }
             }
@@ -266,16 +244,11 @@ namespace ddb
             throw GDALException("Cannot read input dataset window");
         }
 
-        // One stretch for all bands, from the statistics of the raster
-        // TODO: allow people to specify rescale values
-        double globalMin = std::numeric_limits<double>::max();
-        double globalMax = std::numeric_limits<double>::lowest();
+        // One stretch for all bands, from the statistics of the raster file (not of the warped VRT)
+        std::vector<int> shown(static_cast<size_t>(bands));
         for (int i = 0; i < bands; i++)
-        {
-            const BandStatistics s = bandStatistics(i + 1);
-            globalMin = std::min(globalMin, s.min);
-            globalMax = std::max(globalMax, s.max);
-        }
+            shown[static_cast<size_t>(i)] = i + 1;
+        const auto [globalMin, globalMax] = displayRange(inputPath, datasetHandle(fileDataset), shown);
 
         switch (type)
         {
@@ -410,12 +383,8 @@ namespace ddb
                 }
 
                 const auto [sMin, sMax] = stretchRange(bandStatistics(srcBand));
-                const double range = sMax - sMin;
                 for (size_t px = 0; px < windowPixels; px++)
-                {
-                    const double v = std::max(sMin, std::min(sMax, static_cast<double>(fBuf[px])));
-                    byteBuf[px] = static_cast<uint8_t>(255.0 * (v - sMin) / range);
-                }
+                    byteBuf[px] = stretchToByte(static_cast<double>(fBuf[px]), sMin, sMax);
             }
             else if (GDALRasterIOEx(hSrcBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
                                     byteBuf.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0, &extra) != CE_None)

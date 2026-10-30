@@ -5,11 +5,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <tuple>
 
 #include "cancellation.h"
 #include "exceptions.h"
+#include "logger.h"
 #include "raster_utils.h"
 #include "sensorprofile.h"
 #include "vegetation.h"
@@ -84,6 +86,47 @@ namespace ddb
         if (sMin >= sMax)
             sMax = sMin + 1.0;
         return {sMin, sMax};
+    }
+
+    int dataBandCount(GDALDatasetH ds)
+    {
+        const GDALRasterBandH raster = GDALGetRasterBand(ds, 1);
+        const GDALRasterBandH alphaBand = GDALGetMaskBand(raster);
+        const int bandsCount = GDALGetRasterCount(ds);
+        const GDALRasterBandH lastBand = GDALGetRasterBand(ds, bandsCount);
+
+        if (GDALGetMaskFlags(alphaBand) & GMF_ALPHA || bandsCount == 4 ||
+            bandsCount == 2 || GDALGetRasterColorInterpretation(lastBand) == GCI_AlphaBand)
+        {
+            return bandsCount - 1;
+        }
+
+        return bandsCount;
+    }
+
+    std::vector<int> defaultDisplayBands(GDALDatasetH ds)
+    {
+        return dataBandCount(ds) >= 3 ? std::vector<int>{1, 2, 3} : std::vector<int>{1};
+    }
+
+    std::pair<double, double> displayRange(const std::string &path, GDALDatasetH ds, const std::vector<int> &bands)
+    {
+        double lo = std::numeric_limits<double>::max();
+        double hi = std::numeric_limits<double>::lowest();
+        for (const int b : bands)
+        {
+            const BandStatistics s = RasterStatsProvider::instance().get(path, ds, b);
+            lo = std::min(lo, s.min);
+            hi = std::max(hi, s.max);
+        }
+        // Avoid divide by zero
+        if (lo == hi)
+            hi += 0.1;
+        // Can still happen according to GDAL for very large values
+        if (lo == hi)
+            throw GDALException("Cannot scale values due to source min/max being equal");
+        LOGD << "Min: " << lo << " | Max: " << hi;
+        return {lo, hi};
     }
 
     RasterDataKind rasterDataKind(GDALDatasetH ds)
