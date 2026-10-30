@@ -259,9 +259,11 @@ override_dh_auto_install:
 	if [ -f \$(CURDIR)/build/Obj2Tiles ]; then \\
 		cp \$(CURDIR)/build/Obj2Tiles debian/ddb/usr/bin/Obj2Tiles; \\
 		chmod +x debian/ddb/usr/bin/Obj2Tiles; \\
-		if [ -f \$(CURDIR)/build/Obj2Tiles.LICENSE.md ]; then \\
-			cp \$(CURDIR)/build/Obj2Tiles.LICENSE.md debian/ddb/usr/share/doc/ddb/Obj2Tiles.LICENSE.md; \\
-		fi \\
+		for doc in LICENSE THIRD_PARTY_NOTICES; do \\
+			if [ -f \$(CURDIR)/build/Obj2Tiles.\$\$doc.md ]; then \\
+				cp \$(CURDIR)/build/Obj2Tiles.\$\$doc.md debian/ddb/usr/share/doc/ddb/Obj2Tiles.\$\$doc.md; \\
+			fi; \\
+		done \\
 	fi
 
 	# Optional: copy the bundled libktx native library (Apache-2.0) used by

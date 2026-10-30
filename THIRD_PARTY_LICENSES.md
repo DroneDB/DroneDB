@@ -106,7 +106,9 @@ tool, a precompiled .NET application redistributed **unmodified**
 - **Distributed copy**: the precompiled `Obj2Tiles` / `Obj2Tiles.exe`
   binary placed next to the DroneDB executable (mirroring the
   OpenDroneMap packaging); the upstream `LICENSE.md` is preserved
-  alongside it.
+  alongside it as `Obj2Tiles.LICENSE.md`, with the notices of the
+  libraries the binary bundles (LibTiff.Net, BSD 3-Clause, since
+  v1.8.1) as `Obj2Tiles.THIRD_PARTY_NOTICES.md`.
 
 ### Why AGPL is compatible with MPL-licensed DroneDB
 

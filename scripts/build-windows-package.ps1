@@ -231,6 +231,11 @@ if (Test-Path $obj2tilesPath) {
         Copy-Item $obj2tilesLicense $stagingDir -Force
         Write-Host "  ✓ Obj2Tiles.LICENSE.md (AGPL-3.0 license)" -ForegroundColor Green
     }
+    $obj2tilesNotices = Join-Path $BuildDir "Obj2Tiles.THIRD_PARTY_NOTICES.md"
+    if (Test-Path $obj2tilesNotices) {
+        Copy-Item $obj2tilesNotices $stagingDir -Force
+        Write-Host "  ✓ Obj2Tiles.THIRD_PARTY_NOTICES.md (licences of the libraries it bundles)" -ForegroundColor Green
+    }
     # Bundled libktx native library (Apache-2.0), used by Obj2Tiles for KTX2 texture
     # compression (--texture-format Ktx2). Without it, --texture-format Ktx2 requests fail.
     $ktxPath = Join-Path $BuildDir "ktx.dll"
