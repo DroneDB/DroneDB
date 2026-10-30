@@ -222,6 +222,9 @@ if(BUILD_TESTING)
         # ddb_sandbox: the library of the helper programs, tested on its own (unit/sandbox_test.cpp)
         LINK ddb_cli_commands ddb_sandbox
         SERIAL DeltaDiff.isLinear
+        # Extracts 70,000 files (more members than a zip without ZIP64 can count): under 2 s on
+        # Linux, 200 to 300 s on the Windows runner, where creating a file costs about 3 ms
+        SLOW zip.extractAllExtractsSeventyThousandSmallMembers
     )
     # The C API's private headers (src/library/c_api_util.h), for the unit tests of its mapper;
     # after tests/ and the public headers, so no name there is shadowed
