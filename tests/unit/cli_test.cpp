@@ -21,10 +21,14 @@
 #include "cmd/include/credentials.h"
 #include "cmd/include/pull.h"
 #include "cmd/include/push.h"
+#include "cmd/include/rescan.h"
+#include "entry_filters.h"
+#include "entry_types.h"
 #include "exceptions.h"
 #include "fake_http_client.h"
 #include "fake_model_tools.h"
 #include "gtest/gtest.h"
+#include "stringutil.h"
 #include "tagmanager.h"
 #include "test.h"
 #include "testarea.h"
@@ -447,6 +451,28 @@ TEST(CliCommands, everyCommandWithAFormatRefusesAnUnknownOneBeforeItDoesAnything
         EXPECT_NE(outcome.err.find("Invalid format"), std::string::npos) << name << ": " << outcome.err;
     }
     EXPECT_FALSE(std::filesystem::exists(target)) << "list created its output file before it knew the format";
+}
+
+// The help of --type listed the types by hand and missed those added since (gaussiansplat, tiles3d)
+TEST(CliCommands, theTypeHelpOfRescanListsEveryTypeTheOptionTakes) {
+    cmd::Rescan rescan;
+    cxxopts::Options opts("ddb", rescan.description());
+    rescan.setOptions(opts);
+    std::string help;
+    for (const auto &option : opts.group_help("").options)
+        if (option.s == "t")
+            help = option.desc;
+    const std::string label = "Valid types: ";
+    const size_t start = help.find(label);
+    ASSERT_NE(start, std::string::npos) << help;
+
+    std::vector<std::string> listed;
+    for (const std::string &name : ddb::str::split(help.substr(start + label.size()), ','))
+        listed.push_back(ddb::str::trimCopy(name));
+    EXPECT_EQ(listed, ddb::getEntryTypeNames());
+    // and each of them is taken by the option
+    for (const std::string &name : listed)
+        EXPECT_NO_THROW(ddb::filters::parseEntryTypeList(name.c_str())) << name;
 }
 
 TEST(CliCommands, infoWritesOnlyTheJsonToStdout) {

@@ -7,9 +7,20 @@
 #include "dbops.h"
 #include "entry_types.h"
 #include "entry_filters.h"
+#include "stringutil.h"
 
 namespace cmd
 {
+
+    namespace
+    {
+        // The names --type takes: those of the entry handlers, which parseEntryTypeList reads
+        // them with, so the help lists every type the option accepts
+        std::string validTypes()
+        {
+            return ddb::str::join(ddb::getEntryTypeNames(), ", ");
+        }
+    }
 
     void Rescan::setOptions(cxxopts::Options &opts)
     {
@@ -19,7 +30,7 @@ namespace cmd
             .custom_help("rescan");
         cmd::addWorkingDirOption(opts);
         opts.add_options()
-            ("t,type", "Entry types to rescan (comma-separated). Valid types: generic, geoimage, georaster, pointcloud, image, dronedb, markdown, video, geovideo, model, panorama, geopanorama, vector", cxxopts::value<std::string>()->default_value(""))
+            ("t,type", "Entry types to rescan (comma-separated). Valid types: " + validTypes(), cxxopts::value<std::string>()->default_value(""))
             ("e,ext", "File extensions to rescan (comma-separated, e.g. dwg,dxf). Combined with --type, an entry must match both", cxxopts::value<std::string>()->default_value(""))
             ("continue-on-error", "Continue processing if an error occurs", cxxopts::value<bool>());
         // clang-format on
@@ -32,20 +43,10 @@ namespace cmd
 
     std::string Rescan::extendedDescription()
     {
-        std::stringstream ss;
-        ss << "Useful when upgrading DroneDB to a version that extracts more metadata "
-           << "or supports new file types.\n\n"
-           << "Valid type filters: ";
-
-        auto typeNames = ddb::getEntryTypeNames();
-        for (size_t i = 0; i < typeNames.size(); i++)
-        {
-            if (i > 0)
-                ss << ", ";
-            ss << typeNames[i];
-        }
-
-        return ss.str();
+        return "\n\nUseful when upgrading DroneDB to a version that extracts more metadata "
+               "or supports new file types.\n\n"
+               "Valid type filters: " +
+               validTypes();
     }
 
     int Rescan::run(cxxopts::ParseResult &opts)
