@@ -105,12 +105,15 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             python3 scripts/check-abi.py tag --tag "${GITHUB_REF_NAME}"
           fi
-      - name: Check that vendor/bm3d is a bm3d release
-        # The source offer of THIRD_PARTY_LICENSES.md names the bm3d release at the tag the
-        # submodule points to, so the submodule commit must be exactly the commit of the tag
-        # v<vendor/bm3d/VERSION> in the bm3d repository (the version `bm3d --version` reports).
+      - name: Check that every helper submodule is a release
+        # The source offers of THIRD_PARTY_LICENSES.md name the release of each helper built from a
+        # submodule (bm3d, metadata-util, gdal-util), so each submodule commit must be exactly the
+        # commit of the tag v<version> in the helper's repository, <version> being what the helper
+        # reports with --version (scripts/helper-tools.txt). --self-test checks the check first.
         shell: bash
-        run: scripts/check-bm3d-pin.sh vendor/bm3d
+        run: |
+          python3 scripts/check-helper-pins.py --self-test
+          python3 scripts/check-helper-pins.py
       - name: Check narrow path conversions (ratchet)
         # UTF-8 paths (src/include/mio.h, "Path encoding"): fails when a file of src/library,
         # src/include or apps gains a raw path.string(), fs::path(<string>) or ANSI Win32 call

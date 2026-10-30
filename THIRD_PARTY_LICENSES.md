@@ -275,8 +275,11 @@ terms therefore apply to `metadata-util` itself, not to the rest of DroneDB.
 ### Obtaining the corresponding source
 
 The `metadata-util` source code is the `vendor/metadata-util` submodule of the
-corresponding git tag of this repository, and is publicly available in
-the `DroneDB/metadata-util` repository. Every DroneDB release attaches the
+corresponding git tag of this repository. The submodule only ever points at
+a release of [DroneDB/metadata-util](https://github.com/DroneDB/metadata-util):
+the CI checks that its commit is the one of the tag `v` plus the DroneDB
+version (the version `metadata-util --version` prints), so the source is the
+tag of that name in the `DroneDB/metadata-util` repository. Every DroneDB release attaches the
 exact Exiv2 source archive that vcpkg built into `metadata-util`
 (`exiv2-<version>.tar.gz`), the vcpkg port files with the patches vcpkg
 applies to it (`vcpkg-ports-for-gpl-sources.tar.gz`) and a `SOURCES.txt`

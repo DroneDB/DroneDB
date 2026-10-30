@@ -138,9 +138,12 @@ To add a helper:
 Move the submodule to the new commit (`git -C <path> checkout <tag>`, then commit the pointer in
 this repository), and in the same change:
 
-- **vendor/metadata-util**, **vendor/bm3d**: check the version the program reports against its
-  source in `scripts/helper-tools.txt`; for bm3d `scripts/check-bm3d-pin.sh` also checks the
-  release tag the source offer of `THIRD_PARTY_LICENSES.md` names.
+- **Every helper submodule** (vendor/metadata-util, vendor/bm3d, apps/gdal-util): point it at a
+  release tag of its repository. `scripts/check-helper-pins.py` checks that the submodule commit is
+  the commit of the tag `v<version>`, the version being that of the program's source in
+  `scripts/helper-tools.txt` (the DroneDB version for metadata-util and gdal-util, so a DroneDB
+  release tags both at the pinned commit; `vendor/bm3d/VERSION` for bm3d). The source offers of
+  `THIRD_PARTY_LICENSES.md` name those tags.
 - **apps/gdal-util**: its `PROTOCOL.md` and `src/include/raster_protocol.h` describe the same
   protocol and change together. A change of the protocol that older hosts or helpers cannot read
   raises the major version in both, and `tests/contract/schemas/gdal-util-probe.schema.json` and
