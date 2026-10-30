@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdio>
 #include <random>
 #include <utility>
 #include <vector>
@@ -39,6 +40,11 @@ struct Similarity2D {
     Vec2 apply(Vec2 p) const noexcept {
         return { scale * (cosTheta * p.x - sinTheta * p.y) + t.x,
                  scale * (sinTheta * p.x + cosTheta * p.y) + t.y };
+    }
+    // The source point that apply() takes to q
+    Vec2 inverse(Vec2 q) const noexcept {
+        const double x = q.x - t.x, y = q.y - t.y;
+        return { (cosTheta * x + sinTheta * y) / scale, (-sinTheta * x + cosTheta * y) / scale };
     }
     double residual(const TiePoint &tp) const noexcept {
         Vec2 q = apply(tp.src);
@@ -88,16 +94,76 @@ static bool detectIsDem(GDALDatasetH hDs) {
 }
 
 struct RasterGrid {
+    // The signal that the matching compares: the local relief of the elevation of a DEM, or of the
+    // luminance of an image (highPass), with unit variance; 0 where the raster has no data
     std::vector<float> data;
+    std::vector<uint8_t> valid;   // 1 where the raster has data (not nodata, transparent or masked)
     int    width = 0, height = 0;
     double gt[6] = {};      // GeoTransform of the grid (corner + pixel size)
+    size_t validCount = 0;
+    bool   textured = false; // the signal varies where the raster has data
+
+    bool isValid(int r, int c) const noexcept { return valid[static_cast<size_t>(r) * width + c] != 0; }
 };
 
+// The half size of the box of the local mean that highPass removes, in common-grid pixels
+constexpr int kHighPassRadius = 16;
+
 /**
- * Re-reads hDs in the bbox [x0,y0]→[x1,y1] (in the dataset CRS) at the target GSD.
- * Produces a scalar float32 signal:
+ * Keeps the relief of the signal: removes from every sample the mean of the samples with data in
+ * the (2k+1)² box around it, scales what is left to unit variance and sets the samples without
+ * data to 0. Two rasters of the same ground share their relief (the edges of buildings, stockpiles
+ * and vehicles, of the marks of an image) even when their heights or brightness, or the slope of
+ * their terrain, differ. Raw elevations are dominated by the terrain trend and by the jump at the
+ * edge of the data, which the correlation then locks on instead of the ground.
+ */
+static void highPass(RasterGrid &g, int k) {
+    const int W = g.width, H = g.height;
+    const size_t stride = static_cast<size_t>(W) + 1;
+    std::vector<double> sum(stride * (H + 1), 0.0), cnt(stride * (H + 1), 0.0);
+    double rawSum2 = 0;
+    for (int r = 0; r < H; r++) {
+        for (int c = 0; c < W; c++) {
+            const size_t i = static_cast<size_t>(r) * W + c;
+            const double v = g.valid[i] ? g.data[i] : 0.0;
+            rawSum2 += v * v;
+            const size_t o = static_cast<size_t>(r + 1) * stride + (c + 1);
+            sum[o] = v + sum[o - stride] + sum[o - 1] - sum[o - stride - 1];
+            cnt[o] = (g.valid[i] ? 1.0 : 0.0) + cnt[o - stride] + cnt[o - 1] - cnt[o - stride - 1];
+        }
+    }
+    const auto box = [&](const std::vector<double> &s, int r0, int c0, int r1, int c1) {
+        return s[static_cast<size_t>(r1 + 1) * stride + (c1 + 1)] - s[static_cast<size_t>(r0) * stride + (c1 + 1)]
+             - s[static_cast<size_t>(r1 + 1) * stride + c0] + s[static_cast<size_t>(r0) * stride + c0];
+    };
+
+    std::vector<float> out(g.data.size(), 0.f);
+    double sum2 = 0;
+    for (int r = 0; r < H; r++) {
+        const int r0 = std::max(0, r - k), r1 = std::min(H - 1, r + k);
+        for (int c = 0; c < W; c++) {
+            const size_t i = static_cast<size_t>(r) * W + c;
+            if (!g.valid[i]) continue;
+            const int c0 = std::max(0, c - k), c1 = std::min(W - 1, c + k);
+            const double v = g.data[i] - box(sum, r0, c0, r1, c1) / box(cnt, r0, c0, r1, c1);
+            out[i] = static_cast<float>(v);
+            sum2 += v * v;
+        }
+    }
+
+    const double rawRms = g.validCount > 0 ? std::sqrt(rawSum2 / static_cast<double>(g.validCount)) : 0.0;
+    const double stdv = g.validCount > 0 ? std::sqrt(sum2 / static_cast<double>(g.validCount)) : 0.0;
+    g.textured = stdv > 1e-6 * std::max(1.0, rawRms);
+    if (g.textured)
+        for (float &v : out) v = static_cast<float>(v / stdv);
+    g.data = std::move(out);
+}
+
+/**
+ * Re-reads hDs in the bbox [x0,y0]→[x1,y1] (in the dataset CRS) at the target GSD, with which of
+ * its samples have data, and keeps the relief (highPass) of a scalar signal:
  *   ortho → luminance (BT.601 coefficients)
- *   DEM   → standardized elevation: (v − μ) / σ
+ *   DEM   → elevation
  */
 static RasterGrid readToCommonGrid(GDALDatasetH hDs,
                                    const std::string &name,
@@ -109,61 +175,83 @@ static RasterGrid readToCommonGrid(GDALDatasetH hDs,
     double gt[6];
     requireGeoTransform(hDs, gt, name);
 
-    // Source window in pixels
-    int px0 = static_cast<int>(std::floor((x0 - gt[0]) / gt[1]));
-    int py0 = static_cast<int>(std::floor((y1 - gt[3]) / gt[5]));  // gt[5] < 0
-    int px1 = static_cast<int>(std::ceil ((x1 - gt[0]) / gt[1]));
-    int py1 = static_cast<int>(std::ceil ((y0 - gt[3]) / gt[5]));
-    px0 = std::clamp(px0, 0, GDALGetRasterXSize(hDs));
-    py0 = std::clamp(py0, 0, GDALGetRasterYSize(hDs));
-    px1 = std::clamp(px1, 0, GDALGetRasterXSize(hDs));
-    py1 = std::clamp(py1, 0, GDALGetRasterYSize(hDs));
+    // Source window in pixels, read as the exact window of the area (a window snapped outward to
+    // whole pixels of the coarser raster would misplace the grid by up to one of its pixels)
+    const double fx0 = std::clamp((x0 - gt[0]) / gt[1], 0.0, static_cast<double>(GDALGetRasterXSize(hDs)));
+    const double fx1 = std::clamp((x1 - gt[0]) / gt[1], 0.0, static_cast<double>(GDALGetRasterXSize(hDs)));
+    const double fy0 = std::clamp((y1 - gt[3]) / gt[5], 0.0, static_cast<double>(GDALGetRasterYSize(hDs)));  // gt[5] < 0
+    const double fy1 = std::clamp((y0 - gt[3]) / gt[5], 0.0, static_cast<double>(GDALGetRasterYSize(hDs)));
+    const int px0 = static_cast<int>(std::floor(fx0)), py0 = static_cast<int>(std::floor(fy0));
+    const int px1 = static_cast<int>(std::ceil(fx1)), py1 = static_cast<int>(std::ceil(fy1));
     if (px1 <= px0 || py1 <= py0)
         throw AppException("Empty source window when building common grid");
 
     double regionW = x1 - x0, regionH = y1 - y0;
     int outW = std::max(1, static_cast<int>(std::round(regionW / targetGsd)));
     int outH = std::max(1, static_cast<int>(std::round(regionH / targetGsd)));
+    const size_t pixels = static_cast<size_t>(outW) * outH;
+
+    GDALRasterIOExtraArg extra;
+    INIT_RASTERIO_EXTRA_ARG(extra);
+    extra.bFloatingPointWindowValidity = TRUE;
+    extra.dfXOff = fx0;
+    extra.dfYOff = fy0;
+    extra.dfXSize = fx1 - fx0;
+    extra.dfYSize = fy1 - fy0;
+    const auto readWindow = [&](GDALRasterBandH hBand, void *out, GDALDataType type, const std::string &what) {
+        if (GDALRasterIOEx(hBand, GF_Read, px0, py0, px1 - px0, py1 - py0, out, outW, outH, type, 0, 0,
+                           &extra) != CE_None)
+            throw GDALException("GDALRasterIO failed for " + what);
+    };
 
     int nbands = GDALGetRasterCount(hDs);
-    std::vector<std::vector<float>> bands(nbands, std::vector<float>(static_cast<size_t>(outW) * outH, 0.f));
+    std::vector<std::vector<float>> bands(nbands, std::vector<float>(pixels, 0.f));
+    std::vector<float *> ptrs(nbands);
     for (int b = 1; b <= nbands; b++) {
         GDALRasterBandH hBand = GDALGetRasterBand(hDs, b);
         if (!hBand) throw GDALException("Cannot get band " + std::to_string(b));
-        if (GDALRasterIO(hBand, GF_Read,
-                         px0, py0, px1 - px0, py1 - py0,
-                         bands[b - 1].data(), outW, outH,
-                         GDT_Float32, 0, 0) != CE_None)
-            throw GDALException("GDALRasterIO failed for band " + std::to_string(b));
+        readWindow(hBand, bands[b - 1].data(), GDT_Float32, "band " + std::to_string(b));
+        ptrs[b - 1] = bands[b - 1].data();
     }
 
-    std::vector<float> signal(static_cast<size_t>(outW) * outH);
-    if (isDem) {
-        double sum = 0, sum2 = 0;
-        for (float v : bands[0]) { sum += v; sum2 += v * static_cast<double>(v); }
-        double count = static_cast<double>(outW) * outH;
-        double mean = sum / count;
-        double stdv = std::sqrt(std::max(0.0, sum2 / count - mean * mean));
-        if (stdv < 1e-9) stdv = 1.0;
-        for (size_t i = 0; i < signal.size(); i++)
-            signal[i] = static_cast<float>((bands[0][i] - mean) / stdv);
-    } else {
-        // BT.601 luminance
-        for (size_t i = 0; i < signal.size(); i++) {
-            float r = nbands >= 1 ? bands[0][i] : 0.f;
-            float g = nbands >= 2 ? bands[1][i] : r;
-            float b = nbands >= 3 ? bands[2][i] : r;
-            signal[i] = 0.299f * r + 0.587f * g + 0.114f * b;
-        }
+    // The samples without data: nodata values, transparent (alpha 0) or masked out, not finite
+    const RasterBandNodata nodata = detectBandNodata(hDs, nbands);
+    std::vector<uint8_t> datasetMask;
+    if (nodata.datasetMask) {
+        datasetMask.resize(pixels);
+        readWindow(GDALGetMaskBand(GDALGetRasterBand(hDs, 1)), datasetMask.data(), GDT_Byte, "the dataset mask");
     }
+    premaskNodata(ptrs, pixels, nbands, nodata, NODATA_SENTINEL, datasetMask.empty() ? nullptr : datasetMask.data());
+
+    // The color bands of an image: the first three that are not its alpha band
+    std::vector<int> color;
+    for (int b = 0; b < nbands && color.size() < 3; b++)
+        if (b != nodata.alphaBandIdx) color.push_back(b);
+    if (color.empty()) throw AppException("Raster has no band to align: " + name);
 
     RasterGrid grid;
-    grid.data   = std::move(signal);
+    grid.data.assign(pixels, 0.f);
+    grid.valid.assign(pixels, 0);
+    for (size_t i = 0; i < pixels; i++) {
+        bool ok = bands[color[0]][i] != NODATA_SENTINEL;
+        for (int b : color) ok = ok && std::isfinite(bands[b][i]);
+        if (!ok) continue;
+        if (isDem || color.size() < 3) {
+            grid.data[i] = bands[color[0]][i];
+        } else {
+            // BT.601 luminance
+            grid.data[i] = 0.299f * bands[color[0]][i] + 0.587f * bands[color[1]][i] + 0.114f * bands[color[2]][i];
+        }
+        grid.valid[i] = 1;
+        grid.validCount++;
+    }
+
     grid.width  = outW;
     grid.height = outH;
     // GeoTransform of the common grid (north-up, pixel size = targetGsd)
     grid.gt[0] = x0;   grid.gt[1] = targetGsd; grid.gt[2] = 0;
     grid.gt[3] = y1;   grid.gt[4] = 0;          grid.gt[5] = -targetGsd;
+    highPass(grid, kHighPassRadius);
     return grid;
 }
 
@@ -204,9 +292,17 @@ struct PatchCandidate {
     float textureScore = 0.f;
 };
 
+// The integral image of the samples of a grid without data: a box with a count of 0 has data everywhere
+static IntegralImages invalidCounts(const RasterGrid &g) {
+    std::vector<float> invalid(g.valid.size());
+    for (size_t i = 0; i < invalid.size(); i++) invalid[i] = g.valid[i] ? 0.f : 1.f;
+    return IntegralImages(invalid, g.width, g.height);
+}
+
 static std::vector<PatchCandidate> selectPatches(
     const RasterGrid    &srcGrid,
     const IntegralImages &ii,
+    const IntegralImages &invalid,
     int patchSize, int maxPatches)
 {
     std::vector<PatchCandidate> candidates;
@@ -216,6 +312,8 @@ static std::vector<PatchCandidate> selectPatches(
 
     for (int r = margin; r + patchSize + margin < H; r += step) {
         for (int c = margin; c + patchSize + margin < W; c += step) {
+            // A patch over the edge of the data would be matched by the edge, not by the ground
+            if (invalid.boxSum(r, c, r + patchSize - 1, c + patchSize - 1) > 0.5) continue;
             int n = patchSize * patchSize;
             double s  = ii.boxSum (r, c, r + patchSize - 1, c + patchSize - 1);
             double s2 = ii.boxSum2(r, c, r + patchSize - 1, c + patchSize - 1);
@@ -276,10 +374,26 @@ static void fft2d(std::vector<std::complex<double>> &m, int n, bool inverse) {
     }
 }
 
+// The weight of sample i of n in a Tukey window: 1 in the middle, falling as a cosine to 0 over the
+// eighth of the grid at each end. Without it the edges of the grid (the same in both rasters, as
+// both are read on the area they share) correlate at a shift of 0.
+static double taper(int i, int n) {
+    const double edge = std::max(1.0, n / 8.0);
+    const double d = std::min(i + 0.5, n - i - 0.5);
+    return d >= edge ? 1.0 : 0.5 * (1.0 - std::cos(ddb::kPi * d / edge));
+}
+
+// The offset, in [-0.5, 0.5], of the top of the parabola through three samples around a peak
+static double parabolicPeak(double ym1, double y0, double yp1) {
+    const double den = ym1 - 2.0 * y0 + yp1;
+    if (den >= -1e-12) return 0.0;
+    return std::clamp(0.5 * (ym1 - yp1) / den, -0.5, 0.5);
+}
+
 /**
  * Phase correlation between src and ref.
- * @return (dc, dr): the displacement, in common-grid pixels, that must be ADDED
- *         to a source position to reach the matching reference position
+ * @return (dc, dr): the displacement, in common-grid pixels (to a fraction of one), that must be
+ *         ADDED to a source position to reach the matching reference position
  *         (same convention as the per-patch NCC match below).
  */
 static std::pair<double, double> phaseCorrelate(const RasterGrid &src,
@@ -291,23 +405,19 @@ static std::pair<double, double> phaseCorrelate(const RasterGrid &src,
         nfft <<= 1;
     const size_t N = static_cast<size_t>(nfft) * nfft;
 
-    auto meanOf = [](const std::vector<float> &v) -> double {
-        if (v.empty()) return 0.0;
-        double s = 0;
-        for (float x : v) s += x;
-        return s / static_cast<double>(v.size());
-    };
-    const double mS = meanOf(src.data);
-    const double mR = meanOf(ref.data);
-
-    // Zero-padded, mean-subtracted inputs (mean removal suppresses the DC peak)
+    // Zero-padded, tapered inputs; the signals are 0 where there is no data and have no mean
+    // (highPass), so neither the edge of the data nor a DC term makes a peak
     std::vector<std::complex<double>> FS(N, {0.0, 0.0}), FR(N, {0.0, 0.0});
-    for (int r = 0; r < src.height; ++r)
-        for (int c = 0; c < src.width; ++c)
-            FS[static_cast<size_t>(r) * nfft + c] = std::complex<double>(src.data[static_cast<size_t>(r) * src.width + c] - mS, 0.0);
-    for (int r = 0; r < ref.height; ++r)
-        for (int c = 0; c < ref.width; ++c)
-            FR[static_cast<size_t>(r) * nfft + c] = std::complex<double>(ref.data[static_cast<size_t>(r) * ref.width + c] - mR, 0.0);
+    const auto load = [&](const RasterGrid &g, std::vector<std::complex<double>> &f) {
+        for (int r = 0; r < g.height; ++r) {
+            const double wr = taper(r, g.height);
+            for (int c = 0; c < g.width; ++c)
+                f[static_cast<size_t>(r) * nfft + c] =
+                    std::complex<double>(wr * taper(c, g.width) * g.data[static_cast<size_t>(r) * g.width + c], 0.0);
+        }
+    };
+    load(src, FS);
+    load(ref, FR);
 
     fft2d(FS, nfft, false);
     fft2d(FR, nfft, false);
@@ -351,9 +461,16 @@ static std::pair<double, double> phaseCorrelate(const RasterGrid &src,
         *peakStrength = (meanSidelobe > 1e-12) ? (peakVal / meanSidelobe) : 0.0;
     }
 
+    // Sub-pixel: a parabola through the peak and its neighbours (the surface wraps around)
+    const auto at = [&](int r, int c) {
+        return cp[static_cast<size_t>((r + nfft) % nfft) * nfft + static_cast<size_t>((c + nfft) % nfft)].real();
+    };
+    const double subR = parabolicPeak(at(pr - 1, pc), peakVal, at(pr + 1, pc));
+    const double subC = parabolicPeak(at(pr, pc - 1), peakVal, at(pr, pc + 1));
+
     // Circular wrap-around: peaks past nfft/2 represent negative displacements
-    double dr = pr < nfft / 2 ? pr : pr - nfft;
-    double dc = pc < nfft / 2 ? pc : pc - nfft;
+    double dr = (pr < nfft / 2 ? pr : pr - nfft) + subR;
+    double dc = (pc < nfft / 2 ? pc : pc - nfft) + subC;
     return {dc, dr};
 }
 
@@ -376,6 +493,7 @@ struct PatchQuery {
  */
 static NccMatch matchPatch(const RasterGrid    &srcGrid,
                            const IntegralImages &refII,
+                           const IntegralImages &refInvalid,
                            const RasterGrid    &refGrid,
                            const PatchQuery    &query,
                            double seedDr, double seedDc)
@@ -415,6 +533,7 @@ static NccMatch matchPatch(const RasterGrid    &srcGrid,
 
     for (int rr = rr0; rr <= rr1; rr++) {
         for (int rc = rc0; rc <= rc1; rc++) {
+            if (refInvalid.boxSum(rr, rc, rr + patchSize - 1, rc + patchSize - 1) > 0.5) continue;
             double refS  = refII.boxSum (rr, rc, rr + patchSize - 1, rc + patchSize - 1);
             double refS2 = refII.boxSum2(rr, rc, rr + patchSize - 1, rc + patchSize - 1);
             double refMean = refS / n;
@@ -438,17 +557,16 @@ static NccMatch matchPatch(const RasterGrid    &srcGrid,
         }
     }
 
-    // Sub-pixel: 3×3 parabolic fit on the peak
+    if (best.score <= -1.f) return {};
+
+    // Sub-pixel: 3×3 parabolic fit on the peak, where its neighbours were compared
     int pr = static_cast<int>(best.dr + srcRow) - rr0;
     int pc = static_cast<int>(best.dc + srcCol) - rc0;
-    if (pr > 0 && pr < mapRows - 1 && pc > 0 && pc < mapCols - 1) {
-        float ym1 = nccMap[static_cast<size_t>(pr - 1) * mapCols + pc], yp1 = nccMap[static_cast<size_t>(pr + 1) * mapCols + pc];
-        float xm1 = nccMap[static_cast<size_t>(pr) * mapCols + (pc - 1)], xp1 = nccMap[static_cast<size_t>(pr) * mapCols + (pc + 1)];
-        float c0  = nccMap[static_cast<size_t>(pr) * mapCols + pc];
-        float denR = 2 * c0 - ym1 - yp1, denC = 2 * c0 - xm1 - xp1;
-        if (denR > 1e-9f) best.dr += 0.5f * (ym1 - yp1) / denR;
-        if (denC > 1e-9f) best.dc += 0.5f * (xm1 - xp1) / denC;
-    }
+    const auto score = [&](int r, int c) { return nccMap[static_cast<size_t>(r) * mapCols + c]; };
+    if (pr > 0 && pr < mapRows - 1 && score(pr - 1, pc) > -2.f && score(pr + 1, pc) > -2.f)
+        best.dr += parabolicPeak(score(pr - 1, pc), score(pr, pc), score(pr + 1, pc));
+    if (pc > 0 && pc < mapCols - 1 && score(pr, pc - 1) > -2.f && score(pr, pc + 1) > -2.f)
+        best.dc += parabolicPeak(score(pr, pc - 1), score(pr, pc), score(pr, pc + 1));
     return best;
 }
 
@@ -536,6 +654,99 @@ static Similarity2D ransac(const std::vector<TiePoint> &pts,
     }
     if (inliers.size() >= 2) best = umeyama(inliers);
     return best;
+}
+
+// ─── H2  Check of a solution ─────────────────────────────────────────────────
+
+// How well the source, moved by a transform, lies on the reference, on the common grid
+struct MatchQuality {
+    double correlation = 0;  // NCC of the signals of both, where both have data
+    double overlap = 0;      // those samples, over the samples with data of the grid that has fewer
+};
+
+static MatchQuality matchQuality(const RasterGrid &src, const RasterGrid &ref, const Similarity2D &sim) {
+    double sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+    size_t n = 0;
+    for (int r = 0; r < ref.height; r++) {
+        for (int c = 0; c < ref.width; c++) {
+            if (!ref.isValid(r, c)) continue;
+            // The source sample that the transform moves onto the centre of this reference sample
+            const Vec2 p = sim.inverse({ref.gt[0] + (c + 0.5) * ref.gt[1], ref.gt[3] + (r + 0.5) * ref.gt[5]});
+            const double fc = (p.x - src.gt[0]) / src.gt[1] - 0.5;
+            const double fr = (p.y - src.gt[3]) / src.gt[5] - 0.5;
+            const int c0 = static_cast<int>(std::floor(fc)), r0 = static_cast<int>(std::floor(fr));
+            if (c0 < 0 || r0 < 0 || c0 + 1 >= src.width || r0 + 1 >= src.height) continue;
+            if (!src.isValid(r0, c0) || !src.isValid(r0, c0 + 1) || !src.isValid(r0 + 1, c0) ||
+                !src.isValid(r0 + 1, c0 + 1))
+                continue;
+            const double wx = fc - c0, wy = fr - r0;
+            const auto v = [&](int rr, int cc) { return static_cast<double>(src.data[static_cast<size_t>(rr) * src.width + cc]); };
+            const double a = (1 - wy) * ((1 - wx) * v(r0, c0) + wx * v(r0, c0 + 1)) +
+                             wy * ((1 - wx) * v(r0 + 1, c0) + wx * v(r0 + 1, c0 + 1));
+            const double b = ref.data[static_cast<size_t>(r) * ref.width + c];
+            sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b;
+            n++;
+        }
+    }
+    MatchQuality q;
+    const size_t fewer = std::min(src.validCount, ref.validCount);
+    q.overlap = fewer > 0 ? static_cast<double>(n) / static_cast<double>(fewer) : 0.0;
+    if (n > 1) {
+        const double dn = static_cast<double>(n);
+        const double va = saa - sa * sa / dn, vb = sbb - sb * sb / dn;
+        q.correlation = (va > 0 && vb > 0) ? (sab - sa * sb / dn) / std::sqrt(va * vb) : 0.0;
+    }
+    return q;
+}
+
+static std::string percent(double fraction) {
+    return std::to_string(static_cast<int>(std::round(100.0 * fraction))) + "%";
+}
+
+static std::string fixed2(double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.2f", v);
+    return buf;
+}
+
+// The correlation that chance gives these rasters: the largest of those of the source moved by the
+// transform and then by a quarter of the area they share, in each of the eight directions. Fine
+// texture (grass, gravel, the noise of a DEM) differs between two surveys, so the correlation of
+// a right answer depends on the rasters: it is right when it stands out from these.
+static double chanceCorrelation(const RasterGrid &src, const RasterGrid &ref, const Similarity2D &sim) {
+    const double qx = 0.25 * ref.width * ref.gt[1], qy = 0.25 * ref.height * ref.gt[5];
+    double chance = 0;
+    for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+            if (i == 0 && j == 0) continue;
+            Similarity2D off = sim;
+            off.t.x += i * qx;
+            off.t.y += j * qy;
+            chance = std::max(chance, std::abs(matchQuality(src, ref, off).correlation));
+        }
+    }
+    return chance;
+}
+
+// Throws when the source, moved by the solution, does not lie on the reference: a transform that
+// moves it off the reference, or onto ground that does not look like it, is a wrong answer, which
+// must not be written as an aligned raster
+static MatchQuality requireMatch(const RasterGrid &src, const RasterGrid &ref, const Similarity2D &sim,
+                                 const AlignOptions &opts) {
+    const MatchQuality q = matchQuality(src, ref, sim);
+    const double chance = chanceCorrelation(src, ref, sim);
+    LOGD << "Aligned match: correlation " << q.correlation << " (by chance " << chance << "), overlap " << q.overlap;
+    if (q.overlap < opts.minOverlap)
+        throw AppException("Alignment failed: the transform found leaves " + percent(q.overlap) +
+                           " of the data of the source and of the reference on each other (the minimum is " +
+                           percent(opts.minOverlap) + "); the rasters may not show the same area");
+    if (q.correlation < opts.minCorrelation || q.correlation < opts.minCorrelationOverChance * chance)
+        throw AppException("Alignment failed: the aligned source does not match the reference (correlation " +
+                           fixed2(q.correlation) + ", " + fixed2(chance) + " when it is moved a quarter of the area "
+                           "away; at least " + fixed2(opts.minCorrelation) + " and " +
+                           fixed2(opts.minCorrelationOverChance) + " times that are needed); the rasters may not "
+                           "show the same area, or it changed too much between them");
+    return q;
 }
 
 // ─── I  Geotransform composition + GDAL warp ─────────────────────────────────
@@ -838,7 +1049,29 @@ void writeAligned(const AlignInputs &in, const Similarity2D &sim, AlignResult &r
     buildCog(tmpWarp, in.outputPath);
 }
 
-AlignResult alignByTranslation(const AlignInputs &in, AlignResult result) {
+// The centre of the area that both rasters share: the point the reported shift is the shift of
+Vec2 centreOf(const RasterGrid &g) {
+    return {g.gt[0] + 0.5 * g.width * g.gt[1], g.gt[3] + 0.5 * g.height * g.gt[5]};
+}
+
+// Writes the aligned raster and the transform into the result: tx, ty are the shift of the
+// centre of the shared area (for a similarity, the intercept of the transform at the origin of
+// the CRS is metres or kilometres away from it for a rotation of a fraction of a degree)
+void finish(const AlignInputs &in, const Similarity2D &sim, const MatchQuality &q, AlignResult &result) {
+    writeAligned(in, sim, result);
+    const Vec2 c = centreOf(in.refGrid);
+    const Vec2 moved = sim.apply(c);
+    result.success     = true;
+    result.txMapUnits  = moved.x - c.x;
+    result.tyMapUnits  = moved.y - c.y;
+    result.pivotX      = c.x;
+    result.pivotY      = c.y;
+    result.correlation = q.correlation;
+    result.overlap     = q.overlap;
+}
+
+AlignResult alignByTranslation(const AlignInputs &in, const AlignOptions &opts, AlignResult result) {
+    result.mode = "translation";
     double peakStrength = 0.0;
     auto pc = phaseCorrelate(in.srcGrid, in.refGrid, &peakStrength);
     double dc = pc.first, dr = pc.second;
@@ -851,11 +1084,8 @@ AlignResult alignByTranslation(const AlignInputs &in, AlignResult result) {
     LOGD << "Phase correlation: dc=" << dc << " dr=" << dr
          << " → tx=" << sim.t.x << " ty=" << sim.t.y << " m";
 
-    writeAligned(in, sim, result);
-
-    result.success    = true;
-    result.txMapUnits = sim.t.x;
-    result.tyMapUnits = sim.t.y;
+    const MatchQuality q = requireMatch(in.srcGrid, in.refGrid, sim, opts);
+    finish(in, sim, q, result);
     // Map the peak-to-sidelobe strength to a saturating [0,1] confidence
     // (PSR ~ 10 => 0.5, higher => closer to 1). Replaces the previous fixed
     // 0.8 so callers can distinguish a sharp, reliable match from a weak one.
@@ -866,14 +1096,14 @@ AlignResult alignByTranslation(const AlignInputs &in, AlignResult result) {
 // The tie points of the NCC matches of the textured patches of the source
 std::vector<TiePoint> matchTiePoints(const AlignInputs &in, const AlignOptions &opts,
                                      const std::vector<PatchCandidate> &patches, const IntegralImages &refII,
-                                     double seedDr, double seedDc) {
+                                     const IntegralImages &refInvalid, double seedDr, double seedDc) {
     const RasterGrid &srcGrid = in.srcGrid;
     std::vector<TiePoint> tiePoints;
     tiePoints.reserve(patches.size());
     double halfPatch = opts.patchSize / 2.0;
     for (auto &p : patches) {
-        auto m = matchPatch(srcGrid, refII, in.refGrid, {p.row, p.col, opts.patchSize, opts.searchRadius},
-                            seedDr, seedDc);
+        auto m = matchPatch(srcGrid, refII, refInvalid, in.refGrid,
+                            {p.row, p.col, opts.patchSize, opts.searchRadius}, seedDr, seedDc);
         if (m.score < 0.3f) continue;
         Vec2 srcMap { srcGrid.gt[0] + (p.col + halfPatch) * srcGrid.gt[1],
                       srcGrid.gt[3] + (p.row + halfPatch) * srcGrid.gt[5] };
@@ -889,6 +1119,8 @@ AlignResult alignBySimilarity(const AlignInputs &in, const AlignOptions &opts, A
     const RasterGrid &refGrid = in.refGrid;
     IntegralImages srcII(srcGrid.data, srcGrid.width, srcGrid.height);
     IntegralImages refII(refGrid.data, refGrid.width, refGrid.height);
+    const IntegralImages srcInvalid = invalidCounts(srcGrid);
+    const IntegralImages refInvalid = invalidCounts(refGrid);
 
     // Phase seed
     double seedDr = 0, seedDc = 0;
@@ -899,26 +1131,23 @@ AlignResult alignBySimilarity(const AlignInputs &in, const AlignOptions &opts, A
     }
 
     // Patch selection
-    auto patches = selectPatches(srcGrid, srcII, opts.patchSize, opts.maxPatches);
+    auto patches = selectPatches(srcGrid, srcII, srcInvalid, opts.patchSize, opts.maxPatches);
     LOGD << "Candidate patches: " << patches.size();
     if (patches.empty()) {
         result.warningMessage = "No texture patches found; trying translation mode";
-        AlignOptions fallback = opts;
-        fallback.mode = AlignMode::Translation;
-        return alignRaster(in.sourcePath, in.referencePath, in.outputPath, fallback);
+        LOGW << result.warningMessage;
+        return alignByTranslation(in, opts, result);
     }
 
     // NCC matching
-    const std::vector<TiePoint> tiePoints = matchTiePoints(in, opts, patches, refII, seedDr, seedDc);
+    const std::vector<TiePoint> tiePoints = matchTiePoints(in, opts, patches, refII, refInvalid, seedDr, seedDc);
     LOGD << "Tie points before RANSAC: " << tiePoints.size();
 
     if (static_cast<int>(tiePoints.size()) < opts.minInliers) {
         result.warningMessage = "Insufficient texture for similarity estimation; "
                                 "falling back to translation-only";
         LOGW << result.warningMessage;
-        AlignOptions fallback = opts;
-        fallback.mode = AlignMode::Translation;
-        return alignRaster(in.sourcePath, in.referencePath, in.outputPath, fallback);
+        return alignByTranslation(in, opts, result);
     }
 
     // RANSAC
@@ -927,15 +1156,28 @@ AlignResult alignBySimilarity(const AlignInputs &in, const AlignOptions &opts, A
                               opts.ransacIterations, inlierMask);
     int inlierCount = static_cast<int>(
         std::count(inlierMask.begin(), inlierMask.end(), true));
-    LOGD << "RANSAC inliers: " << inlierCount << "/" << tiePoints.size();
+    double inlierRatio = static_cast<double>(inlierCount) / tiePoints.size();
+    LOGD << "RANSAC inliers: " << inlierCount << "/" << tiePoints.size() << ", scale " << sim.scale
+         << ", rotation " << ddb::rad2deg(std::atan2(sim.sinTheta, sim.cosTheta)) << " deg, shift of the centre "
+         << sim.apply(centreOf(refGrid)).x - centreOf(refGrid).x << ", "
+         << sim.apply(centreOf(refGrid)).y - centreOf(refGrid).y;
 
-    if (inlierCount < opts.minInliers ||
-        static_cast<double>(inlierCount) / tiePoints.size() < opts.minInlierRatio) {
-        result.warningMessage =
-            "Low RANSAC inlier count (" + std::to_string(inlierCount) +
-            "/" + std::to_string(tiePoints.size()) + "); result may be inaccurate";
-        LOGW << result.warningMessage;
-    }
+    // The tie points that agree on one transform are too few: the matches are noise
+    if (inlierCount < opts.minInliers || inlierRatio < opts.minInlierRatio)
+        throw AppException("Alignment failed: too few of the matches of the source on the reference agree on "
+                           "one transform (" + std::to_string(inlierCount) + " of " +
+                           std::to_string(tiePoints.size()) + ", the minimum is " +
+                           std::to_string(opts.minInliers) + " and " + percent(opts.minInlierRatio) +
+                           "); the rasters may not show the same area");
+
+    // A georeferencing error moves and turns a raster a little; it does not resize it or turn it
+    // around
+    const double thetaDeg = ddb::rad2deg(std::atan2(sim.sinTheta, sim.cosTheta));
+    if (std::abs(sim.scale - 1.0) > opts.maxScaleChange || std::abs(thetaDeg) > opts.maxRotationDeg)
+        throw AppException("Alignment failed: the transform found resizes the source by a factor of " +
+                           std::to_string(sim.scale) + " and turns it by " + fixed2(thetaDeg) +
+                           " degrees (at most " + fixed2(opts.maxScaleChange * 100.0) + "% and " +
+                           fixed2(opts.maxRotationDeg) + " degrees); try the translation mode");
 
     // RMSE over inliers
     double rmse = 0; int nin = 0;
@@ -943,22 +1185,32 @@ AlignResult alignBySimilarity(const AlignInputs &in, const AlignOptions &opts, A
         if (inlierMask[i]) { rmse += std::pow(sim.residual(tiePoints[i]), 2); nin++; }
     rmse = nin > 0 ? std::sqrt(rmse / nin) : 0.0;
 
-    double inlierRatio = static_cast<double>(inlierCount) / tiePoints.size();
     double confidence  = inlierRatio * std::exp(-rmse / (3.0 * opts.ransacThreshold));
 
-    // Apply and write output
-    writeAligned(in, sim, result);
-
-    result.success      = true;
-    result.txMapUnits   = sim.t.x;
-    result.tyMapUnits   = sim.t.y;
-    result.thetaDeg     = ddb::rad2deg(std::atan2(sim.sinTheta, sim.cosTheta));
+    const MatchQuality q = requireMatch(srcGrid, refGrid, sim, opts);
+    finish(in, sim, q, result);
+    result.thetaDeg     = thetaDeg;
     result.scale        = sim.scale;
     result.inlierCount  = inlierCount;
     result.inlierRatio  = inlierRatio;
     result.rmseMapUnits = rmse;
     result.confidence   = confidence;
     return result;
+}
+
+// Throws when either raster has nothing to match in the area they share
+void requireTexture(const AlignInputs &in) {
+    const auto check = [](const RasterGrid &g, const std::string &which) {
+        if (g.validCount == 0)
+            throw AppException("Alignment failed: the " + which + " has no data in the area it shares with the " +
+                               (which == "source" ? "reference" : "source"));
+        if (!g.textured)
+            throw AppException("Alignment failed: the " + which + " has nothing to match in the area it shares with "
+                               "the " + (which == "source" ? "reference" : "source") +
+                               " (its samples with data are all the same)");
+    };
+    check(in.srcGrid, "source");
+    check(in.refGrid, "reference");
 }
 
 }  // namespace
@@ -988,8 +1240,9 @@ AlignResult alignRaster(const std::string &sourcePath,
 
     // 3. The overlap of both rasters on one grid, then the estimate
     const AlignInputs in = loadInputs(sourcePath, referencePath, effectiveRef, outputPath, scratch.path(), val);
+    requireTexture(in);
     if (opts.mode == AlignMode::Translation)
-        return alignByTranslation(in, result);
+        return alignByTranslation(in, opts, result);
     return alignBySimilarity(in, opts, result);
 }
 
@@ -1005,6 +1258,10 @@ std::string alignResultToJson(const AlignResult &r) {
     j["inlierRatio"] = r.inlierRatio;
     j["rmse"]        = r.rmseMapUnits;
     j["confidence"]  = r.confidence;
+    j["correlation"] = r.correlation;
+    j["overlap"]     = r.overlap;
+    j["pivotX"]      = r.pivotX;
+    j["pivotY"]      = r.pivotY;
     j["mode"]        = r.mode;
     j["warning"]     = r.warningMessage;
     return j.dump(2);

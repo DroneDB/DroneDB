@@ -5,6 +5,7 @@
 #include "align.h"
 #include "gdal_inc.h"
 #include "ddb.h"
+#include "exceptions.h"
 #include "fs.h"
 #include "testarea.h"
 #include <gtest/gtest.h>
@@ -230,34 +231,55 @@ namespace
     }
 
     // ─── Test 7: VRT warp preserves a constant pixel field ───────────────────────
-    // A uniform-value raster bilinearly warped must remain constant in the valid
-    // interior region (bilinear interpolation of a constant C yields C exactly).
-    // This validates that the VRT lightweight wrapper correctly delivers source
-    // pixels to GDALWarp without losing data - the failure mode if VRT can't
-    // find the source file would be an output filled with nodata or zeros.
+    // A uniform-value region bilinearly warped must remain constant in its interior
+    // (bilinear interpolation of a constant C yields C exactly). This validates that
+    // the VRT lightweight wrapper correctly delivers source pixels to GDALWarp without
+    // losing data - the failure mode if VRT can't find the source file would be an
+    // output filled with nodata or zeros. The left half has texture for the alignment
+    // to lock on (a uniform raster has nothing to match, and fails); the right half
+    // is the constant field that is checked.
     TEST_F(AlignTest, WarpPreservesConstantField)
     {
         TestArea ta(TEST_NAME);
 
         const float kValue = 137.0f;
-        // Reference and source at the same position so phase correlation returns
-        // zero offset (constant field has no texture to track - that's fine here;
-        // the identity warp is the correct result).
-        double refGt[6] = {500000.0, 2.0, 0, 5000000.0, 0, -2.0};
-        double srcGt[6] = {500000.0, 2.0, 0, 5000000.0, 0, -2.0};
+        const int W = 256, H = 256;
+        double gt[6] = {500000.0, 2.0, 0, 5000000.0, 0, -2.0};
 
         auto refPath = ta.getPath("ref_const.tif").string();
         auto srcPath = ta.getPath("src_const.tif").string();
         auto outPath = ta.getPath("out_const.tif").string();
 
-        createUniformGeoTiff(refPath, 256, 256, refGt, kValue);
-        createUniformGeoTiff(srcPath, 256, 256, srcGt, kValue);
+        const auto write = [&](const std::string &path) {
+            GDALDriverH hDrv = GDALGetDriverByName("GTiff");
+            GDALDatasetH hDs = GDALCreate(hDrv, path.c_str(), W, H, 1, GDT_Float32, nullptr);
+            GDALSetGeoTransform(hDs, gt);
+            OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+            OSRImportFromEPSG(hSrs, 32632);
+            char *wkt = nullptr;
+            OSRExportToWkt(hSrs, &wkt);
+            GDALSetProjection(hDs, wkt);
+            CPLFree(wkt);
+            OSRDestroySpatialReference(hSrs);
+            std::vector<float> row(static_cast<size_t>(W));
+            for (int r = 0; r < H; r++) {
+                for (int c = 0; c < W; c++)
+                    row[c] = c < W / 2 ? static_cast<float>(60.0 + 130.0 * hash01(r, c)) : kValue;
+                EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0),
+                          CE_None);
+            }
+            GDALClose(hDs);
+        };
+        write(refPath);
+        write(srcPath);
 
         ddb::AlignOptions opts;
         opts.mode = ddb::AlignMode::Translation;
         auto r = ddb::alignRaster(srcPath, refPath, outPath, opts);
 
         ASSERT_TRUE(r.success);
+        EXPECT_NEAR(r.txMapUnits, 0.0, 0.5);
+        EXPECT_NEAR(r.tyMapUnits, 0.0, 0.5);
         ASSERT_TRUE(fs::exists(outPath));
 
         // Open the output COG and sample interior pixels.
@@ -270,15 +292,16 @@ namespace
         int hasNd;
         const float nd = static_cast<float>(GDALGetRasterNoDataValue(hBand, &hasNd));
 
-        // Sample a central strip well away from the nodata border introduced by
-        // the COG reprojection (EPSG:3857). Bilinear of constant C = C.
+        // Sample the interior of the constant half, away from the nodata border
+        // introduced by the COG reprojection (EPSG:3857) and from the textured half.
+        // Bilinear of constant C = C.
         const int margin = std::max(outW, outH) / 4;
         std::vector<float> row(static_cast<size_t>(outW));
         int sampledPixels = 0, correctPixels = 0;
         for (int y = margin; y < outH - margin; y++) {
             GDALRasterIO(hBand, GF_Read, 0, y, outW, 1,
                          row.data(), outW, 1, GDT_Float32, 0, 0);
-            for (int x = margin; x < outW - margin; x++) {
+            for (int x = outW * 9 / 16; x < outW - margin; x++) {
                 if (hasNd && std::abs(row[x] - nd) < 1.0f) continue;
                 sampledPixels++;
                 // Tolerance 1.0 covers rounding from Float32 → bilinear → COG.
@@ -450,6 +473,269 @@ namespace
         EXPECT_GE(r.confidence, 0.0);
         EXPECT_LE(r.confidence, 1.0);
         EXPECT_GT(r.confidence, 0.3);
+    }
+
+    // ─── Rasters of one ground with different georeferences ──────────────────────
+    // The values are functions of the ground point a pixel shows, so the source and the
+    // reference show the same ground at the positions their georeferences disagree on.
+
+    // The transform from the georeference of a raster to the ground it shows:
+    // G = pivot + scale·R(theta)·(X - pivot) + shift. It is the transform that alignment
+    // must find for a source with this error.
+    struct GroundTransform
+    {
+        double scale = 1.0, thetaDeg = 0.0, shiftX = 0.0, shiftY = 0.0;
+        double pivotX = 500050.0, pivotY = 4999950.0;
+
+        void apply(double x, double y, double &gx, double &gy) const
+        {
+            const double t = thetaDeg * 3.14159265358979323846 / 180.0;
+            const double dx = x - pivotX, dy = y - pivotY;
+            gx = pivotX + scale * (std::cos(t) * dx - std::sin(t) * dy) + shiftX;
+            gy = pivotY + scale * (std::sin(t) * dx + std::cos(t) * dy) + shiftY;
+        }
+    };
+
+    // Value noise of the ground: hash01 on a lattice of `cell` metres, bilinearly
+    // interpolated; `seed` makes another noise of the same place
+    static double groundNoise(double x, double y, double cell, int seed)
+    {
+        const double fx = x / cell, fy = y / cell;
+        const double x0 = std::floor(fx), y0 = std::floor(fy);
+        const double wx = fx - x0, wy = fy - y0;
+        const int ix = static_cast<int>(static_cast<long long>(x0) % 100000), iy = static_cast<int>(static_cast<long long>(y0) % 100000);
+        const auto h = [&](int i, int j) { return hash01(iy + j + seed * 7919, ix + i + seed * 104729); };
+        return (1 - wy) * ((1 - wx) * h(0, 0) + wx * h(1, 0)) + wy * ((1 - wx) * h(0, 1) + wx * h(1, 1));
+    }
+
+    // The elevation of a DSM at ground point (x, y): terrain sloping by 5% and 2%, wide
+    // hills, a few stockpiles and the fine relief of the surface
+    static double groundElevation(double x, double y)
+    {
+        const double ex = x - 500000.0, ey = y - 4999900.0;
+        double z = 300.0 + 0.05 * ex + 0.02 * ey + 6.0 * std::sin(ex / 40.0) * std::cos(ey / 55.0);
+        const double piles[4][2] = {{25, 70}, {70, 30}, {40, 25}, {80, 80}};
+        for (const auto &p : piles)
+            z += 4.0 * std::exp(-((ex - p[0]) * (ex - p[0]) + (ey - p[1]) * (ey - p[1])) / 30.0);
+        return z + 1.5 * groundNoise(x, y, 2.0, 1) + 0.5 * groundNoise(x, y, 0.75, 2);
+    }
+
+    // The brightness of band b of an image of ground point (x, y)
+    static double groundColor(double x, double y, int b)
+    {
+        return 40.0 + 120.0 * groundNoise(x, y, 1.0, 3) + 60.0 * groundNoise(x, y, 0.4, 4 + b);
+    }
+
+    struct GroundRaster
+    {
+        int size = 400;               // pixels a side
+        double pixel = 0.25;          // metres
+        double originX = 500000.0, originY = 5000000.0;
+        GroundTransform error;        // of the georeference
+        bool dem = true;              // a Float32 DSM with nodata -9999, or RGB + alpha
+        double zOffset = 0.0;
+        // The data: the inside of an ellipse of the pixel grid, centred at (cx, cy) with
+        // radii (rx, ry) in fractions of the size; nodata (or transparent) outside it
+        double cx = 0.5, cy = 0.5, rx = 0.47, ry = 0.47;
+    };
+
+    static void writeGroundRaster(const std::string &path, const GroundRaster &g)
+    {
+        const int bands = g.dem ? 1 : 4;
+        GDALDriverH hDrv = GDALGetDriverByName("GTiff");
+        GDALDatasetH hDs = GDALCreate(hDrv, path.c_str(), g.size, g.size, bands, g.dem ? GDT_Float32 : GDT_Byte, nullptr);
+        double gt[6] = {g.originX, g.pixel, 0, g.originY, 0, -g.pixel};
+        GDALSetGeoTransform(hDs, gt);
+        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(hSrs, 32632);
+        char *wkt = nullptr;
+        OSRExportToWkt(hSrs, &wkt);
+        GDALSetProjection(hDs, wkt);
+        CPLFree(wkt);
+        OSRDestroySpatialReference(hSrs);
+        if (g.dem)
+            GDALSetRasterNoDataValue(GDALGetRasterBand(hDs, 1), -9999.0);
+        else
+            GDALSetRasterColorInterpretation(GDALGetRasterBand(hDs, 4), GCI_AlphaBand);
+
+        std::vector<std::vector<float>> rows(bands, std::vector<float>(static_cast<size_t>(g.size)));
+        for (int r = 0; r < g.size; r++)
+        {
+            for (int c = 0; c < g.size; c++)
+            {
+                const double ux = (c + 0.5) / g.size - g.cx, uy = (r + 0.5) / g.size - g.cy;
+                const bool inside = (ux * ux) / (g.rx * g.rx) + (uy * uy) / (g.ry * g.ry) <= 1.0;
+                double gx = 0, gy = 0;
+                g.error.apply(g.originX + (c + 0.5) * g.pixel, g.originY - (r + 0.5) * g.pixel, gx, gy);
+                if (g.dem)
+                {
+                    rows[0][c] = inside ? static_cast<float>(groundElevation(gx, gy) + g.zOffset) : -9999.0f;
+                }
+                else
+                {
+                    for (int b = 0; b < 3; b++)
+                        rows[b][c] = inside ? static_cast<float>(groundColor(gx, gy, b)) : 0.0f;
+                    rows[3][c] = inside ? 255.0f : 0.0f;
+                }
+            }
+            for (int b = 0; b < bands; b++)
+                EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(hDs, b + 1), GF_Write, 0, r, g.size, 1, rows[b].data(), g.size,
+                                       1, GDT_Float32, 0, 0),
+                          CE_None);
+        }
+        GDALClose(hDs);
+    }
+
+    // The shift that the transform gives the point (x, y)
+    static void shiftAt(const GroundTransform &t, double x, double y, double &dx, double &dy)
+    {
+        double gx = 0, gy = 0;
+        t.apply(x, y, gx, gy);
+        dx = gx - x;
+        dy = gy - y;
+    }
+
+    // Two DSMs of a sloping site whose data cover different areas (nodata -9999 around
+    // them), the source 10.25 m east and 1.5 m north of where it belongs and 8 m higher.
+    // The standardised elevation with the nodata samples in it was a picture of where
+    // each DSM has data, and translation answered a shift of 0.
+    TEST_F(AlignTest, TranslationOfDemsWithDifferentNodataAreas)
+    {
+        TestArea ta(TEST_NAME);
+        GroundRaster ref;
+        ref.cx = 0.45; ref.rx = 0.42; ref.ry = 0.46;
+        GroundRaster src;
+        src.originX += 10.25; src.originY += 1.5;
+        src.error.shiftX = -10.25; src.error.shiftY = -1.5;
+        src.zOffset = 8.0;
+        src.cy = 0.55; src.rx = 0.48; src.ry = 0.4;
+        const auto refPath = ta.getPath("ref.tif").string(), srcPath = ta.getPath("src.tif").string();
+        writeGroundRaster(refPath, ref);
+        writeGroundRaster(srcPath, src);
+
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        const auto r = ddb::alignRaster(srcPath, refPath, ta.getPath("out.tif").string(), opts);
+        ASSERT_TRUE(r.success);
+        EXPECT_NEAR(r.txMapUnits, -10.25, 0.15);
+        EXPECT_NEAR(r.tyMapUnits, -1.5, 0.15);
+        EXPECT_NEAR(r.shiftZ, -8.0, 0.3);
+        EXPECT_GT(r.correlation, 0.5);
+    }
+
+    // The same with two RGB images with transparent borders (alpha 0)
+    TEST_F(AlignTest, TranslationOfOrthosWithTransparentBorders)
+    {
+        TestArea ta(TEST_NAME);
+        GroundRaster ref;
+        ref.dem = false; ref.pixel = 0.1; ref.cx = 0.52; ref.rx = 0.4;
+        GroundRaster src = ref;
+        src.originX -= 3.3; src.originY += 2.1;
+        src.error.shiftX = 3.3; src.error.shiftY = -2.1;
+        src.cx = 0.46; src.cy = 0.53; src.ry = 0.42;
+        const auto refPath = ta.getPath("ref.tif").string(), srcPath = ta.getPath("src.tif").string();
+        writeGroundRaster(refPath, ref);
+        writeGroundRaster(srcPath, src);
+
+        for (const auto mode : {ddb::AlignMode::Translation, ddb::AlignMode::Similarity})
+        {
+            ddb::AlignOptions opts;
+            opts.mode = mode;
+            opts.patchSize = 32; opts.searchRadius = 16; opts.maxPatches = 64;
+            const auto r = ddb::alignRaster(srcPath, refPath, ta.getPath("out.tif").string(), opts);
+            ASSERT_TRUE(r.success) << r.mode;
+            EXPECT_NEAR(r.txMapUnits, 3.3, 0.1) << r.mode;
+            EXPECT_NEAR(r.tyMapUnits, -2.1, 0.1) << r.mode;
+            EXPECT_NEAR(r.scale, 1.0, 0.01) << r.mode;
+        }
+    }
+
+    // A source resized by 5% and turned by 1 degree: similarity finds the transform, and its
+    // tx, ty are the shift of the centre of the area both share, not the intercept of the
+    // transform at the origin of the CRS (which is (1 - scale) times the coordinates of the
+    // rasters away: hundreds of kilometres in UTM)
+    TEST_F(AlignTest, SimilarityReportsTheShiftOfTheCentre)
+    {
+        TestArea ta(TEST_NAME);
+        GroundRaster ref;
+        GroundRaster src;
+        src.error.scale = 0.95; src.error.thetaDeg = 1.0;
+        src.error.shiftX = 4.0; src.error.shiftY = -1.0;
+        const auto refPath = ta.getPath("ref.tif").string(), srcPath = ta.getPath("src.tif").string();
+        writeGroundRaster(refPath, ref);
+        writeGroundRaster(srcPath, src);
+
+        ddb::AlignOptions opts;
+        opts.patchSize = 32; opts.searchRadius = 24; opts.maxPatches = 100;
+        const auto r = ddb::alignRaster(srcPath, refPath, ta.getPath("out.tif").string(), opts);
+        ASSERT_TRUE(r.success);
+        EXPECT_EQ(r.mode, "similarity");
+        EXPECT_NEAR(r.scale, 0.95, 0.005);
+        EXPECT_NEAR(r.thetaDeg, 1.0, 0.15);
+        double dx = 0, dy = 0;
+        shiftAt(src.error, r.pivotX, r.pivotY, dx, dy);
+        EXPECT_NEAR(r.txMapUnits, dx, 0.2);
+        EXPECT_NEAR(r.tyMapUnits, dy, 0.2);
+        EXPECT_GT(r.correlation, 0.5);
+    }
+
+    // Two rasters that say they show the same area and show different ground (the source
+    // shows the ground 5 km away): there is no right answer, and alignment says so instead
+    // of writing a raster moved by the best of the noise
+    TEST_F(AlignTest, RastersOfDifferentGroundFail)
+    {
+        TestArea ta(TEST_NAME);
+        for (const bool dem : {true, false})
+        {
+            GroundRaster ref;
+            ref.dem = dem;
+            GroundRaster src = ref;
+            src.error.shiftX = 5000.0;
+            src.error.shiftY = 3000.0;
+            const auto refPath = ta.getPath("ref.tif").string(), srcPath = ta.getPath("src.tif").string();
+            writeGroundRaster(refPath, ref);
+            writeGroundRaster(srcPath, src);
+            for (const auto mode : {ddb::AlignMode::Translation, ddb::AlignMode::Similarity})
+            {
+                ddb::AlignOptions opts;
+                opts.mode = mode;
+                opts.patchSize = 32; opts.searchRadius = 16; opts.maxPatches = 64;
+                const auto out = ta.getPath("out.tif");
+                fs::remove(out);
+                try
+                {
+                    const auto r = ddb::alignRaster(srcPath, refPath, out.string(), opts);
+                    ADD_FAILURE() << (dem ? "dem " : "ortho ") << r.mode << ": aligned by " << r.txMapUnits << ", "
+                                  << r.tyMapUnits << " (correlation " << r.correlation << ")";
+                }
+                catch (const ddb::AppException &e)
+                {
+                    EXPECT_NE(std::string(e.what()).find("Alignment failed"), std::string::npos) << e.what();
+                }
+                EXPECT_FALSE(fs::exists(out)) << "a failed alignment writes no raster";
+            }
+        }
+    }
+
+    // A uniform raster has nothing to match: alignment fails instead of answering a shift of 0
+    TEST_F(AlignTest, UniformRasterFails)
+    {
+        TestArea ta(TEST_NAME);
+        double gt[6] = {500000.0, 2.0, 0, 5000000.0, 0, -2.0};
+        const auto refPath = ta.getPath("ref.tif").string(), srcPath = ta.getPath("src.tif").string();
+        createSyntheticGeoTiff(refPath, 256, 256, gt, true);
+        createUniformGeoTiff(srcPath, 256, 256, gt, 137.0f);
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        try
+        {
+            ddb::alignRaster(srcPath, refPath, ta.getPath("out.tif").string(), opts);
+            ADD_FAILURE() << "a uniform source was aligned";
+        }
+        catch (const ddb::AppException &e)
+        {
+            EXPECT_NE(std::string(e.what()).find("nothing to match"), std::string::npos) << e.what();
+        }
     }
 
 } // namespace

@@ -16,7 +16,7 @@
   "height": 512,
   "mode": "translation",
   "pixelsFile": "align_dem",
-  "shiftZ": -5.369999885559082,
+  "shiftZ": -5.0,
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {
    "COMPRESSION": "LZW",
@@ -58,7 +58,7 @@
   "driver": "GTiff",
   "height": 512,
   "mode": "translation",
-  "pixels": "f7ca832aaea34d74",
+  "pixels": "d70fb61277080573",
   "shiftZ": 0.0,
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {

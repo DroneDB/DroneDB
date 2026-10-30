@@ -8,6 +8,8 @@
 // NIR) in Web Mercator with nodata patches, and small GeoTIFFs of any band layout.
 
 #include <cmath>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -67,8 +69,11 @@ namespace golden
         return path;
     }
 
-    inline fs::path makeRaster(const fs::path &path, int bands, GDALDataType type, bool alpha, std::optional<double> nodata,
-                        int size = 96)
+    // A GeoTIFF of size x size pixels of 1 m in UTM 32N whose band b holds value(b, x, y)
+    // (scaled to 0..255 for Byte), with the nodata value of every band
+    inline fs::path writeRaster(const fs::path &path, int bands, GDALDataType type, bool alpha,
+                                std::optional<double> nodata, int size,
+                                const std::function<double(int band, int x, int y)> &value)
     {
         testutils::GeoRasterSpec spec;
         spec.width = spec.height = size;
@@ -80,8 +85,8 @@ namespace golden
         spec.originY = 4500000.0;
         spec.pixelSize = 1.0;
         const double scale = type == GDT_Byte ? 255.0 : 1.0;
-        spec.value = [scale](int band, int x, int y) {
-            return std::floor(((x * (3 + band) + y * (7 - band) + 13 * band) % 251) / 250.0 * scale * 100.0) / 100.0;
+        spec.value = [scale, value](int band, int x, int y) {
+            return std::floor(value(band, x, y) * scale * 100.0) / 100.0;
         };
         testutils::createGeoRaster(path, spec);
         if (nodata)
@@ -94,6 +99,35 @@ namespace golden
                 ds->GetRasterBand(b)->SetColorInterpretation(GCI_GrayIndex);
         }
         return path;
+    }
+
+    // Bands of diagonal ramps: their values repeat along lines, so they are no content to align
+    inline fs::path makeRaster(const fs::path &path, int bands, GDALDataType type, bool alpha, std::optional<double> nodata,
+                        int size = 96)
+    {
+        return writeRaster(path, bands, type, alpha, nodata, size, [](int band, int x, int y) {
+            return ((x * (3 + band) + y * (7 - band) + 13 * band) % 251) / 250.0;
+        });
+    }
+
+    // Broadband noise in [0, 1) of pixel (x, y), from integer operations only (every platform
+    // writes the same values)
+    inline double pixelNoise(int x, int y)
+    {
+        uint32_t h = static_cast<uint32_t>(y) * 73856093u ^ static_cast<uint32_t>(x) * 19349663u;
+        h ^= h >> 13;
+        h *= 0x85ebca6bu;
+        h ^= h >> 16;
+        return static_cast<double>(h & 0xFFFFFFu) / static_cast<double>(0x1000000u);
+    }
+
+    // Bands of noise: a raster that alignment can find a shift of (one of makeRaster is the same
+    // after many shifts)
+    inline fs::path makeTexturedRaster(const fs::path &path, int bands, GDALDataType type,
+                                       std::optional<double> nodata, int size = 96)
+    {
+        return writeRaster(path, bands, type, false, nodata, size,
+                           [](int band, int x, int y) { return pixelNoise(x + 7 * band, y); });
     }
 }
 

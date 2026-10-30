@@ -181,7 +181,7 @@ namespace
         TestArea ta(TEST_NAME, true);
         const auto make = [&](const std::string &name, double declared, double offset) {
             const fs::path p = ta.getPath(name + ".tif");
-            golden::makeRaster(p, 1, GDT_Float32, false, std::nullopt, 256);
+            golden::makeTexturedRaster(p, 1, GDT_Float32, std::nullopt, 256);
             std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(p.string().c_str(), GA_Update)));
             std::vector<float> plane(256 * 256);
             GDALRasterBand *band = ds->GetRasterBand(1);

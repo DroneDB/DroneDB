@@ -49,6 +49,7 @@ namespace
     using golden::kSize;
     using golden::makeMultispectral;
     using golden::makeRaster;
+    using golden::makeTexturedRaster;
     using golden::reflectance;
     using golden::setNodata;
 
@@ -642,11 +643,12 @@ namespace
         for (const bool dem : {true, false})
         {
             const std::string name = dem ? "dem" : "ortho";
-            const fs::path ref = makeRaster(ta.getPath(name + "_ref.tif"), dem ? 1 : 3, dem ? GDT_Float32 : GDT_Byte,
-                                            false, dem ? std::optional<double>(kNodata) : std::nullopt, 256);
+            const fs::path ref = makeTexturedRaster(ta.getPath(name + "_ref.tif"), dem ? 1 : 3,
+                                                    dem ? GDT_Float32 : GDT_Byte,
+                                                    dem ? std::optional<double>(kNodata) : std::nullopt, 256);
             const fs::path src = ta.getPath(name + "_src.tif");
-            makeRaster(src, dem ? 1 : 3, dem ? GDT_Float32 : GDT_Byte, false,
-                       dem ? std::optional<double>(kNodata) : std::nullopt, 256);
+            makeTexturedRaster(src, dem ? 1 : 3, dem ? GDT_Float32 : GDT_Byte,
+                               dem ? std::optional<double>(kNodata) : std::nullopt, 256);
             {
                 std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(src.string().c_str(), GA_Update)));
                 const double gt[6] = {500003.0, 1.0, 0.0, 4499998.0, 0.0, -1.0};
