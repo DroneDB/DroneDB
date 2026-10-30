@@ -740,6 +740,28 @@ namespace
             EXPECT_EQ((*it)[2].str(), "1") << it->str();
     }
 
+#ifndef _WIN32
+    // The server warms up GDAL and PROJ on rasters it writes in a temporary folder of its own, so
+    // its workers inherit what they set up on first use: the folder is gone before the first
+    // request is answered, and the workers it forks after it still serve (they are forked only
+    // from a server of one thread, which the warm-up leaves it)
+    TEST_F(GdalUtilToolTest, theWarmUpOfTheServerLeavesNothingInTheTemporaryFolder)
+    {
+        const fs::path temp = area_->getFolder() / "tmp";
+        fs::create_directories(temp);
+        process::SessionOptions options;
+        options.envOverrides = {{"TMPDIR", io::toUtf8(temp)}};
+        Server server(options);
+        EXPECT_TRUE(server.ask(probeRequest(31, geotiff_)).ok);
+        const fs::path out = area_->getFolder() / "photo.webp";
+        const auto response = server.ask(thumbnailRequest(32, jpeg_, out, raster::ThumbnailParams{256, std::nullopt}));
+        EXPECT_TRUE(response.ok) << response.message;
+        EXPECT_TRUE(fs::is_empty(temp)) << "the warm-up left files in " << temp;
+        server.session().closeStdin();
+        EXPECT_TRUE(server.session().wait(patiently()));
+    }
+#endif
+
     // ------------------------------------------------------------------ normalize
 
     TEST_F(GdalUtilToolTest, aNormalizedPhotoHoldsThePixelsOfTheJpeg)
