@@ -250,6 +250,15 @@ namespace ddb
             return target;
         }
 
+        // Closes the idle tilers that read `artefact`, the file made from `source`, before it is
+        // replaced: Windows replaces no file a process holds open. A tiler is cached under the
+        // path it was asked for (the file of the user), not the artefact it opened, so both go.
+        void releaseTilersOf(const fs::path &source, const fs::path &artefact)
+        {
+            RasterCache::instance().release(source);
+            RasterCache::instance().release(artefact);
+        }
+
         // The COG of a raster of a user, in the artefacts of the cache: built by the raster
         // helper, checked, and moved to the name the raster and its state give. Its statistics
         // stay behind: the tiles are stretched with statistics computed on the whole COG, as
@@ -261,8 +270,7 @@ namespace ddb
             // buildCog refuses an output that does not open as a raster
             buildCog(io::toUtf8(raster), io::toUtf8(produced));
 
-            // A tiler kept open on the previous file would block the replace on Windows
-            RasterCache::instance().release(target);
+            releaseTilersOf(raster, target);
             raster::publishArtefact(produced, target);
         }
     } // namespace
@@ -294,6 +302,7 @@ namespace ddb
         // publishes it via an atomic rename)
         const fs::path target = io::concat(key, "-geoprojected.tif");
         return artefactOnce(target, forceRecreate, [&] {
+            releaseTilersOf(localTileablePath, target);
             ddb::geoProject({io::toUtf8(localTileablePath)}, io::toUtf8(target), "100%", true);
         });
     }
