@@ -1441,17 +1441,21 @@ extern "C"
      * @param x Pixel X coordinate
      * @param y Pixel Y coordinate
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success, DDBERR_INVALIDARGS when the pixel is outside the raster,
+     *         an error otherwise */
     DDB_DLL DDBErr DDBGetRasterPointValue(const char *filePath, int x, int y, char **output);
 
-    /** Get value statistics (min/max/mean/stddev/median) for a rectangular area.
+    /** Get value statistics (min/max/mean/stddev/median) for a rectangular area: the part of
+     * the rectangle inside the raster ("bounds"), its pixels with a value.
      * @param filePath Path to raster
      * @param x0 Left X coordinate
      * @param y0 Top Y coordinate
      * @param x1 Right X coordinate
      * @param y1 Bottom Y coordinate
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success, DDBERR_INVALIDARGS when no pixel of the rectangle has a
+     *         value (the rectangle is outside the raster, or its pixels are all no data), an
+     *         error otherwise */
     DDB_DLL DDBErr DDBGetRasterAreaStats(const char *filePath,
                                          int x0, int y0, int x1, int y1,
                                          char **output);
@@ -1500,7 +1504,9 @@ extern "C"
      * @param radius Search radius in meters (>0)
      * @param sensitivity Detail level in [0, 1]
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success, DDBERR_INVALIDARGS when there is nothing to detect (the
+     *         click is outside the raster, the search region has no data or no pile, the
+     *         window is too small), an error otherwise */
     DDB_DLL DDBErr DDBDetectStockpile(const char *rasterPath,
                                       double lat, double lon,
                                       double radius,
@@ -1515,7 +1521,8 @@ extern "C"
      * @param minAreaM2 Minimum component area in square meters (>=0)
      * @param maxResults Maximum number of stockpiles returned (>0, capped to 500)
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success (no pile found is an empty list), DDBERR_INVALIDARGS when
+     *         the raster has no valid elevation, an error otherwise */
     DDB_DLL DDBErr DDBDetectAllStockpiles(const char *rasterPath,
                                           float sensitivity,
                                           double minAreaM2,

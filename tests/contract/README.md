@@ -493,3 +493,24 @@ Registry has to adopt first.
   `DDB~1` opens the `.ddb` folder of the dataset. `ddb`, `ddb~`, `ddb~x`, `ddb~1x` and
   `ddb~1.txt` stay ordinary. Registry's copy of the vectors takes the same change when it moves
   to a libddb build that has it.
+
+* 2026-10-30: `raster-metadata-formula`: the histogram of a formula bins the range a viewer shows
+  instead of the values' `[min, max]`: that range narrowed to the formula's range (`range` of its
+  `algorithms` entry) and to one 2%-98% spread around the percentiles (`[p2 - (p98 - p2), p98 +
+  (p98 - p2)]`), the whole `[min, max]` when that is empty. A few outliers (an NDVI of -191) no
+  longer put almost every value in one bar. A value is counted in the bin whose edges hold it
+  (it was binned with 254 steps over the edges of 255 bins, up to one bin low), and the histogram
+  gains `below` and `above` (additive, integers): the values outside its edges. `min`, `max`,
+  `mean`, `std` and the percentiles are those of all the values, as before. The fixture and the
+  schema changed; no other fixture did.
+
+* 2026-10-30: a raster query of a place without data is `DDBERR_INVALIDARGS` (it was
+  `DDBERR_EXCEPTION`), in these exports of 1.x too, like a refused entry path: `DDBGetRasterPointValue`
+  for a pixel outside the raster (message `No valid data at the point: pixel (x, y) is outside the
+  WxH raster`), `DDBGetRasterAreaStats` for a rectangle with no pixel in the raster (`No valid
+  data in the area: (x0, y0) - (x1, y1) is outside the WxH raster`; it used to be clamped onto the
+  nearest edge, whose pixels it measured) or with no-data pixels only (`No valid data in the
+  area: its pixels are all no data`), `DDBDetectStockpile` when the click is outside the raster,
+  the search region has no data, the search window is too small or no pile is found (`No
+  stockpile detected at this location`), and `DDBDetectAllStockpiles` for a raster without valid
+  elevation (no pile found is an empty list, as before). The reason is empty. No fixture changed.

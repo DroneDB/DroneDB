@@ -55,10 +55,13 @@
           },
           "histogram": {
             "type": "object",
+            "description": "bins of equal width between the first and the last edge: the values' [min, max] narrowed to the formula's range and to one 2%-98% spread around p2 and p98 ([p2 - (p98 - p2), p98 + (p98 - p2)]), the range a viewer shows",
             "required": [
               "counts",
               "edges",
-              "bins"
+              "bins",
+              "below",
+              "above"
             ],
             "additionalProperties": false,
             "properties": {
@@ -76,6 +79,16 @@
               },
               "bins": {
                 "type": "integer"
+              },
+              "below": {
+                "description": "the values below the first edge",
+                "type": "integer",
+                "minimum": 0
+              },
+              "above": {
+                "description": "the values above the last edge",
+                "type": "integer",
+                "minimum": 0
               }
             }
           }

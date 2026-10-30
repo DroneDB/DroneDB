@@ -182,7 +182,7 @@ Failure classifyCurrentException() {
         return makeFailure(DDBERR_SHUTDOWN, e.what());
     } catch (const CanceledException& e) {
         return makeFailure(DDBERR_CANCELED, e.what());
-    } catch (const InvalidPathException& e) {
+    } catch (const RefusedArgumentException& e) {
         Failure f = makeFailure(DDBERR_INVALIDARGS, e.what());
         f.everyExport = true;
         return f;

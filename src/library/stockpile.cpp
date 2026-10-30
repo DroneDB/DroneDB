@@ -265,7 +265,7 @@ SearchWindow searchWindow(const DemContext &dem, double lat, double lon, double 
     w.centerRow = static_cast<int>(std::floor(centerRowD));
 
     if (w.centerCol < 0 || w.centerCol >= dem.width || w.centerRow < 0 || w.centerRow >= dem.height)
-        throw InvalidArgsException("Click point is outside raster bounds");
+        throw NoRasterDataException("Click point is outside raster bounds");
 
     // Convert radius (meters) to pixels with the size of a pixel on the ground at the click.
     w.pixel = dem.pixelSizeMeters(clickX, clickY);
@@ -279,7 +279,7 @@ SearchWindow searchWindow(const DemContext &dem, double lat, double lon, double 
     w.width = endCol - w.startCol;
     w.height = endRow - w.startRow;
     if (w.width < 3 || w.height < 3)
-        throw InvalidArgsException("Search window too small; increase the radius");
+        throw RefusedArgumentException("Search window too small; increase the radius");
     return w;
 }
 
@@ -298,7 +298,7 @@ double borderElevation(const DemContext &dem, const std::vector<float> &region, 
         if (dem.isValid(region[r * width + width - 1])) border.push_back(region[r * width + width - 1]);
     }
     if (border.empty())
-        throw AppException("Search region contains no valid data");
+        throw NoRasterDataException("Search region contains no valid data");
 
     if (sensitivity < 0.3f) {
         std::sort(border.begin(), border.end());
@@ -439,12 +439,12 @@ std::string detectStockpileJson(const std::string &rasterPath,
     size_t componentSize = 0;
     const auto component = componentAtClick(map, width, height, localCol, localRow, componentSize);
     if (componentSize < 4)
-        throw AppException("No stockpile detected at this location");
+        throw NoStockpileException("No stockpile detected at this location");
 
     // --- Trace contour and simplify ---
     auto contourPx = traceContour(component, width, height);
     if (contourPx.size() < 3)
-        throw AppException("Failed to trace stockpile contour");
+        throw NoStockpileException("No stockpile detected at this location: its contour has fewer than 3 points");
 
     // Convert pixels to raster map coordinates.
     Ring contourMap;
@@ -624,7 +624,7 @@ std::vector<float> terrainTrend(const DemContext &dem, const ScaledRaster &raste
     valid.reserve(region.size() / 4);
     for (float v : region) if (dem.isValid(v)) valid.push_back(v);
     if (valid.empty())
-        throw AppException("Raster contains no valid elevation data");
+        throw NoRasterDataException("Raster contains no valid elevation data");
     std::sort(valid.begin(), valid.end());
     const float fillVal = static_cast<float>(valid[valid.size() / 2]);
     for (size_t i = 0; i < region.size(); i++) {

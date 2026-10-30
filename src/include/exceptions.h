@@ -69,12 +69,29 @@ namespace ddb
     {
         using AppException::AppException;
     };
-    // A dataset path the rules of entry_path.h refuse (outside the dataset, the reserved .ddb
-    // folder, ...). Every C export that takes entry paths returns it as DDBERR_INVALIDARGS,
-    // also the exports of 1.x (whose other invalid arguments stay DDBERR_EXCEPTION).
-    class InvalidPathException : public InvalidArgsException
+    // An invalid argument that every C export returns as DDBERR_INVALIDARGS, also the exports
+    // of 1.x (whose other invalid arguments stay DDBERR_EXCEPTION): the caller asked for
+    // something that cannot exist, and the same call can never succeed
+    class RefusedArgumentException : public InvalidArgsException
     {
         using InvalidArgsException::InvalidArgsException;
+    };
+    // A dataset path the rules of entry_path.h refuse (outside the dataset, the reserved .ddb
+    // folder, ...)
+    class InvalidPathException : public RefusedArgumentException
+    {
+        using RefusedArgumentException::RefusedArgumentException;
+    };
+    // A raster query asked for a place that has no value: a pixel or an area outside the
+    // raster, an area whose pixels are all no data
+    class NoRasterDataException : public RefusedArgumentException
+    {
+        using RefusedArgumentException::RefusedArgumentException;
+    };
+    // The detection of a stockpile found none where the caller asked for one
+    class NoStockpileException : public RefusedArgumentException
+    {
+        using RefusedArgumentException::RefusedArgumentException;
     };
     // The requested entry is not in the index. The exports added in 2.0 return it as
     // DDBERR_NOTFOUND; the older ones keep returning DDBERR_EXCEPTION.

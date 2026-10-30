@@ -178,6 +178,14 @@ TEST(ErrorMapper, codeTable) {
     // A refused entry path is INVALIDARGS in every export, the exports of 1.x included
     expectMapping("InvalidPathException", [] { throw InvalidPathException("Invalid path 'x': traversal"); },
                   {DDBERR_INVALIDARGS, DDBERR_INVALIDARGS, "Invalid path 'x': traversal", ""});
+    // So is every other refused argument: a raster query of a place without data, a detection
+    // that finds no stockpile
+    expectMapping("RefusedArgumentException", [] { throw RefusedArgumentException("window too small"); },
+                  {DDBERR_INVALIDARGS, DDBERR_INVALIDARGS, "window too small", ""});
+    expectMapping("NoRasterDataException", [] { throw NoRasterDataException("No valid data in the area"); },
+                  {DDBERR_INVALIDARGS, DDBERR_INVALIDARGS, "No valid data in the area", ""});
+    expectMapping("NoStockpileException", [] { throw NoStockpileException("No stockpile detected"); },
+                  {DDBERR_INVALIDARGS, DDBERR_INVALIDARGS, "No stockpile detected", ""});
     expectMapping("RetryableBuildException(LowDiskSpace)",
                   [] { throw RetryableBuildException("disk", RetryableBuildReason::LowDiskSpace); },
                   {DDBERR_EXCEPTION, DDBERR_RETRYABLE, "disk", "lowDiskSpace"});

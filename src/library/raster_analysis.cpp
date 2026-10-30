@@ -71,17 +71,35 @@ bool detectIsThermal(const std::string &filePath, std::string &outSensorId) {
 struct AreaBounds {
     int x0, y0, x1, y1;
 
-    // The rectangle clamped to a w x h raster, corners in order
-    static AreaBounds clamped(int x0, int y0, int x1, int y1, int w, int h) {
-        x0 = std::max(0, std::min(x0, w - 1));
-        y0 = std::max(0, std::min(y0, h - 1));
-        x1 = std::max(0, std::min(x1, w - 1));
-        y1 = std::max(0, std::min(y1, h - 1));
+    // The part of the rectangle (corners in any order) inside a w x h raster, corners in order.
+    // A rectangle with no pixel in the raster is a NoRasterDataException: it used to be clamped
+    // onto the nearest edge, whose pixels it then measured.
+    static AreaBounds within(int x0, int y0, int x1, int y1, int w, int h) {
         if (x0 > x1) std::swap(x0, x1);
         if (y0 > y1) std::swap(y0, y1);
-        return {x0, y0, x1, y1};
+        if (x1 < 0 || y1 < 0 || x0 >= w || y0 >= h)
+            throw NoRasterDataException("No valid data in the area: (" + std::to_string(x0) + ", " +
+                                        std::to_string(y0) + ") - (" + std::to_string(x1) + ", " +
+                                        std::to_string(y1) + ") is outside the " + std::to_string(w) + "x" +
+                                        std::to_string(h) + " raster");
+        return {std::max(0, x0), std::max(0, y0), std::min(x1, w - 1), std::min(y1, h - 1)};
     }
 };
+
+// The values of an area with at least one valid pixel: a NoRasterDataException otherwise
+std::vector<float> requireAreaValues(std::vector<float> values) {
+    if (values.empty())
+        throw NoRasterDataException("No valid data in the area: its pixels are all no data");
+    return values;
+}
+
+// A NoRasterDataException when the pixel (x, y) is outside a w x h raster
+void requirePixelInRaster(int x, int y, int w, int h) {
+    if (x < 0 || x >= w || y < 0 || y >= h)
+        throw NoRasterDataException("No valid data at the point: pixel (" + std::to_string(x) + ", " +
+                                    std::to_string(y) + ") is outside the " + std::to_string(w) + "x" +
+                                    std::to_string(h) + " raster");
+}
 
 // Reads the first band over the rectangle as floats (raw thermal values converted to
 // temperatures when the calibration allows); nothing when GDAL cannot read it
@@ -250,11 +268,7 @@ std::string thermalImagePointJson(const std::string &filePath, int x, int y) {
         throw AppException("Cannot read raster data from " + filePath);
     }
 
-    if (x < 0 || x >= td.width || y < 0 || y >= td.height) {
-        throw InvalidArgsException("Pixel coordinates out of bounds: (" +
-            std::to_string(x) + ", " + std::to_string(y) + ") for image " +
-            std::to_string(td.width) + "x" + std::to_string(td.height));
-    }
+    requirePixelInRaster(x, y, td.width, td.height);
 
     size_t idx = static_cast<size_t>(y) * td.width + x;
     float value = td.temperatures[idx];
@@ -381,11 +395,7 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y) {
         const int w = GDALGetRasterXSize(hDs);
         const int h = GDALGetRasterYSize(hDs);
 
-        if (x < 0 || x >= w || y < 0 || y >= h) {
-            throw InvalidArgsException("Pixel coordinates out of bounds: (" +
-                std::to_string(x) + ", " + std::to_string(y) + ") for image " +
-                std::to_string(w) + "x" + std::to_string(h));
-        }
+        requirePixelInRaster(x, y, w, h);
 
         if (GDALGetRasterCount(hDs) >= 1) {
             if (const auto pixel = readPixel(GDALGetRasterBand(hDs, 1), x, y, isThermal, filePath)) {
@@ -418,7 +428,7 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
         const int h = GDALGetRasterYSize(hDs);
         const int nBands = GDALGetRasterCount(hDs);
 
-        const AreaBounds bounds = AreaBounds::clamped(x0, y0, x1, y1, w, h);
+        const AreaBounds bounds = AreaBounds::within(x0, y0, x1, y1, w, h);
 
         std::string unit;
 
@@ -447,13 +457,9 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
                     values.push_back(v);
                 }
 
-                if (values.empty()) {
-                    throw AppException("No valid data in the specified area");
-                }
-
                 if (unit.empty() && isThermal) unit = "\xC2\xB0\x43";
 
-                return areaStatsJson(std::move(values), bounds, unit, isThermal);
+                return areaStatsJson(requireAreaValues(std::move(values)), bounds, unit, isThermal);
             }
         }
     }
@@ -468,7 +474,7 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
         throw AppException("Cannot read raster data from " + filePath);
     }
 
-    const AreaBounds bounds = AreaBounds::clamped(x0, y0, x1, y1, td.width, td.height);
+    const AreaBounds bounds = AreaBounds::within(x0, y0, x1, y1, td.width, td.height);
 
     std::vector<float> values;
     values.reserve(static_cast<size_t>(bounds.x1 - bounds.x0 + 1) * (bounds.y1 - bounds.y0 + 1));
@@ -481,11 +487,7 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
         }
     }
 
-    if (values.empty()) {
-        throw AppException("No valid data in the specified area");
-    }
-
-    return areaStatsJson(std::move(values), bounds, "\xC2\xB0\x43", true);
+    return areaStatsJson(requireAreaValues(std::move(values)), bounds, "\xC2\xB0\x43", true);
 }
 
 // ------------------------------------------------------------------ raster metadata
@@ -493,22 +495,18 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
 namespace {
 
 // The statistics of the values of a formula (the NODATA_SENTINEL ones are no data), as the
-// statistics of band "1": min, max, mean, std, p2 and p98, and a histogram of 255 bins. Null
-// when no pixel has a value.
-json formulaStatistics(const std::vector<float> &formulaResult) {
+// statistics of band "1": min, max, mean, std, p2 and p98, and a histogram of 255 bins over
+// formulaHistogramRange. Null when no pixel has a value.
+json formulaStatistics(const std::vector<float> &formulaResult, const VegetationFormula *formula) {
     std::vector<double> valid;
     valid.reserve(formulaResult.size());
     double sum = 0, sumSq = 0;
-    double fMin = std::numeric_limits<double>::max();
-    double fMax = std::numeric_limits<double>::lowest();
     for (const float f : formulaResult) {
         if (f != NODATA_SENTINEL) {
             double v = static_cast<double>(f);
             valid.push_back(v);
             sum += v;
             sumSq += v * v;
-            fMin = std::min(fMin, v);
-            fMax = std::max(fMax, v);
         }
     }
     if (valid.empty())
@@ -520,29 +518,24 @@ json formulaStatistics(const std::vector<float> &formulaResult) {
     double stddev = std::sqrt(std::max(0.0, variance));
 
     std::sort(valid.begin(), valid.end());
+    const double fMin = valid.front();
+    const double fMax = valid.back();
     double p2 = valid[static_cast<size_t>(count * 0.02)];
     double p98 = valid[std::min(valid.size() - 1, static_cast<size_t>(count * 0.98))];
 
-    // Histogram
-    int bins = 255;
-    std::vector<int> counts(bins, 0);
-    std::vector<double> edges(bins + 1);
-    double range = fMax - fMin;
-    if (range <= 0) range = 1.0;
-    for (int i = 0; i <= bins; i++) {
-        edges[i] = fMin + (range * i / bins);
-    }
-    for (double v : valid) {
-        int idx = static_cast<int>((v - fMin) / range * (bins - 1));
-        idx = std::max(0, std::min(bins - 1, idx));
-        counts[idx]++;
-    }
+    std::optional<std::pair<double, double>> validRange;
+    if (formula != nullptr && formula->hasRange)
+        validRange = std::make_pair(formula->rangeMin, formula->rangeMax);
+    const auto [lo, hi] = formulaHistogramRange(fMin, fMax, p2, p98, validRange);
+    constexpr int bins = 255;
+    const ValueHistogram histogram = binValues(valid, lo, hi, bins);
 
     json stats;
     stats["1"] = {
         {"min", fMin}, {"max", fMax}, {"mean", mean}, {"std", stddev},
         {"percentiles", {{"p2", p2}, {"p98", p98}}},
-        {"histogram", {{"counts", counts}, {"edges", edges}, {"bins", bins}}}
+        {"histogram", {{"counts", histogram.counts}, {"edges", histogram.edges}, {"bins", bins},
+                       {"below", histogram.below}, {"above", histogram.above}}}
     };
     return stats;
 }
@@ -559,7 +552,7 @@ json formulaRasterStatistics(GDALDatasetH hDs, const std::string &formula, const
     const FormulaPlan plan = planFormula(hDs, formula, filter, "", false);
     FormulaBuffers buffers;
     computeFormulaValues(hDs, plan, RasterWindow{0, 0, width, height, sampleW, sampleH}, buffers);
-    return formulaStatistics(buffers.result);
+    return formulaStatistics(buffers.result, plan.formula);
 }
 
 // The statistics of every band GDAL can compute them for, by band number; null when none
@@ -609,6 +602,50 @@ json algorithmList(const VegetationEngine &ve, GDALDatasetH hDs, const BandFilte
 }
 
 } // anonymous namespace
+
+std::pair<double, double> formulaHistogramRange(double min, double max, double p2, double p98,
+                                                const std::optional<std::pair<double, double>> &validRange) {
+    double lo = min;
+    double hi = max;
+    if (validRange) {
+        lo = std::max(lo, validRange->first);
+        hi = std::min(hi, validRange->second);
+    }
+    const double spread = p98 - p2;
+    if (spread > 0) {
+        lo = std::max(lo, p2 - spread);
+        hi = std::min(hi, p98 + spread);
+    }
+    if (!(hi > lo)) {
+        lo = min;
+        hi = max;
+    }
+    if (!(hi > lo))
+        hi = lo + 1.0;
+    return {lo, hi};
+}
+
+ValueHistogram binValues(const std::vector<double> &values, double lo, double hi, int bins) {
+    ValueHistogram h;
+    h.counts.assign(static_cast<size_t>(bins), 0);
+    h.edges.resize(static_cast<size_t>(bins) + 1);
+    const double width = (hi - lo) / bins;
+    for (int i = 0; i < bins; i++)
+        h.edges[i] = lo + width * i;
+    h.edges[bins] = hi;
+    for (const double v : values) {
+        if (v < lo) {
+            h.below++;
+        } else if (v > hi) {
+            h.above++;
+        } else {
+            // The bin of v is the one whose edges hold it: the same width as the edges
+            const int idx = std::min(bins - 1, static_cast<int>(std::floor((v - lo) / width)));
+            h.counts[idx]++;
+        }
+    }
+    return h;
+}
 
 std::string getRasterMetadataJson(const std::string &path, const std::string &formula, const std::string &bandFilter) {
     cancel::throwIfCanceled();

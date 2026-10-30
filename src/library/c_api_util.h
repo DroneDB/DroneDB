@@ -81,8 +81,9 @@ constexpr CodeSet codeSet(Codes... codes) noexcept {
 // DDBBuild BUILDDEPMISSING/BUILDINPROGRESS, DDBExportRaster2 CANCELED: see ddb.cpp). Any other
 // failure stays DDBERR_EXCEPTION, with its own message and reason. DDBERR_INVALIDARGS and
 // DDBERR_RETRYABLE are returned by the exports added in 2.0 only; the older exports switch
-// in a later version, together with Registry. One exception: a refused entry path is
-// DDBERR_INVALIDARGS in every export (InvalidPathException).
+// in a later version, together with Registry. One exception: a refused argument
+// (RefusedArgumentException: an entry path the path rules refuse, a raster query of a place
+// without data) is DDBERR_INVALIDARGS in every export.
 inline constexpr CodeSet kFrozenCodes = codeSet(DDBERR_BUSY);
 // The exports added in 2.0: every code a failure maps to
 inline constexpr CodeSet kNewExportCodes = codeSet(DDBERR_BUSY,
@@ -98,8 +99,8 @@ struct Failure {
     DDBErr code = DDBERR_EXCEPTION;
     std::string message;  // never empty
     std::string reason;   // "" when the failure has none
-    // Every export returns the code, also one that may not return it: a refused entry path
-    // (InvalidPathException) is DDBERR_INVALIDARGS in the exports of 1.x too
+    // Every export returns the code, also one that may not return it: a refused argument
+    // (RefusedArgumentException) is DDBERR_INVALIDARGS in the exports of 1.x too
     bool everyExport = false;
 };
 
@@ -110,7 +111,8 @@ struct Failure {
 //   BuildInProgressException   BUILDINPROGRESS
 //   ShutdownException          SHUTDOWN (a call stopped by DDBShutdown)
 //   CanceledException          CANCELED
-//   InvalidPathException       INVALIDARGS, returned by every export (a refused entry path)
+//   RefusedArgumentException   INVALIDARGS, returned by every export (a refused entry path,
+//                              a raster query of a place without data)
 //   InvalidArgsException       INVALIDARGS
 //   RetryableBuildException    RETRYABLE, reason from kRetryableReasons
 //   std::bad_alloc             EXCEPTION, "Out of memory"
