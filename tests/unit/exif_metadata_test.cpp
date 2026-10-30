@@ -193,6 +193,13 @@ namespace
         {
             threads_.emplace_back(std::forward<F>(body));
         }
+        // A thread that reads `file` with `reader`: the path is copied here, on the thread that
+        // starts it, so the thread never reads the memory of the gate that holds it
+        template <typename Reader>
+        void read(Reader &reader, const fs::path &file)
+        {
+            start([&reader, file] { reader.read(file); });
+        }
         void join()
         {
             for (auto &thread : threads_)
@@ -212,7 +219,9 @@ namespace
       public:
         explicit Gate(const fs::path &folder, const std::string &name) : request_(folder / (name + ".hold")) {}
         ~Gate() { open(); }
-        // The file to read: the fake helper holds the request until the gate is open
+        // The file to read: the fake helper holds the request until the gate is open. A thread
+        // that reads it takes a copy when it is started (Threads::read): the gate is destroyed,
+        // and so opened, before the threads that read through it are joined
         const fs::path &request() const { return request_; }
         void open() const { touch(fs::path(request_.string() + ".release")); }
 
@@ -366,7 +375,7 @@ namespace
         Threads threads;
         Gate gate(area.getFolder(), "a");
         std::atomic<bool> aRead{false};
-        threads.start([&] { aRead = pool.read(gate.request()).metadata.has_value(); });
+        threads.start([&, file = gate.request()] { aRead = pool.read(file).metadata.has_value(); });
         ASSERT_TRUE(waitForFakeRequests(log, 1)) << "helper A holds its request";
         const unsigned long pidA = fakeRequests(log).at(0).pid;
 
@@ -392,7 +401,7 @@ namespace
 
         Threads threads;
         Gate gate(area.getFolder(), "gate");
-        threads.start([&] { pool.read(gate.request()); });
+        threads.read(pool, gate.request());
         ASSERT_TRUE(waitForFakeRequests(log, 1));
 
         constexpr size_t callers = 8;
@@ -427,7 +436,7 @@ namespace
 
         Threads threads;
         Gate gate(area.getFolder(), "gate");
-        threads.start([&] { pool.read(gate.request()); });
+        threads.read(pool, gate.request());
         ASSERT_TRUE(waitForFakeRequests(log, 1));
         std::atomic<bool> waiterRead{false};
         threads.start([&] { waiterRead = pool.read("waiter.jpg").metadata.has_value(); });
@@ -477,7 +486,7 @@ namespace
 
         Threads threads;
         Gate gate(area.getFolder(), "busy");
-        threads.start([&] { pool.read(gate.request()); });
+        threads.read(pool, gate.request());
         ASSERT_TRUE(waitForFakeRequests(log, 1));
         ASSERT_TRUE(pool.read("other.jpg").metadata.has_value());
         const auto idle = pool.idleHelperPids();
@@ -640,9 +649,9 @@ namespace
             Gate first(area.getFolder(), "one");
             Gate second(area.getFolder(), "two");
             Gate third(area.getFolder(), "three");
-            threads.start([&] { pool.read(first.request()); });
-            threads.start([&] { pool.read(second.request()); });
-            threads.start([&] { pool.read(third.request()); });
+            threads.read(pool, first.request());
+            threads.read(pool, second.request());
+            threads.read(pool, third.request());
             ASSERT_TRUE(waitForFakeRequests(log, 3));
         }
         EXPECT_EQ(pool.startedHelpers(), 3u);
@@ -685,9 +694,9 @@ namespace
             Gate first(area.getFolder(), "one");
             Gate second(area.getFolder(), "two");
             Gate third(area.getFolder(), "three");
-            threads.start([&] { pool.read(first.request()); });
-            threads.start([&] { pool.read(second.request()); });
-            threads.start([&] { pool.read(third.request()); });
+            threads.read(pool, first.request());
+            threads.read(pool, second.request());
+            threads.read(pool, third.request());
             ASSERT_TRUE(waitForFakeRequests(log, 3));
         }
         EXPECT_EQ(pool.startedHelpers(), 3u);
@@ -728,7 +737,7 @@ namespace
 
         Threads threads;
         Gate gate(area.getFolder(), "gate");
-        threads.start([&] { pool.read(gate.request()); });
+        threads.read(pool, gate.request());
         ASSERT_TRUE(waitForFakeRequests(log, 1));
 
         auto token = cancel::TokenRef::adopt(cancel::Token::create());
@@ -973,7 +982,7 @@ namespace
         // Destroyed before the threads are joined (see the test above)
         std::promise<void> waiterDone;
         Gate gate(area.getFolder(), "gate");
-        threads.start([&] { pool.read(gate.request()); });
+        threads.read(pool, gate.request());
         ASSERT_TRUE(waitForFakeRequests(log, 1));
         threads.start([&] { waiterServed = pool.read(area.getFolder() / "waiter.jpg").metadata.has_value(); });
         ASSERT_TRUE(pool.awaitWaiters(1, kPatience));
@@ -1018,9 +1027,9 @@ namespace
         Gate first(area.getFolder(), "one");
         Gate second(area.getFolder(), "two");
         Gate third(area.getFolder(), "three");
-        threads.start([&] { pool.read(first.request()); });
-        threads.start([&] { pool.read(second.request()); });
-        threads.start([&] { pool.read(third.request()); });
+        threads.read(pool, first.request());
+        threads.read(pool, second.request());
+        threads.read(pool, third.request());
         ASSERT_TRUE(waitForFakeRequests(log, 3));
         first.open();
         second.open();
@@ -1083,7 +1092,7 @@ namespace
         Gate gate(area.getFolder(), "gate");
         std::atomic<bool> holderRead{false};
         std::atomic<bool> waiterRead{false};
-        threads.start([&] { holderRead = pool.read(gate.request()).metadata.has_value(); });
+        threads.start([&, file = gate.request()] { holderRead = pool.read(file).metadata.has_value(); });
         ASSERT_TRUE(waitForFakeRequests(log, 1));
         const unsigned long holderPid = fakeRequests(log).at(0).pid;
         threads.start([&] { waiterRead = pool.read("waiter.jpg").metadata.has_value(); });
