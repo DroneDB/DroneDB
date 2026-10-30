@@ -79,7 +79,8 @@ namespace ddb
             fs::path get() const { return p; }
         };
 
-        // Holds an exclusive flock on the file p (created when missing) until it is destroyed
+        // Holds an exclusive lock on the file p + ".lock" (created when missing, and left in place)
+        // until it is destroyed: it excludes other processes and the other threads of this one
         class FileLock
         {
             int fd = -1;

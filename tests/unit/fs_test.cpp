@@ -9,11 +9,14 @@
 #include "test.h"
 #include "testarea.h"
 #include "exceptions.h"
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
 #include <vector>
 #include <string>
+#include <thread>
 
 namespace
 {
@@ -290,6 +293,44 @@ namespace
         }
         EXPECT_EQ(io::readAllBytes(file), (std::vector<uint8_t>{'a', 0, 'b'}));
         EXPECT_THROW(io::readAllBytes(ta.getFolder() / "missing.bin"), FSException);
+    }
+
+    TEST(fileLock, excludesTheOtherThreadsAndKeepsItsFile)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path shared = ta.getFolder() / "shared";
+
+        // Threads that take the lock again and again: one at a time is inside, and none fails
+        // to open the file another one has just let go of
+        std::atomic<int> inside{0}, most{0}, failures{0};
+        std::vector<std::thread> threads;
+        for (int t = 0; t < 8; t++)
+            threads.emplace_back([&] {
+                for (int i = 0; i < 25; i++)
+                {
+                    try
+                    {
+                        io::FileLock lock(shared);
+                        const int now = ++inside;
+                        for (int seen = most.load(); now > seen && !most.compare_exchange_weak(seen, now);)
+                        {
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        --inside;
+                    }
+                    catch (const AppException &)
+                    {
+                        failures++;
+                    }
+                }
+            });
+        for (auto &t : threads)
+            t.join();
+
+        EXPECT_EQ(failures.load(), 0);
+        EXPECT_EQ(most.load(), 1) << "two threads held the lock at once";
+        // The file stays for the next one
+        EXPECT_TRUE(fs::exists(io::concat(shared, ".lock")));
     }
 
 }

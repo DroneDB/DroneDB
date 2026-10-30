@@ -894,52 +894,43 @@ namespace ddb
         namespace
         {
 #ifdef _WIN32
-            // Blocks until this process holds an exclusive lock on the whole file (flock(LOCK_EX))
-            int lockExclusive(int fd)
+            // Blocks until this handle holds an exclusive lock on the file (flock(LOCK_EX)); true
+            // when it does
+            bool lockExclusive(int fd)
             {
                 HANDLE h = (HANDLE)_get_osfhandle(fd);
+                if (h == INVALID_HANDLE_VALUE)
+                    return false;
 
-                if (h == (HANDLE)-1)
-                {
-                    errno = EBADF;
-                    return -1;
-                }
-
-                DWORD lower, upper;
+                // The whole range from the start: the lock file is empty, and a lock of its size
+                // (zero bytes) excludes no one
                 OVERLAPPED ol;
-
-                lower = GetFileSize(h, &upper);
-                if (lower == INVALID_FILE_SIZE)
-                {
-                    errno = EBADF;
-                    return -1;
-                }
-
-                // start offset = 0
                 memset(&ol, 0, sizeof ol);
-
-                return LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, lower, upper, &ol);
+                return LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &ol) != 0;
             }
 
             int openLockFile(const std::string &utf8Path)
             {
-                return _wopen(toWide(utf8Path).c_str(), O_CREAT, 0644);
+                return _wopen(toWide(utf8Path).c_str(), O_CREAT | O_RDWR, 0644);
             }
 
             int closeLockFile(int fd) { return _close(fd); }
-
-            int removeLockFile(const std::string &utf8Path)
-            {
-                return _wunlink(toWide(utf8Path).c_str());
-            }
 #else
-            int lockExclusive(int fd) { return ::flock(fd, LOCK_EX); }
+            bool lockExclusive(int fd)
+            {
+                int r;
+                do
+                    r = ::flock(fd, LOCK_EX);
+                while (r == -1 && errno == EINTR);
+                return r == 0;
+            }
 
-            int openLockFile(const std::string &utf8Path) { return ::open(utf8Path.c_str(), O_CREAT, 0644); }
+            int openLockFile(const std::string &utf8Path)
+            {
+                return ::open(utf8Path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+            }
 
             int closeLockFile(int fd) { return ::close(fd); }
-
-            int removeLockFile(const std::string &utf8Path) { return ::unlink(utf8Path.c_str()); }
 #endif
         }
 
@@ -957,7 +948,12 @@ namespace ddb
 
             // Block
             LOGD << "Acquiring lock " << lockFile;
-            lockExclusive(fd);
+            if (!lockExclusive(fd))
+            {
+                closeLockFile(fd);
+                fd = -1;
+                throw ddb::AppException("Cannot acquire lock " + lockFile);
+            }
         }
 
         void FileLock::unlock()
@@ -966,14 +962,12 @@ namespace ddb
             {
                 LOGD << "Freeing lock " + lockFile;
 
+                // The file stays: a process that opened it before a removal would lock the old
+                // file while the next one creates and locks a new one, and on Windows a file being
+                // removed cannot be opened at all
                 if (closeLockFile(fd) != 0)
                 {
                     LOGD << "Cannot close lock " << lockFile;
-                }
-
-                if (removeLockFile(lockFile) != 0)
-                {
-                    LOGD << "Cannot remove lock " << lockFile;
                 }
 
                 fd = -1;
