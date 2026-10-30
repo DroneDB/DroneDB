@@ -118,12 +118,18 @@ namespace
         for (const auto &place : kPlaces)
         {
             const fs::path ortho = makeOrtho(ta.getPath(std::string(place.name) + ".tif"), place);
-            GDALTiler tiler(TilerHelper::toGeoTIFF(ortho).string(), "", 256, false);
-            const auto zooms = tiler.getMinMaxZ();
+            // The tiles below are forced, so each one makes the COG again: the tiler that gives
+            // their range is closed first, since Windows replaces no file a process holds open
+            const auto [zooms, ranges] = [&] {
+                GDALTiler tiler(TilerHelper::toGeoTIFF(ortho).string(), "", 256, false);
+                const auto z = tiler.getMinMaxZ();
+                return std::make_pair(z, std::vector{tiler.getMinMaxCoordsForZ(z.min), tiler.getMinMaxCoordsForZ(z.max)});
+            }();
             out[place.name]["zooms"] = {zooms.min, zooms.max};
-            for (const int z : {zooms.min, zooms.max})
+            for (size_t level = 0; level < ranges.size(); level++)
             {
-                const auto bounds = tiler.getMinMaxCoordsForZ(z);
+                const int z = level == 0 ? zooms.min : zooms.max;
+                const auto &bounds = ranges[level];
                 json tiles = json::object();
                 for (int tx = bounds.min.x; tx <= bounds.max.x; tx++)
                     for (int ty = bounds.min.y; ty <= bounds.max.y; ty++)

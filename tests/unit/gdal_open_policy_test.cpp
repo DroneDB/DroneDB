@@ -73,12 +73,14 @@ namespace
     fs::path writeAs(const char *driver, const fs::path &path)
     {
         const fs::path source = writeGeoTiff(path.string() + ".source.tif");
-        const auto src = adoptDataset(GDALOpen(io::toUtf8(source).c_str(), GA_ReadOnly));
+        auto src = adoptDataset(GDALOpen(io::toUtf8(source).c_str(), GA_ReadOnly));
         EXPECT_NE(src, nullptr);
         auto out = adoptDataset(GDALCreateCopy(GDALGetDriverByName(driver), io::toUtf8(path).c_str(),
                                                datasetHandle(src), FALSE, nullptr, nullptr, nullptr));
         EXPECT_NE(out, nullptr) << driver;
         out.reset();
+        // Closed before the remove: Windows deletes no file that a process holds open
+        src.reset();
         fs::remove(source);
         return path;
     }

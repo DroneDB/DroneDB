@@ -69,7 +69,9 @@ namespace golden
             const double x = a.get<double>(), y = b.get<double>();
             if (std::isnan(x) && std::isnan(y))
                 return true;
-            const double tolerance = 1e-9 * std::max({1.0, std::fabs(x), std::fabs(y)});
+            // Relative: the math libraries of MSVC and glibc differ in the last bits, and a
+            // reprojected raster carries that into its areas and volumes (~5e-9 apart)
+            const double tolerance = 1e-7 * std::max({1.0, std::fabs(x), std::fabs(y)});
             if (std::fabs(x - y) <= tolerance)
                 return true;
             where = at + ": " + a.dump() + " != " + b.dump();
