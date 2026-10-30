@@ -189,19 +189,16 @@ namespace ddb
 
     // The arguments of the GDALWarp that writes the COG: Web Mercator, GoogleMapsCompatible tiles,
     // the threads and warp memory of the budget, transparency and compression of the source.
-    // -multi reads the source on a GDAL worker thread, which does not see a thread-local option:
-    // left out when the reads must stay on this thread (multiThreadedIo false).
+    // No -multi: it reads the source on a GDAL worker thread, which does not see the thread-local
+    // GDAL_NUM_THREADS that lets the decoder use the threads of the build.
     static CPLStringList cogWarpArgs(GDALDatasetH hSrcDataset, GDALRasterBandH hSrcBand1,
-                                     const BuildResourceBudget &budget, const std::string &numThreads,
-                                     bool multiThreadedIo)
+                                     const BuildResourceBudget &budget, const std::string &numThreads)
     {
         CPLStringList targs;
         targs.AddString("-of");
         targs.AddString("COG");
         targs.AddString("-t_srs");
         targs.AddString("EPSG:3857");
-        if (multiThreadedIo)
-            targs.AddString("-multi");
         targs.AddString("-wo");
         targs.AddString(numThreads.c_str());
         targs.AddString("-co");
@@ -260,12 +257,6 @@ namespace ddb
         BuildOptions options;
         options.threads = params.threads;
 
-        // A JPEG 2000 decodes on threads of its own, one per CPU unless GDAL_NUM_THREADS says
-        // otherwise, and starts them when it is opened. It is never a COG: no open before the
-        // budget below is in place.
-        const GDALDriverH sourceDriver = identifyUserRaster(input);
-        const bool ownDecodeThreads = sourceDriver && decodesWithOwnThreads(GDALGetDriverShortName(sourceDriver));
-
         // Threads, warp memory and block cache come from one budget so
         // that several builds running in one process stay within known bounds;
         // the threads beyond this one take CPU tokens, held until the
@@ -274,12 +265,11 @@ namespace ddb
         const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
         const std::string numThreads = parallel::gdalNumThreads(cpu);
 
-        // A decoder with threads of its own gets the threads of the build, scoped to this thread
-        // before the source is opened, and its reads stay on this thread (no -multi) so they see
-        // that option
-        std::optional<ScopedThreadConfigOption> decodeThreadsGuard;
-        if (ownDecodeThreads)
-            decodeThreadsGuard.emplace("GDAL_NUM_THREADS", std::to_string(cpu.threads()).c_str());
+        // The decoder of the source gets the threads of the build, scoped to this thread before
+        // the source is opened (a JPEG 2000 starts its threads when it is opened, one per CPU
+        // unless GDAL_NUM_THREADS says otherwise), and the reads stay on this thread so they see
+        // that option: a compressed GeoTIFF then decodes its blocks on those threads as well
+        const ScopedThreadConfigOption decodeThreads("GDAL_NUM_THREADS", std::to_string(cpu.threads()).c_str());
 
         LOGD << "Building COG from " << input;
 
@@ -350,7 +340,7 @@ namespace ddb
             newDataset = adoptDataset(GDALTranslate(outputCog.c_str(), hSrcDataset, psOptions.get(), nullptr));
             writeSystemError = errno;
         } else {
-            CPLStringList targs = cogWarpArgs(hSrcDataset, hSrcBand1, budget, numThreads, !ownDecodeThreads);
+            CPLStringList targs = cogWarpArgs(hSrcDataset, hSrcBand1, budget, numThreads);
             const GdalOptionsPtr<GDALWarpAppOptions> psOptions(GDALWarpAppOptionsNew(targs.List(), nullptr));
             if (!psOptions) throw GDALException("GDALWarpAppOptionsNew returned null");
             progress.attach(psOptions.get());

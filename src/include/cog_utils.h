@@ -17,10 +17,6 @@ bool isOptimizedCog(const std::string& inputPath);
 // The same check on a dataset that is open already
 bool isOptimizedCogDataset(GDALDatasetH hDataset);
 
-// True for a raster driver that decodes on threads of its own (JPEG 2000). It sizes them from
-// GDAL_NUM_THREADS as the reading thread sees it, and uses every CPU when that is unset.
-bool decodesWithOwnThreads(const std::string& driverName);
-
 }
 
 #endif  // COG_UTILS_H

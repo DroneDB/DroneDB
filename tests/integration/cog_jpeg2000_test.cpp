@@ -2,12 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// A JPEG 2000 builds the same COG as a GeoTIFF of the same pixels, and its decoding stays
-// within the threads of the build.
+// A JPEG 2000 builds the same COG as a GeoTIFF of the same pixels, and the decoding of a source
+// stays within the threads of the build: a JPEG 2000, whose decoder has threads of its own, and a
+// compressed GeoTIFF, whose blocks GDAL decodes on the threads of the build.
 
 #include <atomic>
 #include <chrono>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <thread>
 
@@ -17,9 +19,12 @@
 #include "cog.h"
 #include "cog_utils.h"
 #include "gdal_inc.h"
+#include "in_process_raster_helper.h"
+#include "raster_helper.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
+#include "user_open_child.h"
 
 namespace
 {
@@ -60,11 +65,8 @@ namespace
         return shape;
     }
 
-    TEST(CogJpeg2000, onlyTheJpeg2000DriverDecodesWithItsOwnThreads)
+    TEST(CogJpeg2000, gdalIsBuiltWithOpenJpeg)
     {
-        EXPECT_TRUE(decodesWithOwnThreads("JP2OpenJPEG"));
-        EXPECT_FALSE(decodesWithOwnThreads("GTiff"));
-        EXPECT_FALSE(decodesWithOwnThreads("COG"));
         EXPECT_NE(GDALGetDriverByName("JP2OpenJPEG"), nullptr) << "GDAL is built without OpenJPEG";
     }
 
@@ -89,6 +91,43 @@ namespace
         EXPECT_EQ(fromJp2.checksums, fromTif.checksums) << "a lossless JPEG 2000 has the pixels of its GeoTIFF";
     }
 
+    // The creation options of a tiled GeoTIFF compressed with DEFLATE, for blockCopy
+    char **deflateTiled()
+    {
+        return CSLSetNameValue(CSLSetNameValue(nullptr, "TILED", "YES"), "COMPRESS", "DEFLATE");
+    }
+
+    // A copy of `source` made by `driver` with 256 x 256 blocks: the decoder loads many blocks per
+    // read, which it may decode on one thread each
+    fs::path blockCopy(const fs::path &source, const fs::path &out, const char *driver, char **options)
+    {
+        GDALDatasetH src = GDALOpen(source.string().c_str(), GA_ReadOnly);
+        EXPECT_NE(src, nullptr);
+        options = CSLSetNameValue(options, "BLOCKXSIZE", "256");
+        options = CSLSetNameValue(options, "BLOCKYSIZE", "256");
+        GDALDatasetH copy = GDALCreateCopy(GDALGetDriverByName(driver), out.string().c_str(), src, FALSE, options,
+                                           nullptr, nullptr);
+        CSLDestroy(options);
+        GDALClose(src);
+        EXPECT_NE(copy, nullptr);
+        GDALClose(copy);
+        return out;
+    }
+
+    // A compressed GeoTIFF decodes its blocks on as many threads as the build holds: the COG of a
+    // build of 8 threads has the pixels of the COG of a build of one
+    TEST(CogDecoding, theThreadsOfTheBuildDoNotChangeThePixels)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto source = testutils::createGeoRaster(ta.getPath("source.tif"), patternSpec(2048));
+        const auto deflate = blockCopy(source, ta.getPath("deflate.tif"), "GTiff", deflateTiled());
+        buildCog(deflate.string(), ta.getPath("one.tif").string(), BuildOptions::withThreads(1));
+        buildCog(deflate.string(), ta.getPath("eight.tif").string(), BuildOptions::withThreads(8));
+        const CogShape one = readCog(ta.getPath("one.tif"));
+        ASSERT_GT(one.width, 0);
+        EXPECT_EQ(readCog(ta.getPath("eight.tif")).checksums, one.checksums);
+    }
+
 #ifdef __linux__
     // The threads of this process, from /proc/self/status
     int processThreads()
@@ -101,33 +140,11 @@ namespace
         return -1;
     }
 
-    // The JPEG 2000 decoder starts one thread per CPU unless GDAL_NUM_THREADS says otherwise, and
-    // the warp's -multi reads on a GDAL worker thread that a thread-local option does not reach:
-    // a build capped to one thread peaked at about the CPU count before the decoding was capped
-    TEST(CogJpeg2000, decodingStaysWithinTheThreadsOfTheBuild)
+    // The most threads this process had while `run` ran, above the threads it had before
+    int extraThreadsDuring(const std::function<void()> &run)
     {
-        const unsigned cpus = std::thread::hardware_concurrency();
-        if (cpus < 8)
-            GTEST_SKIP() << "needs 8 CPUs to tell a capped decoder from one thread per CPU (" << cpus << ")";
-
-        TestArea ta(TEST_NAME, true);
-        auto spec = patternSpec(2048);
-        // Small code blocks: the decoder loads many blocks per read, one thread each
-        const auto source = testutils::createGeoRaster(ta.getPath("source.tif"), spec);
-        GDALDatasetH src = GDALOpen(source.string().c_str(), GA_ReadOnly);
-        ASSERT_NE(src, nullptr);
-        char **opts = CSLSetNameValue(nullptr, "REVERSIBLE", "YES");
-        opts = CSLSetNameValue(opts, "BLOCKXSIZE", "256");
-        opts = CSLSetNameValue(opts, "BLOCKYSIZE", "256");
-        GDALDatasetH jp2 = GDALCreateCopy(GDALGetDriverByName("JP2OpenJPEG"), ta.getPath("ortho.jp2").string().c_str(),
-                                          src, FALSE, opts, nullptr, nullptr);
-        CSLDestroy(opts);
-        GDALClose(src);
-        ASSERT_NE(jp2, nullptr);
-        GDALClose(jp2);
-
         const int baseline = processThreads();
-        ASSERT_GT(baseline, 0);
+        EXPECT_GT(baseline, 0);
         std::atomic<bool> done{false};
         std::atomic<int> peak{baseline};
         std::thread sampler([&] {
@@ -138,14 +155,53 @@ namespace
                 std::this_thread::sleep_for(std::chrono::microseconds(500));
             }
         });
-
-        buildCog(ta.getPath("ortho.jp2").string(), ta.getPath("cog.tif").string(), BuildOptions::withThreads(1));
+        run();
         done.store(true);
         sampler.join();
-
-        // The sampler itself, OpenJPEG's one worker and some slack; not one per CPU
-        EXPECT_LE(peak.load() - baseline, 4) << "peak " << peak.load() << " threads, baseline " << baseline
-                                             << ", " << cpus << " CPUs";
+        return peak.load() - baseline;
     }
+
+    // A build capped to one thread, of a source GDAL could decode on one thread per CPU: the
+    // sampler itself, the decoder's one worker and some slack, not one per CPU. The build runs in
+    // this process (an in-process raster helper, in the child that may open files of users), so
+    // its threads are the threads this process counts.
+    void expectDecodingWithinOneThread(const fs::path &source, const fs::path &cog)
+    {
+        testutils::InProcessRasterHelper helper;
+        const raster::ScopedRasterHelper installed(helper);
+        const unsigned cpus = std::thread::hardware_concurrency();
+        const int extra = extraThreadsDuring(
+            [&] { buildCog(source.string(), cog.string(), BuildOptions::withThreads(1)); });
+        EXPECT_LE(extra, 4) << extra << " threads above the baseline, " << cpus << " CPUs";
+    }
+
+    // The JPEG 2000 decoder starts one thread per CPU unless GDAL_NUM_THREADS says otherwise, and
+    // a warp with -multi reads on a GDAL worker thread that a thread-local option does not reach:
+    // a build capped to one thread peaked at about the CPU count before the decoding was capped
+    USER_OPEN_TEST(CogJpeg2000, decodingStaysWithinTheThreadsOfTheBuild)
+    {
+        if (std::thread::hardware_concurrency() < 8)
+            GTEST_SKIP() << "needs 8 CPUs to tell a capped decoder from one thread per CPU";
+
+        TestArea ta(TEST_NAME, true);
+        const auto source = testutils::createGeoRaster(ta.getPath("source.tif"), patternSpec(2048));
+        const auto jp2 = blockCopy(source, ta.getPath("ortho.jp2"), "JP2OpenJPEG",
+                                   CSLSetNameValue(nullptr, "REVERSIBLE", "YES"));
+        expectDecodingWithinOneThread(jp2, ta.getPath("cog.tif"));
+    }
+
+    // A compressed GeoTIFF decodes its blocks on the threads of the build (GDAL_NUM_THREADS of
+    // the reading thread), so a build capped to one thread decodes on one
+    USER_OPEN_TEST(CogDecoding, aCompressedGeoTiffStaysWithinTheThreadsOfTheBuild)
+    {
+        if (std::thread::hardware_concurrency() < 8)
+            GTEST_SKIP() << "needs 8 CPUs to tell a capped decoder from one thread per CPU";
+
+        TestArea ta(TEST_NAME, true);
+        const auto source = testutils::createGeoRaster(ta.getPath("source.tif"), patternSpec(2048));
+        const auto deflate = blockCopy(source, ta.getPath("deflate.tif"), "GTiff", deflateTiled());
+        expectDecodingWithinOneThread(deflate, ta.getPath("cog.tif"));
+    }
+
 #endif
 } // namespace

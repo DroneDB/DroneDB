@@ -9,11 +9,6 @@
 
 namespace ddb
 {
-    bool decodesWithOwnThreads(const std::string &driverName)
-    {
-        return driverName == "JP2OpenJPEG";
-    }
-
     bool isOptimizedCog(const std::string &inputPath)
     {
         const auto dataset = openUserRaster(inputPath);
