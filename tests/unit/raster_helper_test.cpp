@@ -1397,7 +1397,7 @@ namespace
         std::unique_ptr<ScopedProcessConfig> config_;
     };
 
-    TEST_F(RasterBuildsTest, theCogBuildGivesTheHelperTheOutputAndHoldsTheTokensOfTheThreadsItTold)
+    TEST_F(RasterBuildsTest, theCogBuildGivesTheHelperAFolderBesideTheOutputAndHoldsTheTokensOfTheThreadsItTold)
     {
         ScriptedHelper helper;
         fs::path seenPath, seenOut;
@@ -1418,7 +1418,12 @@ namespace
         buildCog(io::toUtf8(input), io::toUtf8(output), BuildOptions::withThreads(3));
 
         EXPECT_EQ(seenPath, input);
-        EXPECT_EQ(seenOut, output);
+        // The helper writes into a private folder made beside the output, and the COG is moved
+        // to its name
+        EXPECT_EQ(seenOut.parent_path().parent_path(), output.parent_path());
+        EXPECT_EQ(seenOut.filename(), output.filename());
+        EXPECT_FALSE(fs::exists(seenOut.parent_path()));
+        EXPECT_TRUE(fs::exists(output));
         ASSERT_GE(threads, 1);
         EXPECT_LE(threads, 3) << "the cap of the caller lowers the threads";
         // The tokens of the CPU pool of the host stay taken for as long as the helper works: the
@@ -1509,7 +1514,9 @@ namespace
 
         const fs::path temp = area_->getPath("cog-temp-x");
         buildGeoRaster(area_->getPath("in.tif"), temp);
-        EXPECT_EQ(seenOut, temp / CogFileName);
+        EXPECT_EQ(seenOut.parent_path().parent_path(), temp) << "a private folder in the folder of the build";
+        EXPECT_EQ(seenOut.filename(), fs::path(CogFileName));
+        EXPECT_TRUE(fs::exists(temp / CogFileName));
 
         // What the helper wrote is no raster: the build fails before anything is published
         helper.onCog = [](const fs::path &, const fs::path &out, const json &) {

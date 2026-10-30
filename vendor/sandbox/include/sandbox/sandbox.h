@@ -42,7 +42,9 @@ namespace sandbox
         // skipped: the list can name optional locations.
         std::vector<std::string> readPaths;
         // Folders (or single files) the process may read and write, create and delete in. They
-        // must exist; a missing one is an error in every mode but Off.
+        // must exist; a missing one is an error in every mode but Off. On Windows they must have
+        // a low integrity label already (windows::setLowIntegrityLabel, given by the host while
+        // the folder is empty): one without it is an error too, and apply() labels nothing.
         std::vector<std::string> writePaths;
 
         uint64_t maxMemoryBytes = 0; // address space of the process
@@ -124,8 +126,15 @@ namespace sandbox
         // and *error says why.
         void *createJob(const Policy &policy, std::string *error);
         // Gives the folder (or file) a low integrity label, so that a low integrity process may
-        // write in it. Must run before the process that writes is made low integrity.
+        // write in it. Must run before the process that writes is made low integrity. Windows
+        // gives the label to what is in the folder already as well: it is for a folder that was
+        // just made, never for one that holds files (a program there would start at low
+        // integrity).
         bool setLowIntegrityLabel(const std::string &pathUtf8, std::string *error);
+        // Whether the folder (or file) has a low integrity label (or a lower one), its own or
+        // one it inherited from its folder: *low says it. False when the label cannot be read,
+        // and *error says why.
+        bool hasLowIntegrityLabel(const std::string &pathUtf8, bool *low, std::string *error);
         // Lowers the integrity level of the calling process to low
         bool lowerCurrentProcessIntegrity(std::string *error);
     } // namespace windows

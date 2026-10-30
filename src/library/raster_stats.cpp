@@ -135,10 +135,15 @@ namespace ddb
         entries_.clear();
     }
 
+    fs::path statsSidecarOf(const fs::path &raster)
+    {
+        return io::concat(raster, ".stats.json");
+    }
+
     bool readStatsSidecar(const std::string &path, int band, BandStatistics &out)
     {
         const fs::path rasterPath = io::fromUtf8(path);
-        const fs::path sidecar = rasterPath.parent_path() / io::concat(rasterPath.filename(), ".stats.json");
+        const fs::path sidecar = statsSidecarOf(rasterPath);
 
         std::error_code ec;
         const auto sidecarTime = fs::last_write_time(sidecar, ec);

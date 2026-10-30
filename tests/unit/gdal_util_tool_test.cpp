@@ -30,12 +30,15 @@
 #include "mio.h"
 #include "process_runner.h"
 #include "cad.h"
+#include "cog.h"
 #include "entry.h"
 #include "exif_metadata.h"
 #include "in_process_raster_helper.h"
+#include "raster_artefacts.h"
 #include "raster_helper.h"
 #include "raster_ops.h"
 #include "raster_protocol.h"
+#include "raster_stats.h"
 #include "raster_test_utils.h"
 #include "sandbox/sandbox.h"
 #include "testarea.h"
@@ -1454,5 +1457,84 @@ namespace
         EXPECT_FALSE(response.ok);
         EXPECT_EQ(response.error, raster::ErrorCode::Internal);
         EXPECT_FALSE(fs::exists(area_->getFolder() / "none.tif"));
+    }
+
+    // ------------------------------------------------------------------ the folder of an output
+
+    // A folder of a user (here one of the test area, which has no low integrity label on Windows)
+    // that holds a program, and a GeoTIFF to build from, outside it
+    struct UserFolder
+    {
+        TestArea area;
+        fs::path folder;
+        fs::path program;
+        fs::path input;
+
+        explicit UserFolder(const std::string &name)
+            : area(name, true), folder(area.getFolder("outputs")), program(folder / "program.exe")
+        {
+            std::ofstream(program) << "a program in the folder of an output";
+            testutils::GeoRasterSpec spec;
+            spec.width = 64;
+            spec.height = 64;
+            input = testutils::createGeoRaster(area.getFolder("inputs") / "ortho.tif", spec);
+        }
+    };
+
+#ifdef _WIN32
+    // Whether `path` has a low integrity label; a label that cannot be read fails the test
+    bool lowLabelled(const fs::path &path)
+    {
+        bool low = false;
+        std::string error;
+        EXPECT_TRUE(sandbox::windows::hasLowIntegrityLabel(io::toUtf8(path), &low, &error))
+            << error;
+        return low;
+    }
+
+    // The confined program writes only in a folder that has a low integrity label, and gives none:
+    // Windows would give it to every file of the folder, and the programs among them would start
+    // at low integrity from then on. A build into a folder without it is refused.
+    TEST(GdalUtilIntegrity, aBuildIntoAFolderWithoutTheLowLabelIsRefusedAndTheFolderKeepsItsLabel)
+    {
+        const UserFolder user("GdalUtilIntegrity.aBuildIntoAFolderWithoutTheLowLabelIsRefused");
+        ASSERT_FALSE(lowLabelled(user.folder));
+
+        const fs::path out = user.folder / "cog.tif";
+        const raster::Request build = buildRequest(61, raster::op::kCog, user.input, out, json::object());
+        const ToolRun run = runTool({"--request", raster::encodeRequest(build)});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        const auto response = raster::decodeResponse(run.lines.back());
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Internal);
+        EXPECT_NE(response.message.find("low integrity label"), std::string::npos)
+            << response.message;
+        EXPECT_FALSE(fs::exists(out));
+        EXPECT_FALSE(lowLabelled(user.folder));
+        EXPECT_FALSE(lowLabelled(user.program));
+    }
+#endif
+
+    // The host builds the COG into a private folder of its own beside the output (which it labels
+    // on Windows while it is empty) and moves the COG and its statistics to their names: the
+    // folder of the user gets nothing else, and on Windows it and its files keep their labels
+    TEST(GdalUtilOutputFolder, aCogBuiltIntoAFolderOfAUserLeavesNothingElseThereAndNoLabel)
+    {
+        const UserFolder user("GdalUtilOutputFolder.aCogBuiltIntoAFolderOfAUser");
+        const fs::path out = user.folder / "cog.tif";
+
+        ddb::buildCog(io::toUtf8(user.input), io::toUtf8(out));
+
+        EXPECT_TRUE(raster::reopenWrittenRaster(out));
+        EXPECT_TRUE(fs::exists(statsSidecarOf(out)));
+        std::vector<fs::path> entries;
+        for (const auto &entry : fs::directory_iterator(user.folder))
+            entries.push_back(entry.path());
+        std::sort(entries.begin(), entries.end());
+        EXPECT_EQ(entries, (std::vector<fs::path>{out, statsSidecarOf(out), user.program}));
+#ifdef _WIN32
+        EXPECT_FALSE(lowLabelled(user.folder));
+        EXPECT_FALSE(lowLabelled(user.program));
+#endif
     }
 }

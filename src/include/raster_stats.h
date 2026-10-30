@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 
+#include "fs.h"
 #include "gdal_inc.h"
 
 namespace ddb
@@ -73,6 +74,9 @@ namespace ddb
         std::list<std::shared_ptr<Entry>> entries_; // most recently used first
         Counters counters_;
     };
+
+    /// The statistics sidecar of a raster: "<raster>.stats.json", next to it
+    fs::path statsSidecarOf(const fs::path &raster);
 
     /// Reads the statistics of band (1-based) from the "<raster>.stats.json" sidecar
     /// next to path. False when there is no sidecar, it is older than the raster or it

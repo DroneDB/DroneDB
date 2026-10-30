@@ -15,6 +15,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_artefacts.h"
+#include "raster_stats.h"
 #include "exceptions.h"
 #include "json.h"
 
@@ -382,7 +383,43 @@ namespace ddb
 
     } // namespace raster
 
+    namespace
+    {
+        // The private folder beside the output that the helper writes a COG and its statistics in
+        constexpr const char *kCogStagingPrefix = ".cog-stage-";
+
+        // Moves the statistics the helper wrote next to `produced` beside `target`. Without them
+        // the sidecar that is there describes the COG that was replaced: it goes.
+        void publishStatsSidecar(const fs::path &produced, const fs::path &target)
+        {
+            const fs::path stats = statsSidecarOf(produced);
+            if (fs::exists(stats))
+                raster::publishArtefact(stats, statsSidecarOf(target));
+            else
+                io::assureIsRemoved(statsSidecarOf(target));
+        }
+    } // namespace
+
     void buildCog(const std::string &input, const std::string &outputCog, const BuildOptions &options)
+    {
+        const fs::path target = fs::absolute(io::fromUtf8(outputCog));
+        if (!target.has_filename())
+            throw InvalidArgsException("Not the path of a file for a COG: " + outputCog);
+
+        // The folder of the output holds other files (programs, the files of a user): the helper
+        // writes into a folder of its own in it, which is removed with whatever is left in it
+        const io::ScopedTempDir staging =
+            raster::makePrivateFolder(target.parent_path(), kCogStagingPrefix);
+        const fs::path produced = staging.path() / target.filename();
+        buildCogInPrivateFolder(input, produced, options);
+
+        // The COG first: the statistics count only while they are not older than it
+        raster::publishArtefact(produced, target);
+        publishStatsSidecar(produced, target);
+    }
+
+    void buildCogInPrivateFolder(const std::string &input, const fs::path &produced,
+                                 const BuildOptions &options)
     {
         // The threads of the build come from the CPU pool of this process, which bounds all the
         // builds it runs: the helper has a pool of its own and is told how many it may use. The
@@ -401,13 +438,14 @@ namespace ddb
                 LOGD << "COG build progress: " << pct << "%";
             }
         };
-        raster::rasterHelper().buildCog(io::fromUtf8(input), io::fromUtf8(outputCog), raster::toJson(params),
+        raster::rasterHelper().buildCog(io::fromUtf8(input), produced, raster::toJson(params),
                                         logProgress);
 
         // The helper read a file of a user, and what it wrote is published (as the COG of a
         // build, a tile artefact, the output of an alignment) and then trusted by its place: it
-        // has to open here as a raster first, with the drivers of the artefacts alone
-        if (!raster::reopenWrittenRaster(io::fromUtf8(outputCog)))
+        // has to open here as a raster first, with the drivers of the artefacts alone. The check
+        // closes it before the caller renames it: Windows renames no file a process holds open.
+        if (!raster::reopenWrittenRaster(produced))
             throw GDALException(std::string(raster::kGdalUtilName) + " wrote a COG of " + input +
                                 " that cannot be opened");
     }
@@ -486,8 +524,7 @@ namespace ddb
             statsJson["bands"] = bandsJson;
             statsJson["computedAt"] = oss.str();
 
-            fs::path cogFsPath = io::fromUtf8(cogPath);
-            fs::path statsPath = cogFsPath.parent_path() / io::concat(cogFsPath.filename(), ".stats.json");
+            const fs::path statsPath = statsSidecarOf(io::fromUtf8(cogPath));
             std::ofstream out(statsPath);
             if (out.is_open()) {
                 out << statsJson.dump(2);

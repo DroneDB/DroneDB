@@ -80,10 +80,14 @@ every layer `active`.
 `job-object`: a Job Object with a memory limit and a CPU time limit per process, one active
 process (the helper cannot start another) and the user interface restrictions (desktop, display
 settings, exit windows, global atoms, other processes' handles, the clipboard, system
-parameters). `integrity-level`: every folder of `writePaths` gets a low integrity label while
-the process can still set labels, then the process drops its token to low integrity, which
-stops it writing anywhere without that label. `windows::createJob`, `windows::setLowIntegrityLabel`
-and `windows::lowerCurrentProcessIntegrity` are public for a host that sets a child up from the
+parameters). `integrity-level`: every folder of `writePaths` must have a low integrity label
+already, which the host gives to the folder it makes for the output while the folder is empty
+(`windows::setLowIntegrityLabel`); a folder without it is refused, in every mode but `off`.
+Then the process drops its token to low integrity, which stops it writing anywhere without that
+label. The layer labels nothing itself: Windows carries a new label of a folder down to the files
+already in it, and a program among them would start at low integrity from then on.
+`windows::createJob`, `windows::setLowIntegrityLabel`, `windows::hasLowIntegrityLabel` and
+`windows::lowerCurrentProcessIntegrity` are public for a host that sets a child up from the
 outside. The layers of Linux are not listed, so `strict` starts and a report can show every
 layer `active`.
 

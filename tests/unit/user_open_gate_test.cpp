@@ -7,6 +7,7 @@
 // every function of the open policy that would parse such a file, so a code path of the host that
 // does it by mistake fails at once instead of exposing the host to the file.
 
+#include <chrono>
 #include <stdexcept>
 #include <string>
 
@@ -17,6 +18,7 @@
 #include "gtest/gtest-spi.h"
 #include "gtest/gtest.h"
 #include "mio.h"
+#include "process_runner.h"
 #include "raster_ops.h"
 #include "raster_test_utils.h"
 #include "test.h"
@@ -138,5 +140,36 @@ namespace
         // The detection of a thermal raster that is given what the tags say reads none
         EXPECT_FALSE(isThermalImage(io::toUtf8(files.raster), false));
         EXPECT_TRUE(isThermalImage(io::toUtf8(files.raster), true));
+    }
+
+    // A body that records nothing: the child of the next test runs it
+    USER_OPEN_TEST(UserOpenGate, aBodyThatRecordsNothing)
+    {
+        EXPECT_TRUE(gdalopen::userFileOpensEnabled());
+    }
+
+    // A child that cannot write what its body recorded says why and fails, so that its parent
+    // reports the reason rather than a child that ended well without a result
+    TEST(UserOpenGate, aChildThatCannotWriteItsResultSaysWhyAndFails)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path result = ta.getPath("not-there") / "result.json";
+
+        process::Options options;
+        options.envOverrides = {{testutils::kUserOpenResultEnv, io::toUtf8(result)},
+                                {testutils::kUserOpenCallEnv, "0"},
+                                {"GTEST_OUTPUT", ""}};
+        options.idleTimeout = std::chrono::milliseconds(0);
+        const process::Result run =
+            process::run(testutils::testBinary(),
+                         {"--gtest_filter=UserOpenGate.aBodyThatRecordsNothing", "--gtest_repeat=1",
+                          "--gtest_shuffle=0", "--gtest_brief=1"},
+                         options);
+
+        EXPECT_TRUE(run.exited) << run.describe();
+        EXPECT_NE(run.exitCode, 0) << run.failureText(2000);
+        EXPECT_NE(run.outputTail.find("cannot write result " + io::toUtf8(result) + ": "), std::string::npos)
+            << run.outputTail;
+        EXPECT_FALSE(fs::exists(result));
     }
 } // namespace

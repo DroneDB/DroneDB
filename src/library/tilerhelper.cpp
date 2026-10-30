@@ -23,6 +23,7 @@
 #include "geoproject.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
+#include "raster_stats.h"
 #include "hash.h"
 #include "json.h"
 #include "logger.h"
@@ -238,7 +239,7 @@ namespace ddb
                 // is not older than the raster (raster_stats.h)
                 const auto now = fs::file_time_type::clock::now();
                 fs::last_write_time(target, now, ec);
-                fs::last_write_time(io::concat(target, ".stats.json"), now, ec);
+                fs::last_write_time(statsSidecarOf(target), now, ec);
                 return target;
             }
 
@@ -267,8 +268,8 @@ namespace ddb
         {
             const io::ScopedTempDir request = raster::makeArtefactRequestFolder("cog-");
             const fs::path produced = request.path() / "cog.tif";
-            // buildCog refuses an output that does not open as a raster
-            buildCog(io::toUtf8(raster), io::toUtf8(produced));
+            // The build refuses an output that does not open as a raster
+            buildCogInPrivateFolder(io::toUtf8(raster), produced);
 
             releaseTilersOf(raster, target);
             raster::publishArtefact(produced, target);

@@ -4,6 +4,7 @@
 #include "user_open_child.h"
 
 #include <chrono>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
@@ -33,11 +34,6 @@ namespace testutils
 {
     namespace
     {
-        // What the parent tells the child: the file it writes what the body recorded to, and which
-        // call of runWithUserFileOpens in the test runs the body
-        constexpr const char *kResultEnv = "DDB_TEST_USER_OPEN_RESULT";
-        constexpr const char *kCallEnv = "DDB_TEST_USER_OPEN_CALL";
-
         // The role of this process: a child started by runWithUserFileOpens, or not (result empty)
         struct ChildRole
         {
@@ -50,19 +46,24 @@ namespace testutils
         ChildRole takeChildRole()
         {
             ChildRole role;
-            const char *result = std::getenv(kResultEnv);
-            const char *call = std::getenv(kCallEnv);
+            const char *result = std::getenv(kUserOpenResultEnv);
+            const char *call = std::getenv(kUserOpenCallEnv);
             if (result != nullptr && *result != '\0' && call != nullptr)
             {
                 role.result = ddb::io::fromUtf8(result);
                 role.call = std::atoi(call);
             }
-            unsetEnv(kResultEnv);
-            unsetEnv(kCallEnv);
+            unsetEnv(kUserOpenResultEnv);
+            unsetEnv(kUserOpenCallEnv);
             return role;
         }
 
         const ChildRole g_role = takeChildRole();
+
+        // The exit code of a child that could not write its result, and how much of what a child
+        // printed last a failure of the parent quotes
+        constexpr int kResultNotWrittenExitCode = 3;
+        constexpr size_t kChildOutputTail = 1000;
 
         // Counts the calls of runWithUserFileOpens in the running test
         class CallCounter : public ::testing::EmptyTestEventListener
@@ -82,18 +83,6 @@ namespace testutils
                 return created;
             }();
             return counter->calls++;
-        }
-
-        // The test binary that runs: the folder of the program and the name it was started with
-        fs::path testBinary()
-        {
-            const auto &argvs = ::testing::internal::GetArgvs();
-            fs::path name = argvs.empty() ? fs::path() : ddb::io::fromUtf8(argvs.front()).filename();
-#ifdef _WIN32
-            if (name.extension().empty())
-                name += ".exe";
-#endif
-            return ddb::io::getExeFolderPath() / name;
         }
 
         // ---- the child
@@ -151,11 +140,12 @@ namespace testutils
             return parts;
         }
 
-        // Ends the child once the result is written. The rest of the test (what follows the call,
-        // the TearDown of the fixture) is the parent's, and the objects of the test still live, so
-        // nothing is destroyed: no static destructor, no atexit handler, no DLL notification. The
-        // test areas of the child go with it unless the body failed (they are what to look at).
-        [[noreturn]] void endChild(bool failed)
+        // Ends the child once the result is written, with `exitCode`. The rest of the test (what
+        // follows the call, the TearDown of the fixture) is the parent's, and the objects of the
+        // test still live, so nothing is destroyed: no static destructor, no atexit handler, no
+        // DLL notification. The test areas of the child go with it unless the body failed (they
+        // are what to look at).
+        [[noreturn]] void endChild(bool failed, int exitCode)
         {
             std::error_code ec;
             if (failed)
@@ -167,9 +157,23 @@ namespace testutils
             std::cerr.flush();
             std::fflush(nullptr);
 #ifdef _WIN32
-            ::TerminateProcess(::GetCurrentProcess(), 0);
+            ::TerminateProcess(::GetCurrentProcess(), static_cast<UINT>(exitCode));
 #endif
-            ::_exit(0);
+            ::_exit(exitCode);
+        }
+
+        // Writes what the body recorded to the file of the parent; the reason it could not, empty
+        // when it did
+        std::string writeResult(const fs::path &file, const json &parts)
+        {
+            std::ofstream out(file, std::ios::binary);
+            if (!out)
+                return "cannot open it (" + std::generic_category().message(errno) + ")";
+            out << parts.dump();
+            out.close();
+            if (!out)
+                return "cannot write it (" + std::generic_category().message(errno) + ")";
+            return std::string();
         }
 
         void runInChild(const std::function<void()> &body, int call)
@@ -179,11 +183,15 @@ namespace testutils
                 return;
 
             const json parts = runBody(body);
+            const std::string writeError = writeResult(g_role.result, parts);
+            if (!writeError.empty())
             {
-                std::ofstream out(g_role.result, std::ios::binary);
-                out << parts.dump();
+                // The parent reports the end of a child without a result, with what it printed
+                std::cerr << "cannot write result " << ddb::io::toUtf8(g_role.result) << ": " << writeError
+                          << std::endl;
+                endChild(true, kResultNotWrittenExitCode);
             }
-            endChild(!parts.empty());
+            endChild(!parts.empty(), 0);
         }
 
         // ---- the parent
@@ -227,8 +235,8 @@ namespace testutils
             const fs::path result = TestArea::processRoot() / ("user-open-" + ddb::randomString(12) + ".json");
 
             ddb::process::Options options;
-            options.envOverrides = {{kResultEnv, ddb::io::toUtf8(result)},
-                                    {kCallEnv, std::to_string(call)},
+            options.envOverrides = {{kUserOpenResultEnv, ddb::io::toUtf8(result)},
+                                    {kUserOpenCallEnv, std::to_string(call)},
                                     // The report of the parent is the parent's to write
                                     {"GTEST_OUTPUT", ""}};
             // The test has the time limit of the run (ctest), as any test does
@@ -251,8 +259,9 @@ namespace testutils
             }
             if (!run.success() || received.empty())
             {
-                ADD_FAILURE() << "the child that opens user files ended without a result (" << run.describe()
-                              << "): its test failed before the call, or does not run alone";
+                ADD_FAILURE() << "the child that opens user files ended without a result ("
+                              << run.failureText(kChildOutputTail)
+                              << "): its test failed before the call, does not run alone, or could not write it";
                 return;
             }
 
@@ -265,6 +274,17 @@ namespace testutils
             report(parts);
         }
     } // namespace
+
+    fs::path testBinary()
+    {
+        const auto &argvs = ::testing::internal::GetArgvs();
+        fs::path name = argvs.empty() ? fs::path() : ddb::io::fromUtf8(argvs.front()).filename();
+#ifdef _WIN32
+        if (name.extension().empty())
+            name += ".exe";
+#endif
+        return ddb::io::getExeFolderPath() / name;
+    }
 
     void runWithUserFileOpens(const std::function<void()> &body)
     {

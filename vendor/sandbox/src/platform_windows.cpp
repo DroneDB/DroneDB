@@ -5,9 +5,9 @@
 // The Windows layers: a Job Object that limits memory, CPU time and the number of processes
 // and shuts the process off from the desktop, and a low integrity level, which keeps the process
 // from writing anywhere that has not been given a low integrity label (the output folders of
-// the policy). Reads and the network are not confined on Windows. The layers of Linux are not
-// listed: a layer is missing only where its system could offer it, so strict can start here and
-// the report of a host can show every layer active.
+// the policy, which the host labels). Reads and the network are not confined on Windows. The
+// layers of Linux are not listed: a layer is missing only where its system could offer it, so
+// strict can start here and the report of a host can show every layer active.
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -147,6 +147,49 @@ namespace sandbox
             return true;
         }
 
+        bool hasLowIntegrityLabel(const std::string &pathUtf8, bool *low, std::string *error)
+        {
+            *low = false;
+            PACL sacl = nullptr;
+            PSECURITY_DESCRIPTOR descriptor = nullptr;
+            const std::wstring path = widen(pathUtf8);
+            const DWORD status = GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION,
+                                                       nullptr, nullptr, nullptr, &sacl, &descriptor);
+            if (status != ERROR_SUCCESS)
+            {
+                *error = "GetNamedSecurityInfo failed for '" + pathUtf8 + "' (error " + std::to_string(status) + ")";
+                return false;
+            }
+            const LocalMemory owner(descriptor);
+
+            // No label is the medium level. A label that is only inherited by what is created
+            // below (inherit-only) is not the object's own.
+            if (sacl == nullptr)
+                return true;
+            for (DWORD i = 0; i < sacl->AceCount; i++)
+            {
+                void *ace = nullptr;
+                if (!GetAce(sacl, i, &ace))
+                {
+                    *error = lastError("GetAce");
+                    return false;
+                }
+                const auto *header = static_cast<const ACE_HEADER *>(ace);
+                if (header->AceType != SYSTEM_MANDATORY_LABEL_ACE_TYPE ||
+                    (header->AceFlags & INHERIT_ONLY_ACE) != 0)
+                    continue;
+                auto *label = static_cast<SYSTEM_MANDATORY_LABEL_ACE *>(ace);
+                const PSID sid = &label->SidStart;
+                const UCHAR count = *GetSidSubAuthorityCount(sid);
+                if (count == 0)
+                    continue;
+                const DWORD level = *GetSidSubAuthority(sid, static_cast<DWORD>(count - 1));
+                *low = level <= static_cast<DWORD>(SECURITY_MANDATORY_LOW_RID);
+                return true;
+            }
+            return true;
+        }
+
         bool lowerCurrentProcessIntegrity(std::string *error)
         {
             HANDLE rawToken = nullptr;
@@ -205,14 +248,27 @@ namespace sandbox
                 return state("job-object", true);
             }
 
-            // The output folders get the low label first, while the process can still change
-            // labels; then the process drops to low integrity
+            // The process drops to low integrity, so it writes only below the output folders,
+            // which must have a low integrity label already: the host gives one to the folder it
+            // makes for a request while the folder is empty. The label is not given here: Windows
+            // carries a new label of a folder down to the files already in it, and a program
+            // among them would start at low integrity from then on, and could no longer write
+            // in its own folders. An output folder without the label is refused, and keeps the
+            // label it has.
             LayerResult applyIntegrity(const Policy &policy)
             {
                 std::string error;
                 for (const auto &path : policy.writePaths)
-                    if (!windows::setLowIntegrityLabel(path, &error))
+                {
+                    bool low = false;
+                    if (!windows::hasLowIntegrityLabel(path, &low, &error))
                         return fatal("integrity-level", error);
+                    if (!low)
+                        return fatal("integrity-level",
+                                     "the output folder '" + path +
+                                         "' has no low integrity label: the host gives it one when it "
+                                         "makes the folder (sandbox::windows::setLowIntegrityLabel)");
+                }
                 if (!windows::lowerCurrentProcessIntegrity(&error))
                     return result("integrity-level", false, error);
                 return result("integrity-level", true, "writes only below folders with a low integrity label");

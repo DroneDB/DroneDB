@@ -147,14 +147,19 @@ USER_OPEN_TEST_F(CogOptimizationTest, TestBuildCogFromNonOptimized) {
 }
 
 USER_OPEN_TEST_F(CogOptimizationTest, TestInvalidFiles) {
+    TestArea ta("CogOptimizationTest");
+
     // Test with non-existent file
-    EXPECT_FALSE(ddb::isOptimizedCog("non_existent_file.tif"))
+    EXPECT_FALSE(ddb::isOptimizedCog(ta.getPath("non_existent_file.tif").string()))
         << "Non-existent file should return false";
 
-    // Test buildCog with invalid input
+    // Test buildCog with invalid input. The output goes to the test area, never to the
+    // current folder (the folder of the test programs)
+    const fs::path output = ta.getPath("output.tif");
     EXPECT_THROW({
-        ddb::buildCog("non_existent_input.tif", "output.tif");
+        ddb::buildCog(ta.getPath("non_existent_input.tif").string(), output.string());
     }, std::exception) << "Should throw exception for non-existent input";
+    EXPECT_FALSE(fs::exists(output));
 }
 
 } // namespace

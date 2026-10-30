@@ -1213,3 +1213,78 @@ namespace
 } // namespace
 
 #endif // __linux__
+
+#ifdef _WIN32
+
+#include <fstream>
+
+#include "mio.h"
+#include "testarea.h"
+
+namespace
+{
+    using namespace ddb;
+
+    // Whether `path` has a low integrity label; a label that cannot be read fails the test
+    bool lowLabelled(const fs::path &path)
+    {
+        bool low = false;
+        std::string error;
+        EXPECT_TRUE(sandbox::windows::hasLowIntegrityLabel(io::toUtf8(path), &low, &error)) << error;
+        return low;
+    }
+
+    // The label a confined process needs to write in a folder: the host gives it to the folder it
+    // has just made, and what is made in the folder afterwards inherits it
+    TEST(Sandbox, aFolderGivenTheLowLabelHasItAndSoHasWhatIsMadeInItAfterwards)
+    {
+        TestArea area("Sandbox.aFolderGivenTheLowLabelHasIt", true);
+        const fs::path folder = area.getFolder("out");
+        EXPECT_FALSE(lowLabelled(folder)) << "a new folder has the medium level of its parent";
+
+        std::string error;
+        ASSERT_TRUE(sandbox::windows::setLowIntegrityLabel(io::toUtf8(folder), &error)) << error;
+        EXPECT_TRUE(lowLabelled(folder));
+
+        std::ofstream(folder / "made-after.txt") << "written after the label";
+        EXPECT_TRUE(lowLabelled(folder / "made-after.txt"));
+        fs::create_directory(folder / "sub");
+        EXPECT_TRUE(lowLabelled(folder / "sub"));
+
+        // A path that does not exist has no label to read
+        bool low = true;
+        const std::string missing = io::toUtf8(area.getPath("not-there"));
+        EXPECT_FALSE(sandbox::windows::hasLowIntegrityLabel(missing, &low, &error));
+        EXPECT_FALSE(low);
+        EXPECT_NE(error.find("not-there"), std::string::npos) << error;
+    }
+
+    // The process does not label its output folders: a label given to a folder goes to the files
+    // already in it, and a program among them would start at low integrity. A folder without the
+    // label is refused before the process gives up anything (the job object is left out, so that
+    // the test process stays as it is), and the folder and its files keep their labels.
+    TEST(Sandbox, anOutputFolderWithoutTheLowLabelIsRefusedAndKeepsItsLabel)
+    {
+        TestArea area("Sandbox.anOutputFolderWithoutTheLowLabelIsRefused", true);
+        const fs::path folder = area.getFolder("out");
+        const fs::path program = folder / "program.exe";
+        std::ofstream(program) << "a program in the folder of an output";
+        // A folder that already has the label (left by an older build) would be accepted, and the
+        // test process would drop to low integrity for the tests that follow
+        ASSERT_FALSE(lowLabelled(folder)) << "the test area already has the low label";
+
+        sandbox::Policy policy;
+        policy.writePaths = {io::toUtf8(folder)};
+        policy.unavailableLayers = {"job-object"};
+        const sandbox::Report report = sandbox::apply(policy, Mode::BestEffort);
+
+        EXPECT_FALSE(report.ok);
+        EXPECT_NE(report.error.find("integrity-level"), std::string::npos) << report.error;
+        EXPECT_NE(report.error.find(io::toUtf8(folder)), std::string::npos) << report.error;
+        EXPECT_NE(report.error.find("low integrity label"), std::string::npos) << report.error;
+        EXPECT_FALSE(lowLabelled(folder));
+        EXPECT_FALSE(lowLabelled(program));
+    }
+} // namespace
+
+#endif // _WIN32

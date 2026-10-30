@@ -94,7 +94,7 @@ namespace ddb
         // the host checks it with openArtefactRaster before it moves it to its name
         io::ScopedTempDir makeArtefactRequestFolder(const std::string &prefix);
 
-        // Moves a file the helper wrote (made by makeArtefactRequestFolder) to `target`, replacing
+        // Moves a file the helper wrote (in a folder made by makePrivateFolder) to `target`, replacing
         // what is there, in one rename: readers see the old file or the whole new one. Another
         // device than the cache's costs a copy to a sibling of `target` first, then the rename.
         // @throws FSException

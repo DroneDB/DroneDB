@@ -6,6 +6,7 @@
 
 #include <functional>
 
+#include "fs.h"
 #include "gtest/gtest.h"
 
 // The test binaries are hosts: they never declare themselves the raster helper, so in them
@@ -29,6 +30,16 @@ namespace testutils
     // GDAL write fail), shares the profile and caches of this process (DDB_HOME), and what it
     // changes in its memory stays there. A test may call it more than once: each call has a child.
     void runWithUserFileOpens(const std::function<void()> &body);
+
+    // What the parent tells the child: the file it writes what the body recorded to, and which
+    // call of runWithUserFileOpens in the test runs the body. A child that cannot write the file
+    // says why and exits with a code other than 0.
+    constexpr const char *kUserOpenResultEnv = "DDB_TEST_USER_OPEN_RESULT";
+    constexpr const char *kUserOpenCallEnv = "DDB_TEST_USER_OPEN_CALL";
+
+    // The test binary that runs: the folder of the program and the name it was started with. The
+    // children of runWithUserFileOpens are new processes of it.
+    fs::path testBinary();
 } // namespace testutils
 
 // TEST whose body runs as runWithUserFileOpens says

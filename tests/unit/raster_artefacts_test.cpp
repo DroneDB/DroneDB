@@ -7,6 +7,7 @@
 // converted by the raster helper into the artefacts folder of the cache, and a COG of a build is
 // tiled as it is.
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <memory>
@@ -15,6 +16,7 @@
 #include <vector>
 
 #include "build_layout.h"
+#include "cog.h"
 #include "ddb.h"
 #include "exceptions.h"
 #include "cpl_http.h"
@@ -28,6 +30,7 @@
 #include "raster_artefacts.h"
 #include "raster_cache.h"
 #include "raster_helper.h"
+#include "raster_stats.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
@@ -690,5 +693,93 @@ namespace
         EXPECT_FALSE(raster::isLibddbArtefact(converted));
         EXPECT_TRUE(raster::isLibddbArtefact(cog));
         EXPECT_EQ(cog.filename(), fs::path(raster::artefactKey(converted) + ".tif"));
+    }
+
+    // ------------------------------------------------------------------ the COG of an output
+
+    // The stand-in that also writes the statistics next to the COG, as the helper does, and notes
+    // the access of the folder it was told to write in
+    class StatsWritingHelper : public ConvertingHelper
+    {
+      public:
+        using ConvertingHelper::ConvertingHelper;
+
+        void buildCog(const fs::path &path, const fs::path &out, const json &params,
+                      const raster::ProgressCallback &progress) override
+        {
+            outFolderPerms = fs::status(out.parent_path()).permissions();
+            ConvertingHelper::buildCog(path, out, params, progress);
+            writeFile(statsSidecarOf(out), R"({"bands":{}})");
+        }
+
+        fs::perms outFolderPerms = fs::perms::unknown;
+    };
+
+    // The folder of an output is the caller's and holds other files (on Windows, a folder the
+    // confined helper may write in gets a label that the files already in it take as well): the
+    // helper writes the COG and its statistics into a private folder made beside the output,
+    // and they are moved to their names
+    TEST_F(RasterArtefacts, aCogIsBuiltInAPrivateFolderBesideItsOutputAndMovedToItsName)
+    {
+        StatsWritingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
+        const raster::ScopedRasterHelper installed(helper);
+        const fs::path folder = area_->getFolder("outputs");
+        const fs::path other = folder / "program.exe";
+        writeFile(other, "a file of the user");
+        const fs::path input = area_->getPath("raw.tif");
+        writeFile(input, "bytes");
+        const fs::path out = folder / "x.tif";
+
+        buildCog(io::toUtf8(input), io::toUtf8(out));
+
+        ASSERT_EQ(helper.count("cog"), 1u);
+        EXPECT_EQ(helper.pathOf("cog"), input);
+        const fs::path staging = helper.lastCogOut.parent_path();
+        EXPECT_NE(staging, folder) << "the helper never writes into the folder of the output";
+        EXPECT_EQ(staging.parent_path(), folder);
+#ifndef _WIN32
+        EXPECT_EQ(helper.outFolderPerms, fs::perms::owner_all) << "a folder only this user enters";
+#endif
+        EXPECT_FALSE(fs::exists(staging)) << "the private folder is removed";
+
+        EXPECT_TRUE(raster::reopenWrittenRaster(out));
+        EXPECT_EQ(readFile(statsSidecarOf(out)), R"({"bands":{}})");
+        std::vector<fs::path> entries;
+        for (const auto &entry : fs::directory_iterator(folder))
+            entries.push_back(entry.path());
+        std::sort(entries.begin(), entries.end());
+        EXPECT_EQ(entries, (std::vector<fs::path>{other, out, statsSidecarOf(out)}));
+    }
+
+    // A COG built again without statistics leaves none of the COG it replaced next to it
+    TEST_F(RasterArtefacts, aCogBuiltWithoutStatisticsRemovesTheStatisticsOfTheCogItReplaces)
+    {
+        ConvertingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
+        const raster::ScopedRasterHelper installed(helper);
+        const fs::path out = area_->getFolder("outputs") / "x.tif";
+        writeFile(out, "the COG of before");
+        writeFile(statsSidecarOf(out), "the statistics of the COG of before");
+        const fs::path input = area_->getPath("raw.tif");
+        writeFile(input, "bytes");
+
+        buildCog(io::toUtf8(input), io::toUtf8(out));
+
+        EXPECT_TRUE(raster::reopenWrittenRaster(out));
+        EXPECT_FALSE(fs::exists(statsSidecarOf(out)));
+    }
+
+    // A COG the helper wrote that does not open is not moved to its name, and its folder goes
+    TEST_F(RasterArtefacts, aCogThatDoesNotOpenIsNotMovedToTheOutput)
+    {
+        const fs::path notACog = area_->getPath("prepared") / "cog.tif";
+        writeFile(notACog, "this is not a GeoTIFF");
+        ConvertingHelper helper(notACog);
+        const raster::ScopedRasterHelper installed(helper);
+        const fs::path folder = area_->getFolder("outputs");
+        const fs::path input = area_->getPath("raw.tif");
+        writeFile(input, "bytes");
+
+        EXPECT_THROW(buildCog(io::toUtf8(input), io::toUtf8(folder / "x.tif")), GDALException);
+        EXPECT_TRUE(fs::is_empty(folder));
     }
 }

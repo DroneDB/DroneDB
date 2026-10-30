@@ -24,6 +24,7 @@
 
 #include <fstream>
 #include <cstring>
+#include <utility>
 
 namespace {
 
@@ -713,23 +714,30 @@ TEST(multispectral, tileNoVisParamsFallback) {
     }
 }
 
+// The deepest zoom of the COG of a raster and the range of its tiles there, from a tiler that is
+// closed on return: a forced tile makes the COG again, and Windows replaces no file a tiler
+// holds open
+std::pair<int, BoundingBox<Projected2Di>> deepestTilesOf(const fs::path& raster) {
+    GDALTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
+    const int z = tiler.getMinMaxZ().max;
+    return {z, tiler.getMinMaxCoordsForZ(z)};
+}
+
 TEST(multispectral, cApiMemoryTileEx) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_capi.tif", 256, 256, 5, GDT_UInt16);
 
-    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
-    auto info = tiler.getMinMaxZ();
-    auto bounds = tiler.getMinMaxCoordsForZ(info.max);
+    const auto [zoom, bounds] = deepestTilesOf(rasterPath);
 
     uint8_t* outBuffer = nullptr;
     int outBufferSize = 0;
     DDBErr err = DDBMemoryTileEx(rasterPath.string().c_str(),
-                                  info.max, bounds.min.x, bounds.min.y,
+                                  zoom, bounds.min.x, bounds.min.y,
                                   256, false, true, nullptr,
                                   nullptr, "3,2,1", nullptr, nullptr, nullptr, nullptr,
                                   &outBuffer, &outBufferSize);
 
-    ASSERT_EQ(err, DDBERR_NONE) << "DDBMemoryTileEx failed with valid tile coords";
+    ASSERT_EQ(err, DDBERR_NONE) << "DDBMemoryTileEx failed with valid tile coords: " << DDBGetLastError();
     EXPECT_NE(outBuffer, nullptr);
     EXPECT_GT(outBufferSize, 0);
     if (outBuffer) DDBVSIFree(outBuffer);
@@ -739,19 +747,18 @@ TEST(multispectral, cApiMemoryTileExFormula) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_capi_formula.tif", 256, 256, 5, GDT_UInt16);
 
-    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
-    auto info = tiler.getMinMaxZ();
-    auto bounds = tiler.getMinMaxCoordsForZ(info.max);
+    const auto [zoom, bounds] = deepestTilesOf(rasterPath);
 
     uint8_t* outBuffer = nullptr;
     int outBufferSize = 0;
     DDBErr err = DDBMemoryTileEx(rasterPath.string().c_str(),
-                                  info.max, bounds.min.x, bounds.min.y,
+                                  zoom, bounds.min.x, bounds.min.y,
                                   256, false, true, nullptr,
                                   nullptr, nullptr, "VARI", "RGB", "rdylgn", "-1,1",
                                   &outBuffer, &outBufferSize);
 
-    ASSERT_EQ(err, DDBERR_NONE) << "DDBMemoryTileEx with formula failed with valid tile coords";
+    ASSERT_EQ(err, DDBERR_NONE) << "DDBMemoryTileEx with formula failed with valid tile coords: "
+                                << DDBGetLastError();
     EXPECT_NE(outBuffer, nullptr);
     EXPECT_GT(outBufferSize, 0);
     if (outBuffer) DDBVSIFree(outBuffer);
