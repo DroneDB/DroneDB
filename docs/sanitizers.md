@@ -73,15 +73,23 @@ which leaves through `std::exit()` must call `disableLeakCheckAtExit()`
 (`tests/sanitizer_hooks.h`) in the child: the child holds a copy of the parent's heap without
 the parent's other threads, so its leak check reports the parent's live objects.
 
-TSan, concurrency tests (what the nightly `TSan (nightly)` workflow runs, report-only). Build
-`ddb_unit_tests ddbtest` in `build-tsan`, then:
+TSan, every unit and integration test (what the nightly `TSan (nightly)` workflow runs,
+report-only). Build `ddb_unit_tests ddbtest` in `build-tsan`, then:
 
 ```bash
 cd build-tsan
-export TSAN_OPTIONS=halt_on_error=0:second_deadlock_stack=1:suppressions=$PWD/../tests/tsan.supp
-./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:PooledConnections.*:OpenIndex.concurrent*:TilerCache.concurrent*:Shutdown.*:CancelToken.*:Cancellation.*:CAbiLog.*'
-./ddbtest --gtest_filter='CopcNodeCache.concurrent*:CopcNodeReader.concurrent*:PointCloudTiler.concurrent*:PointRasterizer.concurrent*:ParallelLoop.*:ParallelIndex.*:IsBuildActiveTest.RealBuildInThread:tiles3dBuild.cleanupNeverStripsTilesFromConcurrentModelBuild:Defects.Target_RandomHelperGivesEachThreadItsOwnEngine:Defects.Target_SingletonsAgreeUnderConcurrentFirstUse:Defects.Target_DsmCache*'
+export DDB_SKIP_TIMING_TESTS=1 \
+  TSAN_OPTIONS=halt_on_error=0:second_deadlock_stack=1:suppressions=$PWD/../tests/tsan.supp
+./ddb_unit_tests --gtest_brief=1 --gtest_filter='-Sandbox.threadsWorkButNoOtherProcessCanBeMade:Sandbox.withTheSandboxOffTheSameCodeMakesProcesses:MetadataUtilToolTest.endOfInput*'
+./ddbtest --gtest_brief=1 --gtest_filter='-testTilerHelper.FailedDownloadIsNotCached'
 ```
+
+The tests left out cannot run under TSan: the two `Sandbox` tests and
+`testTilerHelper.FailedDownloadIsNotCached` start a thread in a child forked from the
+multi-threaded test process, which the runtime ends ("starting new threads after multi-threaded
+fork is not supported", exit code 66), and the `endOfInput` tests of metadata-util give the
+instrumented helper one second to end, which its exit takes longer than. The unit tests take
+about 5 minutes and the integration tests about 11 on 32 cores.
 
 TSan only sees code it instrumented: frames of the prebuilt dependencies are missing from its
 stacks, and their atomics and internal locks are invisible to it. When a report shows only
