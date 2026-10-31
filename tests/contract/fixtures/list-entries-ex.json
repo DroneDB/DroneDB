@@ -1,0 +1,143 @@
+{
+  "call": "DDBBuild(<root>, \"ortho.tif\"), then DDBListEntriesEx(<root>, \"\", \"\", \"\", {recursive=true, withDetails=false, withBuild=true})",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "version"
+    ]
+  },
+  "output": [
+    {
+      "build": {
+        "artifacts": [],
+        "awaitingFiles": false,
+        "buildable": false,
+        "hash": null,
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": null,
+        "source": null,
+        "state": "none"
+      },
+      "depth": 0,
+      "hash": "457ca8f0e0b21bbad706ae2c3f7bfaace967212b6c8cbf5cfeb478e388560ff7",
+      "mtime": 1700000000,
+      "path": "a.txt",
+      "size": 31,
+      "type": 2
+    },
+    {
+      "build": {
+        "artifacts": [],
+        "awaitingFiles": false,
+        "buildable": true,
+        "hash": "76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": "<root>/.ddb/build/76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+        "source": "cloud.las",
+        "state": "none"
+      },
+      "depth": 0,
+      "hash": "76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+      "mtime": 1700000000,
+      "path": "cloud.las",
+      "size": 749,
+      "type": 5
+    },
+    {
+      "build": {
+        "artifacts": [],
+        "awaitingFiles": false,
+        "buildable": true,
+        "hash": "6ff9caf347f675d2b45a6d9aa600a0b337f23c193c971302e55bca4a2151bde4",
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": "<root>/.ddb/build/6ff9caf347f675d2b45a6d9aa600a0b337f23c193c971302e55bca4a2151bde4",
+        "source": "layer.geojson",
+        "state": "none"
+      },
+      "depth": 0,
+      "hash": "6ff9caf347f675d2b45a6d9aa600a0b337f23c193c971302e55bca4a2151bde4",
+      "mtime": 1700000000,
+      "path": "layer.geojson",
+      "size": 336,
+      "type": 14
+    },
+    {
+      "build": {
+        "artifacts": [
+          {
+            "downloadName": "cog.tif",
+            "kind": "file",
+            "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
+            "path": "cog/cog.tif",
+            "role": "raster.cog",
+            "version": "<volatile>"
+          }
+        ],
+        "awaitingFiles": false,
+        "buildable": true,
+        "hash": "d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": "<root>/.ddb/build/d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+        "source": "ortho.tif",
+        "state": "complete"
+      },
+      "depth": 0,
+      "hash": "d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+      "mtime": 1700000000,
+      "path": "ortho.tif",
+      "size": 3462,
+      "type": 4
+    },
+    {
+      "build": {
+        "artifacts": [],
+        "awaitingFiles": false,
+        "buildable": false,
+        "hash": null,
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": null,
+        "source": null,
+        "state": "none"
+      },
+      "depth": 0,
+      "mtime": 1700000000,
+      "path": "sub",
+      "size": 0,
+      "type": 1
+    },
+    {
+      "build": {
+        "artifacts": [],
+        "awaitingFiles": false,
+        "buildable": false,
+        "hash": null,
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": null,
+        "source": null,
+        "state": "none"
+      },
+      "depth": 1,
+      "hash": "5f323dac61d614a0cf94c65fa166cddbd5f5013b19163238b06d94966076d357",
+      "mtime": 1700000000,
+      "path": "sub/img.jpg",
+      "size": 1151,
+      "type": 3
+    }
+  ],
+  "schema": "list-entries-ex.schema.json"
+}

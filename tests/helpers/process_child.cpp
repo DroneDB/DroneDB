@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "buildlock.h"
 #include "fs.h"
@@ -19,6 +21,7 @@
 #include <io.h>
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 
@@ -54,6 +57,70 @@ void writeExtra(const std::string& id, const char* data, size_t length) {
     const ssize_t written = ::write(std::stoi(id), data, length);
     (void)written;
 #endif
+}
+
+// Line server for the session tests: one reply per request line, flushed at once, until
+// stdin reaches EOF (the way a persistent helper ends). `stderrBytes` > 0: each request first
+// makes the child write that many bytes of numbered 64-byte lines to stderr, which the parent
+// must drain for the reply to come.
+int serveLines(size_t stderrBytes) {
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        for (size_t written = 0, i = 0; written < stderrBytes; written += 64, ++i) {
+            char text[65];
+            std::snprintf(text, sizeof(text), "%-63.63s\n", ("flood-line-" + std::to_string(i)).c_str());
+            std::fwrite(text, 1, 64, stderr);
+        }
+        std::fflush(stderr);
+        std::fputs(("echo:" + line + "\n").c_str(), stdout);
+        std::fflush(stdout);
+    }
+    return 0;
+}
+
+// Writes 64-byte lines to stderr from several threads for `ms` milliseconds without ever
+// reading stdin, then exits 0. Several writers and (on Linux) a pipe of 1 MiB keep the parent's
+// end readable at every moment, as a child that never stops talking does.
+int floodStderr(int ms) {
+#ifdef F_SETPIPE_SZ
+    ::fcntl(STDERR_FILENO, F_SETPIPE_SZ, 1024 * 1024);
+#endif
+    const auto until = std::chrono::steady_clock::now() + milliseconds(ms);
+    const auto writer = [until] {
+        std::string chunk(64 * 1024, 'e');
+        for (size_t end = 63; end < chunk.size(); end += 64) chunk[end] = '\n';
+        while (std::chrono::steady_clock::now() < until) {
+#ifdef _WIN32
+            DWORD written = 0;
+            WriteFile(GetStdHandle(STD_ERROR_HANDLE), chunk.data(), static_cast<DWORD>(chunk.size()), &written, nullptr);
+#else
+            const ssize_t written = ::write(STDERR_FILENO, chunk.data(), chunk.size());
+            (void)written;
+#endif
+        }
+    };
+    std::vector<std::thread> writers;
+    for (int i = 0; i < 4; ++i) writers.emplace_back(writer);
+    for (auto& thread : writers) thread.join();
+    return 0;
+}
+
+// Takes `mib` MiB from the heap and writes to every page of it, so the memory is really used
+// and not only reserved. Exit 0 when it got them; when the allocation is refused (a memory limit
+// of the process) it says so and exits 3.
+int allocateMemory(size_t mib) {
+    const size_t bytes = mib * 1024 * 1024;
+    volatile char* block = static_cast<volatile char*>(std::malloc(bytes));
+    if (block == nullptr) {
+        std::fprintf(stderr, "out of memory: %zu MiB refused\n", mib);
+        return 3;
+    }
+    for (size_t offset = 0; offset < bytes; offset += 4096) block[offset] = 1;
+    std::printf("allocated %zu MiB\n", mib);
+    std::fflush(stdout);
+    std::free(const_cast<char*>(block));
+    return 0;
 }
 
 int descendantWorker(const std::string& activity, const std::string& extraId) {
@@ -99,6 +166,7 @@ unsigned long spawnDescendant(const fs::path& self, const std::string& activity,
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
     _setmode(_fileno(stderr), _O_BINARY);
 #endif
@@ -106,6 +174,10 @@ int main(int argc, char** argv) {
     // lets their tests use this real executable without needing shell scripts.
     if (const char* overrideMode = std::getenv("DDB_TEST_CHILD_MODE")) {
         if (std::string(overrideMode) == "no-output") return 0;
+        if (std::string(overrideMode) == "fail") {
+            std::fputs("boom: the tool rejected its input\n", stderr);
+            return 1;
+        }
         if (std::string(overrideMode) == "idle") for (;;) delay(1000);
     }
     if (argc < 2) return 2;
@@ -152,6 +224,37 @@ int main(int argc, char** argv) {
         }
         delay(std::stoi(argv[4]));
         return std::stoi(argv[5]);
+    }
+    if (mode == "allocate") return argc < 3 ? 2 : allocateMemory(std::stoul(argv[2]));
+    if (mode == "echo") return serveLines(0);
+    if (mode == "flood-echo") return argc < 3 ? 2 : serveLines(std::stoul(argv[2]));
+    if (mode == "flood-stderr") return argc < 3 ? 2 : floodStderr(std::stoi(argv[2]));
+    if (mode == "partial-eof") {
+        // an unterminated line, then the end of stdout
+        std::fputs("partial", stdout);
+        std::fflush(stdout);
+        return 0;
+    }
+    if (mode == "long-line") {
+        if (argc < 3) return 2;
+        const std::string text(std::stoul(argv[2]), 'x');
+        std::fputs((text + "\n").c_str(), stdout);
+        std::fflush(stdout);
+        return 0;
+    }
+    if (mode == "print-env") {
+        if (argc < 3) return 2;
+        const char* value = std::getenv(argv[2]);
+        std::fputs(((value ? std::string(value) : std::string("<unset>")) + "\n").c_str(), stdout);
+        std::fflush(stdout);
+        return 0;
+    }
+    if (mode == "fail-stderr") {
+        // a diagnostic on stderr and the exit code argv[2]
+        if (argc < 3) return 2;
+        std::fputs("boom\n", stderr);
+        std::fflush(stderr);
+        return std::stoi(argv[2]);
     }
     if (mode == "hold-lock") {
         if (argc < 4) return 2;

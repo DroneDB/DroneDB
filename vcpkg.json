@@ -1,7 +1,6 @@
 {
   "name": "ddb",
-  "version": "1.12.2",
-  "builtin-baseline": "f3e10653cc27d62a37a3763cd84b38bca07c6075",
+  "version": "2.0.0",
   "dependencies": [
     "boolinq",
     "cctz",
@@ -29,6 +28,9 @@
     "gtest",
     "laszip",
     "libgeotiff",
+    "libjpeg-turbo",
+    "libpng",
+    "libwebp",
     "openssl",
     "libspatialite",
     {
@@ -55,14 +57,8 @@
         "tiff"
       ]
     },
-    {
-      "name": "qt5",
-      "default-features": false,
-      "features": [
-        "imageformats"
-      ]
-    },
     "sqlite3",
+    "tiff",
     "zlib",
     "zstd",
     "assimp",

@@ -6,6 +6,7 @@
 #include "include/meta.h"
 #include "exceptions.h"
 #include "dbops.h"
+#include "metakey.h"
 #include "metamanager.h"
 
 namespace cmd
@@ -21,9 +22,9 @@ namespace cmd
     ("c,command", "Command", cxxopts::value<std::string>())
     ("k,key", "Metadata key/ID", cxxopts::value<std::string>()->default_value(""))
     ("p,path", "Path to associate metadata with", cxxopts::value<std::string>()->default_value(""))
-    ("d,data", "Data string|number|JSON to set", cxxopts::value<std::string>()->default_value(""))
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
-    ("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
+    ("d,data", "Data string|number|JSON to set", cxxopts::value<std::string>()->default_value(""));
+    cmd::addWorkingDirOption(opts);
+    cmd::addFormatOption(opts);
 
         // clang-format on
         opts.parse_positional({"command", "key", "data"});
@@ -34,11 +35,11 @@ namespace cmd
         return "Manage database metadata";
     }
 
-    void Meta::run(cxxopts::ParseResult &opts)
+    int Meta::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("command"))
         {
-            printHelp();
+            usageError();
         }
         const auto command = opts["command"].as<std::string>();
 
@@ -47,13 +48,13 @@ namespace cmd
             command != "restore" &&
             !opts.count("key"))
         {
-            printHelp();
+            usageError();
         }
 
         const auto ddbPath = opts["working-dir"].as<std::string>();
         const auto data = opts["data"].as<std::string>();
         const auto path = opts["path"].as<std::string>();
-        const auto format = opts["format"].as<std::string>();
+        const auto format = cmd::getFormatOption(opts);
         auto key = opts["key"].as<std::string>();
 
         const auto db = ddb::open(ddbPath, true);
@@ -63,9 +64,9 @@ namespace cmd
         {
             // Little help for singular keys (annotation --> annotations)
             // This should not be in the API, it's just a convenience
-            if (key.length() > 0 && key[key.length() - 1] != 's')
+            if (!key.empty() && !ddb::metakey::isList(key))
             {
-                key = key + "s";
+                key += ddb::metakey::kListSuffix;
                 std::cerr << "Note: saving metadata as \"" << key << "\" (plural)" << std::endl;
             }
             output(std::cout, metaManager.add(key, data, path), format);
@@ -106,6 +107,7 @@ namespace cmd
                 throw ddb::InvalidArgsException(e.what());
             }
         }
+        return EXIT_SUCCESS;
     }
 
 }

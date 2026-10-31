@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -47,16 +46,22 @@ struct MergeValidationResult {
     } alignment;
 };
 
-DDB_DLL std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string> &inputPaths);
+std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string> &inputPaths);
 
-DDB_DLL MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths);
+MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths);
 
-DDB_DLL void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
+/// The validation as JSON (DDBValidateMergeMultispectral): ok, errors, warnings, summary
+/// {totalBands, dataType, width, height, crs, pixelSizeX, pixelSizeY, estimatedSize} and
+/// alignment {detected, maxShiftPixels, correctionApplied, shiftSource, bands: [{index, name,
+/// wavelength, shiftX, shiftY}]}
+std::string mergeValidationToJson(const MergeValidationResult &r);
+
+void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
                                         const std::vector<int> &previewBands,
                                         int thumbSize,
                                         uint8_t **outBuffer, int *outBufferSize);
 
-DDB_DLL void mergeMultispectral(const std::vector<std::string> &inputPaths,
+void mergeMultispectral(const std::vector<std::string> &inputPaths,
                                  const std::string &outputPath);
 
 } // namespace ddb

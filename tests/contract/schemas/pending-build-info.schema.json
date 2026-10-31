@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb pending builds",
+  "description": "DDBGetPendingBuildInfo",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "hash",
+      "path",
+      "missingDependencies",
+      "lastAttempt",
+      "retryAfter",
+      "awaitingFiles"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "hash": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "path": {
+        "type": "string"
+      },
+      "missingDependencies": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Dataset-relative names"
+      },
+      "lastAttempt": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Unix epoch seconds (integer)"
+      },
+      "retryAfter": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "When DDBBuild with pendingOnly (and no force) retries the build: lastAttempt + libddb's retry backoff, Unix epoch seconds (integer); due when now >= retryAfter. Applies only when awaitingFiles is false"
+      },
+      "awaitingFiles": {
+        "type": "boolean",
+        "description": "missingDependencies is not empty: no timer retries the build; adding a file of one of those names releases it (then false, due at once)"
+      }
+    }
+  }
+}

@@ -2,13 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <assert.h>
+#include <utility>
 #include "statement.h"
+#include "cancellation.h"
 #include "exceptions.h"
 
 using namespace ddb;
 
 Statement::Statement(sqlite3 *db, const std::string &query)
-    : db(db), query(query), hasRow(false), done(false)
+    : db(db), query(query)
 {
     if (sqlite3_prepare_v2(db, query.c_str(), static_cast<int>(query.length()), &stmt, nullptr) != SQLITE_OK)
     {
@@ -33,6 +35,28 @@ Statement::~Statement()
     }
 }
 
+Statement::Statement(Statement &&other) noexcept
+    : db(std::exchange(other.db, nullptr)), query(std::move(other.query)),
+      hasRow(std::exchange(other.hasRow, false)), done(std::exchange(other.done, false)),
+      stmt(std::exchange(other.stmt, nullptr))
+{
+}
+
+Statement &Statement::operator=(Statement &&other) noexcept
+{
+    if (this != &other)
+    {
+        if (stmt != nullptr)
+            sqlite3_finalize(stmt);
+        db = std::exchange(other.db, nullptr);
+        query = std::move(other.query);
+        hasRow = std::exchange(other.hasRow, false);
+        done = std::exchange(other.done, false);
+        stmt = std::exchange(other.stmt, nullptr);
+    }
+    return *this;
+}
+
 Statement &Statement::bind(int paramNum, const std::string &value)
 {
     assert(stmt != nullptr && db != nullptr);
@@ -54,6 +78,13 @@ Statement &Statement::bind(int paramNum, long long value)
     return *this;
 }
 
+Statement &Statement::bind(int paramNum, double value)
+{
+    assert(stmt != nullptr && db != nullptr);
+    bindCheck(sqlite3_bind_double(stmt, paramNum, value));
+    return *this;
+}
+
 Statement &Statement::step()
 {
     assert(stmt != nullptr);
@@ -68,17 +99,22 @@ Statement &Statement::step()
     case SQLITE_ROW:
         hasRow = true;
         break;
-    case SQLITE_ERROR:
-    case SQLITE_MISUSE:
-        throw SQLException("Cannot execute step for " + query + " (error code: " + std::to_string(code) +
-                           "): " + sqlite3_errmsg(db));
     case SQLITE_CONSTRAINT:
         throw SQLException("Constraint violation executing " + query + ": " + sqlite3_errmsg(db));
     case SQLITE_BUSY:
     case SQLITE_LOCKED:
         throw DBBusyException("Database busy executing " + query + ": " + sqlite3_errmsg(db));
-    default:
+    case SQLITE_INTERRUPT:
+        // The progress handler stopped it: the work of this thread was canceled
         hasRow = done = false;
+        cancel::throwIfCanceled();
+        [[fallthrough]];
+    default:
+        // Any other code (ERROR, MISUSE, IOERR, FULL, CORRUPT, READONLY, NOMEM...) is a
+        // failure, never "no rows".
+        hasRow = done = false;
+        throw SQLException("Cannot execute step for " + query + " (error code: " + std::to_string(code) +
+                           "): " + sqlite3_errmsg(db));
     }
 
     return *this;
@@ -90,19 +126,19 @@ bool Statement::fetch()
     return hasRow;
 }
 
-int Statement::getInt(int columnId)
+int Statement::getInt(int columnId) const
 {
     assert(stmt != nullptr);
     return sqlite3_column_int(stmt, columnId);
 }
 
-long long Statement::getInt64(int columnId)
+long long Statement::getInt64(int columnId) const
 {
     assert(stmt != nullptr);
     return sqlite3_column_int64(stmt, columnId);
 }
 
-std::string Statement::getText(int columnId)
+std::string Statement::getText(int columnId) const
 {
     assert(stmt != nullptr);
     const auto res = reinterpret_cast<const char *>(sqlite3_column_text(stmt, columnId));
@@ -110,22 +146,10 @@ std::string Statement::getText(int columnId)
     return res == nullptr ? std::string() : std::string(res);
 }
 
-const void *Statement::getBlob(int columnId)
-{
-    assert(stmt != nullptr);
-    return sqlite3_column_blob(stmt, columnId);
-}
-
-double Statement::getDouble(int columnId)
+double Statement::getDouble(int columnId) const
 {
     assert(stmt != nullptr);
     return sqlite3_column_double(stmt, columnId);
-}
-
-int Statement::getColumnsCount() const
-{
-    assert(stmt != nullptr);
-    return sqlite3_column_count(stmt);
 }
 
 void Statement::reset()

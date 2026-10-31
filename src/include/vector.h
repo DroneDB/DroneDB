@@ -6,7 +6,8 @@
 
 #include <string>
 #include <vector>
-#include "ddb_export.h"
+
+#include "build_budget.h"
 
 namespace ddb
 {
@@ -25,8 +26,25 @@ namespace ddb
      * rebuilt so callers always observe a consistent pair.
      * Throws on failure; partial outputs are cleaned up.
      *
-     * Multi-layer sources (GPKG, KMZ) preserve all layers in BOTH outputs.
+     * The source is read by the raster helper (raster_helper.h): it builds both outputs in a
+     * private staging folder next to them, and this function publishes the folder. Whether the
+     * build is up to date is told by the outputs it finds (vec/source.gpkg and mvt/metadata.json,
+     * or vec/local.json for a drawing without a coordinate system).
+     *
+     * Multi-layer sources (GPKG, KMZ, GPX) keep every layer that holds a
+     * feature in BOTH outputs; empty layers are left out (all of them are
+     * kept when every layer is empty).
      * Source SRS is reprojected to EPSG:4326 (GPKG) / EPSG:3857 (MVT).
+     *
+     * CAD drawings (.dxf, .dwg): a DWG is converted with LibreDWG dwg2dxf
+     * (cad.h); the CRS comes from cad::resolveCadCrs (layer SRS, same-name
+     * .prj, GEODATA, lon/lat extent). A drawing without a CRS is "local":
+     * only vec/source.gpkg (drawing coordinates, no SRS) and vec/local.json
+     * (units, extent) are written, no mvt/, and an older mvt/ is removed.
+     *
+     * The threads of the build (the thread pool of the MVT writer) take tokens of the CPU pool
+     * of this process for as long as the helper works: the lower of the cap of @p options and
+     * the DDB_BUILD_THREADS budget (BuildResourceBudget), as many as the pool gives.
      *
      * @throws BuildDepMissingException If sidecar files are missing (names are
      *                                  relative to the input's folder).
@@ -34,15 +52,16 @@ namespace ddb
      *                                  including a GDAL build without the
      *                                  MVT driver.
      */
-    DDB_DLL void buildVector(const std::string &input,
-                             const std::string &baseOutputPath,
-                             bool overwrite = false);
+    void buildVector(const std::string &input,
+                     const std::string &baseOutputPath,
+                     bool overwrite = false,
+                     const BuildOptions &options = {});
 
     /**
      * Return the list of required sidecar dependencies for a vector input
      * (e.g. .shp → [".shx"]). Empty for self-contained formats.
      */
-    DDB_DLL std::vector<std::string> getVectorDependencies(const std::string &input);
+    std::vector<std::string> getVectorDependencies(const std::string &input);
 
 } // namespace ddb
 

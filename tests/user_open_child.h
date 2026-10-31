@@ -1,0 +1,68 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#ifndef USER_OPEN_CHILD_H
+#define USER_OPEN_CHILD_H
+
+#include <functional>
+
+#include "fs.h"
+#include "gtest/gtest.h"
+
+// The test binaries are hosts: they never declare themselves the raster helper, so in them
+// openUserRaster, openUserVector and identifyUserRaster throw (gdal_open_policy.h) and a host
+// code path that parses a file of a user with GDAL fails its test. A test whose subject is the
+// code that does open user files (the open policy, the operations of the helper run in the
+// process of the test) runs its body in a child process that declares itself the helper first:
+// the one place of the test code that calls enableUserFileOpens().
+namespace testutils
+{
+    // Runs `body` in a child process where enableUserFileOpens() was called, waits for it, and
+    // reports in the calling test what the body recorded there: its failures (with the file and
+    // line they were raised at), its skip, an uncaught exception, a crash.
+    //
+    // The child is a new process of the test binary, never a fork of this one (a copy of a process
+    // whose other threads hold locks, of GDAL or of an allocator, can wait on them for ever). It
+    // runs this test alone, with the environment of this process: SetUp and the test up to this
+    // call, as the host, then the body as the helper, and it ends there; the rest of the test and
+    // TearDown run here. So the child makes for itself what the test set up before the call (its
+    // test area, which is the child's own, the raster helper it installed, the hooks that make a
+    // GDAL write fail), shares the profile and caches of this process (DDB_HOME), and what it
+    // changes in its memory stays there. A test may call it more than once: each call has a child.
+    void runWithUserFileOpens(const std::function<void()> &body);
+
+    // What the parent tells the child: the file it writes what the body recorded to, and which
+    // call of runWithUserFileOpens in the test runs the body. A child that cannot write the file
+    // says why and exits with a code other than 0.
+    constexpr const char *kUserOpenResultEnv = "DDB_TEST_USER_OPEN_RESULT";
+    constexpr const char *kUserOpenCallEnv = "DDB_TEST_USER_OPEN_CALL";
+
+    // The test binary that runs: the folder of the program and the name it was started with. The
+    // children of runWithUserFileOpens are new processes of it.
+    fs::path testBinary();
+} // namespace testutils
+
+// TEST whose body runs as runWithUserFileOpens says
+#define USER_OPEN_TEST(suite, name)                                                      \
+    static void suite##_##name##_UserOpenBody();                                         \
+    TEST(suite, name)                                                                    \
+    {                                                                                    \
+        ::testutils::runWithUserFileOpens(&suite##_##name##_UserOpenBody);               \
+    }                                                                                    \
+    static void suite##_##name##_UserOpenBody()
+
+// TEST_F whose body runs as runWithUserFileOpens says; SetUp runs in both processes, TearDown in the parent
+#define USER_OPEN_TEST_F(fixture, name)                                                  \
+    class fixture##_##name##_UserOpen : public fixture                                   \
+    {                                                                                    \
+      public:                                                                            \
+        void UserOpenBody();                                                             \
+    };                                                                                   \
+    GTEST_TEST_(fixture, name, fixture##_##name##_UserOpen,                              \
+                ::testing::internal::GetTypeId<fixture>())                               \
+    {                                                                                    \
+        ::testutils::runWithUserFileOpens([this] { UserOpenBody(); });                  \
+    }                                                                                    \
+    void fixture##_##name##_UserOpen::UserOpenBody()
+
+#endif // USER_OPEN_CHILD_H

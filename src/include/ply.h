@@ -9,7 +9,6 @@
 #include <string>
 #include "fs.h"
 #include "entry_types.h"
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -48,9 +47,9 @@ namespace ddb
 
     // Maps a PLY type name (including the sized aliases) to its scalar type;
     // PlyScalarType::Unknown when not recognised.
-    DDB_DLL PlyScalarType plyScalarTypeFromName(const std::string &name);
+    PlyScalarType plyScalarTypeFromName(const std::string &name);
     // Size in bytes of a binary scalar (0 for Unknown).
-    DDB_DLL size_t plyScalarSize(PlyScalarType t);
+    size_t plyScalarSize(PlyScalarType t);
 
     struct PlyProperty
     {
@@ -89,7 +88,6 @@ namespace ddb
         std::string version;    // raw version token (e.g. "1.0")
         std::vector<PlyElement> elements; // in header (and body) order
         std::vector<std::string> comments; // text after `comment `, trimmed, in order
-        std::vector<std::string> objInfo;  // text after `obj_info `, trimmed, in order
         // True when a `comment TextureFile ...` line exists.
         bool hasTextureFile = false;
         // Text after `comment TextureFile ` (rest of the line, trimmed) of the first
@@ -120,31 +118,69 @@ namespace ddb
     // that the name-only consumers (getPlyInfo) keep working. Consumers that read
     // the body (plyconv) validate them.
     // @throws FSException if the file cannot be opened.
-    DDB_DLL bool parsePlyHeader(const fs::path &plyFile, PlyHeader &header, std::string *error = nullptr);
+    bool parsePlyHeader(const fs::path &plyFile, PlyHeader &header, std::string *error = nullptr);
 
     // Same as parsePlyHeader but throws AppException with the reason on failure.
-    DDB_DLL PlyHeader readPlyHeader(const fs::path &plyFile);
+    PlyHeader readPlyHeader(const fs::path &plyFile);
 
     // Multi-texture meshes are not supported (only one texture is converted, so a
     // face of texture #2 would silently be mapped onto texture #1). Returns a
     // human-readable reason when the header declares more than one
     // `comment TextureFile` or the `face` element has a `texnumber` property;
     // empty when the texture layout is supported.
-    DDB_DLL std::string plyUnsupportedTextureReason(const PlyHeader &header);
+    std::string plyUnsupportedTextureReason(const PlyHeader &header);
+
+    // ---------------------------------------------------------------------
+    // Gaussian Splat PLY rules
+    //
+    // build-lod, the tool that builds a splat, decodes a PLY by its own rules
+    // (vendor/spark rust/spark-lib/src/ply.rs); these functions state the same
+    // rules once, on the header only, so the detection and the build agree.
+    // ---------------------------------------------------------------------
+
+    // True when the PLY has no face element and its vertex element carries 3D
+    // Gaussian Splat attributes: the spherical-harmonics DC term (f_dc_0), the
+    // anisotropic covariance set (scale_0..2, rot_0..3 and opacity), or the
+    // SuperSplat compressed layout (a `chunk` element and packed_position). A
+    // PLY that looks like a splat is a splat even when plySplatBuildProblem()
+    // says build-lod cannot read it, so that the build can name what to fix.
+    bool looksLikeSplatPly(const PlyHeader &header);
+
+    // The first rule build-lod would refuse the PLY for, as a message that says what
+    // to change ("ASCII splat PLY is not supported: export it as binary
+    // little-endian", "f_rest count 12 is not 0, 9, 24 or 45", "Splat PLY is
+    // missing properties: opacity"); empty when it can decode the header.
+    // The rules: binary_little_endian 1.0; no list property and only the scalar type names
+    // build-lod knows; a `vertex` element with x, y, z, f_dc_0..2, opacity,
+    // scale_0..2, rot_0..3 and a count of f_rest_* properties of that element
+    // only that is 0, 9, 24 or 45 -- or, when a `chunk` element exists (SuperSplat
+    // compressed), the chunk bounds, the packed_* vertex properties and an optional
+    // `sh` element with the same count of f_rest_*.
+    std::string plySplatBuildProblem(const PlyHeader &header);
+
+    // True when plySplatBuildProblem() finds nothing to refuse.
+    bool isBuildableSplatPly(const PlyHeader &header);
 
     struct PlyInfo
     {
-        unsigned long vertexCount;
+        uint64_t vertexCount;
         bool isMesh;
         bool hasTextures;
         // True when the vertex element carries 3D Gaussian Splat attributes
-        // (spherical-harmonic DC term and/or anisotropic scale + rotation + opacity)
-        // and there is no face element. Mutually exclusive with isMesh.
+        // (spherical-harmonic DC term and/or anisotropic scale + rotation + opacity,
+        // or the SuperSplat compressed layout) and there is no face element, see
+        // looksLikeSplatPly(). Mutually exclusive with isMesh.
         bool isSplat;
         // Spherical-harmonics degree (0..3) inferred from the number of f_rest_*
-        // properties. -1 when the file is not a Gaussian Splat.
+        // properties of the vertex element (of the `sh` element for a compressed
+        // splat). -1 when the file is not a Gaussian Splat, or when that number is not
+        // 0, 9, 24 or 45.
         int shDegree;
-        // Flat list of every property name across all elements, in header order.
+        // Non-empty when the file looks like a splat (isSplat) but build-lod cannot
+        // read it: the reason, see plySplatBuildProblem(). Empty otherwise.
+        std::string splatProblem;
+        // Flat list of every property name across all elements, in header order (the
+        // splat rules look at the vertex element only, see plySplatBuildProblem()).
         std::vector<std::string> dimensions;
         // Value of `comment TextureFile <name>` (rest of line, trimmed); empty when
         // absent. hasTextures is true exactly when a TextureFile comment exists.
@@ -157,8 +193,8 @@ namespace ddb
         std::string unsupportedTextureReason;
     };
 
-    DDB_DLL EntryType identifyPly(const fs::path &plyFile);
-    DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info);
+    EntryType identifyPly(const fs::path &plyFile);
+    bool getPlyInfo(const fs::path &plyFile, PlyInfo &info);
 
 }
 #endif // PLY_H

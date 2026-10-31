@@ -5,9 +5,11 @@
 #ifndef JSON_H
 #define JSON_H
 
-#include <nlohmann/json.hpp>
-#include <nlohmann/json_fwd.hpp>
+// The complete JSON type (nlohmann/json, a heavy header): for source files and for the few headers
+// that need it. A header that only names the type includes json_fwd.h.
 
-using json = nlohmann::json;
+#include <nlohmann/json.hpp>
+
+#include "json_fwd.h"
 
 #endif // JSON_H

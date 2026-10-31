@@ -14,9 +14,9 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("stac")
-    .add_options()
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    .custom_help("stac");
+    cmd::addWorkingDirOption(opts);
+    opts.add_options()
     ("p,path", "Entry path to generate a STAC item for (which must be part of the DroneDB index)", cxxopts::value<std::string>()->default_value(""))
     ("stac-catalog-root", "STAC Catalog absolute URL", cxxopts::value<std::string>()->default_value(""))
     ("stac-collection-root", "STAC Collection absolute URL", cxxopts::value<std::string>()->default_value("."))
@@ -29,7 +29,7 @@ namespace cmd
         return "Generate STAC catalogs";
     }
 
-    void Stac::run(cxxopts::ParseResult &opts)
+    int Stac::run(cxxopts::ParseResult &opts)
     {
         const auto ddbPath = opts["working-dir"].as<std::string>();
         const auto entry = opts["path"].as<std::string>();
@@ -39,6 +39,7 @@ namespace cmd
         const auto id = opts["id"].as<std::string>();
 
         std::cout << ddb::generateStac(ddbPath, entry, stacCollectionRoot, id, stacCatalogRoot).dump(4) << std::endl;
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

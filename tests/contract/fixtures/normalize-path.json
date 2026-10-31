@@ -1,0 +1,12 @@
+{
+  "call": "DDBNormalizePath(\"photos\\\\2024/./a.jpg\", \"[\\\".uploads\\\"]\")",
+  "description": "No dataset: a path with '\\' and '.' segments",
+  "normalisation": {
+    "placeholders": [],
+    "volatileKeys": []
+  },
+  "output": {
+    "path": "photos/2024/a.jpg"
+  },
+  "schema": "normalize-path.schema.json"
+}

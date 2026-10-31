@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb STAC item collection",
+  "description": "DDBStacItemCollection (STAC API ItemCollection)",
+  "type": "object",
+  "required": [
+    "type",
+    "features",
+    "links",
+    "numberMatched",
+    "numberReturned"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "FeatureCollection"
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "$ref": "stac-item.schema.json"
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "stac-item.schema.json#/$defs/link"
+      }
+    },
+    "numberMatched": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "numberReturned": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

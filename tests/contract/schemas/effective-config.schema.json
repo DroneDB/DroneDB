@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb effective process configuration",
+  "description": "DDBGetEffectiveConfig (new in 2.0): every setting of the process configuration with its value and where the value comes from. The settings object is accepted by DDBConfigure as is.",
+  "type": "object",
+  "required": [
+    "settings",
+    "sources",
+    "hardwareThreads"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "settings": {
+      "type": "object",
+      "required": [
+        "cacheDir",
+        "cpuPoolSize",
+        "gdalCacheMb",
+        "ioThreads",
+        "minFreeDiskMb"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cacheDir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute folder of libddb's caches (UTF-8)"
+        },
+        "cpuPoolSize": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096,
+          "description": "Worker threads beside the calling threads, across the process (CPU token pool)"
+        },
+        "ioThreads": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "description": "Threads of one disk-bound section"
+        },
+        "minFreeDiskMb": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000000000,
+          "description": "Free MiB a build needs on its volume; 0 turns the check off"
+        },
+        "gdalCacheMb": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1048576,
+          "description": "Size of GDAL's block cache in MiB, shared by the whole process: the size DDBConfigure set, else the bound from DDB_GDAL_CACHE_MB or the default 1024 (libddb lowers GDAL's own default to it, never raises it, and a GDAL_CACHEMAX set explicitly wins)"
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "required": [
+        "cacheDir",
+        "cpuPoolSize",
+        "gdalCacheMb",
+        "ioThreads",
+        "minFreeDiskMb"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cacheDir": {
+          "$ref": "#/$defs/source"
+        },
+        "cpuPoolSize": {
+          "$ref": "#/$defs/source"
+        },
+        "ioThreads": {
+          "$ref": "#/$defs/source"
+        },
+        "minFreeDiskMb": {
+          "$ref": "#/$defs/source"
+        },
+        "gdalCacheMb": {
+          "$ref": "#/$defs/source"
+        }
+      }
+    },
+    "hardwareThreads": {
+      "type": "integer",
+      "description": "The cores libddb sees, at least 1 (the fixture normalises it to 0)"
+    }
+  },
+  "$defs": {
+    "source": {
+      "enum": [
+        "configure",
+        "environment",
+        "default"
+      ],
+      "description": "DDBConfigure, the setting's environment variable, or the built-in default"
+    }
+  }
+}

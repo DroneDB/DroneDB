@@ -1,0 +1,90 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#ifndef RASTER_TEST_UTILS_H
+#define RASTER_TEST_UTILS_H
+
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
+#include "fs.h"
+#include "gdal_inc.h"
+#include "raster_region.h"
+
+namespace testutils
+{
+    struct GeoRasterSpec
+    {
+        int width = 512;
+        int height = 512;
+        int bands = 3;
+        GDALDataType type = GDT_Byte;
+        int epsg = 3857;
+        double originX = 1000.0; // upper-left corner
+        double originY = 1000.0;
+        double pixelSize = 1.0;
+        bool alphaBand = false;  // the last band is alpha (255, or alphaValue)
+        std::function<double(int x, int y)> alphaValue = [](int, int) { return 255.0; };
+        std::vector<std::string> bandNames; // GDAL descriptions of the first bands, as ODM and the sensors write them
+        std::function<double(int band, int x, int y)> value = [](int, int, int) { return 0.0; };
+    };
+
+    /// Writes a GeoTIFF with spec's georeference and pixel values (bands 1-based)
+    fs::path createGeoRaster(const fs::path &path, const GeoRasterSpec &spec);
+
+    /// Writes a lossless JPEG 2000 with spec's pixel values, and its georeference in GeoJP2 and
+    /// GMLJP2 boxes unless georeferenced is false
+    fs::path createGeoJp2(const fs::path &path, const GeoRasterSpec &spec, bool georeferenced = true);
+
+    /// The region of a raster the tests render: bbox is [minX, minY, maxX, maxY] in srs
+    inline ddb::RegionRequest regionRequest(const std::string &path, const double bbox[4], const std::string &srs,
+                                            int width, int height, const std::string &format)
+    {
+        ddb::RegionRequest request;
+        request.inputPath = path;
+        std::copy(bbox, bbox + 4, request.bbox.begin());
+        request.bboxSrs = srs;
+        request.width = width;
+        request.height = height;
+        request.format = format;
+        return request;
+    }
+
+    /// An encoded image (PNG, JPEG, WebP) decoded with GDAL
+    struct DecodedImage
+    {
+        int width = 0;
+        int height = 0;
+        std::vector<std::vector<uint8_t>> bands;
+        std::vector<GDALColorInterp> colorInterp;
+
+        bool hasAlpha() const { return !colorInterp.empty() && colorInterp.back() == GCI_AlphaBand; }
+        const std::vector<uint8_t> &alpha() const { return bands.back(); }
+    };
+
+    DecodedImage decodeImage(const uint8_t *data, size_t size);
+    DecodedImage decodeImage(const std::vector<uint8_t> &data);
+    DecodedImage decodeImageFile(const fs::path &path);
+
+    /// Counts the files GDAL opens as datasets (GDALOpen/GDALOpenEx successes, not
+    /// /vsimem/ files) while alive, on any thread, through GDAL debug messages
+    class GdalOpenCounter
+    {
+        CPLErrorHandler previous_;
+        std::string previousDebug_;
+
+    public:
+        GdalOpenCounter();
+        ~GdalOpenCounter();
+        int count() const;
+    };
+
+    /// Copies a buffer allocated by GDAL (VSIMalloc) and frees it
+    std::vector<uint8_t> takeBuffer(uint8_t *buffer, int size);
+}
+
+#endif // RASTER_TEST_UTILS_H

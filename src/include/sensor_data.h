@@ -6,7 +6,6 @@
 
 #include <map>
 #include "sqlite_database.h"
-#include "ddb_export.h"
 
 namespace ddb{
 
@@ -16,10 +15,9 @@ class SensorData{
     static std::map<std::string, bool> cacheMiss;
 
 public:
-    DDB_DLL static void checkDbInit();
-    DDB_DLL static bool contains(const std::string &sensor);
-    DDB_DLL static double getFocal(const std::string &sensor);
-    DDB_DLL static void clearCache();
+    static void checkDbInit();
+    static bool contains(const std::string &sensor);
+    static double getFocal(const std::string &sensor);
 };
 
 }

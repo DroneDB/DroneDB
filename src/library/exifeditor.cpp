@@ -4,115 +4,96 @@
 #include "exifeditor.h"
 #include "logger.h"
 #include "exceptions.h"
-#include <exiv2/exiv2.hpp>
+#include "mio.h"
+#include "exif_metadata.h"
 #include <cmath>
+#include <optional>
 
 namespace ddb
 {
 
     ExifEditor::ExifEditor(std::vector<std::string> &files)
     {
-        this->files = std::vector<fs::path>(files.begin(), files.end());
+        this->files = io::fromUtf8(files);
     }
 
     ExifEditor::ExifEditor(const std::string &file)
     {
-        files.push_back(file);
+        files.push_back(io::fromUtf8(file));
     }
 
+    namespace
+    {
+        // Why a file cannot be edited, nothing if it can: it exists and the metadata reader can
+        // read it (a file with no metadata it can give, not an image or damaged, cannot be edited)
+        std::optional<std::string> whyNotEditable(const fs::path &file)
+        {
+            if (!fs::exists(file))
+                return "does not exist";
+            if (fs::is_directory(file))
+                return "cannot set EXIFs to a directory";
+
+            try
+            {
+                const auto result = exif::metadataReader().read(file);
+                if (!result.metadata)
+                    return result.message.empty() ? "cannot read the metadata" : result.message;
+            }
+            catch (const IndexException &e)
+            {
+                // The reader broke on this file; a reader that cannot work at all propagates
+                return std::string(e.what());
+            }
+
+            return std::nullopt;
+        }
+    } // namespace
+
     // Verify that all files can be edited
-    bool ExifEditor::canEdit()
+    bool ExifEditor::canEdit(std::ostream &rejected)
     {
         int rejectCount = 0;
 
         for (auto &file : files)
         {
-            try
+            if (const auto reason = whyNotEditable(file))
             {
-                if (!fs::exists(file))
-                    throw FSException("does not exist");
-                if (fs::is_directory(file))
-                    throw FSException("cannot set EXIFs to a directory");
-                auto image = Exiv2::ImageFactory::open(file.string(), false);
-                if (!image.get())
-                    throw FSException("cannot open " + file.string());
-                image->readMetadata();
-            }
-            catch (const FSException &e)
-            {
-                std::cerr << file.string() << ": " << e.what() << std::endl;
+                rejected << io::toUtf8(file) << ": " << *reason << std::endl;
                 rejectCount++;
             }
-            catch (const Exiv2::Error &e)
-            {
-                std::cerr << file.string() << ": " << e.what() << std::endl;
-                rejectCount++;
-            }
-
-            // All good
         }
 
         return rejectCount == 0;
     }
 
-    void ExifEditor::SetGPSAltitude(double altitude)
+    std::vector<ExifWriteFailure> ExifEditor::SetGPSAltitude(double altitude)
     {
-        eachFile([=](const fs::path &f, Exiv2::ExifData &exifData)
-                 {
-                     exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 4);
-                     exifData["Exif.GPSInfo.GPSAltitudeRef"] = altitude < 0.0 ? "1" : "0";
-                     LOGD << "Setting altitude to " << exifData["Exif.GPSInfo.GPSAltitude"].toString() << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"].toString() << ") for " << f.string();
-
-                     // TODO: adjust XMP DJI tags
-                     // absolute/relative altitude
-                 });
+        // TODO: adjust XMP DJI tags
+        // absolute/relative altitude
+        return writeTags({{"Exif.GPSInfo.GPSAltitude", doubleToFraction(altitude, 4)},
+                          {"Exif.GPSInfo.GPSAltitudeRef", altitude < 0.0 ? "1" : "0"}});
     }
 
-    void ExifEditor::SetGPSLatitude(double latitude)
+    std::vector<ExifWriteFailure> ExifEditor::SetGPSLatitude(double latitude)
     {
-        eachFile([=](const fs::path &f, Exiv2::ExifData &exifData)
-                 {
-        exifData["Exif.GPSInfo.GPSLatitude"] = doubleToDMS(latitude);
-        exifData["Exif.GPSInfo.GPSLatitudeRef"] = latitude >= 0.0 ? "N" : "S";
-
-        LOGD << "Setting latitude to " << doubleToDMS(latitude) << " " <<
-                exifData["Exif.GPSInfo.GPSLatitude"].toString() << " " <<
-                exifData["Exif.GPSInfo.GPSLatitudeRef"].toString() << " " <<
-                "for " << f.string(); });
+        return writeTags({{"Exif.GPSInfo.GPSLatitude", doubleToDMS(latitude)},
+                          {"Exif.GPSInfo.GPSLatitudeRef", latitude >= 0.0 ? "N" : "S"}});
     }
 
-    void ExifEditor::SetGPSLongitude(double longitude)
+    std::vector<ExifWriteFailure> ExifEditor::SetGPSLongitude(double longitude)
     {
-        eachFile([=](const fs::path &f, Exiv2::ExifData &exifData)
-                 {
-        exifData["Exif.GPSInfo.GPSLongitude"] = doubleToDMS(longitude);
-        exifData["Exif.GPSInfo.GPSLongitudeRef"] = longitude >= 0.0 ? "E" : "W";
-        LOGD << "Setting longitude to " <<
-                exifData["Exif.GPSInfo.GPSLongitude"].toString() << " " <<
-                exifData["Exif.GPSInfo.GPSLongitudeRef"].toString() << " " <<
-                "for " << f.string(); });
+        return writeTags({{"Exif.GPSInfo.GPSLongitude", doubleToDMS(longitude)},
+                          {"Exif.GPSInfo.GPSLongitudeRef", longitude >= 0.0 ? "E" : "W"}});
     }
 
-    void ExifEditor::SetGPS(double latitude, double longitude, double altitude)
+    std::vector<ExifWriteFailure> ExifEditor::SetGPS(double latitude, double longitude, double altitude)
     {
-        eachFile([=](const fs::path &f, Exiv2::ExifData &exifData)
-                 {
-        exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 3);
-        exifData["Exif.GPSInfo.GPSAltitudeRef"] = altitude < 0.0 ? "1" : "0";
-        exifData["Exif.GPSInfo.GPSLatitude"] = doubleToDMS(latitude);
-        exifData["Exif.GPSInfo.GPSLatitudeRef"] = latitude >= 0.0 ? "N" : "S";
-        exifData["Exif.GPSInfo.GPSLongitude"] = doubleToDMS(longitude);
-        exifData["Exif.GPSInfo.GPSLongitudeRef"] = longitude >= 0.0 ? "E" : "W";
-
-        LOGD << "Setting lat: " <<
-                exifData["Exif.GPSInfo.GPSLatitude"].toString() << " " <<
-                exifData["Exif.GPSInfo.GPSLatitudeRef"].toString() << " " <<
-                "lon: " <<
-                exifData["Exif.GPSInfo.GPSLongitude"].toString() << " " <<
-                exifData["Exif.GPSInfo.GPSLongitudeRef"].toString() << " " <<
-                "alt: " <<
-                 exifData["Exif.GPSInfo.GPSAltitude"].toString() << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"].toString() << ") " <<
-                "for " << f.string(); });
+        return writeTags({{"Exif.GPSInfo.GPSAltitude", doubleToFraction(altitude, 3)},
+                          {"Exif.GPSInfo.GPSAltitudeRef", altitude < 0.0 ? "1" : "0"},
+                          {"Exif.GPSInfo.GPSLatitude", doubleToDMS(latitude)},
+                          {"Exif.GPSInfo.GPSLatitudeRef", latitude >= 0.0 ? "N" : "S"},
+                          {"Exif.GPSInfo.GPSLongitude", doubleToDMS(longitude)},
+                          {"Exif.GPSInfo.GPSLongitudeRef", longitude >= 0.0 ? "E" : "W"}});
     }
 
     // Convert a double into a DMS string
@@ -120,13 +101,13 @@ namespace ddb
     {
         if (d < 0.0)
             d = -d; // No negative numbers allowed
-        int deg = (int)d;
+        int deg = static_cast<int>(d);
         d -= deg;
         d *= 60;
-        int min = (int)d;
+        int min = static_cast<int>(d);
         d -= min;
         d *= 60;
-        int sec = (int)round(d * 10000.0);
+        int sec = static_cast<int>(round(d * 10000.0));
 
         return std::to_string(deg) + "/1 " +
                std::to_string(min) + "/1 " +
@@ -140,35 +121,30 @@ namespace ddb
             d = -d; // No negative numbers allowed
         d *= pow(10.0, precision);
 
-        std::string res = std::to_string((int)d) + "/1";
+        std::string res = std::to_string(static_cast<int>(d)) + "/1";
         for (int i = 0; i < precision; i++)
             res += "0";
         return res;
     }
 
-    template <typename Func>
-    void ExifEditor::eachFile(Func f)
+    std::vector<ExifWriteFailure> ExifEditor::writeTags(const exif::TagAssignments &set)
     {
+        std::vector<ExifWriteFailure> failures;
+
         for (auto &file : files)
         {
-            auto image = Exiv2::ImageFactory::open(file.string(), false);
-            if (!image.get())
-                throw FSException("Cannot open " + file.string());
-            image->readMetadata();
+            if (!fs::exists(file))
+                throw FSException("Cannot open " + io::toUtf8(file));
 
-            f(file, image->exifData());
+            for (const auto &[key, value] : set)
+                LOGD << "Setting " << key << " to " << value << " for " << io::toUtf8(file);
 
-            image->setExifData(image->exifData());
-            try
-            {
-                image->writeMetadata();
-                // std::cout << "U\t" << file.string() << std::endl;
-            }
-            catch (const Exiv2::Error &)
-            {
-                std::cerr << "Cannot write metadata to " + file.string();
-            }
+            const auto result = exif::metadataReader().write(file, set);
+            if (!result.ok)
+                failures.push_back({io::toUtf8(file), result.message});
         }
+
+        return failures;
     }
 
 }

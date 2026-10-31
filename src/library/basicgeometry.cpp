@@ -3,8 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "basicgeometry.h"
+#include "json.h"
 #include "exceptions.h"
-#include "utils.h"
+#include <sstream>
+#include <format>
 
 namespace ddb
 {
@@ -13,7 +15,7 @@ namespace ddb
     {
         if (empty())
             return "";
-        return utils::stringFormat("POINT Z (%lf %lf %lf)", points[0].x, points[0].y, points[0].z);
+        return std::format("POINT Z ({:f} {:f} {:f})", points[0].x, points[0].y, points[0].z);
     }
 
     json BasicPointGeometry::toGeoJSON() const
@@ -72,11 +74,6 @@ namespace ddb
         j["geometry"]["coordinates"] += poly;
 
         return j;
-    }
-
-    void BasicGeometry::addPoint(const Point &p)
-    {
-        points.push_back(p);
     }
 
     void BasicGeometry::addPoint(double x, double y, double z)

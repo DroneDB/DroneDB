@@ -1,4 +1,4 @@
-file(GLOB SOURCES "*.cpp")
+file(GLOB SOURCES CONFIGURE_DEPENDS "*.cpp")
 set(CMD_SRC_LIST
    ${CMD_SRC_LIST}
    ${SOURCES}

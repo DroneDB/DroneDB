@@ -8,7 +8,6 @@
 #include <string>
 
 #include "3d.h"
-#include "ddb_export.h"
 #include "fs.h"
 #include "ply.h"
 
@@ -91,8 +90,8 @@ namespace ddb
      * @throws AppException on unsupported or malformed input, or an unsatisfiable
      *         (absolute / root-escaping) TextureFile.
      */
-    DDB_DLL PlyToObjResult convertPlyToObj(const std::string &inputPly, const std::string &outputBase,
-                                           const PlyToObjOptions &opts = PlyToObjOptions());
+    PlyToObjResult convertPlyToObj(const std::string &inputPly, const std::string &outputBase,
+                                   const PlyToObjOptions &opts = PlyToObjOptions());
 
     /**
      * @brief Header-only texture dependency check for a PLY.
@@ -108,7 +107,7 @@ namespace ddb
      * @throws BuildDepMissingException if the texture does not exist; the missing
      *         name is relative to the PLY's folder (normalised).
      */
-    DDB_DLL std::string getPlyTexture(const std::string &inputPly, const std::string &datasetRoot = "");
+    std::string getPlyTexture(const std::string &inputPly, const std::string &datasetRoot = "");
 
 }
 

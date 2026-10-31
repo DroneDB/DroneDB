@@ -5,13 +5,17 @@
 #define COG_UTILS_H
 
 #include <string>
-#include "ddb_export.h"
+
+#include <gdal.h>
 
 namespace ddb {
 
-// Check if a GeoTIFF file is already an optimized Cloud Optimized GeoTIFF
-// Returns true if the file is already optimized and doesn't need rebuild
-DDB_DLL bool isOptimizedCog(const std::string& inputPath);
+// Check if a GeoTIFF file is already an optimized Cloud Optimized GeoTIFF: Web Mercator, square
+// tiles of 256 or 512 pixels, overviews, read by the GTiff or COG driver
+bool isOptimizedCog(const std::string& inputPath);
+
+// The same check on a dataset that is open already
+bool isOptimizedCogDataset(GDALDatasetH hDataset);
 
 }
 

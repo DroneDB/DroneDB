@@ -8,34 +8,16 @@
 
 namespace ddb {
 
-namespace {
-const char *beginSql(Transaction::Mode mode) {
-    switch (mode) {
-        case Transaction::Mode::Exclusive: return "BEGIN EXCLUSIVE TRANSACTION";
-        case Transaction::Mode::Deferred:  return "BEGIN DEFERRED TRANSACTION";
-        case Transaction::Mode::Immediate:
-        default:                           return "BEGIN IMMEDIATE TRANSACTION";
-    }
-}
-} // namespace
-
-Transaction::Transaction(SqliteDatabase *db, Mode mode, const RetryPolicy &policy)
+Transaction::Transaction(SqliteDatabase *db, const RetryPolicy &policy)
     : db_(db), policy_(policy), finished_(false) {
     if (db_ == nullptr)
         throw DBException("Cannot start transaction: db is null");
 
-    const char *sql = beginSql(mode);
-    policy_.run([&] { db_->exec(sql); }, "begin transaction");
-}
-
-Transaction::Transaction(Transaction &&other) noexcept
-    : db_(other.db_), policy_(other.policy_), finished_(other.finished_) {
-    other.db_ = nullptr;
-    other.finished_ = true;
+    policy_.run([&] { db_->exec("BEGIN IMMEDIATE TRANSACTION"); }, "begin transaction");
 }
 
 Transaction::~Transaction() noexcept {
-    if (finished_ || db_ == nullptr) return;
+    if (finished_) return;
     try {
         db_->exec("ROLLBACK");
     } catch (const std::exception &e) {
@@ -50,12 +32,6 @@ void Transaction::commit() {
     // policy. If every retry is exhausted the transaction is still open and the destructor will
     // roll it back.
     policy_.run([&] { db_->exec("COMMIT"); }, "commit transaction");
-    finished_ = true;
-}
-
-void Transaction::rollback() {
-    if (finished_) throw DBException("Transaction already finished");
-    db_->exec("ROLLBACK");
     finished_ = true;
 }
 

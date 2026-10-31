@@ -3,492 +3,241 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gsplat.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <cstdlib>
-#include <cerrno>
-#include <cstring>
-#include <fstream>
-#include <limits>
-#include <sstream>
+#include <array>
 
+#include "build_internal.h"
+#include "buildlock.h"
 #include "buildlod_runner.h"
+#include "cancellation.h"
+#include "database.h"
+#include "dbops.h"
+#include "entry_handler.h"
 #include "exceptions.h"
+#include "json.h"
+#include "local_frame_georef.h"
 #include "logger.h"
 #include "mio.h"
 #include "ply.h"
 #include "rad.h"
-#include "thumbs.h"
-#include "utils.h"
-
-// SPZ (vendored, MIT) - native Gaussian Splat encoder/decoder.
-#include "load-spz.h"
-#include "splat-types.h"
+#include "splat_convert.h"
+#include "splat_format.h"
+#include "splat_frame.h"
 
 namespace ddb
 {
     namespace
     {
-        // Recognized Gaussian Splat source format, derived from the file extension.
-        enum class SplatFormat
+        // build-lod exits 0 after it refuses a PLY and only prints why; the header of the file
+        // says the same before the tool is launched (the rules are ply.h's), so the build fails
+        // with what to change in the export
+        void assureBuildableSplatSource(const std::string &input)
         {
-            Unknown,
-            Ply,    // 3DGS PLY (INRIA layout), decoded by SPZ
-            Splat,  // antimatter15 binary .splat (32 bytes/primitive, SH degree 0)
-            Spz,    // canonical compressed format (copied as-is)
-            Ksplat  // mkkellogg format (requires the optional external enhancer)
-        };
+            if (!splatAccepts(io::fromUtf8(input), SplatStage::Build))
+                throw AppException("Cannot build the Gaussian splat " + input + ": its format is not a source (" +
+                                   splatExtensionsText(SplatStage::Build) + " are)");
 
-        SplatFormat formatOf(const std::string &filename)
-        {
-            io::Path p(filename);
-            if (p.checkExtension({"ply"}))
-                return SplatFormat::Ply;
-            if (p.checkExtension({"splat"}))
-                return SplatFormat::Splat;
-            if (p.checkExtension({"spz"}))
-                return SplatFormat::Spz;
-            if (p.checkExtension({"ksplat"}))
-                return SplatFormat::Ksplat;
-            return SplatFormat::Unknown;
-        }
-
-        // SPZ file-format version written for the delivery artifact. The web viewer (Spark)
-        // only understands the gzip-based SPZ versions (1-3); version 4 switched to a ZSTD
-        // per-stream container ("NGSP") that Spark cannot decode (it reports "Invalid gzip
-        // header"). Version 3 keeps the same smallest-three quaternion precision as v4, so
-        // visual quality is unchanged - only the compression container differs (gzip vs zstd).
-        constexpr uint32_t kDeliverySpzVersion = 3;
-
-        // True when the file begins with the gzip magic (0x1F 0x8B), i.e. a legacy SPZ v1-3
-        // that the viewer can already read. NGSP/ZSTD (v4) files start with "NGSP" instead.
-        bool isGzipSpz(const fs::path &path)
-        {
-            std::ifstream in(path.string(), std::ios::binary);
-            if (!in.good())
-                return false;
-            uint8_t magic[2] = {0};
-            in.read(reinterpret_cast<char *>(magic), sizeof(magic));
-            return in.gcount() == 2 && magic[0] == 0x1F && magic[1] == 0x8B;
-        }
-
-        // Inverse sigmoid (logit) with clamping, used to store opacity the way SPZ expects.
-        float inverseSigmoid(float p)
-        {
-            constexpr float eps = 1e-6f;
-            p = std::min(std::max(p, eps), 1.0f - eps);
-            return std::log(p / (1.0f - p));
-        }
-
-        // Parse the DDB_GSPLAT_SH_BITS environment override.
-        // Accepts one or two unsigned integers separated by a comma:
-        //   "5"   -> sets sh1Bits=5 (shRestBits unchanged)
-        //   "5,4" -> sets sh1Bits=5, shRestBits=4
-        // Each value must be in [1,8]. Falls back to SPZ defaults when unset or malformed.
-        void applyShBitsFromEnv(spz::PackOptions &opts)
-        {
-            const char *env = std::getenv("DDB_GSPLAT_SH_BITS");
-            if (env == nullptr || env[0] == '\0')
+            if (splatFormatOf(io::fromUtf8(input)) != SplatFormat::Ply)
                 return;
+            PlyHeader header;
+            std::string error;
+            if (!parsePlyHeader(io::fromUtf8(input), header, &error))
+                throw AppException("Cannot build the Gaussian splat " + input + ": invalid PLY header: " + error);
+            const std::string problem = plySplatBuildProblem(header);
+            if (!problem.empty())
+                throw AppException("Cannot build the Gaussian splat " + input + ": " + problem);
+        }
 
-            const auto parts = utils::split(std::string(env), ",");
+        // The up vector of the scene, for the sidecar; an estimate that cannot be made is logged and
+        // leaves the bounding box alone
+        void addUpEstimate(const fs::path &rad, json &sidecar, bool georeferenced)
+        {
             try
             {
-                if (!parts.empty() && !parts[0].empty())
-                {
-                    const int v = std::stoi(parts[0]);
-                    if (v >= 1 && v <= 8)
-                        opts.sh1Bits = static_cast<uint8_t>(v);
-                }
-                if (parts.size() >= 2 && !parts[1].empty())
-                {
-                    const int v = std::stoi(parts[1]);
-                    if (v >= 1 && v <= 8)
-                        opts.shRestBits = static_cast<uint8_t>(v);
-                }
+                // A georeferenced scene is upright by definition: its splats are not read
+                const RadCoarseSplats splats = georeferenced
+                                                   ? RadCoarseSplats()
+                                                   : readRadCoarseSplats(rad, RadPreviewChunks, /*onlyTheCut=*/true);
+                sidecar.update(json(estimateSplatUp(splats, georeferenced)));
             }
             catch (const std::exception &e)
             {
-                LOGD << "Ignoring malformed DDB_GSPLAT_SH_BITS='" << env << "': " << e.what();
+                LOGW << "No up vector for " << io::toUtf8(rad) << ": " << e.what();
             }
         }
 
-        // Decode an antimatter15 .splat file into an SPZ GaussianCloud.
-        //
-        // Layout (32 bytes per primitive):
-        //   [0..11]  position    : 3 x float32
-        //   [12..23] scale       : 3 x float32 (linear)
-        //   [24..27] color       : 4 x uint8 (r, g, b, a)
-        //   [28..31] rotation    : 4 x uint8, (w, x, y, z) each mapped as (b - 128) / 128
-        //
-        // Produces a cloud consistent with SPZ's PLY convention (scales as log, opacity as
-        // logit, color as the SH DC coefficient, rotations stored [x, y, z, w]).
-        spz::GaussianCloud loadSplatBinary(const std::string &filename)
+        // The footprint of the bounding box on the Earth; one that cannot be made is logged and leaves
+        // the sidecar without it
+        void addFootprint(const LocalFrameGeoref &georef, const std::array<double, 3> &boundsMin,
+                          const std::array<double, 3> &boundsMax, json &sidecar)
         {
-            std::ifstream in(filename, std::ios::binary | std::ios::ate);
-            if (!in.good())
-                throw FSException("Cannot open " + filename);
-
-            const std::streamoff size = in.tellg();
-            if (size <= 0 || (size % 32) != 0)
-                throw AppException("Invalid .splat file (size is not a positive multiple of 32): " +
-                                   filename);
-
-            in.seekg(0, std::ios::beg);
-            std::vector<uint8_t> raw(static_cast<size_t>(size));
-            in.read(reinterpret_cast<char *>(raw.data()), size);
-            if (!in.good())
-                throw AppException("Failed to read .splat file: " + filename);
-
-            const size_t n = static_cast<size_t>(size) / 32u;
-
-            spz::GaussianCloud cloud;
-            cloud.numPoints = static_cast<int32_t>(n);
-            cloud.shDegree = 0;
-            cloud.positions.resize(n * 3);
-            cloud.scales.resize(n * 3);
-            cloud.rotations.resize(n * 4);
-            cloud.alphas.resize(n);
-            cloud.colors.resize(n * 3);
-
-            for (size_t i = 0; i < n; ++i)
-            {
-                const uint8_t *rec = raw.data() + i * 32u;
-
-                float pos[3];
-                float scale[3];
-                std::memcpy(pos, rec + 0, sizeof(pos));
-                std::memcpy(scale, rec + 12, sizeof(scale));
-
-                const uint8_t r = rec[24];
-                const uint8_t g = rec[25];
-                const uint8_t b = rec[26];
-                const uint8_t a = rec[27];
-
-                const float qw = (static_cast<float>(rec[28]) - 128.0f) / 128.0f;
-                const float qx = (static_cast<float>(rec[29]) - 128.0f) / 128.0f;
-                const float qy = (static_cast<float>(rec[30]) - 128.0f) / 128.0f;
-                const float qz = (static_cast<float>(rec[31]) - 128.0f) / 128.0f;
-                float qn = std::sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
-                if (qn < 1e-9f)
-                    qn = 1.0f;
-
-                cloud.positions[i * 3 + 0] = pos[0];
-                cloud.positions[i * 3 + 1] = pos[1];
-                cloud.positions[i * 3 + 2] = pos[2];
-
-                // Linear scale -> log scale (guard against non-positive values).
-                cloud.scales[i * 3 + 0] = std::log(std::max(scale[0], 1e-9f));
-                cloud.scales[i * 3 + 1] = std::log(std::max(scale[1], 1e-9f));
-                cloud.scales[i * 3 + 2] = std::log(std::max(scale[2], 1e-9f));
-
-                // SPZ stores rotations as [x, y, z, w].
-                cloud.rotations[i * 4 + 0] = qx / qn;
-                cloud.rotations[i * 4 + 1] = qy / qn;
-                cloud.rotations[i * 4 + 2] = qz / qn;
-                cloud.rotations[i * 4 + 3] = qw / qn;
-
-                cloud.alphas[i] = inverseSigmoid(static_cast<float>(a) / 255.0f);
-
-                // Recover the SH DC coefficient from the baked-in RGB color.
-                cloud.colors[i * 3 + 0] =
-                    (static_cast<float>(r) / 255.0f - 0.5f) / static_cast<float>(SH_C0);
-                cloud.colors[i * 3 + 1] =
-                    (static_cast<float>(g) / 255.0f - 0.5f) / static_cast<float>(SH_C0);
-                cloud.colors[i * 3 + 2] =
-                    (static_cast<float>(b) / 255.0f - 0.5f) / static_cast<float>(SH_C0);
-            }
-
-            return cloud;
-        }
-
-        // Read splat count + SH degree from a .spz file. Prefers a cheap 13-byte header
-        // read for the v4 ZSTD format, falling back to a full packed load for legacy files.
-        bool readSpzInfo(const std::string &filename, GaussianSplatInfo &info)
-        {
-            std::ifstream in(filename, std::ios::binary);
-            if (!in.good())
-                return false;
-
-            uint8_t hdr[13] = {0};
-            in.read(reinterpret_cast<char *>(hdr), sizeof(hdr));
-            const std::streamsize got = in.gcount();
-            in.close();
-
-            // NGSP magic (v4): 'N','G','S','P' = 0x4E 0x47 0x53 0x50.
-            if (got >= 13 && hdr[0] == 'N' && hdr[1] == 'G' && hdr[2] == 'S' && hdr[3] == 'P')
-            {
-                uint32_t numPoints = 0;
-                std::memcpy(&numPoints, hdr + 8, sizeof(numPoints)); // little-endian field
-                info.splatCount = numPoints;
-                info.shDegree = static_cast<int>(hdr[12]);
-                return true;
-            }
-
-            // Legacy gzip-compressed format (v1-3): decode the packed header.
             try
             {
-                const spz::PackedGaussians packed = spz::loadSpzPacked(filename);
-                if (packed.numPoints <= 0)
-                    return false;
-                info.splatCount = static_cast<size_t>(packed.numPoints);
-                info.shDegree = packed.shDegree;
-                return true;
+                sidecar["wgs84Footprint"] =
+                    localFrameFootprintGeometry(georef, LocalBounds{boundsMin[0], boundsMin[1], boundsMax[0], boundsMax[1]});
             }
             catch (const std::exception &e)
             {
-                LOGD << "Cannot read SPZ info for " << filename << ": " << e.what();
-                return false;
+                LOGW << "No footprint for the georeferenced splat: " << e.what();
             }
+        }
+
+        // Local-space sidecar for deterministic camera framing in the viewer (the streamed .rad has
+        // no resident splats at init time): the bounding box, which way is up and, for a georeferenced
+        // splat, where the bounding box is on the Earth. The sidecar is optional (the viewer frames the
+        // scene without it): one that cannot be written is logged and the build still delivers its
+        // model.rad.
+        void writeSidecar(const fs::path &rad, const fs::path &boundsFile, const std::array<double, 3> &boundsMin,
+                          const std::array<double, 3> &boundsMax, const std::optional<LocalFrameGeoref> &georef)
+        {
+            try
+            {
+                json j;
+                j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
+                j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
+                addUpEstimate(rad, j, georef.has_value());
+                if (georef.has_value())
+                    addFootprint(*georef, boundsMin, boundsMax, j);
+                io::writeFileAtomic(boundsFile, j.dump(), "bounds file");
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Skipping " << io::toUtf8(boundsFile) << ": " << e.what();
+            }
+        }
+
+        // The sidecar of a model.rad build-lod made. The box is computed by streaming the .rad centres:
+        // exact, bounded memory, and in the same coordinate space the viewer renders. A .rad whose
+        // centres cannot be decoded is logged and the build still delivers its model.rad.
+        void writeBoundsSidecar(const fs::path &rad, const fs::path &boundsFile,
+                                const std::optional<LocalFrameGeoref> &georef)
+        {
+            try
+            {
+                std::array<double, 3> boundsMin, boundsMax;
+                if (!computeRadBounds(rad, boundsMin, boundsMax))
+                {
+                    LOGW << "Skipping " << io::toUtf8(boundsFile) << ": no centres decoded from " << io::toUtf8(rad);
+                    return;
+                }
+                writeSidecar(rad, boundsFile, boundsMin, boundsMax, georef);
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Skipping " << io::toUtf8(boundsFile) << ": " << e.what();
+            }
+        }
+
+        // A .rad upload is already what a build makes, so it is checked and published as model.rad
+        // without build-lod: the reader walks the header and every chunk's centres (a file it cannot
+        // read is refused here, not served to a viewer that cannot read it either). The file is
+        // copied, as an optimized COG is: a hard link would share its data with the dataset file, and
+        // a rewrite of that file in place would change the published model.rad under its bounds.json
+        // without a build. The copy goes into the build's scratch folder, which is published by
+        // renaming it whole, so no reader sees a part of it; a full disk fails the copy with its
+        // code, for the build to be retried.
+        void publishRad(const std::string &input, const fs::path &source, const fs::path &outdir,
+                        const std::optional<LocalFrameGeoref> &georef)
+        {
+            std::array<double, 3> boundsMin, boundsMax;
+            bool any = false;
+            try
+            {
+                any = computeRadBounds(source, boundsMin, boundsMax);
+            }
+            catch (const AppException &e)
+            {
+                throw AppException("Cannot build the Gaussian splat " + input + ": it is not a RAD file this can read (" +
+                                   e.what() + ")");
+            }
+            if (!any)
+                throw AppException("Cannot build the Gaussian splat " + input + ": the RAD file holds no splats");
+
+            const fs::path rad = outdir / GsplatRadFileName;
+            io::copy(source, rad);
+            writeSidecar(rad, outdir / GsplatBoundsFileName, boundsMin, boundsMax, georef);
+        }
+
+        // Splat count and SH degree of a .ply, from its header
+        bool plySplatInfo(const std::string &filename, GaussianSplatInfo &info)
+        {
+            PlyInfo ply;
+            if (!getPlyInfo(io::fromUtf8(filename), ply) || !ply.isSplat)
+                return false;
+            info.splatCount = ply.vertexCount;
+            info.shDegree = ply.shDegree >= 0 ? ply.shDegree : 0;
+            return true;
         }
     } // namespace
 
-    json GaussianSplatInfo::toJSON() const
+    void to_json(json &j, const GaussianSplatInfo &info)
     {
-        json j;
-        j["splatCount"] = splatCount;
-        j["shDegree"] = shDegree;
-        return j;
-    }
-
-    json GsplatGeoref::toJSON() const
-    {
-        json j;
-        j["srs"] = srs;
-        j["offset"] = {offset[0], offset[1], offset[2]};
-        if (boundsWgs84.size() == 4)
-            j["boundsWgs84"] = boundsWgs84;
-        return j;
-    }
-
-    bool isSpzPath(const std::string &filename)
-    {
-        return io::Path(filename).checkExtension({"spz"});
-    }
-
-    bool hasSplatExtension(const std::string &filename)
-    {
-        return io::Path(filename).checkExtension({"spz", "splat", "ksplat"});
-    }
-
-    bool looksLikeSpz(const fs::path &path)
-    {
-        std::ifstream in(path.string(), std::ios::binary);
-        if (!in.good())
-            return false;
-        uint8_t magic[4] = {0};
-        in.read(reinterpret_cast<char *>(magic), sizeof(magic));
-        if (in.gcount() < 2)
-            return false;
-        // NGSP (v4) or gzip (legacy v1-3).
-        const bool ngsp = (in.gcount() >= 4) && magic[0] == 'N' && magic[1] == 'G' &&
-                          magic[2] == 'S' && magic[3] == 'P';
-        const bool gzip = magic[0] == 0x1F && magic[1] == 0x8B;
-        return ngsp || gzip;
-    }
-
-    bool looksLikeSplatBinary(const fs::path &path)
-    {
-        std::error_code ec;
-        const auto size = fs::file_size(path, ec);
-        if (ec)
-            return false;
-        return size > 0 && (size % 32) == 0;
+        j = json::object();
+        j["splatCount"] = info.splatCount;
+        j["shDegree"] = info.shDegree;
     }
 
     bool getGaussianSplatInfo(const std::string &filename, GaussianSplatInfo &info)
     {
         info = GaussianSplatInfo();
 
-        switch (formatOf(filename))
+        const fs::path path = io::fromUtf8(filename);
+        if (!splatAccepts(path, SplatStage::Metadata))
+            return false; // no metadata for this format, by design
+
+        switch (splatFormatOf(path))
         {
             case SplatFormat::Ply:
-            {
-                PlyInfo ply;
-                if (!getPlyInfo(filename, ply) || !ply.isSplat)
-                    return false;
-                info.splatCount = ply.vertexCount;
-                info.shDegree = ply.shDegree >= 0 ? ply.shDegree : 0;
-                info.dimensions = ply.dimensions;
-                return true;
-            }
+                return plySplatInfo(filename, info);
             case SplatFormat::Splat:
             {
-                std::error_code ec;
-                const auto size = fs::file_size(filename, ec);
-                if (ec || size == 0 || (size % 32) != 0)
+                if (!looksLikeSplat(path))
                     return false;
-                info.splatCount = static_cast<size_t>(size / 32);
+                info.splatCount = fs::file_size(path) / SplatRecordSize;
                 info.shDegree = 0;
                 return true;
             }
             case SplatFormat::Spz:
-                return readSpzInfo(filename, info);
+            {
+                SpzHeader header;
+                if (!readSpzHeader(path, header))
+                {
+                    LOGD << "Cannot read SPZ info for " << filename;
+                    return false;
+                }
+                info.splatCount = header.numPoints;
+                info.shDegree = header.shDegree;
+                return true;
+            }
             case SplatFormat::Ksplat:
-            case SplatFormat::Unknown:
+            {
+                KsplatHeader header;
+                if (!readKsplatHeader(path, header))
+                    return false;
+                info.splatCount = header.numSplats;
+                info.shDegree = header.shDegree;
+                return true;
+            }
             default:
-                // .ksplat is recognized as a type but not natively decodable here.
                 return false;
         }
     }
 
-    bool parseCoordsFile(const fs::path &coordsFile, GsplatGeoref &georef)
+    void buildGsplat(const std::string &input, const std::string &outdir, const std::optional<LocalFrameGeoref> &georef)
     {
-        georef = GsplatGeoref();
+        assureBuildableSplatSource(input);
 
-        std::ifstream in(coordsFile.string());
-        if (!in.good())
-            return false;
+        io::assureFolderExists(io::fromUtf8(outdir));
 
-        std::string line;
-        // First non-empty line: SRS header.
-        std::string srs;
-        while (std::getline(in, line))
+        if (splatFormatOf(io::fromUtf8(input)) == SplatFormat::Rad)
         {
-            std::string t = line;
-            utils::trim(t);
-            if (!t.empty())
-            {
-                srs = t;
-                break;
-            }
-        }
-        if (srs.empty())
-            return false;
-
-        // Next non-empty, non-comment line: "east north [z]".
-        std::string offsetLine;
-        while (std::getline(in, line))
-        {
-            std::string t = line;
-            utils::trim(t);
-            if (t.empty() || t[0] == '#')
-                continue;
-            offsetLine = t;
-            break;
-        }
-        if (offsetLine.empty())
-            return false;
-
-        std::array<double, 3> offset = {0.0, 0.0, 0.0};
-        std::istringstream ss(offsetLine);
-        if (!(ss >> offset[0] >> offset[1]))
-            return false;
-        ss >> offset[2]; // optional, leaves 0.0 if absent
-
-        georef.srs = srs;
-        georef.offset = offset;
-        georef.valid = true;
-        return true;
-    }
-
-    void writeGeoref(const GsplatGeoref &georef, const fs::path &outFile)
-    {
-        const fs::path parentDir = outFile.parent_path();
-        if (!parentDir.empty())
-            io::assureFolderExists(parentDir);
-        std::ofstream out;
-        errno = 0;
-        out.open(outFile.string(), std::ios::binary | std::ios::trunc);
-        const int openError = errno;
-        if (!out.good())
-            throw FSException("Cannot write georef sidecar " + outFile.string(),
-                              std::error_code(openError, std::generic_category()));
-        errno = 0;
-        out << georef.toJSON().dump(2);
-        out.flush();
-        const int writeError = errno;
-        if (!out.good())
-            throw FSException("Failed while writing " + outFile.string(),
-                              std::error_code(writeError, std::generic_category()));
-        errno = 0;
-        out.close();
-        const int closeError = errno;
-        if (out.fail())
-            throw FSException("Failed while closing " + outFile.string(),
-                              std::error_code(closeError, std::generic_category()));
-
-    }
-
-    void convertToSpz(const std::string &input, const std::string &output)
-    {
-        const SplatFormat fmt = formatOf(input);
-
-        // A missing external tool is not a missing dependency: fail instead of deferring.
-        if (fmt == SplatFormat::Ksplat)
-            throw AppException("Converting .ksplat requires the optional splat-transform tool, "
-                               "which is not available");
-
-        if (fmt == SplatFormat::Unknown)
-            throw InvalidArgsException("Unsupported Gaussian Splat format: " + input);
-
-        const fs::path parentDir = fs::path(output).parent_path();
-        if (!parentDir.empty())
-            io::assureFolderExists(parentDir);
-
-        if (fmt == SplatFormat::Spz)
-        {
-            if (!looksLikeSpz(input))
-                throw AppException("File does not look like a valid .spz: " + input);
-            // Gzip-based SPZ (v1-3) is already viewer-compatible: copy it through unchanged.
-            // NGSP/ZSTD SPZ (v4) must be transcoded to v3 so the Spark viewer can decode it.
-            if (isGzipSpz(input))
-            {
-                io::copy(input, output);
-                return;
-            }
-
-            spz::UnpackOptions unpack;
-            spz::GaussianCloud cloud = spz::loadSpz(input, unpack);
-            if (cloud.numPoints <= 0)
-                throw AppException("No splats decoded from: " + input);
-
-            spz::PackOptions pack;
-            pack.version = kDeliverySpzVersion;
-            applyShBitsFromEnv(pack);
-            if (!spz::saveSpz(cloud, pack, output))
-                throw AppException("Failed to transcode .spz to viewer-compatible version: " + output);
+            publishRad(input, io::fromUtf8(input), io::fromUtf8(outdir), georef);
             return;
         }
 
-        spz::GaussianCloud cloud;
-        if (fmt == SplatFormat::Ply)
-        {
-            spz::UnpackOptions unpack; // canonical (no coordinate conversion)
-            cloud = spz::loadSplatFromPly(input, unpack);
-            if (cloud.numPoints <= 0)
-                throw AppException("Not a valid Gaussian Splat PLY (no splats decoded): " + input);
-        }
-        else // SplatFormat::Splat
-        {
-            cloud = loadSplatBinary(input);
-            if (cloud.numPoints <= 0)
-                throw AppException("No splats decoded from: " + input);
-        }
-
-        spz::PackOptions pack; // canonical (from = UNSPECIFIED)
-        pack.version = kDeliverySpzVersion;
-        applyShBitsFromEnv(pack);
-
-        if (!spz::saveSpz(cloud, pack, output))
-            throw AppException("Failed to encode .spz: " + output);
-    }
-
-    void buildGsplat(const std::string &input, const std::string &outdir)
-    {
-        GsplatGeoref none;
-        buildGsplat(input, outdir, none);
-    }
-
-    void buildGsplat(const std::string &input, const std::string &outdir, const GsplatGeoref &georef)
-    {
-        io::assureFolderExists(outdir);
-
         // build-lod is a mandatory dependency: model.rad is the sole delivery artifact (streamed
-        // by the viewer, and decoded on demand to render thumbnails). Run it directly on the
-        // source splat so no intermediate .spz is materialized - memory stays bounded even for
-        // multi-gigabyte inputs, since build-lod reads the file in chunks.
+        // by the viewer, and decoded on demand to render thumbnails). It runs on the source splat
+        // itself (staged under a name of ours), with no intermediate .spz: it reads every SPZ
+        // version, the gzip container of v1-3 and the NGSP/ZSTD container of v4.
         // A missing external tool fails the build (it would never appear by uploading
         // files). After the tool is installed, the next full build picks the entry up.
         if (!buildlod::isBuildLodAvailable())
@@ -496,36 +245,85 @@ namespace ddb
                 "Building Gaussian Splats requires the build-lod tool, which was not found "
                 "(set DDB_BUILDLOD_PATH or place build-lod next to the DroneDB executable)");
 
-        const fs::path outRad = fs::path(outdir) / GsplatRadFileName;
-        const auto lodResult = buildlod::runBuildLodResult(input, outRad, /*quality=*/true, GsplatRadMaxSh);
+        const fs::path lodInput = io::fromUtf8(input);
+        const fs::path outRad = io::fromUtf8(outdir) / GsplatRadFileName;
+        // Its silent steps grow with the number of splats: a large splat gets a longer idle limit
+        process::Options lodOptions;
+        lodOptions.idleTimeout = buildlod::idleTimeoutFor(lodInput);
+        const auto lodResult =
+            buildlod::runBuildLodResult({lodInput, outRad, /*quality=*/true, GsplatRadMaxSh}, lodOptions);
         if (!lodResult.succeeded) {
             lodResult.throwIfRetryable("build-lod failed for " + input + ": ");
             throw AppException("build-lod failed for " + input + ": " + lodResult.error);
         }
 
-        // Local-space bounding box sidecar for deterministic camera framing in the viewer (the
-        // streamed .rad has no resident splats at init time). Computed by streaming the .rad
-        // centres: exact, bounded memory, and in the same coordinate space the viewer renders.
-        std::array<double, 3> boundsMin, boundsMax;
-        if (computeRadBounds(outRad, boundsMin, boundsMax))
-        {
-            json j;
-            j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
-            j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
-            const fs::path boundsFile = fs::path(outdir) / GsplatBoundsFileName;
-            std::ofstream out(boundsFile.string(), std::ios::binary);
-            if (out.good())
-                out << j.dump();
-            else
-                LOGD << "Could not write " << boundsFile.string();
-        }
-        else
-        {
-            LOGD << "Skipping bounds.json: no centres decoded from " << outRad.string();
-        }
+        writeBoundsSidecar(outRad, io::fromUtf8(outdir) / GsplatBoundsFileName, georef);
+    }
 
-        if (georef.valid)
-            writeGeoref(georef, fs::path(outdir) / GsplatGeorefFileName);
+    void to_json(json &j, const SplatSpzExport &exported)
+    {
+        j = {{"path", io::toUtf8(exported.path)}, {"role", GsplatExportRole}, {"cached", exported.cached}};
+    }
+
+    namespace
+    {
+        // What an export found: made after the dataset file and not empty
+        bool isCurrentExport(const fs::path &exported, const fs::path &source)
+        {
+            std::error_code ec;
+            if (!fs::is_regular_file(exported, ec) || ec || fs::file_size(exported, ec) == 0 || ec)
+                return false;
+            const auto madeAt = fs::last_write_time(exported, ec);
+            if (ec)
+                return false;
+            const auto changedAt = fs::last_write_time(source, ec);
+            return !ec && madeAt >= changedAt;
+        }
+    } // namespace
+
+    SplatSpzExport exportSplatSpz(Database *db, const std::string &entryPath)
+    {
+        const auto entry = getEntry(db, entryPath);
+        if (!entry)
+            throw EntryNotFoundException("No entry " + entryPath);
+        if (entry->type != EntryType::GaussianSplat)
+            throw InvalidArgsException(entryPath + " is not a Gaussian splat");
+
+        const fs::path source = db->rootDirectory() / io::fromUtf8(entry->path);
+        assureConvertibleToSpz(io::toUtf8(source));
+        std::error_code ec;
+        if (!fs::is_regular_file(source, ec) || ec)
+            throw AppException("The file of the Gaussian splat " + entryPath + " does not exist in the dataset");
+        cancel::throwIfCanceled();
+
+        const fs::path baseOutputPath = fs::absolute(db->buildDirectory() / entry->hash);
+        const fs::path outputFolder = baseOutputPath / GsplatBuildSubfolder;
+        if (!fs::is_directory(baseOutputPath, ec) || ec)
+            throw EntryNotFoundException("The Gaussian splat " + entryPath + " is not built: build it first");
+
+        // The lock of the whole build of a splat is the one of its output folder: a build that runs
+        // holds it until it has published gsplat/, and none starts while this export writes into it
+        BuildLock lock(io::toUtf8(outputFolder));
+        if (!entryHandler(entry->type).isComplete(baseOutputPath))
+            throw EntryNotFoundException("The Gaussian splat " + entryPath + " is not built: build it first");
+
+        const fs::path exported = outputFolder / GsplatExportFileName;
+        if (isCurrentExport(exported, source))
+            return {exported, true};
+
+        try
+        {
+            ensureSufficientDiskSpace(baseOutputPath);
+            cancel::throwIfCanceled();
+            convertToSpz(io::toUtf8(source), io::toUtf8(exported));
+        }
+        catch (const FSException &e)
+        {
+            if (e.code() == std::errc::no_space_on_device)
+                throw RetryableBuildException(e.what(), RetryableBuildReason::NoSpaceOnDevice);
+            throw;
+        }
+        return {exported, false};
     }
 
 } // namespace ddb

@@ -1,0 +1,768 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <iterator>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "3d.h"
+#include "exceptions.h"
+#include "fs.h"
+#include "helpers/process_test_utils.h"
+#include "gtest/gtest.h"
+#include "json.h"
+#include "mio.h"
+#include "obj2tiles_runner.h"
+#include "test.h"
+#include "testarea.h"
+#include "utils.h"
+
+
+namespace {
+
+using namespace ddb;
+
+// A path that cannot exist as an executable; used to force "binary unavailable".
+#ifdef _WIN32
+constexpr const char* kBogusBinary = "Z:\\nonexistent\\Obj2Tiles_missing.exe";
+#else
+constexpr const char* kBogusBinary = "/nonexistent/Obj2Tiles_missing";
+#endif
+
+// RAII helper that refreshes the Obj2Tiles binary cache on entry/exit so tests
+// that set DDB_OBJ2TILES_PATH don't leak state into sibling tests.
+struct Obj2TilesEnvReset {
+    Obj2TilesEnvReset() { ddb::obj2tiles::findObj2TilesBinary(true); }
+    ~Obj2TilesEnvReset() {
+        unsetEnv("DDB_OBJ2TILES_PATH");
+        ddb::obj2tiles::findObj2TilesBinary(true);
+    }
+};
+
+// An authoritative, non-executable DDB_OBJ2TILES_PATH makes discovery return
+// empty regardless of any real Obj2Tiles binary on PATH.
+TEST(obj2tiles, binaryNotFoundWithBogusEnv) {
+    Obj2TilesEnvReset reset;
+    setEnv("DDB_OBJ2TILES_PATH", kBogusBinary);
+    EXPECT_TRUE(ddb::obj2tiles::findObj2TilesBinary(true).empty());
+}
+
+// runObj2Tiles must fail gracefully (false + message) when no binary is available.
+TEST(obj2tiles, runReturnsFalseWhenBinaryMissing) {
+    Obj2TilesEnvReset reset;
+    setEnv("DDB_OBJ2TILES_PATH", kBogusBinary);
+    ddb::obj2tiles::findObj2TilesBinary(true);
+
+    TestArea ta(TEST_NAME);
+    const fs::path out = ta.getPath("out3dtiles");
+
+    ddb::obj2tiles::Obj2TilesOptions opts;
+    std::string err;
+    const bool ok = ddb::obj2tiles::runObj2Tiles("model.obj", out, opts, err);
+    EXPECT_FALSE(ok);
+    EXPECT_NE(err.find("not found"), std::string::npos);
+}
+
+TEST(obj2tiles, seededOutputRejectedBeforeToolRuns) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path output = ta.getFolder("out");
+    writeFile(output / "tileset.json", "old tileset");
+    writeFile(output / "keep.bin", "old artifact");
+    obj2tiles::Obj2TilesOptions opts;
+    std::string error;
+    // A bogus executable/input proves validation precedes any tool launch.
+    EXPECT_FALSE(obj2tiles::runObj2Tiles("missing.obj", output, opts, error, kBogusBinary));
+    EXPECT_NE(error.find("must be absent or empty"), std::string::npos) << error;
+    const auto content = [](const fs::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+    EXPECT_EQ(content(output / "tileset.json"), "old tileset");
+    EXPECT_EQ(content(output / "keep.bin"), "old artifact");
+    EXPECT_EQ(fs::file_size(output / "tileset.json"), 11u);
+    EXPECT_EQ(fs::file_size(output / "keep.bin"), 12u);
+    EXPECT_EQ(std::distance(fs::directory_iterator(output), fs::directory_iterator()), 2);
+}
+
+// buildModel3DTiles must surface the missing binary as a typed Obj2TilesException
+// so the build pipeline can treat 3D Tiles as a best-effort, non-blocking artifact.
+// Uses a minimal dependency-free OBJ so no network download is needed.
+TEST(obj2tiles, buildThrowsWhenBinaryMissing) {
+    Obj2TilesEnvReset reset;
+
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    {
+        std::ofstream o(obj.string());
+        o << "v 0 0 0\n"
+          << "v 1 0 0\n"
+          << "v 0 1 0\n"
+          << "f 1 2 3\n";
+    }
+
+    setEnv("DDB_OBJ2TILES_PATH", kBogusBinary);
+    ddb::obj2tiles::findObj2TilesBinary(true);
+
+    const fs::path out = ta.getPath("out3dtiles");
+    EXPECT_THROW(ddb::buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}), Obj2TilesException);
+    // Nothing must be left behind at the destination when generation fails.
+    EXPECT_FALSE(fs::exists(out));
+}
+
+// End-to-end LOCAL (non-georeferenced) generation: with no sidecar the tileset
+// must use the identity transform. Disabled on CI (needs the Obj2Tiles binary).
+MANUAL_TEST(obj2tiles, endToEndGeneration) {
+    if (ddb::obj2tiles::findObj2TilesBinary(true).empty())
+        GTEST_SKIP() << "Obj2Tiles binary not available";
+
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+
+    const fs::path out = ta.getPath("out3dtiles");
+    const std::string tileset = ddb::buildModel3DTiles(obj.string(), out.string(), {.overwrite = true});
+    ASSERT_TRUE(fs::exists(tileset));
+    ASSERT_TRUE(fs::exists(out / "tileset.json"));
+
+    std::ifstream in(tileset);
+    json j;
+    in >> j;
+    ASSERT_TRUE(j.contains("root") && j["root"].contains("transform"));
+    const auto t = j["root"]["transform"];
+    ASSERT_EQ(t.size(), 16u);
+    // Local mode -> identity transform: zero translation column (indices 12,13,14).
+    const double tx = t[12].get<double>(), ty = t[13].get<double>(), tz = t[14].get<double>();
+    EXPECT_NEAR(std::abs(tx) + std::abs(ty) + std::abs(tz), 0.0, 1e-9);
+}
+
+// A model georeferenced by a projected CRS and an offset (ODM's coords.txt) is placed at the WGS84
+// position of the offset point: the translation of the root transform is its ECEF position, which
+// PROJ gives as (-152070.337, -4367817.964, 4629817.481) for EPSG:32615 (576705, 5188170).
+// Disabled on CI (needs the Obj2Tiles binary).
+MANUAL_TEST(obj2tiles, endToEndGenerationWithAProjectedGeoref) {
+    if (ddb::obj2tiles::findObj2TilesBinary(true).empty())
+        GTEST_SKIP() << "Obj2Tiles binary not available";
+
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(ta.getPath("coords.txt"), "WGS84 UTM 15N\n576705 5188170\n");
+
+    const std::string tileset = ddb::buildModel3DTiles(obj.string(), ta.getPath("out3dtiles").string(), {.overwrite = true});
+    std::ifstream in(tileset);
+    json j;
+    in >> j;
+    const auto t = j["root"]["transform"];
+    ASSERT_EQ(t.size(), 16u);
+    EXPECT_NEAR(t[12].get<double>(), -152070.337, 0.01);
+    EXPECT_NEAR(t[13].get<double>(), -4367817.964, 0.01);
+    EXPECT_NEAR(t[14].get<double>(), 4629817.481, 0.01);
+}
+
+// --- Georeferencing detection (CI-safe: pure function, no binary needed) ---
+
+TEST(obj2tiles, detectGeorefNoneWhenNoSidecar) {
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\nf 1 1 1\n");  // not JSON, just a placeholder OBJ
+    EXPECT_FALSE(detectLocalFrameGeoref(obj.string()).has_value());
+}
+
+TEST(obj2tiles, detectGeorefFromGeorefJson) {
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\n");
+    writeFile(ta.getPath("georef.json"),
+                 R"({"latitude": 45.5, "longitude": 9.25, "altitude": 120.0})");
+
+    const auto g = detectLocalFrameGeoref(obj.string());
+    ASSERT_TRUE(g.has_value());
+    EXPECT_NEAR(g->origin.latitude, 45.5, 1e-9);
+    EXPECT_NEAR(g->origin.longitude, 9.25, 1e-9);
+    EXPECT_NEAR(g->origin.altitude, 120.0, 1e-9);
+}
+
+TEST(obj2tiles, detectGeorefFromReferenceLla) {
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\n");
+    // ODM convention; altitude omitted -> defaults to 0.
+    writeFile(ta.getPath("reference_lla.json"),
+                 R"({"latitude": -33.86, "longitude": 151.21})");
+
+    const auto g = detectLocalFrameGeoref(obj.string());
+    ASSERT_TRUE(g.has_value());
+    EXPECT_NEAR(g->origin.latitude, -33.86, 1e-9);
+    EXPECT_NEAR(g->origin.longitude, 151.21, 1e-9);
+    EXPECT_NEAR(g->origin.altitude, 0.0, 1e-9);
+}
+
+TEST(obj2tiles, detectGeorefFromPerModelSidecar) {
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("mymodel.obj");
+    writeFile(obj, "v 0 0 0\n");
+    // <stem>.geo.json takes precedence and uses short keys.
+    writeFile(ta.getPath("mymodel.geo.json"),
+                 R"({"lat": 10.0, "lon": 20.0, "alt": 5.0})");
+
+    const auto g = detectLocalFrameGeoref(obj.string());
+    ASSERT_TRUE(g.has_value());
+    EXPECT_NEAR(g->origin.latitude, 10.0, 1e-9);
+    EXPECT_NEAR(g->origin.longitude, 20.0, 1e-9);
+    EXPECT_NEAR(g->origin.altitude, 5.0, 1e-9);
+}
+
+TEST(obj2tiles, detectGeorefRejectsOutOfRange) {
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\n");
+    writeFile(ta.getPath("georef.json"),
+                 R"({"latitude": 999.0, "longitude": 9.0})");
+    EXPECT_FALSE(detectLocalFrameGeoref(obj.string()).has_value());
+}
+
+// getModelInfo reads a model's local-space bounding box (used to derive a
+// georeferenced model's WGS84 footprint). A simple OBJ with known vertices must
+// yield exactly those bounds.
+TEST(obj2tiles, getModelInfoBounds) {
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("box.obj");
+    writeFile(obj,
+                 "v 0 0 0\n"
+                 "v 10 0 0\n"
+                 "v 0 20 0\n"
+                 "v 0 0 5\n"
+                 "f 1 2 3\n"
+                 "f 1 4 2\n");
+
+    ModelInfo info;
+    ASSERT_TRUE(getModelInfo(obj.string(), info));
+    EXPECT_TRUE(info.hasBounds);
+    EXPECT_NEAR(info.minX, 0.0, 1e-6);
+    EXPECT_NEAR(info.maxX, 10.0, 1e-6);
+    EXPECT_NEAR(info.minY, 0.0, 1e-6);
+    EXPECT_NEAR(info.maxY, 20.0, 1e-6);
+    EXPECT_NEAR(info.minZ, 0.0, 1e-6);
+    EXPECT_NEAR(info.maxZ, 5.0, 1e-6);
+}
+
+// A missing / unreadable model must fail gracefully (false, no throw) so indexing
+// proceeds without a footprint instead of aborting.
+TEST(obj2tiles, getModelInfoMissingReturnsFalse) {
+    TestArea ta(TEST_NAME);
+    ModelInfo info;
+    EXPECT_FALSE(getModelInfo(ta.getPath("does_not_exist.obj").string(), info));
+}
+
+// ---------------------------------------------------------------------------
+// computeObj2TilesOpts heuristic: verify all threshold bands
+// ---------------------------------------------------------------------------
+
+// Tiny band: < 10K faces → lods=1, divisions=0, octree=false (depth=0)
+TEST(obj2tiles, computeOptsTiny) {
+    ModelInfo info;
+    info.faceCount = 9999;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 1);
+    EXPECT_EQ(opts.divisions, 0);
+    EXPECT_FALSE(opts.octree);
+    EXPECT_EQ(opts.textureFormat, "Ktx2");
+    EXPECT_EQ(opts.ktx2Quality, 192);
+    EXPECT_EQ(opts.splitStrategy, "VertexMedian");
+    EXPECT_EQ(opts.ktx2Threads, 4); // single tile: the encoder gets its own threads
+}
+
+// Small band: 10K–50K → lods=2, divisions=0, octree=true (depth=1)
+TEST(obj2tiles, computeOptsSmall) {
+    ModelInfo info;
+    info.faceCount = 30000;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 2);
+    EXPECT_EQ(opts.divisions, 0);
+    EXPECT_TRUE(opts.octree);
+    EXPECT_EQ(opts.ktx2Threads, 4);
+}
+
+// Medium band: 50K–200K → lods=2, divisions=1, octree=true (depth=2)
+TEST(obj2tiles, computeOptsMedium) {
+    ModelInfo info;
+    info.faceCount = 100000;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 2);
+    EXPECT_EQ(opts.divisions, 1);
+    EXPECT_TRUE(opts.octree);
+    EXPECT_EQ(opts.ktx2Threads, 4); // depth 2: 16 finest tiles
+}
+
+// Large band: 200K–750K → lods=3, divisions=2, octree=true (depth=4)
+// (divisions bumped 1→2 vs. original bands: favors base-grid granularity over LOD depth)
+TEST(obj2tiles, computeOptsLarge) {
+    ModelInfo info;
+    info.faceCount = 500000;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 3);
+    EXPECT_EQ(opts.divisions, 2);
+    EXPECT_TRUE(opts.octree);
+    EXPECT_EQ(opts.ktx2Threads, 0); // 256 finest tiles already saturate the cores
+}
+
+// XL band: 750K–3M → lods=3, divisions=3, octree=true (depth=5)
+// (divisions bumped 2→3 vs. original bands: favors base-grid granularity over LOD depth)
+TEST(obj2tiles, computeOptsXL) {
+    ModelInfo info;
+    info.faceCount = 1500000u;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 3);
+    EXPECT_EQ(opts.divisions, 3);
+    EXPECT_TRUE(opts.octree);
+    EXPECT_EQ(opts.ktx2Threads, 0);
+}
+
+// XXL band: 3M–12M → lods=4, divisions=2, octree=true (depth=5)
+TEST(obj2tiles, computeOptsXXL) {
+    ModelInfo info;
+    info.faceCount = 6000000u;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 4);
+    EXPECT_EQ(opts.divisions, 2);
+    EXPECT_TRUE(opts.octree);
+}
+
+// Encoder threads stop exactly where the Large band (depth 4) starts.
+TEST(obj2tiles, computeOptsKtx2ThreadsBoundary200K) {
+    ModelInfo info;
+    info.faceCount = 199999;
+    EXPECT_EQ(computeObj2TilesOpts(info).ktx2Threads, 4);
+    info.faceCount = 200000;
+    EXPECT_EQ(computeObj2TilesOpts(info).ktx2Threads, 0);
+    info.faceCount = UINT64_MAX;
+    EXPECT_EQ(computeObj2TilesOpts(info).ktx2Threads, 0);
+}
+
+// Boundary: exactly 10K faces → Small band (not Tiny)
+TEST(obj2tiles, computeOptsBoundary10K) {
+    ModelInfo info;
+    info.faceCount = 10000;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 2);
+    EXPECT_EQ(opts.divisions, 0);
+    EXPECT_TRUE(opts.octree);
+}
+
+// Cap: even with astronomically large face count, depth never exceeds MAX_TILE_DEPTH (6)
+TEST(obj2tiles, computeOptsCapNeverExceedsMaxDepth) {
+    ModelInfo info;
+    info.faceCount = UINT64_MAX;
+    auto opts = computeObj2TilesOpts(info);
+    int depth = opts.octree ? (opts.lods + opts.divisions - 1) : opts.divisions;
+    EXPECT_LE(depth, 6);
+}
+
+// Force-defaults env var: when DDB_OBJ2TILES_FORCE_DEFAULTS is set,
+// buildModel3DTiles should skip the heuristic and use hardcoded defaults.
+// This unit test verifies the env var parsing logic matches the same
+// lambda used in buildModel3DTiles() in 3d.cpp.
+TEST(obj2tiles, forceDefaultsEnvVarParsing) {
+    auto checkEnv = [] {
+        const char* env = std::getenv("DDB_OBJ2TILES_FORCE_DEFAULTS");
+        return env && env[0] != '0' && env[0] != '\0';
+    };
+
+    // Restores the pre-existing value afterwards
+    EnvVarGuard guard("DDB_OBJ2TILES_FORCE_DEFAULTS");
+
+    // Default: not set → false
+    unsetEnv("DDB_OBJ2TILES_FORCE_DEFAULTS");
+    EXPECT_FALSE(checkEnv());
+
+    // Set to "1" → true
+    setEnv("DDB_OBJ2TILES_FORCE_DEFAULTS", "1");
+    EXPECT_TRUE(checkEnv());
+
+    // Set to "true" → true
+    setEnv("DDB_OBJ2TILES_FORCE_DEFAULTS", "true");
+    EXPECT_TRUE(checkEnv());
+
+    // Set to "0" → false (explicitly disabled)
+    setEnv("DDB_OBJ2TILES_FORCE_DEFAULTS", "0");
+    EXPECT_FALSE(checkEnv());
+
+    // Set to empty string → false
+    setEnv("DDB_OBJ2TILES_FORCE_DEFAULTS", "");
+    EXPECT_FALSE(checkEnv());
+}
+
+// When force-defaults is active, a model that would normally get "Tiny" params
+// (< 10K faces → lods=1, divisions=0, octree=false) should instead get the
+// default (lods=3, divisions=3, octree=true). Verified via the env var path
+// producing the same result as the fallback defaults.
+TEST(obj2tiles, forceDefaultsProducesExpectedParams) {
+    // Simulate what buildModel3DTiles does when forceDefaults is true:
+    // it sets hardcoded defaults matching the "XXL" band
+    obj2tiles::Obj2TilesOptions forcedOpts;
+    forcedOpts.octree = true;
+    forcedOpts.divisions = 3;
+    forcedOpts.lods = 3;
+
+    // Verify these are the same defaults used in the fallback path
+    EXPECT_TRUE(forcedOpts.octree);
+    EXPECT_EQ(forcedOpts.divisions, 3);
+    EXPECT_EQ(forcedOpts.lods, 3);
+
+    // A tiny model's heuristic would give very different params
+    ModelInfo tinyInfo;
+    tinyInfo.faceCount = 100;
+    auto heuristicOpts = computeObj2TilesOpts(tinyInfo);
+    // Tiny band: lods=1, divisions=0, octree=false — definitely different
+    EXPECT_FALSE(heuristicOpts.octree);
+    EXPECT_EQ(heuristicOpts.divisions, 0);
+    EXPECT_EQ(heuristicOpts.lods, 1);
+}
+
+// End-to-end georeferenced generation: a sidecar must yield a non-identity ECEF
+// transform in the tileset. Disabled on CI (needs the Obj2Tiles binary).
+MANUAL_TEST(obj2tiles, endToEndGeoreferenced) {
+    if (ddb::obj2tiles::findObj2TilesBinary(true).empty())
+        GTEST_SKIP() << "Obj2Tiles binary not available";
+
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(ta.getPath("georef.json"),
+                 R"({"latitude": 45.46, "longitude": 9.19, "altitude": 120.0})");
+
+    const fs::path out = ta.getPath("out3dtiles");
+    const std::string tileset = ddb::buildModel3DTiles(obj.string(), out.string(), {.overwrite = true});
+    ASSERT_TRUE(fs::exists(tileset));
+
+    std::ifstream in(tileset);
+    json j;
+    in >> j;
+    ASSERT_TRUE(j.contains("root") && j["root"].contains("transform"));
+    const auto t = j["root"]["transform"];
+    ASSERT_EQ(t.size(), 16u);
+    // The ECEF translation column (indices 12,13,14) must be non-zero, i.e. the
+    // transform is NOT the identity used for local-mode tilesets.
+    const double tx = t[12].get<double>(), ty = t[13].get<double>(), tz = t[14].get<double>();
+    EXPECT_GT(std::abs(tx) + std::abs(ty) + std::abs(tz), 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// DDB_OBJ2TILES_MAX_CORES -> DOTNET_PROCESSOR_COUNT in the child only.
+// A fake Obj2Tiles (POSIX shell script) dumps its environment; the tests check
+// only the child's environment (the runtime effect is measured manually).
+// ---------------------------------------------------------------------------
+
+#ifdef _WIN32
+#define SKIP_WITHOUT_POSIX_SHELL() GTEST_SKIP() << "fake Obj2Tiles is a POSIX shell script"
+#else
+#define SKIP_WITHOUT_POSIX_SHELL() \
+    do {                           \
+    } while (0)
+#endif
+
+TEST(obj2tiles, emptyDestinationCannotReportOldSuccessFromNoOutputTool) {
+    TestArea ta(TEST_NAME, true);
+    EnvVarGuard guard("DDB_TEST_CHILD_MODE");
+    setEnv("DDB_TEST_CHILD_MODE", "no-output");
+    ASSERT_TRUE(fs::is_regular_file(testChildPath())) << testChildPath();
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    obj2tiles::Obj2TilesOptions opts;
+    std::string error;
+    const fs::path output = ta.getFolder("out");
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, output, opts, error, testChildPath()));
+    EXPECT_NE(error.find("tileset.json is missing"), std::string::npos) << error;
+    EXPECT_TRUE(fs::is_empty(output));
+}
+
+// Writes a fake Obj2Tiles that records its environment in <out>/env.txt and
+// writes a tileset.json (argv: input output ...).
+fs::path writeEnvDumpingObj2Tiles(const fs::path& dir) {
+    const fs::path script = dir / "fake_obj2tiles_env.sh";
+    writeFile(script,
+                 "#!/bin/sh\n"
+                 "out=\"$2\"\n"
+                 "mkdir -p \"$out\"\n"
+                 "env > \"$out/env.txt\"\n"
+                 "echo '{\"asset\":{\"version\":\"1.0\"},\"geometricError\":0,\"root\":{}}' > "
+                 "\"$out/tileset.json\"\n");
+    fs::permissions(script, fs::perms::owner_all, fs::perm_options::replace);
+    return script;
+}
+
+// Runs the fake binary with DDB_OBJ2TILES_MAX_CORES = cap (nullopt = unset) and
+// returns every DOTNET_PROCESSOR_COUNT value seen by the child.
+std::vector<std::string> childProcessorCounts(TestArea& ta, const std::string& label,
+                                              const std::optional<std::string>& cap) {
+    if (cap)
+        setEnv("DDB_OBJ2TILES_MAX_CORES", *cap);
+    else
+        unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+
+    const fs::path dir = ta.getFolder("env_" + label);
+    const fs::path script = writeEnvDumpingObj2Tiles(dir);
+    const fs::path obj = dir / "model.obj";
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    const fs::path out = dir / "out";
+    io::assureIsRemoved(out);
+
+    obj2tiles::Obj2TilesOptions opts;
+    std::string err;
+    const bool ok = obj2tiles::runObj2Tiles(obj, out, opts, err, script);
+    EXPECT_TRUE(ok) << label << ": " << err;
+
+    std::vector<std::string> values;
+    std::ifstream in((out / "env.txt").string());
+    std::string line;
+    const std::string key = "DOTNET_PROCESSOR_COUNT=";
+    while (std::getline(in, line))
+        if (line.rfind(key, 0) == 0) values.push_back(line.substr(key.size()));
+    return values;
+}
+
+std::string expectedCap(unsigned int requested) {
+    const unsigned int hw = std::thread::hardware_concurrency();
+    return std::to_string(hw > 0 && requested > hw ? hw : requested);
+}
+
+TEST(obj2tiles, maxCoresValidDecimalReachesChild) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_EQ(childProcessorCounts(ta, "one", std::string("1")), std::vector<std::string>{"1"});
+    EXPECT_EQ(childProcessorCounts(ta, "two", std::string("2")), std::vector<std::string>{expectedCap(2)});
+    // Leading zeros are still a decimal integer.
+    EXPECT_EQ(childProcessorCounts(ta, "zeros", std::string("001")), std::vector<std::string>{"1"});
+    // Never set in the parent process.
+    EXPECT_EQ(std::getenv("DOTNET_PROCESSOR_COUNT"), nullptr);
+}
+
+TEST(obj2tiles, maxCoresInvalidValuesAddNothing) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_TRUE(childProcessorCounts(ta, "unset", std::nullopt).empty());
+    const std::vector<std::string> invalid = {"0x10", "0", "-4", "abc", "", " 4", "4 ", "+4",
+                                              "99999999999999999999"};
+    for (size_t i = 0; i < invalid.size(); ++i)
+        EXPECT_TRUE(childProcessorCounts(ta, "bad" + std::to_string(i), invalid[i]).empty())
+            << "value '" << invalid[i] << "'";
+}
+
+TEST(obj2tiles, maxCoresInheritedValuePassesThroughWhenUnsetOrInvalid) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    setEnv("DOTNET_PROCESSOR_COUNT", "5");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_EQ(childProcessorCounts(ta, "unset", std::nullopt), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "empty", std::string("")), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "hex", std::string("0x10")), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "zero", std::string("0")), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "neg", std::string("-4")), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "abc", std::string("abc")), std::vector<std::string>{"5"});
+}
+
+TEST(obj2tiles, maxCoresOverridesInheritedValue) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    setEnv("DOTNET_PROCESSOR_COUNT", "64");
+    TestArea ta(TEST_NAME);
+
+    // Exactly one DOTNET_PROCESSOR_COUNT entry, with the cap's value.
+    EXPECT_EQ(childProcessorCounts(ta, "override", std::string("1")), std::vector<std::string>{"1"});
+    // The parent's value is untouched.
+    ASSERT_NE(std::getenv("DOTNET_PROCESSOR_COUNT"), nullptr);
+    EXPECT_STREQ(std::getenv("DOTNET_PROCESSOR_COUNT"), "64");
+}
+
+TEST(obj2tiles, maxCoresClampedToHardwareConcurrency) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    const unsigned int hw = std::thread::hardware_concurrency();
+    if (hw == 0) GTEST_SKIP() << "hardware_concurrency() unknown: no clamp applies";
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_EQ(childProcessorCounts(ta, "above", std::to_string(hw + 7)),
+              std::vector<std::string>{std::to_string(hw)});
+    EXPECT_EQ(childProcessorCounts(ta, "exact", std::to_string(hw)),
+              std::vector<std::string>{std::to_string(hw)});
+    EXPECT_EQ(childProcessorCounts(ta, "huge", std::string("1000000")),
+              std::vector<std::string>{std::to_string(hw)});
+}
+
+// ---------------------------------------------------------------------------
+// --ktx2-threads: forwarded only with KTX2 textures and only without a core
+// cap (libktx threads are native and ignore DOTNET_PROCESSOR_COUNT).
+// ---------------------------------------------------------------------------
+
+// Runs a fake Obj2Tiles that records its argv one per line and returns it.
+std::vector<std::string> childArgs(TestArea& ta, const std::string& label,
+                                   const obj2tiles::Obj2TilesOptions& opts) {
+    const fs::path dir = ta.getFolder("args_" + label);
+    const fs::path script = dir / "fake_obj2tiles_args.sh";
+    writeFile(script,
+                 "#!/bin/sh\n"
+                 "out=\"$2\"\n"
+                 "mkdir -p \"$out\"\n"
+                 "printf '%s\\n' \"$@\" > \"$out/args.txt\"\n"
+                 "echo '{\"asset\":{\"version\":\"1.0\"},\"geometricError\":0,\"root\":{}}' > "
+                 "\"$out/tileset.json\"\n");
+    fs::permissions(script, fs::perms::owner_all, fs::perm_options::replace);
+    const fs::path obj = dir / "model.obj";
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    const fs::path out = dir / "out";
+    io::assureIsRemoved(out);
+
+    std::string err;
+    EXPECT_TRUE(obj2tiles::runObj2Tiles(obj, out, opts, err, script)) << label << ": " << err;
+
+    std::vector<std::string> args;
+    std::ifstream in((out / "args.txt").string());
+    for (std::string line; std::getline(in, line);) args.push_back(line);
+    return args;
+}
+
+// Value following `flag` in argv, or nullopt when the flag is absent.
+std::optional<std::string> argValue(const std::vector<std::string>& args, const std::string& flag) {
+    for (size_t i = 0; i + 1 < args.size(); ++i)
+        if (args[i] == flag) return args[i + 1];
+    return std::nullopt;
+}
+
+obj2tiles::Obj2TilesOptions ktx2Opts(int threads) {
+    obj2tiles::Obj2TilesOptions opts;
+    opts.textureFormat = "Ktx2";
+    opts.ktx2Threads = threads;
+    return opts;
+}
+
+TEST(obj2tiles, ktx2ThreadsReachChildWithoutCoreCap) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_EQ(argValue(childArgs(ta, "four", ktx2Opts(4)), "--ktx2-threads"), std::optional<std::string>("4"));
+    // 0 keeps the Obj2Tiles default (single-threaded encoder): no flag.
+    EXPECT_EQ(argValue(childArgs(ta, "zero", ktx2Opts(0)), "--ktx2-threads"), std::nullopt);
+}
+
+TEST(obj2tiles, ktx2ThreadsNeverSentWithoutKtx2Textures) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    // Obj2Tiles rejects --ktx2-threads without --texture-format Ktx2.
+    obj2tiles::Obj2TilesOptions jpeg = ktx2Opts(4);
+    jpeg.textureFormat.clear();
+    EXPECT_EQ(argValue(childArgs(ta, "default", jpeg), "--ktx2-threads"), std::nullopt);
+    jpeg.textureFormat = "Webp";
+    EXPECT_EQ(argValue(childArgs(ta, "webp", jpeg), "--ktx2-threads"), std::nullopt);
+}
+
+TEST(obj2tiles, ktx2ThreadsDroppedUnderCoreCap) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    // Explicit DroneDB cap.
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    setEnv("DDB_OBJ2TILES_MAX_CORES", "2");
+    auto args = childArgs(ta, "ddbcap", ktx2Opts(4));
+    EXPECT_EQ(argValue(args, "--ktx2-threads"), std::nullopt);
+    EXPECT_EQ(argValue(args, "--ktx2-quality"), std::optional<std::string>("128")); // rest of KTX2 args intact
+
+    // Cap inherited from the environment.
+    unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+    setEnv("DOTNET_PROCESSOR_COUNT", "2");
+    EXPECT_EQ(argValue(childArgs(ta, "inherited", ktx2Opts(4)), "--ktx2-threads"), std::nullopt);
+
+    // An invalid DroneDB cap is ignored, so it does not count as a cap.
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    setEnv("DDB_OBJ2TILES_MAX_CORES", "abc");
+    EXPECT_EQ(argValue(childArgs(ta, "invalid", ktx2Opts(4)), "--ktx2-threads"), std::optional<std::string>("4"));
+}
+
+// Failures carry the exit code or signal number and the output tail.
+TEST(obj2tiles, runReportsExitCodeSignalAndTail) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+
+    const fs::path failing = ta.getPath("fake_fail.sh");
+    writeFile(failing, "#!/bin/sh\necho 'first line'\necho 'fake Obj2Tiles failure' >&2\nexit 3\n");
+    fs::permissions(failing, fs::perms::owner_all, fs::perm_options::replace);
+
+    obj2tiles::Obj2TilesOptions opts;
+    std::string err;
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out_fail"), opts, err, failing));
+    EXPECT_NE(err.find("exited with code 3"), std::string::npos) << err;
+    EXPECT_NE(err.find("fake Obj2Tiles failure"), std::string::npos) << err;
+
+    const fs::path killed = ta.getPath("fake_killed.sh");
+    writeFile(killed, "#!/bin/sh\necho 'about to die'\nkill -9 $$\n");
+    fs::permissions(killed, fs::perms::owner_all, fs::perm_options::replace);
+    err.clear();
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out_killed"), opts, err, killed));
+    EXPECT_NE(err.find("signal 9"), std::string::npos) << err;
+    EXPECT_NE(err.find("about to die"), std::string::npos) << err;
+
+    // Exit 0 without a tileset is still a failure.
+    const fs::path noTileset = ta.getPath("fake_no_tileset.sh");
+    writeFile(noTileset, "#!/bin/sh\nexit 0\n");
+    fs::permissions(noTileset, fs::perms::owner_all, fs::perm_options::replace);
+    err.clear();
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out_none"), opts, err, noTileset));
+    EXPECT_NE(err.find("tileset.json is missing"), std::string::npos) << err;
+}
+
+// Exit 0 without tileset.json still reports the output tail.
+TEST(obj2tiles, runReportsTailWhenTilesetMissing) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+
+    const fs::path script = ta.getPath("fake_silent_failure.sh");
+    writeFile(script,
+                 "#!/bin/sh\n"
+                 "echo 'Loading model'\n"
+                 "echo 'Unhandled: could not write tiles' >&2\n"
+                 "exit 0\n");
+    fs::permissions(script, fs::perms::owner_all, fs::perm_options::replace);
+
+    obj2tiles::Obj2TilesOptions opts;
+    std::string err;
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out"), opts, err, script));
+    EXPECT_NE(err.find("tileset.json is missing"), std::string::npos) << err;
+    EXPECT_NE(err.find("Unhandled: could not write tiles"), std::string::npos) << err;
+    EXPECT_NE(err.find("Loading model"), std::string::npos) << err;
+}
+
+}  // namespace

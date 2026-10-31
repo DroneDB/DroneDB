@@ -31,7 +31,7 @@ param(
             if (Test-Path $versionFile) {
                 (Get-Content $versionFile -ErrorAction SilentlyContinue).Trim()
             } else {
-                "v1.8.0"
+                "v1.8.1"
             }
         }
     )
@@ -113,14 +113,18 @@ try {
         Write-Host "  WARNING: ktx.dll not found in the downloaded archive; --texture-format Ktx2 will be unavailable." -ForegroundColor Yellow
     }
 
-    # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary.
-    $licenseDest = Join-Path $TargetDir "Obj2Tiles.LICENSE.md"
-    $licenseUrl = "https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/$Version/LICENSE.md"
-    try {
-        Invoke-WebRequest -Uri $licenseUrl -OutFile $licenseDest -UseBasicParsing
-        Write-Host "  Obj2Tiles.LICENSE.md staged to $licenseDest"
-    } catch {
-        Write-Host "  WARNING: could not fetch Obj2Tiles LICENSE.md from $licenseUrl" -ForegroundColor Yellow
+    # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary, with the
+    # notices of the libraries the binary bundles (THIRD_PARTY_NOTICES.md, since v1.8.1: LibTiff.Net, BSD).
+    foreach ($doc in @("LICENSE", "THIRD_PARTY_NOTICES")) {
+        $docDest = Join-Path $TargetDir "Obj2Tiles.$doc.md"
+        $docUrl = "https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/$Version/$doc.md"
+        try {
+            Invoke-WebRequest -Uri $docUrl -OutFile $docDest -UseBasicParsing
+            Write-Host "  Obj2Tiles.$doc.md staged to $docDest"
+        } catch {
+            Remove-Item $docDest -Force -ErrorAction SilentlyContinue
+            Write-Host "  WARNING: could not fetch Obj2Tiles $doc.md from $docUrl" -ForegroundColor Yellow
+        }
     }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

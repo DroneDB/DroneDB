@@ -2,7 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "volume.h"
+#include "cancellation.h"
+#include "timeutil.h"
+#include "dem.h"
+#include "stringutil.h"
+#include "mathutil.h"
+#include "plane_fit.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
 
@@ -29,35 +36,6 @@ namespace ddb {
 
 namespace {
 
-// Keep the implementation self-contained: small RAII wrappers mirroring
-// those in raster_profile.cpp. Duplication is intentional - the helpers
-// are 3 lines each and cross-TU sharing would add a header only for them.
-
-struct OgrGeometryDeleter {
-    void operator()(OGRGeometry *g) const {
-        if (g) OGRGeometryFactory::destroyGeometry(g);
-    }
-};
-using OgrGeometryPtr = std::unique_ptr<OGRGeometry, OgrGeometryDeleter>;
-
-struct SrsHandle {
-    OGRSpatialReferenceH h = nullptr;
-    explicit SrsHandle(OGRSpatialReferenceH handle = nullptr) : h(handle) {}
-    ~SrsHandle() { if (h) OSRDestroySpatialReference(h); }
-    SrsHandle(const SrsHandle &) = delete;
-    SrsHandle &operator=(const SrsHandle &) = delete;
-};
-
-struct CtHandle {
-    OGRCoordinateTransformationH h = nullptr;
-    ~CtHandle() { if (h) OCTDestroyCoordinateTransformation(h); }
-};
-
-struct DsGuard {
-    GDALDatasetH h = nullptr;
-    ~DsGuard() { if (h) GDALClose(h); }
-};
-
 enum class BaseMethod {
     LowestPerimeter,
     AveragePerimeter,
@@ -66,9 +44,7 @@ enum class BaseMethod {
 };
 
 BaseMethod parseMethod(const std::string &raw) {
-    std::string m;
-    m.reserve(raw.size());
-    for (char c : raw) m.push_back(static_cast<char>(std::tolower((unsigned char)c)));
+    const std::string m = str::toLowerCopy(raw);
     if (m == "lowest_perimeter" || m.empty()) return BaseMethod::LowestPerimeter;
     if (m == "average_perimeter") return BaseMethod::AveragePerimeter;
     if (m == "best_fit") return BaseMethod::BestFit;
@@ -86,138 +62,40 @@ const char *methodName(BaseMethod m) {
     return "lowest_perimeter";
 }
 
-// Ax + By + C defines a plane in raster map coordinates.
-struct Plane {
-    double a = 0.0, b = 0.0, c = 0.0;
-    double at(double x, double y) const { return a * x + b * y + c; }
+std::string nowIso8601() { return utcIso8601(currentUnixTimestamp()); }
+
+// The part of the raster the polygon covers, in pixels
+struct Window {
+    int startCol = 0, startRow = 0;
+    int width = 0, height = 0;
+
+    size_t index(int r, int c) const { return static_cast<size_t>(r) * width + c; }
+
+    // The map coordinates of the center of the pixel (row r, column c) of the window
+    void cellCenter(const double *gt, int r, int c, double &mx, double &my) const {
+        mx = gt[0] + (startCol + c + 0.5) * gt[1] + (startRow + r + 0.5) * gt[2];
+        my = gt[3] + (startCol + c + 0.5) * gt[4] + (startRow + r + 0.5) * gt[5];
+    }
 };
 
-// Solve the normal equations for a least-squares plane z = ax + by + c
-// using a 3x3 Gaussian elimination. Good enough for the tiny matrices we
-// build here (and avoids pulling Eigen into DroneDB for one call).
-bool solvePlane(double S_xx, double S_xy, double S_x,
-                double S_yy, double S_y, double n,
-                double S_xz, double S_yz, double S_z,
-                Plane &out) {
-    double m[3][4] = {
-        {S_xx, S_xy, S_x, S_xz},
-        {S_xy, S_yy, S_y, S_yz},
-        {S_x,  S_y,  n,   S_z}
-    };
-    for (int i = 0; i < 3; i++) {
-        int piv = i;
-        for (int k = i + 1; k < 3; k++)
-            if (std::fabs(m[k][i]) > std::fabs(m[piv][i])) piv = k;
-        if (std::fabs(m[piv][i]) < 1e-12) return false;
-        if (piv != i) std::swap(m[i], m[piv]);
-        for (int k = i + 1; k < 3; k++) {
-            const double f = m[k][i] / m[i][i];
-            for (int j = i; j < 4; j++) m[k][j] -= f * m[i][j];
-        }
-    }
-    const double c = m[2][3] / m[2][2];
-    const double b = (m[1][3] - m[1][2] * c) / m[1][1];
-    const double a = (m[0][3] - m[0][1] * b - m[0][2] * c) / m[0][0];
-    out.a = a; out.b = b; out.c = c;
-    return true;
-}
-
-std::string nowIso8601() {
-    const auto t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm tm{};
-#ifdef _WIN32
-    gmtime_s(&tm, &t);
-#else
-    gmtime_r(&t, &tm);
-#endif
-    char buf[32];
-    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
-    return buf;
-}
-
-} // anonymous namespace
-
-std::string calculateVolumeJson(const std::string &rasterPath,
-                                const std::string &polygonGeoJson,
-                                const std::string &baseMethod,
-                                double flatElevation) {
-    const BaseMethod method = parseMethod(baseMethod);
-    LOGD << "calculateVolume method=" << methodName(method) << " path=" << rasterPath;
-
-    // --- Parse polygon (GeoJSON, WGS84) ---
+// The polygon of the request (GeoJSON, WGS84); throws InvalidArgsException when it is not one
+OGRGeometryUniquePtr parsePolygon(const std::string &polygonGeoJson) {
     OGRGeometryH hRaw = OGR_G_CreateGeometryFromJson(polygonGeoJson.c_str());
     if (!hRaw) throw InvalidArgsException("Cannot parse polygon GeoJSON");
-    OgrGeometryPtr geom(reinterpret_cast<OGRGeometry *>(hRaw));
+    OGRGeometryUniquePtr geom(OGRGeometry::FromHandle(hRaw));
     const OGRwkbGeometryType gType = wkbFlatten(geom->getGeometryType());
     if (gType != wkbPolygon && gType != wkbMultiPolygon)
         throw InvalidArgsException("Volume geometry must be a Polygon or MultiPolygon");
+    return geom;
+}
 
-    // --- Open raster ---
-    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDs) throw AppException("Cannot open raster: " + rasterPath);
-    DsGuard dsGuard{hDs};
-
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None)
-        throw AppException("Raster has no geotransform: " + rasterPath);
-
-    const int rasterW = GDALGetRasterXSize(hDs);
-    const int rasterH = GDALGetRasterYSize(hDs);
-    if (GDALGetRasterCount(hDs) < 1)
-        throw AppException("Raster has no bands");
-
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-    int hasNoData = 0;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
-
-    const char *projRef = GDALGetProjectionRef(hDs);
-    const std::string projection = projRef ? projRef : "";
-
-    // --- Reproject polygon WGS84 -> raster CRS (if needed) ---
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
-
-    // Capture polygon centroid latitude in WGS84 *before* any reprojection
-    // so we can convert pixel sizes to meters when the raster CRS is
-    // geographic (e.g. EPSG:4326).
-    double polyCentroidLat = 0.0;
-    {
-        OGREnvelope wgsEnv;
-        geom->getEnvelope(&wgsEnv);
-        polyCentroidLat = 0.5 * (wgsEnv.MinY + wgsEnv.MaxY);
-    }
-
-    SrsHandle rasterSrs;
-    bool rasterIsGeographic = false;
-    if (!projection.empty()) {
-        rasterSrs.h = OSRNewSpatialReference(nullptr);
-        char *wktPtr = const_cast<char *>(projection.c_str());
-        if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-            OSRDestroySpatialReference(rasterSrs.h);
-            rasterSrs.h = nullptr;
-        } else {
-            OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
-        }
-    }
-
-    if (rasterSrs.h) {
-        CtHandle wgsToRaster;
-        wgsToRaster.h = OCTNewCoordinateTransformation(wgs84.h, rasterSrs.h);
-        if (!wgsToRaster.h)
-            throw AppException("Cannot create WGS84 -> raster coordinate transformation");
-        if (OGR_G_Transform(reinterpret_cast<OGRGeometryH>(geom.get()),
-                            wgsToRaster.h) != OGRERR_NONE)
-            throw AppException("Cannot reproject polygon into raster CRS");
-    }
-
-    // --- Polygon envelope in pixel space ---
+// The window of the raster that the envelope of geom (already in the raster CRS) covers
+Window polygonWindow(const DemContext &dem, const OGRGeometry &geom) {
     OGREnvelope env;
-    geom->getEnvelope(&env);
+    geom.getEnvelope(&env);
 
     double invGt[6];
-    if (!GDALInvGeoTransform(gt, invGt))
+    if (!GDALInvGeoTransform(dem.gt, invGt))
         throw AppException("Cannot invert geotransform");
 
     // Map the four envelope corners to pixel space to stay correct even
@@ -236,180 +114,148 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     const double minPy = std::min({py1, py2, py3, py4});
     const double maxPy = std::max({py1, py2, py3, py4});
 
-    const int startCol = std::max(0, static_cast<int>(std::floor(minPx)));
-    const int startRow = std::max(0, static_cast<int>(std::floor(minPy)));
-    const int endCol = std::min(rasterW, static_cast<int>(std::ceil(maxPx)));
-    const int endRow = std::min(rasterH, static_cast<int>(std::ceil(maxPy)));
-    const int width = endCol - startCol;
-    const int height = endRow - startRow;
+    Window w;
+    w.startCol = std::max(0, static_cast<int>(std::floor(minPx)));
+    w.startRow = std::max(0, static_cast<int>(std::floor(minPy)));
+    const int endCol = std::min(dem.width, static_cast<int>(std::ceil(maxPx)));
+    const int endRow = std::min(dem.height, static_cast<int>(std::ceil(maxPy)));
+    w.width = endCol - w.startCol;
+    w.height = endRow - w.startRow;
 
-    if (width <= 0 || height <= 0)
+    if (w.width <= 0 || w.height <= 0)
         throw InvalidArgsException("Polygon does not overlap raster extent");
+    return w;
+}
 
-    // --- Read the raster window ---
-    std::vector<float> elev(static_cast<size_t>(width) * height);
-    if (GDALRasterIO(hBand, GF_Read, startCol, startRow, width, height,
-                     elev.data(), width, height, GDT_Float32, 0, 0) != CE_None)
-        throw AppException("Cannot read raster data");
-
-    // --- Build a polygon mask by rasterizing the geometry onto an in-memory
-    //     band (faster and more robust than per-pixel Contains tests). ---
-    std::vector<uint8_t> mask(static_cast<size_t>(width) * height, 0);
+// Builds a polygon mask by rasterizing the geometry onto an in-memory band (faster and more
+// robust than per-pixel Contains tests): 1 inside, 0 outside
+std::vector<uint8_t> rasterizeMask(const DemContext &dem, const Window &w, OGRGeometry &geom) {
+    const double *gt = dem.gt;
+    std::vector<uint8_t> mask(static_cast<size_t>(w.width) * w.height, 0);
 
     GDALDriverH memDrv = GDALGetDriverByName("MEM");
     if (!memDrv) throw AppException("MEM driver unavailable");
-    GDALDatasetH maskDs = GDALCreate(memDrv, "", width, height, 1, GDT_Byte, nullptr);
-    if (!maskDs) throw AppException("Cannot create mask dataset");
-    DsGuard maskGuard{maskDs};
+    const auto maskOwner = adoptDataset(
+        GDALCreate(memDrv, "", w.width, w.height, 1, GDT_Byte, nullptr));
+    if (!maskOwner) throw AppException("Cannot create mask dataset");
+    GDALDatasetH maskDs = datasetHandle(maskOwner);
 
     double maskGt[6] = {
-        gt[0] + startCol * gt[1] + startRow * gt[2],
+        gt[0] + w.startCol * gt[1] + w.startRow * gt[2],
         gt[1], gt[2],
-        gt[3] + startCol * gt[4] + startRow * gt[5],
+        gt[3] + w.startCol * gt[4] + w.startRow * gt[5],
         gt[4], gt[5]
     };
-    GDALSetGeoTransform(maskDs, maskGt);
-    if (!projection.empty()) GDALSetProjection(maskDs, projection.c_str());
+    if (GDALSetGeoTransform(maskDs, maskGt) != CE_None ||
+        (!dem.projection.empty() && GDALSetProjection(maskDs, dem.projection.c_str()) != CE_None))
+        throw AppException("Cannot georeference the mask dataset");
 
-    OGRGeometryH hGeom = reinterpret_cast<OGRGeometryH>(geom.get());
+    OGRGeometryH hGeom = OGRGeometry::ToHandle(&geom);
     int bandList[1] = {1};
     double burn[1] = {1.0};
+    // The rasterization stops when the call is canceled
+    cancel::GdalProgress progress;
     if (GDALRasterizeGeometries(maskDs, 1, bandList, 1, &hGeom,
                                 nullptr, nullptr, burn, nullptr,
-                                nullptr, nullptr) != CE_None)
+                                progress.function(), progress.data()) != CE_None) {
+        cancel::throwIfCanceled();
         throw AppException("Failed to rasterize polygon");
+    }
     GDALRasterBandH maskBand = GDALGetRasterBand(maskDs, 1);
-    if (GDALRasterIO(maskBand, GF_Read, 0, 0, width, height,
-                     mask.data(), width, height, GDT_Byte, 0, 0) != CE_None)
+    if (GDALRasterIO(maskBand, GF_Read, 0, 0, w.width, w.height,
+                     mask.data(), w.width, w.height, GDT_Byte, 0, 0) != CE_None)
         throw AppException("Cannot read mask data");
+    return mask;
+}
 
-    const auto isValid = [&](float v) {
-        if (!std::isfinite(v)) return false;
-        if (hasNoData && std::fabs(static_cast<double>(v) - noData) < 1e-9) return false;
-        return true;
-    };
+// The valid elevations on the edge of the mask, with their map coordinates. A pixel is on the
+// perimeter if it is inside the mask but has at least one 4-neighbour outside (or is at the
+// window edge).
+PlanePoints collectPerimeter(const DemContext &dem, const Window &w, const std::vector<uint8_t> &mask,
+                             const std::vector<float> &elev) {
+    PlanePoints p;
+    p.x.reserve(static_cast<size_t>(w.width) * 2 + w.height * 2);
+    p.y.reserve(p.x.capacity());
+    p.z.reserve(p.x.capacity());
 
-    // --- Collect perimeter elevations for base plane computation ---
-    // A pixel is on the perimeter if it is inside the mask but has at least
-    // one 4-neighbour outside (or is at the window edge).
-    std::vector<double> perimMx, perimMy, perimZ;
-    perimMx.reserve(static_cast<size_t>(width) * 2 + height * 2);
-    perimMy.reserve(perimMx.capacity());
-    perimZ.reserve(perimMx.capacity());
-
-    auto indexAt = [width](int r, int c) { return static_cast<size_t>(r) * width + c; };
-
-    for (int r = 0; r < height; r++) {
-        for (int c = 0; c < width; c++) {
-            if (!mask[indexAt(r, c)]) continue;
-            bool onEdge = (r == 0 || r == height - 1 || c == 0 || c == width - 1)
-                || !mask[indexAt(r - 1, c)]
-                || !mask[indexAt(r + 1, c)]
-                || !mask[indexAt(r, c - 1)]
-                || !mask[indexAt(r, c + 1)];
+    for (int r = 0; r < w.height; r++) {
+        cancel::throwIfCanceled();
+        for (int c = 0; c < w.width; c++) {
+            if (!mask[w.index(r, c)]) continue;
+            bool onEdge = (r == 0 || r == w.height - 1 || c == 0 || c == w.width - 1)
+                || !mask[w.index(r - 1, c)]
+                || !mask[w.index(r + 1, c)]
+                || !mask[w.index(r, c - 1)]
+                || !mask[w.index(r, c + 1)];
             if (!onEdge) continue;
-            const float z = elev[indexAt(r, c)];
-            if (!isValid(z)) continue;
-            const double mx = gt[0] + (startCol + c + 0.5) * gt[1]
-                              + (startRow + r + 0.5) * gt[2];
-            const double my = gt[3] + (startCol + c + 0.5) * gt[4]
-                              + (startRow + r + 0.5) * gt[5];
-            perimMx.push_back(mx);
-            perimMy.push_back(my);
-            perimZ.push_back(z);
+            const float z = elev[w.index(r, c)];
+            if (!dem.isValid(z)) continue;
+            double mx, my;
+            w.cellCenter(dem.gt, r, c, mx, my);
+            p.add(mx, my, z);
         }
     }
+    return p;
+}
 
-    // --- Compute base plane ---
+Plane computeBasePlane(BaseMethod method, double flatElevation, const PlanePoints &perim) {
     Plane basePlane;
     if (method == BaseMethod::FlatPlane) {
         basePlane.c = flatElevation;
-    } else {
-        if (perimZ.empty())
-            throw AppException("No valid perimeter elevations; cannot estimate base plane");
-
-        if (method == BaseMethod::LowestPerimeter) {
-            basePlane.c = *std::min_element(perimZ.begin(), perimZ.end());
-        } else if (method == BaseMethod::AveragePerimeter) {
-            double s = 0.0;
-            for (double z : perimZ) s += z;
-            basePlane.c = s / static_cast<double>(perimZ.size());
-        } else { // BestFit
-            // Normalize around centroid to improve conditioning.
-            double cx = 0, cy = 0;
-            for (size_t i = 0; i < perimZ.size(); i++) { cx += perimMx[i]; cy += perimMy[i]; }
-            cx /= perimZ.size(); cy /= perimZ.size();
-
-            double S_xx = 0, S_xy = 0, S_x = 0,
-                   S_yy = 0, S_y = 0,
-                   S_xz = 0, S_yz = 0, S_z = 0;
-            const double n = static_cast<double>(perimZ.size());
-            for (size_t i = 0; i < perimZ.size(); i++) {
-                const double x = perimMx[i] - cx;
-                const double y = perimMy[i] - cy;
-                const double z = perimZ[i];
-                S_xx += x * x; S_xy += x * y; S_x += x;
-                S_yy += y * y; S_y += y;
-                S_xz += x * z; S_yz += y * z; S_z += z;
-            }
-            Plane local{};
-            if (!solvePlane(S_xx, S_xy, S_x, S_yy, S_y, n, S_xz, S_yz, S_z, local)) {
-                // Degenerate (collinear points): fall back to the mean.
-                basePlane.c = S_z / n;
-            } else {
-                // Rewrite plane in world coordinates: z = a(X-cx) + b(Y-cy) + c
-                //                                     = aX + bY + (c - a*cx - b*cy)
-                basePlane.a = local.a;
-                basePlane.b = local.b;
-                basePlane.c = local.c - local.a * cx - local.b * cy;
-            }
-        }
+        return basePlane;
     }
 
-    // --- Accumulate cut/fill/area ---
-    // For projected CRS the geotransform is already in meters; for geographic
-    // CRS (e.g. EPSG:4326) it is in degrees, so convert to meters using a
-    // local WGS84 approximation (same as stockpile.cpp). Without this the
-    // documented m^2 / m^3 outputs would be off by ~10^10.
-    double pixelWidth = std::fabs(gt[1]);
-    double pixelHeight = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs.h) {
-        const double d2r = M_PI / 180.0;
-        const double mPerDeg = 111320.0; // good-enough WGS84 approximation
-        pixelWidth = std::fabs(gt[1]) * mPerDeg * std::cos(polyCentroidLat * d2r);
-        pixelHeight = std::fabs(gt[5]) * mPerDeg;
-        if (pixelWidth < 1e-6) pixelWidth = mPerDeg * std::fabs(gt[1]);
-    }
-    const double pixelArea = pixelWidth * pixelHeight;
+    if (perim.z.empty())
+        throw AppException("No valid perimeter elevations; cannot estimate base plane");
 
+    if (method == BaseMethod::LowestPerimeter) {
+        basePlane.c = *std::min_element(perim.z.begin(), perim.z.end());
+    } else if (method == BaseMethod::AveragePerimeter) {
+        double s = 0.0;
+        for (double z : perim.z) s += z;
+        basePlane.c = s / static_cast<double>(perim.z.size());
+    } else { // BestFit
+        basePlane = bestFitPlane(perim);
+    }
+    return basePlane;
+}
+
+// What the pixels of the polygon add up to against the base plane
+struct VolumeTotals {
     double cutVolume = 0.0;
     double fillVolume = 0.0;
     double area3d = 0.0;
     double baseElevationSum = 0.0;
     size_t pixelCount = 0;
+};
 
-    for (int r = 0; r < height; r++) {
-        for (int c = 0; c < width; c++) {
-            if (!mask[indexAt(r, c)]) continue;
-            const float z = elev[indexAt(r, c)];
-            if (!isValid(z)) continue;
+VolumeTotals accumulateVolume(const DemContext &dem, const Window &w, const std::vector<uint8_t> &mask,
+                              const std::vector<float> &elev, const Plane &basePlane,
+                              const PixelSize &pixel) {
+    const double pixelArea = pixel.x * pixel.y;
+    VolumeTotals t;
 
-            const double mx = gt[0] + (startCol + c + 0.5) * gt[1]
-                              + (startRow + r + 0.5) * gt[2];
-            const double my = gt[3] + (startCol + c + 0.5) * gt[4]
-                              + (startRow + r + 0.5) * gt[5];
+    for (int r = 0; r < w.height; r++) {
+        cancel::throwIfCanceled();
+        for (int c = 0; c < w.width; c++) {
+            if (!mask[w.index(r, c)]) continue;
+            const float z = elev[w.index(r, c)];
+            if (!dem.isValid(z)) continue;
+
+            double mx, my;
+            w.cellCenter(dem.gt, r, c, mx, my);
             const double bz = basePlane.at(mx, my);
             const double diff = static_cast<double>(z) - bz;
 
-            if (diff > 0)      cutVolume  += diff * pixelArea;
-            else if (diff < 0) fillVolume += (-diff) * pixelArea;
+            if (diff > 0)      t.cutVolume  += diff * pixelArea;
+            else if (diff < 0) t.fillVolume += (-diff) * pixelArea;
 
             // 3D area from local slope (central differences with edge fallback).
             auto safeGet = [&](int rr, int cc, float &out) {
-                rr = std::clamp(rr, 0, height - 1);
-                cc = std::clamp(cc, 0, width - 1);
-                out = elev[indexAt(rr, cc)];
-                return isValid(out);
+                rr = std::clamp(rr, 0, w.height - 1);
+                cc = std::clamp(cc, 0, w.width - 1);
+                out = elev[w.index(rr, cc)];
+                return dem.isValid(out);
             };
             float zxp = 0, zxm = 0, zyp = 0, zym = 0;
             const bool okXp = safeGet(r, c + 1, zxp);
@@ -417,24 +263,71 @@ std::string calculateVolumeJson(const std::string &rasterPath,
             const bool okYp = safeGet(r + 1, c, zyp);
             const bool okYm = safeGet(r - 1, c, zym);
             const double dzdx = (okXp && okXm)
-                ? (zxp - zxm) / (2.0 * pixelWidth)
+                ? (zxp - zxm) / (2.0 * pixel.x)
                 : 0.0;
             const double dzdy = (okYp && okYm)
-                ? (zyp - zym) / (2.0 * pixelHeight)
+                ? (zyp - zym) / (2.0 * pixel.y)
                 : 0.0;
             const double slope2 = dzdx * dzdx + dzdy * dzdy;
-            area3d += pixelArea * std::sqrt(1.0 + slope2);
+            t.area3d += pixelArea * std::sqrt(1.0 + slope2);
 
-            baseElevationSum += bz;
-            pixelCount++;
+            t.baseElevationSum += bz;
+            t.pixelCount++;
         }
     }
+    return t;
+}
 
-    if (pixelCount == 0)
+} // anonymous namespace
+
+std::string calculateVolumeJson(const std::string &rasterPath,
+                                const std::string &polygonGeoJson,
+                                const std::string &baseMethod,
+                                double flatElevation) {
+    cancel::throwIfCanceled();
+    const BaseMethod method = parseMethod(baseMethod);
+    LOGD << "calculateVolume method=" << methodName(method) << " path=" << rasterPath;
+
+    // --- Parse polygon (GeoJSON, WGS84) ---
+    OGRGeometryUniquePtr geom = parsePolygon(polygonGeoJson);
+
+    // --- Open raster ---
+    const DemContext dem = openDem(rasterPath);
+
+    // --- Reproject polygon WGS84 -> raster CRS (if needed) ---
+    if (const auto wgsToRaster = dem.wgs84ToDem()) {
+        if (OGR_G_Transform(OGRGeometry::ToHandle(geom.get()),
+                            OGRCoordinateTransformation::ToHandle(wgsToRaster->get())) != OGRERR_NONE)
+            throw AppException("Cannot reproject polygon into raster CRS");
+    }
+
+    // The pixel size is measured on the ground at the polygon, whatever the CRS of the raster: the
+    // degrees of a geographic one, the feet of a foot-based one and the stretch of a Web Mercator one
+    // all have to end up as meters, or the documented m^2 / m^3 outputs would be off.
+    OGREnvelope rasterEnv;
+    geom->getEnvelope(&rasterEnv);
+    const PixelSize pixel = dem.pixelSizeMeters(0.5 * (rasterEnv.MinX + rasterEnv.MaxX),
+                                                0.5 * (rasterEnv.MinY + rasterEnv.MaxY));
+
+    // --- Polygon envelope in pixel space, the raster window and the polygon mask ---
+    const Window window = polygonWindow(dem, *geom);
+    const std::vector<float> elev = dem.readElevations(window.startCol, window.startRow, window.width, window.height);
+    const std::vector<uint8_t> mask = rasterizeMask(dem, window, *geom);
+
+    // --- Compute base plane from the perimeter elevations ---
+    const Plane basePlane = computeBasePlane(method, flatElevation, collectPerimeter(dem, window, mask, elev));
+
+    // --- Accumulate cut/fill/area ---
+    const double pixelArea = pixel.x * pixel.y;
+    const VolumeTotals totals = accumulateVolume(dem, window, mask, elev, basePlane, pixel);
+
+    if (totals.pixelCount == 0)
         throw AppException("Polygon did not cover any valid raster pixels");
 
-    const double area2d = static_cast<double>(pixelCount) * pixelArea;
-    const double baseElevationAvg = baseElevationSum / static_cast<double>(pixelCount);
+    const double area2d = static_cast<double>(totals.pixelCount) * pixelArea;
+    const double baseElevationAvg = totals.baseElevationSum / static_cast<double>(totals.pixelCount);
+    const double cutVolume = totals.cutVolume;
+    const double fillVolume = totals.fillVolume;
 
     // --- Build JSON response (echo input polygon as GeoJSON in WGS84) ---
     json result;
@@ -442,12 +335,12 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     result["fillVolume"] = fillVolume;
     result["netVolume"] = cutVolume - fillVolume;
     result["area2d"] = area2d;
-    result["area3d"] = area3d;
+    result["area3d"] = totals.area3d;
     result["baseElevation"] = baseElevationAvg;
     result["basePlaneMethod"] = methodName(method);
-    result["pixelSize"] = std::min(pixelWidth, pixelHeight);
-    result["crs"] = projection;
-    result["pixelCount"] = static_cast<uint64_t>(pixelCount);
+    result["pixelSize"] = std::min(pixel.x, pixel.y);
+    result["crs"] = dem.projection;
+    result["pixelCount"] = static_cast<uint64_t>(totals.pixelCount);
     result["calculatedAt"] = nowIso8601();
     try {
         result["boundaryPolygon"] = json::parse(polygonGeoJson);
@@ -457,7 +350,7 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     }
 
     LOGD << "Volume: cut=" << cutVolume << " fill=" << fillVolume
-         << " net=" << (cutVolume - fillVolume) << " pixels=" << pixelCount;
+         << " net=" << (cutVolume - fillVolume) << " pixels=" << totals.pixelCount;
 
     return result.dump();
 }

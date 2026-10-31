@@ -15,9 +15,8 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("status [directory]")
-    .add_options()
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
+    .custom_help("status [directory]");
+    cmd::addWorkingDirOption(opts);
         // clang-format on
 
         // Nice to have
@@ -31,7 +30,7 @@ namespace cmd
         return "Show files and directories index status compared to the filesystem";
     }
 
-    void Status::run(cxxopts::ParseResult &opts)
+    int Status::run(cxxopts::ParseResult &opts)
     {
 
         const auto workingDir = opts["working-dir"].as<std::string>();
@@ -75,6 +74,7 @@ namespace cmd
         };
 
         statusIndex(db.get(), cb);
+        return EXIT_SUCCESS;
     }
 
 }

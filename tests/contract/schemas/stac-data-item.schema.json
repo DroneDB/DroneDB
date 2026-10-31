@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb data-only STAC item",
+  "description": "DDBStacData with an entry; also the features of DDBStacItemCollectionData. The DDBStac item without the members built from a URL or an ID: no id, collection, links or asset href.",
+  "type": "object",
+  "required": [
+    "type",
+    "stac_version",
+    "geometry",
+    "bbox",
+    "properties",
+    "assets"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "Feature"
+    },
+    "stac_version": {
+      "type": "string"
+    },
+    "stac_extensions": {
+      "$ref": "stac-item.schema.json#/$defs/stacExtensions"
+    },
+    "geometry": {
+      "$ref": "stac-item.schema.json#/$defs/geometry"
+    },
+    "bbox": {
+      "$ref": "stac-item.schema.json#/$defs/bbox"
+    },
+    "properties": {
+      "$ref": "stac-item.schema.json#/$defs/properties"
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/asset"
+      }
+    }
+  },
+  "$defs": {
+    "asset": {
+      "description": "A STAC asset without its href: the key of the data asset is the entry path (also properties.title), the thumbnail asset is \"thumbnail\"",
+      "type": "object",
+      "required": [
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

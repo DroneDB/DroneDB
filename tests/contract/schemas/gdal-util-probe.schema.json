@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gdal-util probe response",
+  "description": "The response line of gdal-util (apps/gdal-util/PROTOCOL.md) to a probe request: the result for a raster or a vector, or a failure",
+  "type": "object",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["id", "ok", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "integer" },
+        "ok": { "const": true },
+        "result": { "$ref": "#/$defs/result" }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["id", "ok", "error", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": ["integer", "null"] },
+        "ok": { "const": false },
+        "error": { "enum": ["unreadable", "policy", "limit", "crashed", "timeout", "nospace", "internal"] },
+        "message": { "type": "string" }
+      }
+    }
+  ],
+  "$defs": {
+    "result": {
+      "type": "object",
+      "required": ["type", "isCog", "properties"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["GeoRaster", "Raster", "Vector"] },
+        "isCog": { "type": "boolean" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 },
+            "geotransform": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": { "type": "number" }
+            },
+            "bands": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["type", "colorInterp"],
+                "additionalProperties": false,
+                "properties": {
+                  "type": { "type": "string" },
+                  "colorInterp": { "type": "string" }
+                }
+              }
+            },
+            "georeferenced": { "type": "boolean" },
+            "vector": {
+              "type": "object",
+              "required": ["driver", "layers"],
+              "properties": {
+                "driver": { "type": "string" },
+                "layers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "geometryType", "featureCount"],
+                    "properties": {
+                      "name": { "type": "string" },
+                      "geometryType": { "type": "string" },
+                      "featureCount": { "type": "integer" },
+                      "extent": {
+                        "type": "array",
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "items": { "type": "number" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "wkt": { "type": "string", "minLength": 1 },
+        "pointGeom": { "$ref": "#/$defs/point" },
+        "polygonGeom": { "$ref": "#/$defs/polygon" },
+        "warning": { "type": "string", "minLength": 1 }
+      }
+    },
+    "coordinate": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "point": {
+      "type": "object",
+      "required": ["type", "coordinates"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "Point" },
+        "coordinates": { "$ref": "#/$defs/coordinate" }
+      }
+    },
+    "polygon": {
+      "type": "object",
+      "required": ["type", "coordinates"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "Polygon" },
+        "coordinates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 4,
+            "items": { "$ref": "#/$defs/coordinate" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -6,13 +6,47 @@ software that may be redistributed alongside DroneDB binaries (Windows
 ZIP archive, Debian package, Docker image) and the licenses that apply
 to those components.
 
-DroneDB **dynamically links** against several open-source libraries
-provided through [vcpkg](https://github.com/microsoft/vcpkg) at build
-time (GDAL, PROJ, PDAL, SpatiaLite, Exiv2, libcurl, ...). The licenses
-of those libraries apply to the redistributed binaries; refer to the
-upstream projects for the exact terms. The list below is not
-exhaustive - it focuses on components that ship as separate binaries
-inside our distribution archives.
+DroneDB links against several open-source libraries provided through
+[vcpkg](https://github.com/microsoft/vcpkg) at build time (GDAL, PROJ,
+PDAL, SpatiaLite, libcurl, ...). On Linux they are linked **statically**
+(the `x64-linux-release` triplet in [`vcpkg-triplets`](vcpkg-triplets) sets
+static library linkage) into `libddb`, `ddbcmd` and the helper executables
+below; the vcpkg libraries that ship as shared libraries in the Debian
+package are PDAL (`libpdalcpp` and its plugins). On Windows
+they are DLLs in the ZIP archive. The licenses of those libraries apply
+to the redistributed binaries, and both packages ship the notice of
+every one of them (see
+[vcpkg-managed libraries](#vcpkg-managed-libraries) below). The sections
+below focus on components that ship as separate binaries inside our
+distribution archives.
+
+Two GPL-licensed code bases are **not** part of `libddb` or `ddbcmd`:
+Exiv2 (image metadata) lives in the separate `metadata-util` executable, and
+bm3d (3D mesh streaming, with the Nexus, vcglib and corto code it is made
+of) in the separate `bm3d` executable. DroneDB runs both as child
+processes. The Linux and Windows CI builds check this on the files they
+produce, each as far as its platform's tools allow:
+
+- On Linux, [`scripts/check-gpl-linkage.py`](scripts/check-gpl-linkage.py)
+  reads every symbol defined in `libddb.so`, `ddbcmd` and `gdal-util` (none
+  may come from Exiv2, bm3d, vcglib or corto) and the shared libraries they
+  load (none may load `libexiv2` or `libbm3d`). It also checks that the
+  pattern used to find bm3d, vcglib and corto symbols does match symbols
+  of the `bm3d` binary, which contains them, so that the check on
+  `libddb.so` cannot pass because the pattern stopped matching; its
+  `--self-test` runs the patterns and that control on made-up symbols.
+- On Windows, [`scripts/check-gpl-linkage.ps1`](scripts/check-gpl-linkage.ps1)
+  reads only the DLLs `ddb.dll`, `ddbcmd.exe` and `gdal-util.exe` import
+  (`dumpbin /dependents`): none may load `exiv2.dll` or a `bm3d` DLL. It
+  does not look at symbols, so code compiled into them is not seen there.
+
+`gdal-util` is the helper program that reads the files of users with GDAL; it
+is part of DroneDB, under the same MPL-2.0 licence as `libddb` (its licence
+text ships as `gdal-util.LICENSE`), embeds `libddb` the way `ddbcmd` does and
+contains no GPL code, which is why it is held to the rules of `libddb`.
+
+Both also check that `bm3d` does not use Qt: on Linux by symbols and loaded
+libraries, on Windows by the DLLs it imports.
 
 ---
 
@@ -72,7 +106,9 @@ tool, a precompiled .NET application redistributed **unmodified**
 - **Distributed copy**: the precompiled `Obj2Tiles` / `Obj2Tiles.exe`
   binary placed next to the DroneDB executable (mirroring the
   OpenDroneMap packaging); the upstream `LICENSE.md` is preserved
-  alongside it.
+  alongside it as `Obj2Tiles.LICENSE.md`, with the notices of the
+  libraries the binary bundles (LibTiff.Net, BSD 3-Clause, since
+  v1.8.1) as `Obj2Tiles.THIRD_PARTY_NOTICES.md`.
 
 ### Why AGPL is compatible with MPL-licensed DroneDB
 
@@ -99,7 +135,7 @@ corresponding git tag in this repository.
 
 `Obj2Tiles` is an **optional generator**: when the binary is missing
 from the installation, DroneDB skips OGC 3D Tiles generation for
-`MODEL` entries and still produces the Nexus (`.nxz`) output, so no
+`MODEL` entries and still produces the bm3d (`.bm3d`) output, so no
 build fails. Distributors who prefer not to redistribute AGPL code may
 safely omit the `Obj2Tiles` / `Obj2Tiles.exe` file from the archive
 without affecting DroneDB's core functionality (only the additive 3D
@@ -128,30 +164,256 @@ subprocess and is never linked into `ddbcmd` / `libddb`; it does not
 affect DroneDB's MPL-2.0 licensing. It is optional: when absent,
 Obj2Tiles fails to honor `--texture-format Ktx2`, which DroneDB treats
 as a best-effort 3D Tiles generation failure (same as a missing
-Obj2Tiles binary), while Nexus output is unaffected.
+Obj2Tiles binary), while bm3d output is unaffected.
 
 ---
 
-## libnexus / Nexus
+## LibreDWG `dwg2dxf` (optional DWG converter)
 
-The `libnxs.so` / `nxs.dll` library shipped with DroneDB is a fork of
-[cnr-isti-vclab/nexus](https://github.com/cnr-isti-vclab/nexus)
-(maintained at [DroneDB/libnexus](https://github.com/DroneDB/libnexus)),
-distributed under the **GNU General Public License v3.0** (or later).
-See `vendor/libnexus/LICENSE.txt` for the full text.
+When present in the distribution archive, the `dwg2dxf` /
+`dwg2dxf.exe` binary is the
+[GNU LibreDWG](https://www.gnu.org/software/libredwg/) DWG-to-DXF
+converter, built **unmodified** from the signed GNU release tarball by
+[`scripts/build-libredwg.sh`](scripts/build-libredwg.sh) (version in
+[`scripts/libredwg-version`](scripts/libredwg-version); the tarball
+signature is verified against the LibreDWG maintainer's key
+`38A4167B0DB69E49C5F7216CB8C28866AB27A7A2`). Configure flags:
+`--disable-shared --enable-static --disable-bindings --disable-docs
+--disable-python --enable-release`; the Windows binary is
+cross-compiled with mingw-w64 from the same tarball
+(`LDFLAGS=-all-static`).
+
+- **License**: GNU General Public License, version 3 or later
+  (GPL-3.0-or-later).
+- **Source**: https://www.gnu.org/software/libredwg/
+- **Distributed copy**: the `dwg2dxf` / `dwg2dxf.exe` binary placed
+  next to the DroneDB executable, with the upstream `COPYING` file
+  next to it as `dwg2dxf.LICENSE.txt`.
+
+### Why GPL is compatible with MPL-licensed DroneDB
+
+DroneDB invokes `dwg2dxf` exclusively as a **separate subprocess**
+through [`src/library/cad.cpp`](src/library/cad.cpp) (bounded by an
+idle timeout and a total run time); LibreDWG is never linked
+(statically or dynamically) into `ddbcmd`, `libddb`, or any other
+DroneDB-licensed binary. Per the
+[GPL FAQ on aggregation](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation),
+this constitutes "mere aggregation" of independent programs and the
+GPL terms therefore apply only to the `dwg2dxf` binary itself.
+
+### Obtaining the corresponding source
+
+Every DroneDB release that ships `dwg2dxf` attaches the exact
+`libredwg-<version>.tar.xz` it was built from, with its GNU signature
+(`.sig`), to the same GitHub release. The build script and flags are in
+the corresponding git tag of this repository. The same tarball is also
+available from the GNU FTP server linked above.
+
+### Optionality
+
+`dwg2dxf` is an **optional converter**: when the binary is missing,
+DWG files are still indexed (without a footprint) and their builds fail
+with a message that names the missing tool; every other format,
+including DXF, is unaffected. Distributors who prefer not to
+redistribute GPL code may safely omit `dwg2dxf` / `dwg2dxf.exe` from
+the archive.
 
 ---
 
-## vcpkg-managed runtime libraries
+## Exiv2 in `metadata-util` (image metadata helper)
 
-The Windows ZIP and the Debian package include several shared
-libraries pulled in by vcpkg (notably `pdalcpp`, `gdal`, `proj`,
-`libsqlite3`, `libcurl`, `dbus`, ...). Each of those libraries is
-distributed under its own license (typically MIT, BSD, Apache 2.0,
-LGPL, or X11). The relevant license files can be found inside
-`build/vcpkg_installed/<triplet>/share/<port>/copyright` after a
-build, and the upstream license texts are available in the vcpkg
-ports tree at https://github.com/microsoft/vcpkg.
+DroneDB reads and writes EXIF, XMP and the other image metadata through
+[Exiv2](https://exiv2.org/), which is linked into the separate
+`metadata-util` / `metadata-util.exe` executable and nowhere else. The executable
+is DroneDB's own program, kept in its own repository
+([DroneDB/metadata-util](https://github.com/DroneDB/metadata-util), git submodule
+[`vendor/metadata-util`](vendor/metadata-util)); it is required, and is installed
+next to `ddb` (`/usr/bin` in the Debian package, the root folder of the
+Windows ZIP archive).
+
+- **License of Exiv2**: GNU General Public License, version 2 or later
+  (GPL-2.0-or-later). The vcpkg port builds the upstream release archive
+  with a few port patches.
+- **License of `metadata-util`**: GNU General Public License, version 2 or
+  later (GPL-2.0-or-later), the text is in
+  [`vendor/metadata-util/LICENSE`](vendor/metadata-util/LICENSE). The protocol
+  document `vendor/metadata-util/PROTOCOL.md` is released under CC0-1.0, so
+  anyone can write a client or a replacement without taking over any GPL
+  code.
+- **Source**: https://exiv2.org/ and https://github.com/DroneDB/metadata-util
+- **Distributed copy**: the `metadata-util` / `metadata-util.exe` binary (Exiv2
+  and its vcpkg dependencies linked statically on Linux, `exiv2.dll`
+  and the other DLLs next to it on Windows), with the licence text of
+  `metadata-util` as `metadata-util.LICENSE` in `/usr/share/doc/ddb`
+  (Debian package) or the root of the ZIP archive, and that of Exiv2 as
+  `exiv2.LICENSE` in the `third-party` folder there, with the notices of
+  the other vcpkg libraries.
+
+### Why GPL is compatible with MPL-licensed DroneDB
+
+`libddb` starts `metadata-util` exclusively as a **separate child process**
+and talks to it over its standard input and output with the documented
+JSON-lines protocol ([`vendor/metadata-util/PROTOCOL.md`](vendor/metadata-util/PROTOCOL.md):
+a request line per file, a response line with the tags), which is the
+whole boundary between the two programs. The client side is DroneDB's
+own MPL-licensed code:
+[`src/library/helper_pool.cpp`](src/library/helper_pool.cpp)
+starts and reuses the helper processes, and
+[`src/library/exif_helper_pool.cpp`](src/library/exif_helper_pool.cpp)
+applies it to `metadata-util`,
+[`src/library/exif_protocol.cpp`](src/library/exif_protocol.cpp) writes
+the requests and decodes the responses, and
+[`src/include/exif_metadata.h`](src/include/exif_metadata.h) with
+[`src/library/exif_metadata.cpp`](src/library/exif_metadata.cpp) holds
+the tag model and the reader interface the rest of `libddb` goes
+through. Exiv2 is never linked
+(statically or dynamically) into `ddbcmd`, `libddb`, or any other
+DroneDB-licensed binary, which the CI checks listed above enforce. Per
+the [GPL FAQ on aggregation](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation),
+pipes and command lines are how separate programs normally communicate,
+and the exchange is plain data, not shared internal structures; the GPL
+terms therefore apply to `metadata-util` itself, not to the rest of DroneDB.
+
+### Obtaining the corresponding source
+
+The `metadata-util` source code is the `vendor/metadata-util` submodule of the
+corresponding git tag of this repository. The submodule only ever points at
+a release of [DroneDB/metadata-util](https://github.com/DroneDB/metadata-util):
+the CI checks that its commit is the one of the tag `v` plus the DroneDB
+version (the version `metadata-util --version` prints), so the source is the
+tag of that name in the `DroneDB/metadata-util` repository. Every DroneDB release attaches the
+exact Exiv2 source archive that vcpkg built into `metadata-util`
+(`exiv2-<version>.tar.gz`), the vcpkg port files with the patches vcpkg
+applies to it (`vcpkg-ports-for-gpl-sources.tar.gz`) and a `SOURCES.txt`
+that names the origin and SHA512 of each archive, to the same GitHub
+release. [`scripts/fetch-vcpkg-gpl-sources.sh`](scripts/fetch-vcpkg-gpl-sources.sh)
+collects them from the vcpkg port files of the tag.
+
+### Optionality
+
+`metadata-util` is **required**: without it DroneDB cannot read image
+metadata, so indexing and building stop with an error that names the
+missing tool and the `DDB_METADATA_UTIL_PATH` environment variable (which
+overrides where DroneDB looks for it). Distributors who cannot
+redistribute GPL code can provide their own executable that speaks the
+CC0-licensed protocol and point `DDB_METADATA_UTIL_PATH` at it.
+
+---
+
+## `bm3d` (3D mesh streaming helper)
+
+DroneDB builds the progressive `.bm3d` format for 3D models with the
+separate `bm3d` / `bm3d.exe` executable, built from
+[DroneDB/bm3d](https://github.com/DroneDB/bm3d) (git submodule
+[`vendor/bm3d`](vendor/bm3d)). bm3d is derived from
+[Nexus](https://github.com/cnr-isti-vclab/nexus) (Federico Ponchio,
+ISTI - CNR) and uses [VCGLib](https://github.com/cnr-isti-vclab/vcglib)
+and [corto](https://github.com/cnr-isti-vclab/corto), by way of the
+DroneDB fork of Nexus and its `libnexus` wrapper; the repository's
+`PROVENANCE.md` names the exact upstream commits. It is one program: it
+has no library of its own, and neither `libddb` nor `ddbcmd` links or loads
+any of its code.
+
+- **License of `bm3d`**: GNU General Public License, version 3 (GPL-3.0),
+  Digipa; the text is in [`vendor/bm3d/LICENSE`](vendor/bm3d/LICENSE) and
+  the notice that names the code and libraries inside it in
+  [`vendor/bm3d/NOTICE`](vendor/bm3d/NOTICE). The wrapper it derives from was
+  DroneDB's own code (relicensed from AGPL-3.0 so that it matches the code it
+  is combined with).
+- **Nexus**: GNU General Public License, Visual Computing Lab,
+  ISTI - CNR (`vendor/bm3d/licenses/Nexus.LICENSE` is version 3; the
+  source headers say version 2 or later).
+- **VCGLib**: GNU General Public License, Visual Computing Lab,
+  ISTI - CNR (`vendor/bm3d/licenses/vcglib.LICENSE` is version 3; the
+  source headers say version 2 or later). bm3d carries a few patches to it.
+- **corto** (mesh compression): Visual Computing Lab, ISTI - CNR
+  (`vendor/bm3d/licenses/corto.LICENSE` is the MIT license; the headers
+  of the library sources say GNU Lesser General Public License, version 3
+  or later, and its README says the C++ code is under the GPL). Either
+  reading is compatible with the GPL-3.0 of the executable. bm3d carries
+  patches to it.
+- **Image codec libraries** (texture decoding and encoding), from the
+  vcpkg ports of the same names, with permissive licences:
+  [libjpeg-turbo](https://libjpeg-turbo.org/) (IJG License and
+  3-clause BSD License),
+  [libtiff](https://libtiff.gitlab.io/libtiff/) (libtiff licence, an
+  MIT-style licence) and [libwebp](https://github.com/webmproject/libwebp)
+  (3-clause BSD License), together with
+  [stb](https://github.com/nothings/stb) (MIT or public domain, at your
+  choice; no notice is required). bm3d uses no GUI toolkit: it needs no
+  Qt, X11, OpenGL or D-Bus library. The CI checks listed above fail a build
+  in which `bm3d` contains or loads Qt again.
+- **Distributed copy**: the `bm3d` / `bm3d.exe` binary, with
+  `bm3d.LICENSE`, `bm3d.NOTICE.LICENSE`, `Nexus.LICENSE`, `vcglib.LICENSE`
+  and `corto.LICENSE` in `/usr/share/doc/ddb` (Debian package) or the root
+  of the ZIP archive, and the notices of the image codec libraries
+  (`libjpeg-turbo.LICENSE`, `tiff.LICENSE`, `libwebp.LICENSE` and
+  `stb.LICENSE`) in the `third-party` folder there. All of the GPL code is
+  under GPL version 3 or compatible terms; the image codec libraries are
+  permissive and their notices ship with the binary.
+
+### Why GPL is compatible with MPL-licensed DroneDB
+
+`libddb` starts `bm3d` exclusively as a **separate subprocess**
+through [`src/library/bm3d_runner.cpp`](src/library/bm3d_runner.cpp) (an input model, an
+output path, the exit status and a message on failure); bm3d, Nexus,
+vcglib and corto are never linked (statically or dynamically) into
+`ddbcmd`, `libddb`, or any other DroneDB-licensed binary, which the CI
+checks listed above enforce. Per the
+[GPL FAQ on aggregation](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation)
+this constitutes "mere aggregation" of independent programs, and the GPL
+terms therefore apply only to the `bm3d` executable.
+
+### Obtaining the corresponding source
+
+The `bm3d` source code (including the Nexus, vcglib and corto code in it) is
+the [`vendor/bm3d`](vendor/bm3d) submodule of the corresponding git tag of
+this repository. The submodule only ever points at a release of
+[DroneDB/bm3d](https://github.com/DroneDB/bm3d): the CI checks that its
+commit is the one of the tag `v` plus the text of `vendor/bm3d/VERSION`
+(the version `bm3d --version` prints). The source is therefore the
+[GitHub release](https://github.com/DroneDB/bm3d/releases) of bm3d at that
+tag, which includes a source tarball. The image codec libraries are
+permissive and need no source offer.
+
+### Optionality
+
+`bm3d` is needed only for `.bm3d` output: when it is missing, a build
+that produces it fails with a message that names the tool and the
+`DDB_BM3D_PATH` environment variable (which overrides where DroneDB
+looks for it), and every other build type is unaffected. Distributors who
+prefer not to redistribute this code may omit `bm3d` / `bm3d.exe`.
+
+---
+
+## vcpkg-managed libraries
+
+The libraries vcpkg builds (GDAL, PROJ, GEOS, PDAL, SQLite, libcurl,
+OpenSSL, Exiv2, expat, zlib, brotli and the others of
+[`vcpkg.json`](vcpkg.json) with their dependencies) are linked
+statically into `libddb`, `ddbcmd` and the helper executables on Linux,
+except PDAL (`libpdalcpp` and its plugins), and ship as DLLs in the
+Windows ZIP. Each is distributed under its own license (typically MIT,
+BSD, Apache 2.0, zlib, LGPL; Exiv2 is GPL, see above).
+
+Both packages ship the notice of every vcpkg library that ends up in
+them: `/usr/share/doc/ddb/third-party` in the Debian package and the
+`third-party` folder of the Windows ZIP hold one `<port>.LICENSE` per
+vcpkg port (the port's `share/<port>/copyright` file) and `index.txt`,
+which lists the ports with their versions and the licenses vcpkg
+records for them. [`scripts/collect-vcpkg-notices.py`](scripts/collect-vcpkg-notices.py)
+fills the folder from the build's vcpkg tree, leaving out only the
+ports that are never linked into a shipped binary (vcpkg's build
+helpers, `pkgconf`, `pdal-dimbuilder` and the `gtest` test framework),
+and [`scripts/check-helper-tools.py`](scripts/check-helper-tools.py)
+fails the package build when the folder is missing, empty or lacks a
+notice it lists.
+
+GDAL (MIT) is built from the overlay port in
+[`vcpkg-overlays/gdal`](vcpkg-overlays/gdal): the upstream vcpkg port
+plus one source patch, `dxf-fit-point-splines.patch`, which makes the
+DXF driver read SPLINE entities defined only by fit points (as written
+by LibreDWG `dwg2dxf`) instead of dropping them.
 
 ---
 

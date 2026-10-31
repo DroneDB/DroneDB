@@ -1,0 +1,18 @@
+{
+  "call": "DDBBuild(<root>, \"ortho.tif\"), then DDBResolveBuildFile(<root>, <hash of ortho.tif>, \"cog/cog.tif\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "version"
+    ]
+  },
+  "output": {
+    "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
+    "path": "<root>/.ddb/build/d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f/cog/cog.tif",
+    "version": "<volatile>"
+  },
+  "schema": "build-file.schema.json"
+}

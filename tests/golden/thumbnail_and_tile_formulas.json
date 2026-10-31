@@ -1,0 +1,500 @@
+{
+ "thumb_EVI_spectral_rescale": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_EXG_grayscale_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_GLI_rdylgn_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_GRVI_inferno_rescale": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_NDRE_rdylgn_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_NDVI_default_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_NDWI_bugn_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_NOPE_default_auto": {
+  "error": "Unknown formula: NOPE"
+ },
+ "thumb_SAVI_viridis_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "thumb_VARI_plasma_auto": {
+  "alpha": true,
+  "bands": 4,
+  "height": 96,
+  "transparent": 450,
+  "width": 96
+ },
+ "tile_EVI_spectral_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_EVI_spectral_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_EVI_spectral_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_EVI_spectral_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "12f2625837f6071b",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_EVI_spectral_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "92db0c79fc1e7039",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_EVI_spectral_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_EXG_grayscale_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_EXG_grayscale_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_EXG_grayscale_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_EXG_grayscale_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "6fd0130ebfa26a8b",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_EXG_grayscale_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "9de812d8f1650044",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_EXG_grayscale_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_GLI_rdylgn_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_GLI_rdylgn_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_GLI_rdylgn_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_GLI_rdylgn_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "c19d0e7e42bf10fa",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_GLI_rdylgn_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "d6a84ec0d82cf0bd",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_GLI_rdylgn_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_GRVI_inferno_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_GRVI_inferno_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_GRVI_inferno_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_GRVI_inferno_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "90cfc301263bb241",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_GRVI_inferno_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "f9cb2d37fd8dfc2b",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_GRVI_inferno_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDRE_rdylgn_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDRE_rdylgn_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDRE_rdylgn_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDRE_rdylgn_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "114a5cb3ff98f08d",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_NDRE_rdylgn_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "bec98f041a7c9aa6",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_NDRE_rdylgn_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDVI_default_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDVI_default_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDVI_default_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDVI_default_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "bdc17dc79849576b",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_NDVI_default_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "b7cf3ce073f9dd55",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_NDVI_default_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDWI_bugn_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDWI_bugn_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDWI_bugn_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_NDWI_bugn_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "09005f4b30e32d8c",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_NDWI_bugn_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "af889d6f66c5caf3",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_NDWI_bugn_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_SAVI_viridis_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_SAVI_viridis_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_SAVI_viridis_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_SAVI_viridis_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "07f0468cd0ad6efa",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_SAVI_viridis_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "e78ce7667b0b1e15",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_SAVI_viridis_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_VARI_plasma_34587_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_VARI_plasma_34587_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_VARI_plasma_34587_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ },
+ "tile_VARI_plasma_34588_41959": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "20c81297421a64ff",
+  "transparent": 32348,
+  "width": 256
+ },
+ "tile_VARI_plasma_34588_41960": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "7cbca9d75cec1b62",
+  "transparent": 54730,
+  "width": 256
+ },
+ "tile_VARI_plasma_34588_41961": {
+  "alpha": true,
+  "bands": 4,
+  "height": 256,
+  "pixels": "cc1d385dc7531abb",
+  "transparent": 65536,
+  "width": 256
+ }
+}

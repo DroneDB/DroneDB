@@ -17,8 +17,9 @@ namespace cmd
     .positional_help("[args]")
     .custom_help("mask input.tif [-o output.tif] [-n 15] [-w] [-c r,g,b]")
     .add_options()
-    ("i,input", "Input GeoTIFF file", cxxopts::value<std::string>())
-    ("o,output", "Output GeoTIFF file (default: <input>_masked.tif)", cxxopts::value<std::string>()->default_value(""))
+    ("i,input", "Input GeoTIFF file", cxxopts::value<std::string>());
+    cmd::addOutputOption(opts, "Output GeoTIFF file (default: <input>_masked.tif)", "");
+    opts.add_options()
     ("n,near", "Tolerance in grey levels", cxxopts::value<int>()->default_value("15"))
     ("w,white", "Search for white borders instead of black", cxxopts::value<bool>()->default_value("false"))
     ("c,color", "Custom color r,g,b (e.g. 0,0,0)", cxxopts::value<std::string>()->default_value(""));
@@ -32,11 +33,11 @@ namespace cmd
         return "Mask orthophoto borders making them transparent.";
     }
 
-    void Mask::run(cxxopts::ParseResult &opts)
+    int Mask::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            usageError();
         }
 
         auto input = opts["input"].as<std::string>();
@@ -57,6 +58,7 @@ namespace cmd
 
         ddb::maskBorders(input, output, near, white, color);
         std::cout << "Output: " << output << std::endl;
+        return EXIT_SUCCESS;
     }
 
 }

@@ -2,14 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "untwine_runner.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <mutex>
-#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -17,7 +16,10 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "parallel.h"
 #include "process_runner.h"
+#include "tool_locator.h"
+#include "tool_run_support.h"
 
 namespace ddb
 {
@@ -26,57 +28,6 @@ namespace ddb
 
         namespace
         {
-
-#ifdef _WIN32
-            constexpr const char *kBinaryName = "untwine.exe";
-            constexpr char kPathSep = ';';
-#else
-            constexpr const char *kBinaryName = "untwine";
-            constexpr char kPathSep = ':';
-#endif
-
-            std::mutex g_cacheMutex;
-            bool g_cacheValid = false;
-            fs::path g_cachedBinary;
-
-            bool isExecutableFile(const fs::path &p)
-            {
-                std::error_code ec;
-                if (!fs::exists(p, ec) || ec) return false;
-                if (!fs::is_regular_file(p, ec) || ec) return false;
-#ifdef _WIN32
-                return true;
-#else
-                // Check executable bit for current user/group/other
-                auto perms = fs::status(p, ec).permissions();
-                if (ec) return false;
-                using fs::perms;
-                return (perms & (perms::owner_exec | perms::group_exec | perms::others_exec)) != perms::none;
-#endif
-            }
-
-            fs::path searchOnPath()
-            {
-                const char *path = std::getenv("PATH");
-                if (!path || !*path) return {};
-
-                std::string p(path);
-                size_t start = 0;
-                while (start <= p.size())
-                {
-                    size_t end = p.find(kPathSep, start);
-                    if (end == std::string::npos) end = p.size();
-                    std::string dir = p.substr(start, end - start);
-                    if (!dir.empty())
-                    {
-                        fs::path candidate = fs::path(dir) / kBinaryName;
-                        if (isExecutableFile(candidate)) return candidate;
-                    }
-                    if (end == p.size()) break;
-                    start = end + 1;
-                }
-                return {};
-            }
 
             // Tail of the captured output included in errorOut.
             constexpr size_t kErrorTailLength = 600;
@@ -160,64 +111,7 @@ namespace ddb
 
         fs::path findUntwineBinary(bool forceRefresh)
         {
-            std::lock_guard<std::mutex> lock(g_cacheMutex);
-            if (!forceRefresh && g_cacheValid) return g_cachedBinary;
-
-            fs::path found;
-
-            // 1. Explicit override via env var. When DDB_UNTWINE_PATH is set
-            // (non-empty), it is authoritative: either it points to a usable
-            // binary or no binary is considered available (so callers can pin
-            // the backend deterministically and tests can simulate "missing").
-            if (const char *override = std::getenv("DDB_UNTWINE_PATH"))
-            {
-                if (override[0] != '\0')
-                {
-                    fs::path p(override);
-                    if (isExecutableFile(p)) found = p;
-                    g_cachedBinary = found;
-                    g_cacheValid = true;
-                    if (!found.empty())
-                        LOGD << "Untwine binary discovered via DDB_UNTWINE_PATH at " << found.string();
-                    else
-                        LOGD << "DDB_UNTWINE_PATH=" << override << " is not an executable file; treating Untwine as unavailable";
-                    return found;
-                }
-            }
-
-            // 2. Folder of the current executable (where untwine is bundled by build/packaging)
-            {
-                fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty())
-                {
-                    fs::path candidate = exeDir / kBinaryName;
-                    if (isExecutableFile(candidate)) found = candidate;
-                }
-            }
-
-            // 3. <install_prefix>/bin (parent of exe folder + /bin) - covers cmake --install layouts
-            if (found.empty())
-            {
-                fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty() && exeDir.has_parent_path())
-                {
-                    fs::path candidate = exeDir.parent_path() / "bin" / kBinaryName;
-                    if (isExecutableFile(candidate)) found = candidate;
-                }
-            }
-
-            // 4. System PATH
-            if (found.empty()) found = searchOnPath();
-
-            g_cachedBinary = found;
-            g_cacheValid = true;
-
-            if (!found.empty())
-                LOGD << "Untwine binary discovered at " << found.string();
-            else
-                LOGD << "Untwine binary not found in DDB_UNTWINE_PATH, exe folder, install prefix or PATH";
-
-            return found;
+            return tools::findTool("untwine", "DDB_UNTWINE_PATH", forceRefresh);
         }
 
         CopcBackend resolveBackend(CopcBackend requested)
@@ -235,8 +129,7 @@ namespace ddb
             // Explicit backend env (overrides argument)
             if (const char *envBackend = std::getenv("DDB_COPC_BACKEND"))
             {
-                std::string s(envBackend);
-                std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+                const std::string s = str::toLowerCopy(envBackend);
                 if (s == "untwine") requested = CopcBackend::Untwine;
                 else if (s == "pdal") requested = CopcBackend::Pdal;
                 else if (s == "auto") requested = CopcBackend::Auto;
@@ -259,26 +152,16 @@ namespace ddb
             return bin.empty() ? CopcBackend::Pdal : CopcBackend::Untwine;
         }
 
-        bool runUntwine(const std::vector<std::string> &inputFiles,
-                        const fs::path &outputFile,
-                        const fs::path &tempDir,
-                        std::string &errorOut,
-                        const fs::path &binary)
-        {
-            const auto result = runUntwineResult(inputFiles, outputFile, tempDir, binary);
-            errorOut = result.error;
-            return result.succeeded;
-        }
-
         ToolRunResult runUntwineResult(const std::vector<std::string> &inputFiles,
                                       const fs::path &outputFile,
                                       const fs::path &tempDir,
                                       const fs::path &binary,
-                                      const process::Options &options)
+                                      const process::Options &options,
+                                      const process::IProcessRunner &runner)
         {
             ToolRunResult result;
-            fs::path bin = binary.empty() ? findUntwineBinary() : binary;
-            if (bin.empty() || !isExecutableFile(bin))
+            const fs::path bin = binary.empty() ? findUntwineBinary() : binary;
+            if (!tools::isExecutableFile(bin))
             {
                 result.error = "untwine binary not found";
                 return result;
@@ -309,45 +192,33 @@ namespace ddb
             fs::remove(outputFile, ec);
             if (ec) return failIo("Cannot remove stale COPC output", ec);
 
-            std::vector<std::string> args = {"--files", filesArg, "--output_dir", outputFile.string()};
+            std::vector<std::string> args = {"--files", filesArg, "--output_dir", io::toUtf8(outputFile)};
             if (!tempDir.empty())
             {
                 fs::create_directories(tempDir, ec);
                 if (ec) return failIo("Cannot create Untwine temporary directory", ec);
                 args.push_back("--temp_dir");
-                args.push_back(tempDir.string());
+                args.push_back(io::toUtf8(tempDir));
             }
             args.push_back("--progress_fd");
             args.push_back(process::kExtraChannelPlaceholder);
 
             LOGD << "Spawning untwine (" << inputFiles.size() << " input file(s)): "
                  << process::formatCommandLine(bin, args);
+            // untwine has no thread option: it runs up to 10 threads of its own (8 file readers,
+            // then a pool of 10). They are counted as CPU tokens while it runs, so the
+            // other parallel sections of the process take fewer.
+            constexpr size_t UntwineThreads = 10;
+            const auto cpu = parallel::tryAcquireThreads(UntwineThreads);
+            LOGD << "untwine CPU tokens: " << cpu.count();
+
             ProgressDecoder progress;
             process::Options popts = options;
             popts.extraChannel = true;
             popts.onExtraData = [&progress](const char *data, size_t n) { progress.feed(data, n); };
             popts.onOutputLine = [](const std::string &line) { LOGD << "[untwine] " << line; };
 
-            const process::Result res = process::run(bin, args, popts);
-            if (res.descendantsTerminated)
-                LOGW << "untwine " << res.describe();
-            if (!res.success())
-            {
-                result.timedOut = res.timedOut;
-                std::ostringstream oss;
-                oss << "untwine " << res.describe();
-                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
-                result.error = oss.str();
-                return result;
-            }
-            if (!fs::exists(outputFile, ec) || ec)
-            {
-                result.errorCode = ec;
-                result.error = "untwine reported success but output file is missing: " + outputFile.string();
-                return result;
-            }
-            result.succeeded = true;
-            return result;
+            return tools::runToolProducingFile({"untwine", bin, args, popts, outputFile, kErrorTailLength}, runner).result;
         }
 
     } // namespace untwine

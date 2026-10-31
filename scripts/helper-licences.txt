@@ -1,0 +1,25 @@
+# Licence texts of the helper executables (metadata-util, bm3d, gdal-util) and of the code built into
+# them from this repository's submodules, one per line:
+#
+#   <file name in the package> | <source path, relative to the repository root>
+#
+# The Debian package puts the files in /usr/share/doc/ddb and the Windows package in the root of
+# the zip. Both packaging scripts and scripts/check-helper-tools.py read this list, so a licence is
+# added in one place. Every file name contains ".LICENSE", which the Debian build leaves
+# uncompressed.
+#
+# The vcpkg libraries inside the helpers (Exiv2 in metadata-util, the image codecs bm3d reads
+# and writes textures with) are not listed: scripts/collect-vcpkg-notices.py ships the notice of
+# every vcpkg port in the package, theirs included, in the third-party folder next to these.
+metadata-util.LICENSE | vendor/metadata-util/LICENSE
+# gdal-util (MPL-2.0, the submodule apps/gdal-util): the GDAL, PROJ and image library notices in it ship
+# with the vcpkg ones, like those of the other helpers.
+gdal-util.LICENSE | apps/gdal-util/LICENSE
+# bm3d: its licence, the NOTICE that names the code and libraries inside it (the name keeps
+# ".LICENSE" so that the Debian build leaves it uncompressed), and each text in its licenses/
+# folder (add a line here when that folder gets a file).
+bm3d.LICENSE | vendor/bm3d/LICENSE
+bm3d.NOTICE.LICENSE | vendor/bm3d/NOTICE
+Nexus.LICENSE | vendor/bm3d/licenses/Nexus.LICENSE
+vcglib.LICENSE | vendor/bm3d/licenses/vcglib.LICENSE
+corto.LICENSE | vendor/bm3d/licenses/corto.LICENSE

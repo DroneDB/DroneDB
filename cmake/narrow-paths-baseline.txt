@@ -1,0 +1,9 @@
+# Narrow path conversion baseline for scripts/check-narrow-paths.py (UTF-8 paths, src/include/mio.h).
+# Do not edit by hand: after removing conversions, run scripts/check-narrow-paths.py --update and commit this file.
+# Format: <path> <check> <count>   (checks: string, path-ctor, ansi-win32)
+apps/cmd/build.cpp path-ctor 1
+apps/cmd/terminal.cpp ansi-win32 1
+src/library/mio.cpp path-ctor 1
+src/library/plyconv.cpp path-ctor 1
+src/library/thumbs.cpp path-ctor 1
+src/library/tilerhelper.cpp path-ctor 1

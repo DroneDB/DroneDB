@@ -3,21 +3,22 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "shareclient.h"
 
-#include "dbops.h"
-#include "fs.h"
+#include "exceptions.h"
+#include "json.h"
+#include "logger.h"
 #include "mio.h"
-#include "registry.h"
-#include "registryutils.h"
-#include "userprofile.h"
-#include "utils.h"
-#include <cpr/cpr.h>
 
 namespace ddb
 {
 
-    const int MAX_RETRIES = 10;
+    // What an upload of one file of a share may take. Never the whole transfer (a 10 s cap on it
+    // aborted every large file on a slow link): the connection must open quickly, and the
+    // transfer must keep moving. The stall limit is generous because a proxy that buffers the
+    // body (nginx does) sends nothing back while it hands the file over to the Registry.
+    constexpr HttpLimits ShareUploadLimits{std::chrono::milliseconds{0}, std::chrono::seconds{10},
+                                           std::chrono::seconds{120}};
 
-    ShareClient::ShareClient(ddb::Registry *registry) : registry(registry)
+    ShareClient::ShareClient(RegistryClient *client) : registry(client)
     {
     }
 
@@ -25,86 +26,47 @@ namespace ddb
                            const std::string &datasetName,
                            const std::string &datasetDescription)
     {
-        // if (tag.empty()) throw InvalidArgsException("Missing tag parameter");
+        // The password of the share stays out of the log
+        LOGD << "Init('" << tag << "', '" << datasetName << "', '" << datasetDescription << "')";
 
-        LOGD << "Init('" << tag << "', '" << password << "', '" << datasetName
-             << "', '" << datasetDescription << "')";
+        const auto res = registry->postForm("/share/init", {{"tag", tag}, {"password", password}},
+                                            AuthScheme::Bearer);
+        registry->expectOk(res);
 
-        this->registry->ensureTokenValidity();
-
-        cpr::Response res = cpr::Post(cpr::Url(this->registry->getUrl("/share/init")),
-                                      utils::authHeader(this->registry->getAuthToken()),
-                                      cpr::Payload{{"tag", tag}, {"password", password}},
-                                      cpr::VerifySsl(this->registry->getSslVerify()));
-
-        if (res.status_code != 200)
-            this->registry->handleError(res);
-
-        json j = json::parse(res.text);
+        json j = json::parse(res.body);
         if (!j.contains("token"))
-            this->registry->handleError(res);
+            registry->fail(res);
         this->token = j["token"];
         LOGD << "Token = " << this->token;
     }
 
     void ShareClient::Upload(const std::string &path, const fs::path &filePath,
-                             const utils::UploadCallback &cb)
+                             const UploadCallback &cb)
     {
         if (token.empty())
             throw InvalidArgsException("Missing token, call Init first");
 
-        io::Path p = io::Path(filePath);
-        size_t filesize = p.getSize();
+        std::string filename = io::toUtf8(filePath.filename());
 
-        std::string filename = filePath.filename().string();
+        LOGD << "Uploading " << io::toUtf8(filePath);
 
-        // size_t gTotalBytes = p.getSize();
-        // size_t gTxBytes = 0;
-
-        LOGD << "Uploading " << p.string();
-
-        int retryNum = 0;
-
-        while (true)
-        {
-            try
+        // Not tried again: an upload may have reached the server when the answer was lost
+        const auto res = registry->postMultipart(
+            "/share/upload/" + this->token,
+            {HttpPart::fromFile("file", filePath), HttpPart::text("path", path)}, AuthScheme::Bearer,
+            ShareUploadLimits,
+            [&cb, &filename](const HttpProgress &progress) -> bool
             {
-                this->registry->ensureTokenValidity();
+                if (cb == nullptr)
+                    return true;
+                return cb(filename, progress.uploadNow, progress.uploadTotal);
+            });
+        registry->expectOk(res);
 
-                auto res = cpr::Post(cpr::Url(this->registry->getUrl("/share/upload/" + this->token)),
-                                     utils::authHeader(this->registry->getAuthToken()),
-                                     cpr::Multipart{{cpr::Part("file", cpr::File(filePath.string())), cpr::Part("path", path)}},
-                                     cpr::Timeout{10000},
-                                     cpr::ProgressCallback([&cb, &filename](size_t, size_t, size_t uploadTotal, size_t uploadNow, intptr_t) -> bool
-                                                           {
-                        if (cb == nullptr) return true;
-                        return cb(filename, uploadNow, uploadTotal); }),
-                                     cpr::VerifySsl(this->registry->getSslVerify()));
+        json j = json::parse(res.body);
 
-
-                if (res.status_code != 200)
-                    this->registry->handleError(res);
-
-                json j = json::parse(res.text);
-
-                if (!j.contains("hash"))
-                    this->registry->handleError(res);
-
-                break; // Done
-            }
-            // TODO: We should handle retries differently
-            catch (const NetException &e)
-            {
-                if (std::string(e.what()).find("Callback aborted") != std::string::npos)
-                    throw;
-                if (++retryNum >= MAX_RETRIES)
-                    throw;
-
-                LOGD << e.what() << ", retrying upload of " << filename
-                     << " (attempt " << retryNum << ")";
-                utils::sleep(1000 * retryNum);
-            }
-        }
+        if (!j.contains("hash"))
+            registry->fail(res);
     }
 
     std::string ShareClient::Commit()
@@ -112,44 +74,14 @@ namespace ddb
         if (token.empty())
             throw InvalidArgsException("Missing token, call Init first");
 
-        // Commit
-        int retryNum = 0;
-        while (true)
-        {
-            try
-            {
-                this->registry->ensureTokenValidity();
+        const auto res = registry->postForm("/share/commit/" + this->token, {}, AuthScheme::Bearer);
+        registry->expectOk(res);
 
-                auto res = cpr::Post(cpr::Url(this->registry->getUrl("/share/commit/" + this->token)),
-                                     utils::authHeader(this->registry->getAuthToken()),
-                                     cpr::VerifySsl(this->registry->getSslVerify()));
+        json j = json::parse(res.body);
+        if (!j.contains("url"))
+            registry->fail(res);
 
-                if (res.status_code != 200)
-                    this->registry->handleError(res);
-
-                json j = json::parse(res.text);
-                if (!j.contains("url"))
-                    this->registry->handleError(res);
-
-                this->resultUrl = this->registry->getUrl(j["url"]);
-
-                return std::string(this->resultUrl); // Done
-            }
-            // TODO: Retries need to be handled differently
-            catch (const NetException &e)
-            {
-                if (++retryNum >= MAX_RETRIES)
-                    throw e;
-                LOGD << e.what() << ", retrying commit (attempt " << retryNum << ")";
-                utils::sleep(1000 * retryNum);
-            }
-        }
-    }
-
-    std::string ShareClient::getToken() const { return std::string(this->token); }
-    std::string ShareClient::getResultUrl() const
-    {
-        return std::string(this->resultUrl);
+        return registry->getUrl(j["url"]);
     }
 
 } // namespace ddb

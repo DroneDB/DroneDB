@@ -1,0 +1,84 @@
+{
+  "call": "gdal-util --serve: {\"id\":1,\"op\":\"probe\",\"path\":\"<ortho.tif>\",\"params\":{\"kind\":\"raster\"}}",
+  "description": "The response of gdal-util to a probe request (kind raster) of ortho.tif of the contract inputs",
+  "normalisation": {
+    "placeholders": [],
+    "volatileKeys": []
+  },
+  "output": {
+    "id": 1,
+    "ok": true,
+    "result": {
+      "isCog": false,
+      "pointGeom": {
+        "coordinates": [
+          9.00010177534253,
+          45.153549196783544,
+          0.0
+        ],
+        "type": "Point"
+      },
+      "polygonGeom": {
+        "coordinates": [
+          [
+            [
+              9.0,
+              45.15362121030084,
+              0.0
+            ],
+            [
+              9.000203550941414,
+              45.15362121011944,
+              0.0
+            ],
+            [
+              9.00020355042871,
+              45.15347718317464,
+              0.0
+            ],
+            [
+              9.0,
+              45.153477183356024,
+              0.0
+            ],
+            [
+              9.0,
+              45.15362121030084,
+              0.0
+            ]
+          ]
+        ],
+        "type": "Polygon"
+      },
+      "properties": {
+        "bands": [
+          {
+            "colorInterp": "Red",
+            "type": "Byte"
+          },
+          {
+            "colorInterp": "Green",
+            "type": "Byte"
+          },
+          {
+            "colorInterp": "Blue",
+            "type": "Byte"
+          }
+        ],
+        "geotransform": [
+          500000.0,
+          0.5,
+          0.0,
+          5000016.0,
+          0.0,
+          -0.5
+        ],
+        "height": 32,
+        "width": 32
+      },
+      "type": "GeoRaster",
+      "wkt": "PROJCS[\"WGS 84 / UTM zone 32N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",9],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"32632\"]]"
+    }
+  },
+  "schema": "gdal-util-probe.schema.json"
+}

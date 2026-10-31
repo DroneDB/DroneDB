@@ -22,8 +22,8 @@ namespace cmd
 			.custom_help("delta source target")
 			.add_options()
 			("s,source", "Source ddb", cxxopts::value<std::string>())
-			("t,target", "Target ddb", cxxopts::value<std::string>()->default_value("."))
-			("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
+			("t,target", "Target ddb", cxxopts::value<std::string>()->default_value("."));
+        cmd::addFormatOption(opts);
         // clang-format on
         opts.parse_positional({"source", "target"});
     }
@@ -38,35 +38,27 @@ namespace cmd
         return "\r\n\r\nOutputs the delta that applied to target turns it into source";
     }
 
-    void Delta::run(cxxopts::ParseResult &opts)
+    int Delta::run(cxxopts::ParseResult &opts)
     {
-        try
+        if (opts["source"].count() != 1)
         {
-
-            if (opts["source"].count() != 1)
-            {
-                printHelp();
-                return;
-            }
-
-            const auto sourceDdbPath = opts["source"].as<std::string>();
-            const auto targetDdbPath = opts["target"].as<std::string>();
-            const auto format = opts["format"].as<std::string>();
-
-            LOGD << "Source: " << sourceDdbPath;
-            LOGD << "Target: " << targetDdbPath;
-            LOGD << "Format: " << format;
-
-            const auto source = ddb::open(sourceDdbPath, false);
-            const auto target = ddb::open(targetDdbPath, false);
-
-            ddb::delta(source.get(), target.get(), std::cout, format);
+            usageError();
         }
-        catch (ddb::InvalidArgsException &e)
-        {
-            std::cerr << "Error: " << e.what() << std::endl;
-            printHelp();
-        }
+
+        const auto sourceDdbPath = opts["source"].as<std::string>();
+        const auto targetDdbPath = opts["target"].as<std::string>();
+        const auto format = cmd::getFormatOption(opts);
+
+        LOGD << "Source: " << sourceDdbPath;
+        LOGD << "Target: " << targetDdbPath;
+        LOGD << "Format: " << ddb::outputFormatName(format);
+
+        const auto source = ddb::open(sourceDdbPath, false);
+        const auto target = ddb::open(targetDdbPath, false);
+
+        ddb::delta(source.get(), target.get(), std::cout, format);
+
+        return EXIT_SUCCESS;
     }
 
 }

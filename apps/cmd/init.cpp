@@ -15,9 +15,9 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args] [DIRECTORY]")
-    .custom_help("init")
-    .add_options()
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    .custom_help("init");
+    cmd::addWorkingDirOption(opts);
+    opts.add_options()
     ("from-scratch", "Create the index database from scratch instead of using a prebuilt one (slower)", cxxopts::value<bool>());
         // clang-format on
         opts.parse_positional({"working-dir"});
@@ -28,13 +28,14 @@ namespace cmd
         return "Initialize an index. If a directory is not specified, initializes the index in the current directory";
     }
 
-    void Init::run(cxxopts::ParseResult &opts)
+    int Init::run(cxxopts::ParseResult &opts)
     {
         std::string p = opts["working-dir"].as<std::string>();
         const bool fromScratch = opts["from-scratch"].count() > 0;
 
         const std::string outPath = ddb::initIndex(p, fromScratch);
         std::cout << "Initialized empty database in " << outPath << std::endl;
+        return EXIT_SUCCESS;
     }
 
 }

@@ -2,7 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "contour.h"
+#include "cancellation.h"
+#include "dem.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
 
@@ -30,27 +33,6 @@ namespace {
 constexpr int    MAX_LEVELS               = 1000;
 constexpr int    DEFAULT_COUNT            = 20;
 constexpr double MIN_INTERVAL             = 1e-9;
-
-// --- RAII helpers ---------------------------------------------------------
-
-struct DatasetGuard {
-    GDALDatasetH h = nullptr;
-    ~DatasetGuard() { if (h) GDALClose(h); }
-};
-
-struct SrsHandle {
-    OGRSpatialReferenceH h = nullptr;
-    SrsHandle() = default;
-    explicit SrsHandle(OGRSpatialReferenceH handle) : h(handle) {}
-    ~SrsHandle() { if (h) OSRDestroySpatialReference(h); }
-    SrsHandle(const SrsHandle &) = delete;
-    SrsHandle &operator=(const SrsHandle &) = delete;
-};
-
-struct CtHandle {
-    OGRCoordinateTransformationH h = nullptr;
-    ~CtHandle() { if (h) OCTDestroyCoordinateTransformation(h); }
-};
 
 // Convert an OGRGeometry to GeoJSON coordinates (LineString or
 // MultiLineString) and append the resulting Feature(s) to `out`.
@@ -113,10 +95,10 @@ double resolveInterval(const ContourOptions &opts,
     return range / static_cast<double>(count);
 }
 
-} // anonymous namespace
+constexpr int idFieldIdx   = 0;
+constexpr int elevFieldIdx = 1;
 
-std::string generateContoursJson(const std::string &rasterPath,
-                                 const ContourOptions &options) {
+void validateOptions(const ContourOptions &options) {
     if (!options.interval.has_value() && !options.count.has_value())
         throw InvalidArgsException(
             "Either 'interval' or 'count' must be specified");
@@ -127,130 +109,92 @@ std::string generateContoursJson(const std::string &rasterPath,
 
     if (options.simplifyTolerance < 0.0)
         throw InvalidArgsException("'simplifyTolerance' must be >= 0");
+}
 
-    // --- Open raster ------------------------------------------------------
-    DatasetGuard dsGuard;
-    dsGuard.h = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!dsGuard.h)
-        throw GDALException("Cannot open raster: " + rasterPath);
+// The in-memory OGR layer the contours are generated into, with the dataset that owns it
+struct ContourLayer {
+    GDALDatasetUniquePtr dataset;
+    OGRLayerH layer = nullptr;
+};
 
-    double gt[6];
-    if (GDALGetGeoTransform(dsGuard.h, gt) != CE_None)
-        throw GDALException("Raster has no geotransform: " + rasterPath);
+// Adds a field to the layer, or throws: a layer without it would shift the fields the generator
+// and the readers address by index
+void addField(OGRLayerH layer, const char *name, OGRFieldType type) {
+    OGRFieldDefnH defn = OGR_Fld_Create(name, type);
+    const OGRErr created = OGR_L_CreateField(layer, defn, TRUE);
+    OGR_Fld_Destroy(defn);
+    if (created != OGRERR_NONE)
+        throw GDALException(std::string("Cannot create the field '") + name + "' of the contour layer");
+}
 
-    const int bandCount = GDALGetRasterCount(dsGuard.h);
-    if (options.bandIndex < 1 || options.bandIndex > bandCount)
-        throw InvalidArgsException("Invalid band index: " +
-                                   std::to_string(options.bandIndex));
-
-    GDALRasterBandH hBand = GDALGetRasterBand(dsGuard.h, options.bandIndex);
-    if (!hBand) throw GDALException("Cannot access raster band");
-
-    const char *unitCStr = GDALGetRasterUnitType(hBand);
-    const std::string unit = unitCStr ? unitCStr : "";
-
-    // Band statistics drive interval-from-count and JSON metadata.
-    double bMin = 0.0, bMax = 0.0, bMean = 0.0, bStdDev = 0.0;
-    const CPLErr statErr = GDALGetRasterStatistics(hBand, FALSE, TRUE,
-                                                   &bMin, &bMax, &bMean, &bStdDev);
-    if (statErr != CE_None)
-        throw GDALException("Cannot compute raster statistics");
-
-    const double interval = resolveInterval(options, bMin, bMax);
-
-    // --- Build in-memory OGR layer to collect contours --------------------
-    SrsHandle rasterSrs;
-    bool rasterHasSrs = false;
-    {
-        const char *projRef = GDALGetProjectionRef(dsGuard.h);
-        if (projRef && projRef[0] != '\0') {
-            rasterSrs.h = OSRNewSpatialReference(nullptr);
-            char *wktPtr = const_cast<char *>(projRef);
-            if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-                OSRDestroySpatialReference(rasterSrs.h);
-                rasterSrs.h = nullptr;
-            } else {
-                OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-                rasterHasSrs = true;
-            }
-        }
-    }
+// Runs the GDAL contour generator over the band into a new in-memory layer in the CRS of the raster
+ContourLayer generateContourLayer(const DemContext &dem, double interval, const ContourOptions &options) {
+    const bool rasterHasSrs = dem.srs != nullptr;
 
     GDALDriverH memDrv = GDALGetDriverByName("Memory");
     if (!memDrv) throw GDALException("Memory OGR driver not available");
 
-    GDALDatasetH hMemDs = GDALCreate(memDrv, "contours_mem", 0, 0, 0, GDT_Unknown, nullptr);
-    if (!hMemDs) throw GDALException("Cannot create in-memory dataset");
-    DatasetGuard memGuard{hMemDs};
+    ContourLayer out;
+    out.dataset = adoptDataset(
+        GDALCreate(memDrv, "contours_mem", 0, 0, 0, GDT_Unknown, nullptr));
+    if (!out.dataset) throw GDALException("Cannot create in-memory dataset");
+    GDALDatasetH hMemDs = datasetHandle(out.dataset);
 
     OGRLayerH hLayer = GDALDatasetCreateLayer(hMemDs, "contours",
-                                              rasterHasSrs ? rasterSrs.h : nullptr,
+                                              rasterHasSrs ? dem.srs.get() : nullptr,
                                               wkbLineString, nullptr);
     if (!hLayer) throw GDALException("Cannot create contour layer");
+    out.layer = hLayer;
 
-    constexpr int idFieldIdx   = 0;
-    constexpr int elevFieldIdx = 1;
-
-    OGRFieldDefnH fId = OGR_Fld_Create("id", OFTInteger);
-    OGR_L_CreateField(hLayer, fId, TRUE);
-    OGR_Fld_Destroy(fId);
-
-    OGRFieldDefnH fElev = OGR_Fld_Create("elev", OFTReal);
-    OGR_L_CreateField(hLayer, fElev, TRUE);
-    OGR_Fld_Destroy(fElev);
+    // In this order: the generator writes into them by index (idFieldIdx, elevFieldIdx)
+    addField(hLayer, "id", OFTInteger);
+    addField(hLayer, "elev", OFTReal);
 
     // --- Run GDAL contour generator --------------------------------------
-    int hasNoData = FALSE;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
 
-    char **opts = nullptr;
-    opts = CSLSetNameValue(opts, "ELEV_FIELD",
-                           std::to_string(elevFieldIdx).c_str());
-    opts = CSLSetNameValue(opts, "ID_FIELD",
-                           std::to_string(idFieldIdx).c_str());
-    opts = CSLSetNameValue(opts, "LEVEL_INTERVAL",
-                           std::to_string(interval).c_str());
-    opts = CSLSetNameValue(opts, "LEVEL_BASE",
-                           std::to_string(options.baseOffset).c_str());
-    if (hasNoData) {
-        opts = CSLSetNameValue(opts, "NODATA",
-                               std::to_string(noData).c_str());
+    CPLStringList opts;
+    opts.SetNameValue("ELEV_FIELD", std::to_string(elevFieldIdx).c_str());
+    opts.SetNameValue("ID_FIELD", std::to_string(idFieldIdx).c_str());
+    opts.SetNameValue("LEVEL_INTERVAL", std::to_string(interval).c_str());
+    opts.SetNameValue("LEVEL_BASE", std::to_string(options.baseOffset).c_str());
+    if (dem.nodata.has) {
+        opts.SetNameValue("NODATA", std::to_string(dem.nodata.value).c_str());
     }
 
-    const CPLErr cErr = GDALContourGenerateEx(hBand, hLayer, opts,
-                                              nullptr, nullptr);
-    CSLDestroy(opts);
+    // The generation stops when the call is canceled
+    cancel::GdalProgress progress;
+    const CPLErr cErr = GDALContourGenerateEx(dem.band, hLayer, opts.List(),
+                                              progress.function(), progress.data());
 
-    if (cErr != CE_None)
+    if (cErr != CE_None) {
+        cancel::throwIfCanceled();
         throw GDALException("GDAL contour generation failed");
-
-    // --- Build coordinate transform back to WGS84 -------------------------
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
-
-    CtHandle rasterToWgs;
-    if (rasterHasSrs) {
-        rasterToWgs.h = OCTNewCoordinateTransformation(rasterSrs.h, wgs84.h);
-        if (!rasterToWgs.h)
-            throw GDALException("Cannot build raster -> WGS84 transform");
     }
+    return out;
+}
+
+// The contour lines as GeoJSON features: filtered by elevation, simplified, in WGS84
+struct ContourFeatures {
+    json features = json::array();
+    double minElev = std::numeric_limits<double>::infinity();
+    double maxElev = -std::numeric_limits<double>::infinity();
+    int kept = 0;
+};
+
+ContourFeatures collectFeatures(OGRLayerH hLayer, const DemContext &dem, const ContourOptions &options) {
+    // --- Build coordinate transform back to WGS84 -------------------------
+    const auto rasterToWgs = dem.demToWgs84();
 
     // --- Iterate features, simplify, transform, serialize -----------------
-    json features = json::array();
-    double outMinElev = std::numeric_limits<double>::infinity();
-    double outMaxElev = -std::numeric_limits<double>::infinity();
-    int kept = 0;
+    ContourFeatures out;
+    json &features = out.features;
 
     OGR_L_ResetReading(hLayer);
     while (true) {
-        OGRFeatureH hFeat = OGR_L_GetNextFeature(hLayer);
-        if (!hFeat) break;
-
-        struct FeatGuard {
-            OGRFeatureH h;
-            ~FeatGuard() { if (h) OGR_F_Destroy(h); }
-        } featGuard{hFeat};
+        cancel::throwIfCanceled();
+        const FeaturePtr feature(OGR_L_GetNextFeature(hLayer));
+        if (!feature) break;
+        OGRFeatureH hFeat = feature.get();
 
         const double elev = OGR_F_GetFieldAsDouble(hFeat, elevFieldIdx);
 
@@ -261,10 +205,8 @@ std::string generateContoursJson(const std::string &rasterPath,
         if (!hGeom) continue;
 
         // Optional simplification in raster CRS units.
-        OGRGeometry *workGeom = reinterpret_cast<OGRGeometry *>(hGeom);
-        std::unique_ptr<OGRGeometry, void(*)(OGRGeometry *)> ownedSimplified(
-            nullptr,
-            [](OGRGeometry *g) { if (g) OGRGeometryFactory::destroyGeometry(g); });
+        OGRGeometry *workGeom = OGRGeometry::FromHandle(hGeom);
+        OGRGeometryUniquePtr ownedSimplified;
         if (options.simplifyTolerance > 0.0) {
             OGRGeometry *simp = workGeom->SimplifyPreserveTopology(
                 options.simplifyTolerance);
@@ -276,34 +218,66 @@ std::string generateContoursJson(const std::string &rasterPath,
 
         // Reproject in-place to WGS84 (operate on a clone so we don't
         // mutate features still owned by the layer).
-        std::unique_ptr<OGRGeometry, void(*)(OGRGeometry *)> ownedTransformed(
-            nullptr,
-            [](OGRGeometry *g) { if (g) OGRGeometryFactory::destroyGeometry(g); });
-        if (rasterToWgs.h) {
-            OGRGeometry *clone = workGeom->clone();
-            if (!clone) continue;
-            if (clone->transform(reinterpret_cast<OGRCoordinateTransformation *>(
-                    rasterToWgs.h)) != OGRERR_NONE) {
-                OGRGeometryFactory::destroyGeometry(clone);
+        OGRGeometryUniquePtr ownedTransformed;
+        if (rasterToWgs) {
+            ownedTransformed.reset(workGeom->clone());
+            if (!ownedTransformed) continue;
+            if (ownedTransformed->transform(rasterToWgs->get()) != OGRERR_NONE) {
                 continue;
             }
-            ownedTransformed.reset(clone);
-            workGeom = clone;
+            workGeom = ownedTransformed.get();
         }
 
         const size_t before = features.size();
         appendGeometryAsFeature(features, workGeom, elev);
         if (features.size() > before) {
-            kept++;
-            outMinElev = std::min(outMinElev, elev);
-            outMaxElev = std::max(outMaxElev, elev);
+            out.kept++;
+            out.minElev = std::min(out.minElev, elev);
+            out.maxElev = std::max(out.maxElev, elev);
         }
 
-        if (kept >= MAX_LEVELS * 100) {
+        if (out.kept >= MAX_LEVELS * 100) {
             LOGD << "Contour generation hit feature cap";
             break;
         }
     }
+    return out;
+}
+
+} // anonymous namespace
+
+std::string generateContoursJson(const std::string &rasterPath,
+                                 const ContourOptions &options) {
+    validateOptions(options);
+    cancel::throwIfCanceled();
+
+    // --- Open raster ------------------------------------------------------
+    const DemContext dem = openDem(rasterPath, options.bandIndex);
+    GDALRasterBandH hBand = dem.band;
+
+    const char *unitCStr = GDALGetRasterUnitType(hBand);
+    const std::string unit = unitCStr ? unitCStr : "";
+
+    // Band statistics drive interval-from-count and JSON metadata.
+    // (the statistics stored with the raster, else a pass over it that stops when the call is canceled)
+    double bMin = 0.0, bMax = 0.0, bMean = 0.0, bStdDev = 0.0;
+    CPLErr statErr = GDALGetRasterStatistics(hBand, FALSE, FALSE, &bMin, &bMax, &bMean, &bStdDev);
+    if (statErr != CE_None) {
+        cancel::GdalProgress progress;
+        statErr = GDALComputeRasterStatistics(hBand, FALSE, &bMin, &bMax, &bMean, &bStdDev,
+                                              progress.function(), progress.data());
+    }
+    if (statErr != CE_None) {
+        cancel::throwIfCanceled();
+        throw GDALException("Cannot compute raster statistics");
+    }
+
+    const double interval = resolveInterval(options, bMin, bMax);
+
+    // --- Build in-memory OGR layer to collect contours, and read it back -------
+    const ContourLayer contours = generateContourLayer(dem, interval, options);
+    const ContourFeatures collected = collectFeatures(contours.layer, dem, options);
+    const json &features = collected.features;
 
     // --- Build output JSON -----------------------------------------------
     json result;
@@ -311,9 +285,9 @@ std::string generateContoursJson(const std::string &rasterPath,
     result["features"] = features;
     result["interval"] = interval;
     result["baseOffset"] = options.baseOffset;
-    if (kept > 0) {
-        result["min"] = outMinElev;
-        result["max"] = outMaxElev;
+    if (collected.kept > 0) {
+        result["min"] = collected.minElev;
+        result["max"] = collected.maxElev;
     } else {
         result["min"] = nullptr;
         result["max"] = nullptr;

@@ -5,14 +5,20 @@
 #include "testfs.h"
 
 #include <algorithm>
-#include <thread>
-#include <chrono>
 #include <fstream>
 #include <cstring>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
+#include "ddb.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "randomutil.h"
 
 namespace {
     // SQLite magic header: "SQLite format 3\000" (16 bytes including NUL terminator)
@@ -61,29 +67,27 @@ TestArea::TestArea(const std::string& name, bool recreateIfExists) : name(name) 
         throw ddb::FSException("Cannot use .. in name");
 
     // Calculate root path without creating the directory
-    const fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
+    const fs::path root = processRoot() / fs::path(name);
 
     if (recreateIfExists) {
         if (fs::exists(root)) {
             LOGD << "Removing " << root;
+            // The library keeps the index connections and the rasters of recent calls open
+            // between calls: a host releases them before it deletes a dataset folder (ddb.h),
+            // or Windows refuses to delete the open files. A test reusing its area is such a host.
+            DDBReleaseConnections(ddb::io::toUtf8(root).c_str(), nullptr);
             std::error_code ec;
-            auto removed = fs::remove_all(root, ec);
-            if (ec) {
-                LOGD << "Error removing " << root << ": " << ec.message();
-                // Try again with a small delay (Windows file locking issues)
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                removed = fs::remove_all(root, ec);
-                if (ec) {
-                    LOGD << "Second attempt failed: " << ec.message();
-                }
-            }
+            const auto removed = fs::remove_all(root, ec);
+            if (ec)
+                throw ddb::FSException("Cannot recreate the test area " + ddb::io::toUtf8(root) + ": " + ec.message(),
+                                       ec);
             LOGD << "Removed " << removed << " files/folders";
         }
     }
 }
 
 fs::path TestArea::getPath(const fs::path& p) {
-    const fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
+    const fs::path root = processRoot() / fs::path(name);
     // Ensure the root directory exists
     if (!fs::exists(root)) {
         ddb::io::createDirectories(root);
@@ -93,7 +97,7 @@ fs::path TestArea::getPath(const fs::path& p) {
 }
 
 fs::path TestArea::getFolder(const fs::path& subfolder) {
-    const fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
+    const fs::path root = processRoot() / fs::path(name);
     auto dir = root;
     if (!subfolder.empty())
         dir = dir / subfolder;
@@ -134,7 +138,57 @@ fs::path TestArea::downloadTestAsset(const std::string& url,
     if (isSqliteFile)
         validator = isValidSqliteFile;
 
-    return TestFS::downloadTestAsset(url, destination, false, validator);
+    // Shared cache: downloaded once, copied to the test area
+    const fs::path cached = TestFS::cachedAssetPath(url);
+    fs::create_directories(cached.parent_path());
+    if (isSqliteFile && fs::exists(cached) && !isValidSqliteFile(cached)) {
+        LOGD << "Found corrupted SQLite file at " << cached << ", forcing re-download";
+        fs::remove(cached);
+    }
+    TestFS::downloadTestAsset(url, cached, false, validator);
+    fs::copy_file(cached, destination, fs::copy_options::overwrite_existing);
+    return destination;
+}
+
+namespace {
+    int currentProcessId() {
+#ifdef _WIN32
+        return _getpid();
+#else
+        return static_cast<int>(getpid());
+#endif
+    }
+
+    // The folder of this process's areas. Removed when the process ends (static destruction: also
+    // after std::exit, which is how a death-test child ends), unless it is kept. Only by the
+    // process that made it: a fork() child that exits would remove the folder of its parent.
+    struct ProcessRoot {
+        const fs::path path = fs::temp_directory_path() / "ddb_test_areas" / ddb::randomString(12);
+        const int owner = currentProcessId();
+        bool keep = false;
+
+        ~ProcessRoot() {
+            if (keep || currentProcessId() != owner)
+                return;
+            // Nothing to report from here: the logger may be gone, and a folder that stays
+            // (open files on Windows) is only a leftover of the temp folder
+            std::error_code ec;
+            fs::remove_all(path, ec);
+        }
+    };
+
+    ProcessRoot& processRootState() {
+        static ProcessRoot root;
+        return root;
+    }
+}
+
+fs::path TestArea::processRoot() {
+    return processRootState().path;
+}
+
+void TestArea::keepProcessRoot() {
+    processRootState().keep = true;
 }
 
 void TestArea::clearAll() {

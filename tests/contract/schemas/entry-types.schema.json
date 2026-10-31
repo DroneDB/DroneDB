@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb entry types",
+  "description": "DDBGetEntryTypes (new in 2.0): one item per registered entry type, by id",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "name",
+      "buildable",
+      "thumbnail",
+      "sidecarExtensions",
+      "roles"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "The entry type value (entries' \"type\")"
+      },
+      "name": {
+        "type": "string",
+        "minLength": 1
+      },
+      "buildable": {
+        "type": "boolean"
+      },
+      "thumbnail": {
+        "enum": [
+          "none",
+          "file",
+          "build"
+        ]
+      },
+      "sidecarExtensions": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+$"
+        },
+        "description": "Lowercase, without the dot"
+      },
+      "roles": {
+        "type": "array",
+        "items": {
+          "$ref": "build-artifacts.schema.json#/$defs/artifact/properties/role"
+        }
+      }
+    }
+  }
+}

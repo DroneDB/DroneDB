@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb meta keys",
+  "description": "DDBMetaList",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "key",
+      "path",
+      "count"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "key": {
+        "type": "string"
+      },
+      "path": {
+        "type": "string",
+        "description": "\"\" for the dataset itself"
+      },
+      "count": {
+        "type": "integer",
+        "minimum": 1
+      }
+    }
+  }
+}

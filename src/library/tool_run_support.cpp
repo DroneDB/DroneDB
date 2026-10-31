@@ -1,0 +1,56 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include "tool_run_support.h"
+
+#include <cstdint>
+#include <system_error>
+
+#include "env.h"
+#include "mio.h"
+
+namespace ddb
+{
+    namespace tools
+    {
+
+        ToolRunOutcome runToolProducingFile(const ToolRun &run, const process::IProcessRunner &runner)
+        {
+            ToolRunOutcome outcome;
+            outcome.process = runner.run(run.binary, run.args, run.options);
+            outcome.result = ToolRunResult::fromProcess(run.tool, outcome.process, run.tailLength);
+            if (!outcome.result.succeeded)
+                return outcome;
+
+            std::error_code ec;
+            const bool regular = fs::is_regular_file(run.output, ec) && !ec;
+            const auto size = regular ? fs::file_size(run.output, ec) : std::uintmax_t{0};
+            if (regular && !ec && size > 0)
+                return outcome;
+
+            ToolRunResult failure;
+            failure.error = run.tool + " reported success but " + run.missingOutputText + ": " + io::toUtf8(run.output);
+            if (regular && !ec)
+                failure.error += " (the file is empty)";
+            if (!outcome.process.outputTail.empty())
+                failure.error += ": " + outcome.process.tail(run.tailLength);
+            outcome.result = failure;
+            return outcome;
+        }
+
+        std::chrono::milliseconds toolMaxRuntime(const char *envName, std::chrono::seconds defaultValue)
+        {
+            const auto seconds = env::readIntegerOrWarn(envName, 1, env::kDefaultMaxInteger);
+            return std::chrono::seconds(seconds ? static_cast<long long>(*seconds) : defaultValue.count());
+        }
+
+        std::string oneLine(std::string_view text)
+        {
+            std::string line(text);
+            for (auto &c : line)
+                if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+            return line;
+        }
+
+    } // namespace tools
+} // namespace ddb

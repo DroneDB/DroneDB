@@ -2,12 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
+#include <memory>
+#include <optional>
 #include <cctype>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#include "gdal_inc.h"
+#include "coordstransformer.h"
+#include "gdal_raii.h"
+#include "stringutil.h"
 #include "gdal_priv.h"
 #include "gdal_utils.h"
 #include "ogrsf_frmts.h"
@@ -16,9 +20,9 @@
 #include "cpl_vsi.h"
 
 #include "vector_query.h"
+#include "raster_cache.h"
 #include "exceptions.h"
 #include "logger.h"
-#include "utils.h"
 #include "json.h"
 
 namespace ddb
@@ -36,9 +40,7 @@ namespace ddb
 
         FormatSpec resolveOutputFormat(const std::string &fmt)
         {
-            std::string f = fmt;
-            std::transform(f.begin(), f.end(), f.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+            const std::string f = str::toLowerCopy(fmt);
             if (f.empty() || f == "geojson" || f == "json")
                 return {"GeoJSON", "geojson", "RFC7946=YES"};
             if (f == "gml")
@@ -73,9 +75,7 @@ namespace ddb
                 return std::string(authName) + ":" + authCode;
             char *wkt = nullptr;
             srs->exportToWkt(&wkt);
-            std::string out = wkt ? wkt : "";
-            CPLFree(wkt);
-            return out;
+            return takeGdalString(wkt);
         }
 
         json layerToJson(OGRLayer *layer, bool includeFields)
@@ -118,177 +118,232 @@ namespace ddb
 
     // ---------------------------------------------------------------------
 
-    std::string queryVector(const std::string &vectorPath,
-                            const std::string &layerName,
-                            const double *bbox,
-                            const std::string &bboxSrs,
-                            int maxFeatures,
-                            int startIndex,
-                            const std::string &outputFormat)
+    namespace
+    {
+        // A layer of a cached vector dataset; clears the filters set on it when done, so
+        // the next user of the dataset starts clean
+        class LayerScope
+        {
+            DatasetLease dataset_;
+            OGRLayer *layer_ = nullptr;
+
+        public:
+            LayerScope(const std::string &vectorPath, const std::string &layerName)
+                : dataset_(RasterCache::instance().acquireVectorDataset(vectorPath))
+            {
+                layer_ = findLayer(GDALDataset::FromHandle(dataset_->handle()), layerName);
+            }
+            ~LayerScope()
+            {
+                // Clearing a filter cannot fail, and a destructor could not report it
+                layer_->SetSpatialFilter(nullptr);
+                layer_->SetAttributeFilter(nullptr);
+                layer_->ResetReading();
+            }
+            LayerScope(const LayerScope &) = delete;
+            LayerScope &operator=(const LayerScope &) = delete;
+
+            GDALDatasetH dataset() const { return dataset_->handle(); }
+            OGRLayer *operator->() const { return layer_; }
+            OGRLayer *get() const { return layer_; }
+        };
+
+        // query.bbox in the layer's SRS (corners reprojected from query.bboxSrs)
+        std::optional<OGREnvelope> layerFilterRect(OGRLayer *layer, const VectorQuery &query)
+        {
+            if (!query.bbox)
+                return std::nullopt;
+
+            const std::string requestedSrs = query.bboxSrs.empty() ? std::string("EPSG:4326") : query.bboxSrs;
+            OGREnvelope rect;
+            rect.MinX = (*query.bbox)[0];
+            rect.MinY = (*query.bbox)[1];
+            rect.MaxX = (*query.bbox)[2];
+            rect.MaxY = (*query.bbox)[3];
+
+            const OGRSpatialReference *layerSrsRef = layer->GetSpatialRef();
+            if (!layerSrsRef)
+                return rect;
+
+            // GetSpatialRef() returns a const pointer (GDAL >= 3.x); take a mutable copy so
+            // we can normalize the axis mapping strategy without mutating the dataset's
+            // shared SRS object.
+            OGRSpatialReference layerSrs(*layerSrsRef);
+            const SrsPtr reqSrs = srsFromUserInput(requestedSrs.c_str());
+            if (!reqSrs)
+                throw InvalidArgsException("Invalid SRS: " + requestedSrs);
+            layerSrs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            if (srsOf(reqSrs).IsSame(&layerSrs))
+                return rect;
+
+            const auto t = CoordsTransformer::tryCreate(srsOf(reqSrs), layerSrs);
+            if (!t)
+                throw GDALException("Cannot create bbox coordinate transformation from " + requestedSrs +
+                                    " to layer SRS");
+            // Transform all 4 corners
+            double xs[4] = {rect.MinX, rect.MaxX, rect.MaxX, rect.MinX};
+            double ys[4] = {rect.MinY, rect.MinY, rect.MaxY, rect.MaxY};
+            if (!t->tryTransform(4, xs, ys))
+                throw GDALException("bbox coordinate transformation failed (" + requestedSrs +
+                                    " -> layer SRS); refusing to apply the bbox in the wrong CRS.");
+            rect.MinX = *std::min_element(xs, xs + 4);
+            rect.MaxX = *std::max_element(xs, xs + 4);
+            rect.MinY = *std::min_element(ys, ys + 4);
+            rect.MaxY = *std::max_element(ys, ys + 4);
+            return rect;
+        }
+
+        // "<column> IN (1,2,3)" selecting query.fids, or "" for every feature
+        std::string fidPredicate(const VectorQuery &query, const std::string &column)
+        {
+            if (query.fids.empty())
+                return "";
+            std::string in;
+            for (const auto fid : query.fids)
+                in += (in.empty() ? "" : ",") + std::to_string(fid);
+            return column + " IN (" + in + ")";
+        }
+
+        // The attribute filter of query: its feature ids and its where expression
+        std::string attributeFilter(const VectorQuery &query, const std::string &fidColumn)
+        {
+            const std::string fids = fidPredicate(query, fidColumn);
+            if (query.where.empty())
+                return fids;
+            if (fids.empty())
+                return "(" + query.where + ")";
+            return fids + " AND (" + query.where + ")";
+        }
+
+        // Identifier quoted for SQL: between double quotes, embedded quotes doubled
+        std::string quoteIdentifier(const std::string &name)
+        {
+            std::string quoted = "\"";
+            for (const char c : name)
+            {
+                if (c == '"')
+                    quoted.push_back('"');
+                quoted.push_back(c);
+            }
+            return quoted + "\"";
+        }
+
+        std::string formatNumber(double value)
+        {
+            return CPLSPrintf("%.17g", value);
+        }
+    } // namespace
+
+    std::string queryVector(const std::string &vectorPath, const VectorQuery &query)
     {
         if (vectorPath.empty())
             throw InvalidArgsException("queryVector: vectorPath empty");
-        if (maxFeatures < 0)
+        if (query.maxFeatures < 0)
             throw InvalidArgsException("queryVector: maxFeatures < 0");
-        if (startIndex < 0)
+        if (query.startIndex < 0)
             throw InvalidArgsException("queryVector: startIndex < 0");
 
-        const FormatSpec fmt = resolveOutputFormat(outputFormat);
-
-        auto *hSrc = static_cast<GDALDataset *>(
-            GDALOpenEx(vectorPath.c_str(),
-                       GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                       nullptr, nullptr, nullptr));
-        if (!hSrc)
-            throw GDALException("Cannot open vector: " + vectorPath);
-
-        OGRLayer *layer = nullptr;
-        try {
-            layer = findLayer(hSrc, layerName);
-        } catch (...) {
-            GDALClose(hSrc);
-            throw;
-        }
-
-        // Apply spatial filter, reprojecting bbox to layer SRS if needed.
-        if (bbox != nullptr) {
-            const std::string requestedSrs =
-                bboxSrs.empty() ? std::string("EPSG:4326") : bboxSrs;
-            double minX = bbox[0], minY = bbox[1], maxX = bbox[2], maxY = bbox[3];
-
-            const OGRSpatialReference *layerSrsRef = layer->GetSpatialRef();
-            if (layerSrsRef) {
-                // GetSpatialRef() returns a const pointer (GDAL >= 3.x); take a
-                // mutable copy so we can normalize the axis mapping strategy
-                // without mutating the dataset's shared SRS object.
-                OGRSpatialReference layerSrs(*layerSrsRef);
-                OGRSpatialReference reqSrs;
-                if (reqSrs.SetFromUserInput(requestedSrs.c_str()) != OGRERR_NONE) {
-                    GDALClose(hSrc);
-                    throw InvalidArgsException("Invalid SRS: " + requestedSrs);
-                }
-                reqSrs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-                layerSrs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-                if (!reqSrs.IsSame(&layerSrs)) {
-                    OGRCoordinateTransformation *t =
-                        OGRCreateCoordinateTransformation(&reqSrs, &layerSrs);
-                    if (!t) {
-                        GDALClose(hSrc);
-                        throw GDALException(
-                            "Cannot create bbox coordinate transformation from " +
-                            requestedSrs + " to layer SRS");
-                    }
-                    // Transform all 4 corners
-                    double xs[4] = {minX, maxX, maxX, minX};
-                    double ys[4] = {minY, minY, maxY, maxY};
-                    int ok;
-                    try {
-                        ok = t->Transform(4, xs, ys);
-                    } catch (...) {
-                        OCTDestroyCoordinateTransformation(
-                            OGRCoordinateTransformation::ToHandle(t));
-                        GDALClose(hSrc);
-                        throw;
-                    }
-                    OCTDestroyCoordinateTransformation(
-                        OGRCoordinateTransformation::ToHandle(t));
-                    if (!ok) {
-                        GDALClose(hSrc);
-                        throw GDALException(
-                            "bbox coordinate transformation failed (" +
-                            requestedSrs + " -> layer SRS); refusing to apply "
-                            "the bbox in the wrong CRS.");
-                    }
-                    minX = *std::min_element(xs, xs + 4);
-                    maxX = *std::max_element(xs, xs + 4);
-                    minY = *std::min_element(ys, ys + 4);
-                    maxY = *std::max_element(ys, ys + 4);
-                }
-            }
-            layer->SetSpatialFilterRect(minX, minY, maxX, maxY);
-        }
+        const FormatSpec fmt = resolveOutputFormat(query.outputFormat);
+        LayerScope layer(vectorPath, query.layerName);
+        const std::string layerName = layer->GetName();
 
         // Build GDALVectorTranslate options for selected layer + paging.
-        const std::string vsiPath = "/vsimem/ddb-vquery-" +
-                                    utils::generateRandomString(16) +
-                                    "." + fmt.vsiExt;
+        const VsiMemFile out = VsiMemFile::unique("ddb-vquery-", std::string(".") + fmt.vsiExt);
+
+        // A layer without an SRS (a local CAD drawing) cannot be
+        // reprojected: return its own coordinates, as plain GeoJSON (RFC 7946
+        // mandates WGS84, so its layer option is not applied either).
+        const bool layerHasSrs = layer->GetSpatialRef() != nullptr;
 
         std::vector<std::string> argStore;
         argStore.emplace_back("-f"); argStore.emplace_back(fmt.driver);
-        argStore.emplace_back("-t_srs"); argStore.emplace_back("EPSG:4326");
-        if (fmt.layerCreationOpts) {
+        if (layerHasSrs) {
+            argStore.emplace_back("-t_srs"); argStore.emplace_back("EPSG:4326");
+        }
+        if (fmt.layerCreationOpts && layerHasSrs) {
             argStore.emplace_back("-lco");
             argStore.emplace_back(fmt.layerCreationOpts);
         }
+        // Feature ids are the source FIDs, not the position in this page
+        argStore.emplace_back("-preserve_fid");
+        // -spat also filters the -sql result below (a filter set on the layer would not)
+        if (const auto rect = layerFilterRect(layer.get(), query)) {
+            argStore.emplace_back("-spat");
+            for (const double v : {rect->MinX, rect->MinY, rect->MaxX, rect->MaxY})
+                argStore.emplace_back(formatNumber(v));
+        }
         // Pagination: when startIndex > 0 we cannot rely on -limit alone, so
-        // we route the request through OGR SQL with LIMIT/OFFSET using the
+        // we route the request through SQL with LIMIT/OFFSET using the
         // SQLite dialect (works against any OGR data source). Otherwise we
-        // keep the original layer-restricted invocation with -limit.
-        const bool usePagedSql = (startIndex > 0);
-        std::string sqlStmt;
-        if (usePagedSql) {
-            // Build a properly quoted identifier: embed the layer name between
-            // double-quotes and escape any embedded double-quote by doubling it
-            // (SQLite / OGR SQL identifier quoting rules).
-            const char *rawName = layer->GetName();
-            std::string lname(rawName ? rawName : "");
-            std::string qname;
-            qname.reserve(lname.size() + 2);
-            qname.push_back('"');
-            for (char c : lname) { if (c == '"') qname.push_back('"'); qname.push_back(c); }
-            qname.push_back('"');
-            sqlStmt = "SELECT * FROM " + qname;
-            if (maxFeatures > 0)
-                sqlStmt += " LIMIT " + std::to_string(maxFeatures);
-            sqlStmt += " OFFSET " + std::to_string(startIndex);
-            argStore.emplace_back("-sql"); argStore.emplace_back(sqlStmt);
+        // keep the layer-restricted invocation with -limit.
+        if (query.startIndex > 0) {
+            const char *fidColumn = layer->GetFIDColumn();
+            const std::string where =
+                attributeFilter(query, fidColumn != nullptr && *fidColumn != '\0' ? quoteIdentifier(fidColumn) : "rowid");
+            std::string sql = "SELECT * FROM " + quoteIdentifier(layerName);
+            if (!where.empty())
+                sql += " WHERE " + where;
+            sql += " LIMIT " + std::to_string(query.maxFeatures > 0 ? query.maxFeatures : -1);
+            sql += " OFFSET " + std::to_string(query.startIndex);
+            argStore.emplace_back("-sql"); argStore.emplace_back(sql);
             argStore.emplace_back("-dialect"); argStore.emplace_back("SQLITE");
+            // The result layer keeps the layer's name (and the ids their prefix)
+            argStore.emplace_back("-nln"); argStore.emplace_back(layerName);
         } else {
-            if (maxFeatures > 0) {
+            const std::string where = attributeFilter(query, "FID");
+            if (!where.empty()) {
+                argStore.emplace_back("-where"); argStore.emplace_back(where);
+            }
+            if (query.maxFeatures > 0) {
                 argStore.emplace_back("-limit");
-                argStore.emplace_back(std::to_string(maxFeatures));
+                argStore.emplace_back(std::to_string(query.maxFeatures));
             }
             // Restrict to a single layer (the one we want).
-            argStore.emplace_back(layer->GetName());
+            argStore.emplace_back(layerName);
         }
 
-        std::vector<char *> argv;
-        argv.reserve(argStore.size() + 1);
-        for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
-        argv.push_back(nullptr);
-
-        GDALVectorTranslateOptions *opts =
-            GDALVectorTranslateOptionsNew(argv.data(), nullptr);
-        if (!opts) {
-            GDALClose(hSrc);
+        CPLStringList argv = cslFromStrings(argStore);
+        const GdalOptionsPtr<GDALVectorTranslateOptions> opts(
+            GDALVectorTranslateOptionsNew(argv.List(), nullptr));
+        if (!opts)
             throw GDALException("Cannot build GDALVectorTranslate options");
-        }
 
-        // Re-open as ReservedHandle list (GDALDataset*[])
-        GDALDatasetH srcArr[1] = {hSrc};
+        GDALDatasetH srcArr[1] = {layer.dataset()};
         int usageErr = 0;
-        GDALDatasetH hOut = GDALVectorTranslate(vsiPath.c_str(), nullptr,
-                                                1, srcArr, opts, &usageErr);
-        GDALVectorTranslateOptionsFree(opts);
-        GDALClose(hSrc);
-
-        if (!hOut || usageErr) {
-            if (hOut) GDALClose(hOut);
-            VSIUnlink(vsiPath.c_str());
+        auto written = adoptDataset(GDALVectorTranslate(out.c_str(), nullptr, 1, srcArr, opts.get(), &usageErr));
+        if (!written || usageErr)
             throw GDALException("Vector translate failed for " + vectorPath);
-        }
-        GDALClose(hOut);
+        // Closed before its bytes are taken: closing writes them
+        closeOutputOrThrow(std::move(written), "the result of the query of " + vectorPath);
 
         vsi_l_offset size = 0;
-        GByte *buf = VSIGetMemFileBuffer(vsiPath.c_str(), &size, TRUE);
+        const auto buf = stealMemFileBuffer(out.path(), size);
         if (!buf) {
             throw GDALException("Empty vector query result");
         }
-        std::string result(reinterpret_cast<char *>(buf),
-                           static_cast<size_t>(size));
-        VSIFree(buf);
+        return std::string(reinterpret_cast<char *>(buf.get()), static_cast<size_t>(size));
+    }
 
-        return result;
+    int64_t countVectorFeatures(const std::string &vectorPath, const VectorQuery &query)
+    {
+        if (vectorPath.empty())
+            throw InvalidArgsException("countVectorFeatures: vectorPath empty");
+
+        LayerScope layer(vectorPath, query.layerName);
+        if (const auto rect = layerFilterRect(layer.get(), query))
+            layer->SetSpatialFilterRect(rect->MinX, rect->MinY, rect->MaxX, rect->MaxY);
+        const std::string where = attributeFilter(query, "FID");
+        if (!where.empty() && layer->SetAttributeFilter(where.c_str()) != OGRERR_NONE)
+            throw GDALException("Cannot filter " + vectorPath + " with " + where);
+
+        // GeoPackage counts with its R-tree and primary key, without reading features.
+        // A filter that SQLite rejects only shows as an error raised by the count.
+        CPLErrorReset();
+        const auto count = static_cast<int64_t>(layer->GetFeatureCount(TRUE));
+        if (count < 0 || CPLGetLastErrorType() == CE_Failure)
+            throw GDALException("Cannot count the features of " + vectorPath +
+                                (where.empty() ? std::string() : " with " + where) + ": " + CPLGetLastErrorMsg());
+        return count;
     }
 
     // ---------------------------------------------------------------------
@@ -299,12 +354,8 @@ namespace ddb
         if (vectorPath.empty())
             throw InvalidArgsException("describeVector: vectorPath empty");
 
-        auto *hSrc = static_cast<GDALDataset *>(
-            GDALOpenEx(vectorPath.c_str(),
-                       GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                       nullptr, nullptr, nullptr));
-        if (!hSrc)
-            throw GDALException("Cannot open vector: " + vectorPath);
+        const auto dataset = RasterCache::instance().acquireVectorDataset(vectorPath);
+        auto *hSrc = GDALDataset::FromHandle(dataset->handle());
 
         json out;
         const char *drvName = hSrc->GetDriverName();
@@ -313,10 +364,8 @@ namespace ddb
         json layers = json::array();
         if (!layerName.empty()) {
             OGRLayer *l = hSrc->GetLayerByName(layerName.c_str());
-            if (!l) {
-                GDALClose(hSrc);
+            if (!l)
                 throw InvalidArgsException("Layer not found: " + layerName);
-            }
             layers.push_back(layerToJson(l, true));
         } else {
             const int n = hSrc->GetLayerCount();
@@ -327,7 +376,6 @@ namespace ddb
         }
         out["layers"] = layers;
 
-        GDALClose(hSrc);
         return out.dump();
     }
 

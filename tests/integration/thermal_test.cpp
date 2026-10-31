@@ -1,0 +1,355 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include "gtest/gtest.h"
+#include "json.h"
+#include "test.h"
+#include "testarea.h"
+#include "testfs.h"
+
+#include "thermal.h"
+#include "raster_analysis.h"
+#include "ddb.h"
+#include "sensorprofile.h"
+#include "gdal_inc.h"
+
+#include "mio.h"
+
+#include <cmath>
+#include <fstream>
+
+namespace {
+
+using namespace ddb;
+
+const std::string THERMAL_BASE_URL = testDataUrl("thermal/");
+
+// ============================================================
+// Detection Tests
+// ============================================================
+
+TEST(thermal, detectThermalFromExif) {
+    EXPECT_TRUE(isThermalImageFromExif("DJI", "MAVIC3T-T"));
+    EXPECT_TRUE(isThermalImageFromExif("DJI", "ZH20T"));
+    EXPECT_TRUE(isThermalImageFromExif("DJI", "ZH20T-S"));
+    EXPECT_TRUE(isThermalImageFromExif("DJI", "M3T"));
+    EXPECT_TRUE(isThermalImageFromExif("FLIR", "Vue Pro R"));
+    EXPECT_TRUE(isThermalImageFromExif("FLIR", "Tau2"));
+    EXPECT_TRUE(isThermalImageFromExif("FLIR Systems AB", "FLIR A310"));
+    EXPECT_TRUE(isThermalImageFromExif("Workswell", "WirisProSc"));
+
+    EXPECT_FALSE(isThermalImageFromExif("DJI", "FC220"));
+    EXPECT_FALSE(isThermalImageFromExif("Hasselblad", "L1D-20c"));
+    EXPECT_FALSE(isThermalImageFromExif("Canon", "EOS R5"));
+}
+
+// ============================================================
+// Planck Formula Tests
+// ============================================================
+
+TEST(thermal, planckFormula) {
+    ThermalCalibration cal;
+    cal.planckR1 = 21106.77;
+    cal.planckB = 1501.0;
+    cal.planckF = 1.0;
+    cal.planckO = -7340.0;
+    cal.planckR2 = 0.012545258;
+    cal.emissivity = 0.95;
+    cal.valid = true;
+
+    // A typical midrange raw value should give a reasonable temperature
+    uint16_t rawMid = 20000;
+    double temp = rawToTemperature(rawMid, cal);
+    // Expected: a reasonable temperature in Celsius (roughly room temp to warm)
+    EXPECT_GT(temp, -50.0);
+    EXPECT_LT(temp, 200.0);
+
+    // Higher raw values should give higher temperatures
+    uint16_t rawHigh = 30000;
+    double tempHigh = rawToTemperature(rawHigh, cal);
+    EXPECT_GT(tempHigh, temp);
+
+    // Lower raw values should give lower temperatures
+    uint16_t rawLow = 10000;
+    double tempLow = rawToTemperature(rawLow, cal);
+    EXPECT_LT(tempLow, temp);
+}
+
+// ============================================================
+// R-JPEG Detection & Parsing (requires test data download)
+// ============================================================
+
+TEST(thermal, detectThermalImageFile) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    EXPECT_TRUE(isThermalImage(thermalImg.string()));
+}
+
+TEST(thermal, extractCalibration) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    auto cal = extractThermalCalibration(thermalImg.string());
+    EXPECT_TRUE(cal.valid);
+    EXPECT_GT(cal.planckR1, 0.0);
+    EXPECT_GT(cal.planckB, 0.0);
+    EXPECT_GT(cal.emissivity, 0.0);
+    EXPECT_LE(cal.emissivity, 1.0);
+}
+
+TEST(thermal, extractRawData) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    auto raw = extractRawThermalData(thermalImg.string());
+    EXPECT_TRUE(raw.valid);
+    EXPECT_GT(raw.width, 0);
+    EXPECT_GT(raw.height, 0);
+    EXPECT_EQ(raw.data.size(), static_cast<size_t>(raw.width * raw.height));
+}
+
+TEST(thermal, rawToTempMap) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    auto raw = extractRawThermalData(thermalImg.string());
+    auto cal = extractThermalCalibration(thermalImg.string());
+
+    ASSERT_TRUE(raw.valid);
+    ASSERT_TRUE(cal.valid);
+
+    auto tempMap = rawToTemperatureMap(raw, cal);
+    EXPECT_EQ(tempMap.size(), raw.data.size());
+
+    // All temperatures should be in a plausible range
+    for (auto t : tempMap) {
+        EXPECT_GT(t, -80.0f);
+        EXPECT_LT(t, 600.0f);
+    }
+}
+
+// ============================================================
+// JSON Query Functions
+// ============================================================
+
+TEST(thermal, rasterValueInfoJson) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    std::string jsonStr = getRasterValueInfoJson(thermalImg.string());
+    auto j = json::parse(jsonStr);
+
+    EXPECT_TRUE(j.contains("calibration"));
+    EXPECT_TRUE(j.contains("valueMin"));
+    EXPECT_TRUE(j.contains("valueMax"));
+    EXPECT_TRUE(j.contains("width"));
+    EXPECT_TRUE(j.contains("height"));
+    EXPECT_TRUE(j.contains("isThermal"));
+    EXPECT_TRUE(j["isThermal"].get<bool>());
+    EXPECT_GT(j["width"].get<int>(), 0);
+    EXPECT_GT(j["height"].get<int>(), 0);
+    EXPECT_LT(j["valueMin"].get<double>(), j["valueMax"].get<double>());
+}
+
+TEST(thermal, rasterPointJson) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    std::string jsonStr = getRasterPointJson(thermalImg.string(), 100, 100);
+    auto j = json::parse(jsonStr);
+
+    EXPECT_TRUE(j.contains("value"));
+    EXPECT_TRUE(j.contains("rawValue"));
+    EXPECT_TRUE(j.contains("x"));
+    EXPECT_TRUE(j.contains("y"));
+    EXPECT_TRUE(j.contains("isThermal"));
+    EXPECT_EQ(j["x"].get<int>(), 100);
+    EXPECT_EQ(j["y"].get<int>(), 100);
+
+    double val = j["value"].get<double>();
+    EXPECT_GT(val, -80.0);
+    EXPECT_LT(val, 600.0);
+}
+
+TEST(thermal, rasterAreaStatsJson) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    std::string jsonStr = getRasterAreaStatsJson(thermalImg.string(), 50, 50, 150, 150);
+    auto j = json::parse(jsonStr);
+
+    EXPECT_TRUE(j.contains("min"));
+    EXPECT_TRUE(j.contains("max"));
+    EXPECT_TRUE(j.contains("mean"));
+    EXPECT_TRUE(j.contains("stddev"));
+    EXPECT_TRUE(j.contains("median"));
+    EXPECT_TRUE(j.contains("pixelCount"));
+    EXPECT_TRUE(j.contains("isThermal"));
+
+    EXPECT_GT(j["pixelCount"].get<int>(), 0);
+    EXPECT_LE(j["min"].get<double>(), j["max"].get<double>());
+    EXPECT_GE(j["mean"].get<double>(), j["min"].get<double>());
+    EXPECT_LE(j["mean"].get<double>(), j["max"].get<double>());
+}
+
+// ============================================================
+// C API Tests
+// ============================================================
+
+TEST(thermal, cApiGetRasterValueInfo) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    char *output = nullptr;
+    auto err = DDBGetRasterValueInfo(thermalImg.string().c_str(), &output);
+    EXPECT_EQ(err, DDBERR_NONE);
+    EXPECT_NE(output, nullptr);
+
+    auto j = json::parse(std::string(output));
+    EXPECT_TRUE(j.contains("calibration"));
+    EXPECT_TRUE(j.contains("valueMin"));
+
+    DDBFree(output);
+}
+
+TEST(thermal, cApiGetRasterPointValue) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    char *output = nullptr;
+    auto err = DDBGetRasterPointValue(thermalImg.string().c_str(), 50, 50, &output);
+    EXPECT_EQ(err, DDBERR_NONE);
+    EXPECT_NE(output, nullptr);
+
+    auto j = json::parse(std::string(output));
+    EXPECT_TRUE(j.contains("value"));
+
+    DDBFree(output);
+}
+
+TEST(thermal, cApiGetRasterAreaStats) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+
+    char *output = nullptr;
+    auto err = DDBGetRasterAreaStats(thermalImg.string().c_str(), 10, 10, 100, 100, &output);
+    EXPECT_EQ(err, DDBERR_NONE);
+    EXPECT_NE(output, nullptr);
+
+    auto j = json::parse(std::string(output));
+    EXPECT_TRUE(j.contains("min"));
+    EXPECT_GT(j["pixelCount"].get<int>(), 0);
+
+    DDBFree(output);
+}
+
+// ============================================================
+// Non-thermal file should not be detected
+// ============================================================
+
+TEST(thermal, nonThermalDetection) {
+    TestArea ta(TEST_NAME);
+    // Create a regular 3-band Byte GeoTIFF
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    ASSERT_NE(tifDrv, nullptr);
+
+    fs::path rasterPath = ta.getPath("regular_rgb.tif");
+    GDALDatasetH hDs = GDALCreate(tifDrv, rasterPath.string().c_str(), 100, 100, 3, GDT_Byte, nullptr);
+    ASSERT_NE(hDs, nullptr);
+    GDALClose(hDs);
+
+    EXPECT_FALSE(isThermalImage(rasterPath.string()));
+}
+
+// ============================================================
+// Keyword detection on GDAL metadata
+// ============================================================
+
+// A single-band Float32 GeoTIFF with no pixel data written; the band description, the unit and
+// one dataset metadata item are set only when given
+fs::path writeSingleBandTiff(const fs::path &path, const std::string &bandDescription = "",
+                             const std::string &unit = "", const std::string &noteItem = "") {
+    fs::create_directories(path.parent_path());
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    EXPECT_NE(tifDrv, nullptr);
+    GDALDatasetH hDs = GDALCreate(tifDrv, path.string().c_str(), 16, 16, 1, GDT_Float32, nullptr);
+    EXPECT_NE(hDs, nullptr);
+    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+    if (!bandDescription.empty()) GDALSetDescription(hBand, bandDescription.c_str());
+    if (!unit.empty()) GDALSetRasterUnitType(hBand, unit.c_str());
+    if (!noteItem.empty()) GDALSetMetadataItem(hDs, "NOTE", noteItem.c_str(), nullptr);
+    GDALClose(hDs);
+    return path;
+}
+
+TEST(thermal, folderNameWithShortKeywordIsNotThermal) {
+    TestArea ta(TEST_NAME);
+    // GDAL lists the path of the file in its DERIVED_SUBDATASETS domain: a folder called
+    // "subtitles_bt" must not make a plain raster thermal
+    const fs::path rasterPath = writeSingleBandTiff(ta.getPath("subtitles_bt/plain.tif"));
+
+    EXPECT_FALSE(isThermalImage(rasterPath.string()));
+}
+
+TEST(thermal, bandDescriptionLstIsThermal) {
+    TestArea ta(TEST_NAME);
+    const fs::path rasterPath = writeSingleBandTiff(ta.getPath("lst.tif"), "LST");
+
+    EXPECT_TRUE(isThermalImage(rasterPath.string()));
+}
+
+TEST(thermal, bandUnitKelvinIsThermal) {
+    TestArea ta(TEST_NAME);
+    const fs::path rasterPath = writeSingleBandTiff(ta.getPath("kelvin.tif"), "", "Kelvin");
+
+    EXPECT_TRUE(isThermalImage(rasterPath.string()));
+}
+
+TEST(thermal, wordContainingDemDoesNotRuleOutThermal) {
+    TestArea ta(TEST_NAME);
+    const fs::path rasterPath =
+        writeSingleBandTiff(ta.getPath("academic.tif"), "", "Kelvin", "academic survey");
+
+    EXPECT_TRUE(isThermalImage(rasterPath.string()));
+}
+
+TEST(thermal, demTokenRulesOutThermal) {
+    TestArea ta(TEST_NAME);
+    const fs::path rasterPath = writeSingleBandTiff(ta.getPath("dem.tif"), "", "Kelvin", "DEM of the site");
+
+    EXPECT_FALSE(isThermalImage(rasterPath.string()));
+}
+
+// ============================================================
+// Sensor Profile Detection for Thermal
+// ============================================================
+
+TEST(thermal, sensorProfilesIncludeThermal) {
+    // The sensor profiles file shipped next to the library includes thermal profiles
+    // that match when a thermal raster is provided
+    std::ifstream file(io::fromUtf8(io::toUtf8(io::getDataPath("sensor-profiles.json"))));
+    ASSERT_TRUE(file.is_open());
+
+    bool hasThermal = false;
+    for (const auto& p : json::parse(file).at("profiles").get<std::vector<SensorProfile>>()) {
+        if (p.sensorCategory == "thermal") {
+            hasThermal = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(hasThermal);
+}
+
+} // namespace

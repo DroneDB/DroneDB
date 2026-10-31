@@ -5,7 +5,6 @@
 #define VOLUME_H
 
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -22,6 +21,10 @@ namespace ddb {
  *   - "average_perimeter"
  *   - "best_fit"          (least-squares plane z = ax + by + c)
  *   - "flat"              (uses @p flatElevation)
+ *
+ * Elevations are meters above the vertical datum of the DEM: a band whose unit
+ * type is feet or US survey feet is converted to meters when it is read, so
+ * @p flatElevation and the "baseElevation" of the result are meters as well.
  *
  * Output JSON schema:
  * {
@@ -42,10 +45,10 @@ namespace ddb {
  * Throws InvalidArgsException for bad input (geometry, method name),
  * AppException for runtime GDAL/IO errors.
  */
-DDB_DLL std::string calculateVolumeJson(const std::string &rasterPath,
-                                        const std::string &polygonGeoJson,
-                                        const std::string &baseMethod,
-                                        double flatElevation);
+std::string calculateVolumeJson(const std::string &rasterPath,
+                                const std::string &polygonGeoJson,
+                                const std::string &baseMethod,
+                                double flatElevation);
 
 } // namespace ddb
 

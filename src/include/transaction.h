@@ -4,33 +4,26 @@
 #ifndef TRANSACTION_H
 #define TRANSACTION_H
 
-#include "ddb_export.h"
 #include "retrypolicy.h"
 #include "sqlite_database.h"
 
 namespace ddb {
 
 // RAII wrapper for BEGIN/COMMIT/ROLLBACK. Guarantees a matching ROLLBACK on exception, early
-// return or cancellation (I4). Replaces the hand-rolled BEGIN/COMMIT sites across dbops.cpp and
-// metamanager.cpp.
-class DDB_DLL Transaction {
+// return or cancellation.
+class Transaction {
 public:
-    enum class Mode { Deferred, Immediate, Exclusive };
-
-    // Acquires the transaction, retrying on DBBusyException per the policy.
-    explicit Transaction(SqliteDatabase *db, Mode mode = Mode::Immediate,
-                        const RetryPolicy &policy = RetryPolicy::defaultPolicy());
+    // Begins an immediate transaction (the write lock is taken at once, so a conflict shows at
+    // BEGIN and not at the first write), retrying on DBBusyException per the policy.
+    explicit Transaction(SqliteDatabase *db, const RetryPolicy &policy = RetryPolicy::defaultPolicy());
 
     // Rolls back if commit() was never called.
     ~Transaction() noexcept;
 
     Transaction(const Transaction &) = delete;
     Transaction &operator=(const Transaction &) = delete;
-    Transaction(Transaction &&other) noexcept;
-    Transaction &operator=(Transaction &&) = delete;
 
     void commit();
-    void rollback();
 
 private:
     SqliteDatabase *db_;

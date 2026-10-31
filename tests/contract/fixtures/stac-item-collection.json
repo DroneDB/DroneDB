@@ -1,0 +1,433 @@
+{
+  "call": "DDBStacItemCollection(<root>, stacCollectionRoot=\"https://hub.example/orgs/contract/ds/fixtures\", id=\"contract\", stacCatalogRoot=\"https://hub.example\", bbox=\"\", datetime=\"\", limit=10, offset=0)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "features": [
+      {
+        "assets": {
+          "cloud.las": {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/download?path=cloud.las",
+            "roles": [
+              "data"
+            ],
+            "title": "cloud.las",
+            "type": "application/vnd.las"
+          },
+          "thumbnail": {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/thumb?path=cloud.las&size=512",
+            "roles": [
+              "thumbnail"
+            ],
+            "title": "Thumbnail",
+            "type": "image/webp"
+          }
+        },
+        "bbox": [
+          9.0,
+          45.15347718336,
+          9.00015266311,
+          45.15358520346
+        ],
+        "collection": "contract",
+        "geometry": {
+          "coordinates": [
+            [
+              [
+                9,
+                45.15347718336,
+                100
+              ],
+              [
+                9.00015266311,
+                45.15347718336,
+                100
+              ],
+              [
+                9.00015266311,
+                45.15358520346,
+                100
+              ],
+              [
+                9,
+                45.15358520346,
+                100
+              ],
+              [
+                9,
+                45.15347718336,
+                100
+              ]
+            ]
+          ],
+          "type": "Polygon"
+        },
+        "id": "path-cloud-las",
+        "links": [
+          {
+            "href": "https://hub.example/stac",
+            "rel": "root",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+            "rel": "parent",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+            "rel": "collection",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac/Y2xvdWQubGFz",
+            "rel": "self",
+            "type": "application/geo+json"
+          }
+        ],
+        "properties": {
+          "datetime": "2023-11-14T22:13:20Z",
+          "dimensions": [
+            "X",
+            "Y",
+            "Z",
+            "Intensity",
+            "ReturnNumber",
+            "NumberOfReturns",
+            "ScanDirectionFlag",
+            "EdgeOfFlightLine",
+            "Classification",
+            "Synthetic",
+            "KeyPoint",
+            "Withheld",
+            "Overlap",
+            "ScanAngleRank",
+            "UserData",
+            "PointSourceId"
+          ],
+          "pointCount": 16,
+          "projection": "PROJCS[\"WGS 84 / UTM zone 32N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",9],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"32632\"]]",
+          "title": "cloud.las"
+        },
+        "stac_version": "1.1.0",
+        "type": "Feature"
+      },
+      {
+        "assets": {
+          "layer.geojson": {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/download?path=layer.geojson",
+            "roles": [
+              "data"
+            ],
+            "title": "layer.geojson",
+            "type": "application/geo+json"
+          }
+        },
+        "bbox": [
+          8.25,
+          46.84,
+          8.251,
+          46.841
+        ],
+        "collection": "contract",
+        "geometry": {
+          "coordinates": [
+            [
+              [
+                8.25,
+                46.84,
+                0
+              ],
+              [
+                8.251,
+                46.84,
+                0
+              ],
+              [
+                8.251,
+                46.841,
+                0
+              ],
+              [
+                8.25,
+                46.841,
+                0
+              ],
+              [
+                8.25,
+                46.84,
+                0
+              ]
+            ]
+          ],
+          "type": "Polygon"
+        },
+        "id": "path-layer-geojson",
+        "links": [
+          {
+            "href": "https://hub.example/stac",
+            "rel": "root",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+            "rel": "parent",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+            "rel": "collection",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac/bGF5ZXIuZ2VvanNvbg==",
+            "rel": "self",
+            "type": "application/geo+json"
+          }
+        ],
+        "properties": {
+          "datetime": "2023-11-14T22:13:20Z",
+          "title": "layer.geojson",
+          "vector": {
+            "driver": "GeoJSON",
+            "layers": [
+              {
+                "extent": [
+                  8.25,
+                  46.84,
+                  8.251,
+                  46.841
+                ],
+                "featureCount": 2,
+                "geometryType": "Unknown (any)",
+                "name": "layer"
+              }
+            ]
+          }
+        },
+        "stac_version": "1.1.0",
+        "type": "Feature"
+      },
+      {
+        "assets": {
+          "ortho.tif": {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/download?path=ortho.tif",
+            "roles": [
+              "data"
+            ],
+            "title": "ortho.tif",
+            "type": "image/tiff"
+          },
+          "thumbnail": {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/thumb?path=ortho.tif&size=512",
+            "roles": [
+              "thumbnail"
+            ],
+            "title": "Thumbnail",
+            "type": "image/webp"
+          }
+        },
+        "bbox": [
+          9.0,
+          45.15347718317,
+          9.000203550941,
+          45.1536212103
+        ],
+        "collection": "contract",
+        "geometry": {
+          "coordinates": [
+            [
+              [
+                9,
+                45.1536212103,
+                0
+              ],
+              [
+                9.000203550941,
+                45.15362121012,
+                0
+              ],
+              [
+                9.000203550429,
+                45.15347718317,
+                0
+              ],
+              [
+                9,
+                45.15347718336,
+                0
+              ],
+              [
+                9,
+                45.1536212103,
+                0
+              ]
+            ]
+          ],
+          "type": "Polygon"
+        },
+        "id": "path-ortho-tif",
+        "links": [
+          {
+            "href": "https://hub.example/stac",
+            "rel": "root",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+            "rel": "parent",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+            "rel": "collection",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac/b3J0aG8udGlm",
+            "rel": "self",
+            "type": "application/geo+json"
+          }
+        ],
+        "properties": {
+          "bands": [
+            {
+              "colorInterp": "Red",
+              "type": "Byte"
+            },
+            {
+              "colorInterp": "Green",
+              "type": "Byte"
+            },
+            {
+              "colorInterp": "Blue",
+              "type": "Byte"
+            }
+          ],
+          "datetime": "2023-11-14T22:13:20Z",
+          "proj:code": "EPSG:32632",
+          "proj:shape": [
+            32,
+            32
+          ],
+          "proj:transform": [
+            500000.0,
+            0.5,
+            0.0,
+            5000016.0,
+            0.0,
+            -0.5
+          ],
+          "proj:wkt2": "PROJCS[\"WGS 84 / UTM zone 32N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",9],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"32632\"]]",
+          "title": "ortho.tif"
+        },
+        "stac_extensions": [
+          "https://stac-extensions.github.io/projection/v2.0.0/schema.json"
+        ],
+        "stac_version": "1.1.0",
+        "type": "Feature"
+      },
+      {
+        "assets": {
+          "sub/img.jpg": {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/download?path=sub%2Fimg.jpg",
+            "roles": [
+              "data"
+            ],
+            "title": "sub/img.jpg",
+            "type": "image/jpeg"
+          },
+          "thumbnail": {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/thumb?path=sub%2Fimg.jpg&size=512",
+            "roles": [
+              "thumbnail"
+            ],
+            "title": "Thumbnail",
+            "type": "image/webp"
+          }
+        },
+        "bbox": [
+          8.25,
+          46.841667,
+          8.25,
+          46.841667
+        ],
+        "collection": "contract",
+        "geometry": {
+          "coordinates": [
+            8.25,
+            46.841667,
+            120
+          ],
+          "type": "Point"
+        },
+        "id": "path-sub-img-jpg",
+        "links": [
+          {
+            "href": "https://hub.example/stac",
+            "rel": "root",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+            "rel": "parent",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+            "rel": "collection",
+            "type": "application/json"
+          },
+          {
+            "href": "https://hub.example/orgs/contract/ds/fixtures/stac/c3ViL2ltZy5qcGc=",
+            "rel": "self",
+            "type": "application/geo+json"
+          }
+        ],
+        "properties": {
+          "cameraPitch": -90.0,
+          "cameraRoll": 0.0,
+          "cameraYaw": 0.0,
+          "captureTime": 1714972089000.0,
+          "datetime": "2024-05-06T05:08:09Z",
+          "hasCameraOrientation": false,
+          "height": 24,
+          "make": "Contract",
+          "model": "Camera",
+          "orientation": 1,
+          "sensor": "contract camera",
+          "title": "sub/img.jpg",
+          "width": 32
+        },
+        "stac_version": "1.1.0",
+        "type": "Feature"
+      }
+    ],
+    "links": [
+      {
+        "href": "https://hub.example/stac",
+        "rel": "root",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac/items",
+        "rel": "self",
+        "type": "application/geo+json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+        "rel": "collection",
+        "type": "application/json"
+      }
+    ],
+    "numberMatched": 4,
+    "numberReturned": 4,
+    "type": "FeatureCollection"
+  },
+  "schema": "stac-item-collection.schema.json"
+}

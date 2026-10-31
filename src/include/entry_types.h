@@ -7,12 +7,14 @@
 #include <string>
 #include <map>
 #include <vector>
-#include "ddb_export.h"
 
 namespace ddb
 {
 
-    enum EntryType
+    // The kind of an indexed entry. The numeric values are stored in the index (entries.type) and
+    // returned to hosts as integers (the C API, Registry): they never change, and a new type takes
+    // the next number.
+    enum class EntryType : int
     {
         Undefined = 0,
         Directory = 1,
@@ -33,9 +35,12 @@ namespace ddb
         Tiles3D = 16
     };
 
-    DDB_DLL std::string typeToHuman(EntryType t);
-    DDB_DLL EntryType typeFromHuman(const std::string &s);
-    DDB_DLL std::vector<std::string> getEntryTypeNames();
+    // The number of a type, as stored in the index and returned to hosts
+    constexpr int entryTypeValue(EntryType t) noexcept { return static_cast<int>(t); }
+
+    std::string typeToHuman(EntryType t);
+    EntryType typeFromHuman(const std::string &s);
+    std::vector<std::string> getEntryTypeNames();
 
 }
 

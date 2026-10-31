@@ -1,0 +1,60 @@
+{
+  "call": "DDBStacData(<root>, entry=\"sub/img.jpg\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "assets": {
+      "sub/img.jpg": {
+        "roles": [
+          "data"
+        ],
+        "title": "sub/img.jpg",
+        "type": "image/jpeg"
+      },
+      "thumbnail": {
+        "roles": [
+          "thumbnail"
+        ],
+        "title": "Thumbnail",
+        "type": "image/webp"
+      }
+    },
+    "bbox": [
+      8.25,
+      46.841667,
+      8.25,
+      46.841667
+    ],
+    "geometry": {
+      "coordinates": [
+        8.25,
+        46.841667,
+        120
+      ],
+      "type": "Point"
+    },
+    "properties": {
+      "cameraPitch": -90.0,
+      "cameraRoll": 0.0,
+      "cameraYaw": 0.0,
+      "captureTime": 1714972089000.0,
+      "datetime": "2024-05-06T05:08:09Z",
+      "hasCameraOrientation": false,
+      "height": 24,
+      "make": "Contract",
+      "model": "Camera",
+      "orientation": 1,
+      "sensor": "contract camera",
+      "title": "sub/img.jpg",
+      "width": 32
+    },
+    "stac_version": "1.1.0",
+    "type": "Feature"
+  },
+  "schema": "stac-data-item.schema.json"
+}

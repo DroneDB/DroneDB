@@ -1,0 +1,86 @@
+{
+  "call": "DDBStac(<root>, entry=\"sub/img.jpg\", stacCollectionRoot=\"https://hub.example/orgs/contract/ds/fixtures\", id=\"contract\", stacCatalogRoot=\"https://hub.example\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "assets": {
+      "sub/img.jpg": {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/download?path=sub%2Fimg.jpg",
+        "roles": [
+          "data"
+        ],
+        "title": "sub/img.jpg",
+        "type": "image/jpeg"
+      },
+      "thumbnail": {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/thumb?path=sub%2Fimg.jpg&size=512",
+        "roles": [
+          "thumbnail"
+        ],
+        "title": "Thumbnail",
+        "type": "image/webp"
+      }
+    },
+    "bbox": [
+      8.25,
+      46.841667,
+      8.25,
+      46.841667
+    ],
+    "collection": "contract",
+    "geometry": {
+      "coordinates": [
+        8.25,
+        46.841667,
+        120
+      ],
+      "type": "Point"
+    },
+    "id": "path-sub-img-jpg",
+    "links": [
+      {
+        "href": "https://hub.example/stac",
+        "rel": "root",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+        "rel": "parent",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+        "rel": "collection",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac/c3ViL2ltZy5qcGc=",
+        "rel": "self",
+        "type": "application/geo+json"
+      }
+    ],
+    "properties": {
+      "cameraPitch": -90.0,
+      "cameraRoll": 0.0,
+      "cameraYaw": 0.0,
+      "captureTime": 1714972089000.0,
+      "datetime": "2024-05-06T05:08:09Z",
+      "hasCameraOrientation": false,
+      "height": 24,
+      "make": "Contract",
+      "model": "Camera",
+      "orientation": 1,
+      "sensor": "contract camera",
+      "title": "sub/img.jpg",
+      "width": 32
+    },
+    "stac_version": "1.1.0",
+    "type": "Feature"
+  },
+  "schema": "stac-item.schema.json"
+}

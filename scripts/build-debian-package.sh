@@ -19,12 +19,10 @@ run_with_privilege() {
 # Set necessary environment variables
 echo "Setting up environment variables..."
 if [ -z "$DDB_VERSION" ]; then
-  # If not in a tag, use the git describe output
-  DDB_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
-  if [ -z "$DDB_VERSION" ]; then
-    # Fallback to package.json version if no tag is available
-    DDB_VERSION=$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)
-  fi
+  # Not a release tag: package.json (the version source, as for libddb itself) plus the commit,
+  # as a Debian pre-release ("2.0.0~git19ab8e1" sorts before "2.0.0"). The last tag would name
+  # the package after the previous release.
+  DDB_VERSION="$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)~git$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 fi
 
 # Set VCPKG triplet (can be overridden by environment variable)
@@ -60,7 +58,7 @@ Homepage: https://github.com/DroneDB/DroneDB
 
 Package: ddb
 Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}, libgl1, libx11-6, libxcb1, libxcb-glx0, libx11-xcb1, libegl1, libxcb-icccm4, libxcb-image0, libxcb-shm0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-render0, libxcb-shape0, libxcb-sync1, libxcb-xfixes0, libxcb-xinerama0, libxcb-xkb1, libxcb-xinput0, libxkbcommon-x11-0, libxkbcommon0
+Depends: \${shlibs:Depends}, \${misc:Depends}
 Description: Effortless aerial data management and sharing
  DroneDB is a toolset for effortlessly managing and sharing aerial datasets.
  It can extract metadata from aerial images such as GPS location, altitude,
@@ -132,6 +130,39 @@ ddb (${DDB_VERSION}) unstable; urgency=medium
  -- DroneDB Team <support@dronedb.app>  $(date -R)
 EOF
 
+# The helper tools libddb starts as child processes: scripts/helper-tools.txt is the one list of them
+# (the CMake build, the Windows package and the package checks read it too). The rules file below
+# installs each of them.
+HELPER_TOOLS="$(python3 scripts/check-helper-tools.py --names | tr '\n' ' ')"
+if [ -z "${HELPER_TOOLS// /}" ]; then
+  echo "ERROR: scripts/helper-tools.txt lists no helper tool"
+  exit 1
+fi
+
+# Licence texts of the helper tools, collected in debian/helper-licences for
+# the rules file; scripts/helper-licences.txt lists them, the Windows package reads the same list
+echo "Collecting the helper licence texts..."
+rm -rf debian/helper-licences
+mkdir -p debian/helper-licences
+while read -r licence_name _ licence_source; do
+  case "$licence_name" in ''|'#'*) continue ;; esac
+  # The source path may hold a '*' for the vcpkg triplet folder: expand it unquoted
+  # shellcheck disable=SC2086
+  set -- $licence_source
+  if [ ! -f "$1" ]; then
+    echo "ERROR: licence text $licence_source for $licence_name not found (submodules checked out? build finished?)"
+    exit 1
+  fi
+  cp "$1" "debian/helper-licences/$licence_name"
+done < scripts/helper-licences.txt
+
+# Licence notices of the vcpkg libraries linked into the binaries (GDAL, PROJ, GEOS, Exiv2, the image
+# codecs, zlib ...), for /usr/share/doc/ddb/third-party; the Windows package runs the same collector
+echo "Collecting the vcpkg licence notices..."
+rm -rf debian/third-party
+python3 scripts/collect-vcpkg-notices.py --installed build/vcpkg_installed --triplet "$VCPKG_HOST_TRIPLET" \
+  --output debian/third-party
+
 # Create rules file that skips the build step
 echo "Creating rules file..."
 cat > debian/rules << EOF
@@ -165,6 +196,12 @@ override_dh_strip:
 override_dh_dwz:
 	dh_dwz -XObj2Tiles -Xlibktx.so
 
+# The license texts of the bundled tools and the notices in third-party/ ship as they are:
+# dh_compress would gzip those over 4 KB (dwg2dxf's GPL text, the index of third-party/),
+# and the package checks (and readers) look for them by name.
+override_dh_compress:
+	dh_compress -X.LICENSE -Xthird-party/
+
 override_dh_auto_install:
 	# Create directory structure for installed files
 	mkdir -p debian/ddb/usr/bin
@@ -175,7 +212,24 @@ override_dh_auto_install:
 	# Copy binary and libs from build directory directly
 	cp \$(CURDIR)/build/ddbcmd debian/ddb/usr/bin/ddb
 	cp \$(CURDIR)/build/libddb.so debian/ddb/usr/lib/
-	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
+
+	# Required: the helper tools libddb starts as child processes (scripts/helper-tools.txt: image
+	# metadata with Exiv2, bm3d multiresolution models). They are GPL, which is why they are
+	# separate executables and not part of libddb. Installed in /usr/bin so the runtime discovery
+	# (exe folder, then PATH, which is how Registry finds them) needs no configuration. The package
+	# is broken without them: image indexing and bm3d builds stop.
+	for tool in $HELPER_TOOLS; do \\
+		test -f \$(CURDIR)/build/\$\$tool || { echo "ERROR: build/\$\$tool not found (built by the \$\$tool target)"; exit 1; }; \\
+		cp \$(CURDIR)/build/\$\$tool debian/ddb/usr/bin/\$\$tool; \\
+		chmod +x debian/ddb/usr/bin/\$\$tool; \\
+	done
+
+	# Their licence texts and those of the code inside them, next to the other notices
+	cp \$(CURDIR)/debian/helper-licences/* debian/ddb/usr/share/doc/ddb/
+
+	# The notices of every vcpkg library in the binaries (scripts/collect-vcpkg-notices.py)
+	@test -f \$(CURDIR)/debian/third-party/index.txt || { echo "ERROR: debian/third-party (vcpkg licence notices) is missing"; exit 1; }
+	cp -r \$(CURDIR)/debian/third-party debian/ddb/usr/share/doc/ddb/third-party
 
 	# Optional: copy untwine COPC accelerator if it was built (vendor/untwine).
 	# Installed alongside ddb so that runtime discovery
@@ -201,13 +255,15 @@ override_dh_auto_install:
 	# (scripts/download-obj2tiles.sh). Installed alongside ddb so that runtime
 	# discovery (obj2tiles_runner.cpp::findObj2TilesBinary -> getExeFolder())
 	# finds it without any extra configuration. OGC 3D Tiles generation for
-	# MODEL entries is skipped (Nexus still produced) when the binary is missing.
+	# MODEL entries is skipped (bm3d still produced) when the binary is missing.
 	if [ -f \$(CURDIR)/build/Obj2Tiles ]; then \\
 		cp \$(CURDIR)/build/Obj2Tiles debian/ddb/usr/bin/Obj2Tiles; \\
 		chmod +x debian/ddb/usr/bin/Obj2Tiles; \\
-		if [ -f \$(CURDIR)/build/Obj2Tiles.LICENSE.md ]; then \\
-			cp \$(CURDIR)/build/Obj2Tiles.LICENSE.md debian/ddb/usr/share/doc/ddb/Obj2Tiles.LICENSE.md; \\
-		fi \\
+		for doc in LICENSE THIRD_PARTY_NOTICES; do \\
+			if [ -f \$(CURDIR)/build/Obj2Tiles.\$\$doc.md ]; then \\
+				cp \$(CURDIR)/build/Obj2Tiles.\$\$doc.md debian/ddb/usr/share/doc/ddb/Obj2Tiles.\$\$doc.md; \\
+			fi; \\
+		done \\
 	fi
 
 	# Optional: copy the bundled libktx native library (Apache-2.0) used by
@@ -219,17 +275,29 @@ override_dh_auto_install:
 		cp \$(CURDIR)/build/libktx.so debian/ddb/usr/bin/libktx.so; \\
 	fi
 
+	# Optional: copy the LibreDWG dwg2dxf converter if it was built
+	# (scripts/build-libredwg.sh). Installed alongside ddb so that runtime
+	# discovery (cad.cpp::findDwg2DxfBinary -> exe folder, then PATH, which is how
+	# Registry finds it) needs no configuration. GPL-3.0-or-later, invoked only as
+	# a subprocess; its license text ships next to the other notices. Without it,
+	# DWG builds fail with an actionable message; every other format is unaffected.
+	if [ -f \$(CURDIR)/build/dwg2dxf ]; then \\
+		cp \$(CURDIR)/build/dwg2dxf debian/ddb/usr/bin/dwg2dxf; \\
+		chmod +x debian/ddb/usr/bin/dwg2dxf; \\
+		if [ -f \$(CURDIR)/build/dwg2dxf.LICENSE.txt ]; then \\
+			cp \$(CURDIR)/build/dwg2dxf.LICENSE.txt debian/ddb/usr/share/doc/ddb/dwg2dxf.LICENSE.txt; \\
+		fi \\
+	fi
+
 	# Copy PDAL libraries from vcpkg installed directory
 	# Use wildcard to detect the actual SOVERSION (e.g., .so.19, .so.20, etc.)
 	# so the script survives future PDAL ABI bumps without manual updates
 	\$(eval PDAL_CPP_SO := \$(firstword \$(wildcard \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.[0-9]*)))
 	@test -n "\$(PDAL_CPP_SO)" || { echo "ERROR: libpdalcpp.so.* not found in vcpkg_installed"; exit 1; }
 	cp \$(PDAL_CPP_SO) debian/ddb/usr/lib/
-	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libdbus-1.so.3 debian/ddb/usr/lib/
 
 	# Create necessary symbolic links for libraries
 	ln -sf \$(notdir \$(PDAL_CPP_SO)) debian/ddb/usr/lib/libpdalcpp.so
-	ln -sf libdbus-1.so.3 debian/ddb/usr/lib/libdbus-1.so
 
 	# Copy PDAL plugins if needed (wildcard SOVERSION to survive PDAL ABI bumps)
 	mkdir -p debian/ddb/usr/lib/pdal/plugins
@@ -252,6 +320,13 @@ override_dh_auto_install:
 	cp \$(CURDIR)/build/timezone21.bin debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/sensor_data.sqlite debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/curl-ca-bundle.crt debian/ddb/usr/share/ddb/
+
+	# GDAL's data files (tile matrix sets, CSV tables): libddb sets GDAL_DATA to this folder at
+	# start-up (process_init.cpp setupGdalData, through getDataPath), so hosts that never source
+	# /etc/profile.d/ddb.sh (Registry under dotnet, services) find them as well. The build step
+	# stages them without the CMake files of vcpkg's share/gdal (cmake/StageGdalData.cmake).
+	@test -f \$(CURDIR)/build/gdal/gdalvrt.xsd || { echo "ERROR: build/gdal (GDAL data) is missing"; exit 1; }
+	cp -r \$(CURDIR)/build/gdal debian/ddb/usr/share/ddb/gdal
 
 	# Copy license / attribution files (redistribution compliance)
 	mkdir -p debian/ddb/usr/share/doc/ddb
@@ -302,6 +377,29 @@ if [ -f build/Obj2Tiles ]; then
     echo "  $f is byte-identical to the upstream binary."
   done
   rm -rf "$VERIFY_DIR"
+fi
+
+# dwg2dxf (DWG support): when it was built, the package must carry it, its
+# license, and the pinned version (it is our own build, so dh_strip may touch it).
+if [ -f build/dwg2dxf ]; then
+  echo "Verifying packaged dwg2dxf..."
+  DWG_CHECK_DIR=$(mktemp -d)
+  dpkg-deb -x build/package/ddb_*.deb "$DWG_CHECK_DIR"
+  for f in usr/bin/dwg2dxf usr/share/doc/ddb/dwg2dxf.LICENSE.txt; do
+    if [ ! -f "$DWG_CHECK_DIR/$f" ]; then
+      echo "ERROR: /$f is missing from the package"
+      rm -rf "$DWG_CHECK_DIR"
+      exit 1
+    fi
+  done
+  EXPECTED_LIBREDWG="$(tr -d '[:space:]' < scripts/libredwg-version)"
+  if ! "$DWG_CHECK_DIR/usr/bin/dwg2dxf" --version 2>&1 | grep -q "dwg2dxf ${EXPECTED_LIBREDWG}"; then
+    echo "ERROR: packaged dwg2dxf does not report version ${EXPECTED_LIBREDWG}"
+    rm -rf "$DWG_CHECK_DIR"
+    exit 1
+  fi
+  rm -rf "$DWG_CHECK_DIR"
+  echo "  dwg2dxf ${EXPECTED_LIBREDWG} packaged with its license."
 fi
 
 # Regression guard: PDAL >= 19 loads plugins by unversioned soname from the

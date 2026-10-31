@@ -19,9 +19,8 @@ namespace cmd
         // clang-format off
         opts
             .positional_help("[args]")
-            .custom_help("cleanup [-w working-dir]")
-            .add_options()
-            ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
+            .custom_help("cleanup [-w working-dir]");
+        cmd::addWorkingDirOption(opts);
         // clang-format on
     }
 
@@ -30,44 +29,38 @@ namespace cmd
         return "Remove DB entries whose files no longer exist and orphaned build artifacts.";
     }
 
-    void Cleanup::run(cxxopts::ParseResult &opts)
+    int Cleanup::run(cxxopts::ParseResult &opts)
     {
-        try
+        const auto ddbPath = opts["working-dir"].as<std::string>();
+
+        const auto db = ddb::open(ddbPath, true);
+        const auto result = ddb::cleanupBuild(db.get(), "");
+
+        if (result.removedEntries.empty() && result.removedBuilds.empty())
         {
-            const auto ddbPath = opts["working-dir"].as<std::string>();
-
-            const auto db = ddb::open(ddbPath, true);
-            const auto result = ddb::cleanupBuild(db.get(), "");
-
-            if (result.removedEntries.empty() && result.removedBuilds.empty())
-            {
-                std::cout << "Nothing to clean up." << std::endl;
-                return;
-            }
-
-            if (!result.removedEntries.empty())
-            {
-                std::cout << "Removed stale DB entries:" << std::endl;
-                for (const auto &p : result.removedEntries)
-                    std::cout << "  - " << p << std::endl;
-            }
-
-            if (!result.removedBuilds.empty())
-            {
-                std::cout << "Removed orphan build artifacts:" << std::endl;
-                for (const auto &p : result.removedBuilds)
-                    std::cout << "  - " << p << std::endl;
-            }
-
-            std::cout << result.removedEntries.size() << " stale entry/entries, "
-                      << result.removedBuilds.size() << " orphan build artifact(s) removed."
-                      << std::endl;
+            std::cout << "Nothing to clean up." << std::endl;
+            return EXIT_SUCCESS;
         }
-        catch (ddb::InvalidArgsException &e)
+
+        if (!result.removedEntries.empty())
         {
-            std::cerr << "Error: " << e.what() << std::endl;
-            printHelp();
+            std::cout << "Removed stale DB entries:" << std::endl;
+            for (const auto &p : result.removedEntries)
+                std::cout << "  - " << p << std::endl;
         }
+
+        if (!result.removedBuilds.empty())
+        {
+            std::cout << "Removed orphan build artifacts:" << std::endl;
+            for (const auto &p : result.removedBuilds)
+                std::cout << "  - " << p << std::endl;
+        }
+
+        std::cout << result.removedEntries.size() << " stale entry/entries, "
+                  << result.removedBuilds.size() << " orphan build artifact(s) removed."
+                  << std::endl;
+
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

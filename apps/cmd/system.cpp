@@ -33,7 +33,7 @@ namespace cmd
                "\tclean\tCleanup user cache files\r\n";
     }
 
-    void System::run(cxxopts::ParseResult &opts)
+    int System::run(cxxopts::ParseResult &opts)
     {
         auto cmd = opts["command"].as<std::string>();
         if (cmd == "clean")
@@ -43,8 +43,9 @@ namespace cmd
         }
         else
         {
-            printHelp();
+            usageError();
         }
+        return EXIT_SUCCESS;
     }
 
 }

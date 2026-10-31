@@ -1,0 +1,12 @@
+{
+  "call": "DDBGetPendingBuildInfo(<root>) (nothing pending)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": [],
+  "schema": "pending-build-info.schema.json"
+}

@@ -40,8 +40,9 @@ namespace ddb
         std::error_code code_;
     };
 
-    // Only these classified failures can preserve an existing pending build.
-    // This is internal to native builds; the C API still reports a failed job.
+    // Only these classified failures can preserve an existing pending build. The C API reports
+    // the reason (DDBGetLastErrorReason, c_api_util.h): with DDBERR_EXCEPTION from the 1.x
+    // exports (DDBBuild), with DDBERR_RETRYABLE from the ones new in 2.0.
     enum class RetryableBuildReason { LowDiskSpace, NoSpaceOnDevice, IdleTimeout };
     class RetryableBuildException : public AppException
     {
@@ -68,6 +69,35 @@ namespace ddb
     {
         using AppException::AppException;
     };
+    // An invalid argument that every C export returns as DDBERR_INVALIDARGS, also the exports
+    // of 1.x (whose other invalid arguments stay DDBERR_EXCEPTION): the caller asked for
+    // something that cannot exist, and the same call can never succeed
+    class RefusedArgumentException : public InvalidArgsException
+    {
+        using InvalidArgsException::InvalidArgsException;
+    };
+    // A dataset path the rules of entry_path.h refuse (outside the dataset, the reserved .ddb
+    // folder, ...)
+    class InvalidPathException : public RefusedArgumentException
+    {
+        using RefusedArgumentException::RefusedArgumentException;
+    };
+    // A raster query asked for a place that has no value: a pixel or an area outside the
+    // raster, an area whose pixels are all no data
+    class NoRasterDataException : public RefusedArgumentException
+    {
+        using RefusedArgumentException::RefusedArgumentException;
+    };
+    // The detection of a stockpile found none where the caller asked for one
+    class NoStockpileException : public RefusedArgumentException
+    {
+        using RefusedArgumentException::RefusedArgumentException;
+    };
+    // The requested entry is not in the index. The exports added in 2.0 return it as
+    // DDBERR_NOTFOUND; the older ones keep returning DDBERR_EXCEPTION.
+    class EntryNotFoundException : public AppException {
+        using AppException::AppException;
+    };
     class GDALException : public AppException
     {
         using AppException::AppException;
@@ -84,11 +114,20 @@ namespace ddb
     {
         using AppException::AppException;
     };
-    class NetException : public AppException
+    // A helper program (a process libddb talks to over a pipe: metadata-util, the raster helper)
+    // cannot be used: it is missing, does not start or speaks another protocol version. Not a
+    // problem of the file being indexed, so it is not an item error of ddb add (addErrorCode):
+    // the batch stops. Each helper has its own subclass.
+    class HelperUnavailableException : public AppException
     {
         using AppException::AppException;
     };
-    class URLException : public AppException
+    // The program that reads image metadata (metadata-util) cannot be used
+    class MetadataHelperException : public HelperUnavailableException
+    {
+        using HelperUnavailableException::HelperUnavailableException;
+    };
+    class NetException : public AppException
     {
         using AppException::AppException;
     };
@@ -105,10 +144,6 @@ namespace ddb
         using AppException::AppException;
     };
     class RegistryNotFoundException : public RegistryException
-    {
-        using RegistryException::RegistryException;
-    };
-    class NoStampException : public RegistryException
     {
         using RegistryException::RegistryException;
     };
@@ -130,16 +165,38 @@ namespace ddb
         BuildDepMissingException(const std::string &message, const std::vector<std::string> &missingDeps) :
             AppException(message), missingDependencies(missingDeps) {}
 
+        // otherPaths: further absolute paths (UTF-8) the builder looked in, any of which would
+        // satisfy one of the missing dependencies (an OBJ texture is also looked for in the OBJ's
+        // folder)
+        BuildDepMissingException(const std::string &message, const std::vector<std::string> &missingDeps,
+                                 const std::vector<std::string> &otherPaths) :
+            AppException(message), missingDependencies(missingDeps), lookupPaths(otherPaths) {}
+
+        // Names relative to the folder of the source file
         const std::vector<std::string>& getMissingDependencies() const {
             return missingDependencies;
         }
 
+        // Where else the builder looked, besides each name resolved against the folder of the
+        // source file; usually empty
+        const std::vector<std::string>& getLookupPaths() const {
+            return lookupPaths;
+        }
+
     private:
         std::vector<std::string> missingDependencies;
+        std::vector<std::string> lookupPaths;
     };
-    class NotImplementedException : public AppException
+    // A progress callback asked to stop: the C API returns DDBERR_CANCELED from the exports
+    // listed as cancellable in DDBGetCapabilities()
+    class CanceledException : public AppException
     {
         using AppException::AppException;
+    };
+    // The work stopped because the library is shutting down (DDBShutdown): DDBERR_SHUTDOWN
+    class ShutdownException : public CanceledException
+    {
+        using CanceledException::CanceledException;
     };
 
     // Build lock specific exceptions

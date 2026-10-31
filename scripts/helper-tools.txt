@@ -1,0 +1,21 @@
+# The helper programs libddb starts as child processes, one per line:
+#
+#   <program> | <version source>
+#
+# <program> is the CMake target and the executable name (".exe" on Windows). <version source> is
+# what the program must report with --version: "package" for the version of the package, or the
+# path (relative to the repository root) of a file whose first line is the version.
+#
+# This is the only list of them. CMake reads it into DDB_HELPER_TOOLS (vendor/CMakeLists.txt) and
+# stops, in the top-level CMakeLists.txt, on a name that is not a target; the targets that start
+# the programs depend on them, the Debian and Windows packaging scripts install them, the package
+# check (scripts/check-helper-tools.py) runs them, and the CI workflow checks they were built. Add
+# a helper here and in its subdirectory of vendor/ or apps/, and every one of those picks it up.
+#
+# Programs that a build only uses when they are present (Obj2Tiles, untwine, dwg2dxf) are not helpers
+# in this sense and are not listed. build-lod is needed by every Gaussian Splat build, but it is a
+# Rust program built by scripts/build-buildlod.{sh,ps1}, not a vendor/ target, so it is not listed
+# either.
+metadata-util | package
+bm3d | vendor/bm3d/VERSION
+gdal-util | package

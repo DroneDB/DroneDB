@@ -1,0 +1,37 @@
+{
+  "call": "DDBBuild(<root>, \"ortho.tif\"), then DDBGetBuildStatus(<root>, [\"ortho.tif\", \"layer.geojson\", \"a.txt\", \"missing.tif\"])",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": [
+    {
+      "buildable": true,
+      "complete": true,
+      "exists": true,
+      "path": "ortho.tif"
+    },
+    {
+      "buildable": true,
+      "complete": false,
+      "exists": true,
+      "path": "layer.geojson"
+    },
+    {
+      "buildable": false,
+      "complete": false,
+      "exists": true,
+      "path": "a.txt"
+    },
+    {
+      "buildable": false,
+      "complete": false,
+      "exists": false,
+      "path": "missing.tif"
+    }
+  ],
+  "schema": "build-status.schema.json"
+}

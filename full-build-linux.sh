@@ -72,7 +72,7 @@ cmake --build . -- -j"$CPU_CORES"
 # Optional: download the OpenDroneMap Obj2Tiles binary (OGC 3D Tiles generator).
 # Delegated to scripts/download-obj2tiles.sh so the same logic is shared with
 # CI workflows and packaging. Failures NEVER abort the main build; DroneDB skips
-# 3D Tiles generation (Nexus still produced) when Obj2Tiles is missing.
+# 3D Tiles generation (bm3d still produced) when Obj2Tiles is missing.
 # ----------------------------------------------------------------------
 (
     cd ..
@@ -82,5 +82,19 @@ cmake --build . -- -j"$CPU_CORES"
     elif [ -f "./scripts/download-obj2tiles.sh" ]; then
         bash ./scripts/download-obj2tiles.sh build || \
             echo "WARNING: scripts/download-obj2tiles.sh failed (non-blocking, 3D Tiles generation disabled)"
+    fi
+)
+
+# ----------------------------------------------------------------------
+# Optional: build the LibreDWG dwg2dxf converter (DWG support) from the signed
+# GNU release. Delegated to scripts/build-libredwg.sh (shared with CI and
+# packaging). Failures NEVER abort the main build; DWG builds then fail with an
+# actionable message while every other format is unaffected.
+# ----------------------------------------------------------------------
+(
+    cd ..
+    if [ -f "./scripts/build-libredwg.sh" ]; then
+        bash ./scripts/build-libredwg.sh build || \
+            echo "WARNING: scripts/build-libredwg.sh failed (non-blocking, DWG support disabled)"
     fi
 )

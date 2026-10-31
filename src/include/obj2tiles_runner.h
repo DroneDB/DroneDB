@@ -6,8 +6,8 @@
 
 #include <optional>
 #include <string>
-#include "ddb_export.h"
 #include "fs.h"
+#include "process_runner.h"
 
 namespace ddb
 {
@@ -38,16 +38,14 @@ namespace ddb
             int ktx2Quality = 128;         // --ktx2-quality (since v1.6.0; 1-255, only emitted when textureFormat == "Ktx2")
             int ktx2Threads = 0;           // --ktx2-threads (since v1.8.0; 0 = single-threaded encoder, only emitted when textureFormat == "Ktx2" and no core cap applies)
             std::string splitStrategy;     // --split-strategy (since v1.4.0; "VertexMedian"/"VertexBaricenter"/"AbsoluteCenter", empty = Obj2Tiles default)
+            std::optional<int> maxCores;   // the cores the child may use at most (the cap of a build, build_budget.h): lowers DDB_OBJ2TILES_MAX_CORES, an inherited DOTNET_PROCESSOR_COUNT or the host cores, never raises them, and is no cap at all when it does not lower them; not an Obj2Tiles flag
         };
 
-        // Locates the Obj2Tiles executable using the following discovery order:
-        //   1. DDB_OBJ2TILES_PATH env var (authoritative when non-empty)
-        //   2. Folder of the current executable (bundled next to ddbcmd/ddbtest)
-        //   3. <exe_folder>/../bin (cmake --install layout)
-        //   4. Directories on the system PATH
+        // Locates the Obj2Tiles executable with tools::findTool (see tool_locator.h for the
+        // search order); DDB_OBJ2TILES_PATH, when non-empty, is authoritative.
         // Returns an empty path if no usable binary is found. The result is cached
         // for the lifetime of the process; pass forceRefresh=true to bypass the cache.
-        DDB_DLL fs::path findObj2TilesBinary(bool forceRefresh = false);
+        fs::path findObj2TilesBinary(bool forceRefresh = false);
 
         /**
          * @brief Convert a single OBJ to an OGC 3D Tiles tileset with Obj2Tiles.
@@ -65,21 +63,28 @@ namespace ddb
          * concurrency. Empty/unset inherits the environment; invalid values are
          * logged and ignored. libktx encoder threads are native and ignore
          * DOTNET_PROCESSOR_COUNT, so opts.ktx2Threads is dropped whenever a core
-         * cap applies (DDB_OBJ2TILES_MAX_CORES or an inherited DOTNET_PROCESSOR_COUNT).
+         * cap applies (DDB_OBJ2TILES_MAX_CORES, opts.maxCores or an inherited
+         * DOTNET_PROCESSOR_COUNT). opts.maxCores, the cap of a build, sets DOTNET_PROCESSOR_COUNT
+         * like the variable does when it is below the cores the child gets without it (the
+         * variable, else an inherited DOTNET_PROCESSOR_COUNT, else the host cores); otherwise it
+         * limits nothing and the run is that of no cap (opts.ktx2Threads kept).
          *
          * @param inputObj Source OBJ file.
          * @param outDir Absent or empty destination for tileset.json and LOD-* tiles.
          * @param opts Options forwarded to the tool.
          * @param errorOut Actionable failure diagnostic; cleared on entry.
          * @param binary Explicit executable, or empty to use findObj2TilesBinary().
+         * @param runner Starts the child (process::systemProcessRunner() by default; a test
+         *        passes a fake).
          * @return true when the child exits successfully and produces tileset.json;
          *         false on invalid destination, missing tool/input or tool failure.
          */
-        DDB_DLL bool runObj2Tiles(const fs::path &inputObj,
-                                  const fs::path &outDir,
-                                  const Obj2TilesOptions &opts,
-                                  std::string &errorOut,
-                                  const fs::path &binary = fs::path());
+        bool runObj2Tiles(const fs::path &inputObj,
+                          const fs::path &outDir,
+                          const Obj2TilesOptions &opts,
+                          std::string &errorOut,
+                          const fs::path &binary = fs::path(),
+                          const process::IProcessRunner &runner = process::systemProcessRunner());
 
     } // namespace obj2tiles
 

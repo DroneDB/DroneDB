@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb meta removal count",
+  "description": "DDBMetaUnset, DDBMetaRemove",
+  "type": "object",
+  "required": [
+    "removed"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "removed": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

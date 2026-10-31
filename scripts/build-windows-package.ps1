@@ -96,11 +96,28 @@ New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 Write-Host "  ✓ Staging directory: $stagingDir" -ForegroundColor Green
 Write-Host "  ✓ Output directory: $OutputDir" -ForegroundColor Green
 
+# Python reads the helper tool list and collects the vcpkg licence notices
+$python = Get-Command python, python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $python) {
+    Write-Error "Python is needed to read scripts/helper-tools.txt and to collect the vcpkg licence notices (scripts/collect-vcpkg-notices.py)"
+    exit 1
+}
+
+# The helper executables libddb starts as child processes (scripts/helper-tools.txt: image metadata
+# with Exiv2, bm3d builds), as file names
+$helperTools = @(& $python.Source (Join-Path $PSScriptRoot "check-helper-tools.py") --names)
+if ($LASTEXITCODE -ne 0 -or $helperTools.Count -eq 0) {
+    Write-Error "Reading scripts/helper-tools.txt failed ($LASTEXITCODE)"
+    exit 1
+}
+$helperExecutables = @($helperTools | ForEach-Object { "$_.exe" })
+
 # Define required files for verification
+# The DLLs the helpers load are not listed: the zip check that runs the helpers proves they are there
 $requiredFiles = @(
     "ddbcmd.exe",
-    "ddb.dll",
-    "nxs.dll",
+    "ddb.dll"
+) + $helperExecutables + @(
     "proj.db",
     "timezone21.bin",
     "sensor_data.sqlite",
@@ -133,6 +150,14 @@ Write-Host "Copying executable..." -ForegroundColor Cyan
 $exePath = Join-Path $BuildDir "ddbcmd.exe"
 Copy-Item $exePath $stagingDir -Force
 Write-Host "  ✓ ddbcmd.exe" -ForegroundColor Green
+
+# The helper executables sit next to ddbcmd.exe, where libddb looks for them first; Registry puts
+# this folder on PATH. Their DLLs (exiv2.dll and the libraries it loads) are copied with
+# all the others below.
+foreach ($helper in $helperExecutables) {
+    Copy-Item (Join-Path $BuildDir $helper) $stagingDir -Force
+    Write-Host "  ✓ $helper" -ForegroundColor Green
+}
 
 # Copy all DLL files
 Write-Host ""
@@ -184,13 +209,16 @@ if (Test-Path $untwinePath) {
     Write-Host "  - untwine.exe (not found, skipping - DroneDB will fall back to PDAL writers.copc)" -ForegroundColor Yellow
 }
 
-# Copy build-lod.exe if present (mandatory for Gaussian Splat builds, vendor/spark)
+# Copy build-lod.exe (mandatory for Gaussian Splat builds, vendor/spark; the workflow fails a
+# release build whose zip does not have it)
+Write-Host ""
+Write-Host "Copying build-lod..." -ForegroundColor Cyan
 $buildLodPath = Join-Path $BuildDir "build-lod.exe"
 if (Test-Path $buildLodPath) {
     Copy-Item $buildLodPath $stagingDir -Force
     Write-Host "  ✓ build-lod.exe (Gaussian Splat LOD producer)" -ForegroundColor Green
 } else {
-    Write-Host "  - build-lod.exe (not found, skipping - Gaussian Splat builds deferred until it is available)" -ForegroundColor Yellow
+    Write-Host "  - build-lod.exe (not found, skipping - Gaussian Splat builds fail without it)" -ForegroundColor Yellow
 }
 
 # Copy Obj2Tiles.exe if present (optional - enables OGC 3D Tiles generation from OBJ models)
@@ -203,6 +231,11 @@ if (Test-Path $obj2tilesPath) {
         Copy-Item $obj2tilesLicense $stagingDir -Force
         Write-Host "  ✓ Obj2Tiles.LICENSE.md (AGPL-3.0 license)" -ForegroundColor Green
     }
+    $obj2tilesNotices = Join-Path $BuildDir "Obj2Tiles.THIRD_PARTY_NOTICES.md"
+    if (Test-Path $obj2tilesNotices) {
+        Copy-Item $obj2tilesNotices $stagingDir -Force
+        Write-Host "  ✓ Obj2Tiles.THIRD_PARTY_NOTICES.md (licences of the libraries it bundles)" -ForegroundColor Green
+    }
     # Bundled libktx native library (Apache-2.0), used by Obj2Tiles for KTX2 texture
     # compression (--texture-format Ktx2). Without it, --texture-format Ktx2 requests fail.
     $ktxPath = Join-Path $BuildDir "ktx.dll"
@@ -211,7 +244,23 @@ if (Test-Path $obj2tilesPath) {
         Write-Host "  ✓ ktx.dll (libktx, KTX2 texture compression)" -ForegroundColor Green
     }
 } else {
-    Write-Host "  - Obj2Tiles.exe (not found, skipping - 3D Tiles generation disabled, Nexus still produced)" -ForegroundColor Yellow
+    Write-Host "  - Obj2Tiles.exe (not found, skipping - 3D Tiles generation disabled, bm3d still produced)" -ForegroundColor Yellow
+}
+
+# Copy dwg2dxf.exe if present (optional - enables DWG drawings; LibreDWG, GPL-3.0,
+# invoked only as a subprocess). Built by scripts/build-libredwg.sh (CI cross-compiles
+# it) or scripts/build-libredwg.ps1; found next to ddbcmd.exe, or on PATH in Registry.
+$dwg2dxfPath = Join-Path $BuildDir "dwg2dxf.exe"
+if (Test-Path $dwg2dxfPath) {
+    Copy-Item $dwg2dxfPath $stagingDir -Force
+    Write-Host "  ✓ dwg2dxf.exe (LibreDWG DWG converter)" -ForegroundColor Green
+    $dwg2dxfLicense = Join-Path $BuildDir "dwg2dxf.LICENSE.txt"
+    if (Test-Path $dwg2dxfLicense) {
+        Copy-Item $dwg2dxfLicense $stagingDir -Force
+        Write-Host "  ✓ dwg2dxf.LICENSE.txt (GPL-3.0 license)" -ForegroundColor Green
+    }
+} else {
+    Write-Host "  - dwg2dxf.exe (not found, skipping - DWG builds fail with an actionable message)" -ForegroundColor Yellow
 }
 
 # Copy license files (always included for redistribution compliance)
@@ -223,10 +272,39 @@ foreach ($lic in $licenseFiles) {
     }
 }
 
-# Copy directories (zoneinfo, plugins)
+# Licence texts of the helper executables and of the code inside them: the list is shared with the
+# Debian package. "<name> | <path>" per line; a '*' in the path matches the vcpkg triplet folder.
+Write-Host ""
+Write-Host "Copying helper licence texts..." -ForegroundColor Cyan
+$repoRoot = Split-Path $PSScriptRoot -Parent
+foreach ($line in Get-Content (Join-Path $PSScriptRoot "helper-licences.txt")) {
+    if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith("#")) { continue }
+    $name, $source = $line -split '\s*\|\s*', 2
+    $match = Get-Item -Path (Join-Path $repoRoot $source.Trim()) -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $match) {
+        Write-Error "Licence text '$source' for $name not found (submodules checked out? build finished?)"
+        exit 1
+    }
+    Copy-Item $match.FullName (Join-Path $stagingDir $name) -Force
+    Write-Host "  ✓ $name" -ForegroundColor Green
+}
+
+# Licence notices of the vcpkg libraries in the binaries and DLLs (GDAL, PROJ, GEOS, Exiv2, the image
+# codecs, zlib ...), in third-party/; the Debian package runs the same collector
+Write-Host ""
+Write-Host "Collecting the vcpkg licence notices..." -ForegroundColor Cyan
+& $python.Source (Join-Path $PSScriptRoot "collect-vcpkg-notices.py") --installed (Join-Path $BuildDir "vcpkg_installed") --output (Join-Path $stagingDir "third-party")
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Collecting the vcpkg licence notices failed ($LASTEXITCODE)"
+    exit 1
+}
+
+# Copy directories (zoneinfo, gdal)
 Write-Host ""
 Write-Host "Copying directories..." -ForegroundColor Cyan
-$directories = @("zoneinfo", "plugins")
+# gdal: GDAL's data files, found next to the library (process_init.cpp setupGdalData); the build
+# stages them (cmake/StageGdalData.cmake)
+$directories = @("zoneinfo", "gdal")
 $copiedDirs = 0
 foreach ($dir in $directories) {
     $sourcePath = Join-Path $BuildDir $dir
@@ -239,6 +317,11 @@ foreach ($dir in $directories) {
     else {
         Write-Host "  - $dir/ (not found, skipping)" -ForegroundColor Yellow
     }
+}
+
+if (-not (Test-Path (Join-Path $stagingDir "gdal\gdalvrt.xsd"))) {
+    Write-Error "The GDAL data folder (gdal) is missing from the build: rasters would warn about missing GDAL data files."
+    exit 1
 }
 
 # Count total files staged
