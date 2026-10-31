@@ -144,7 +144,7 @@ struct Inputs {
     TestArea area;
     fs::path raster;   // 3 bands, EPSG:3857, 512x512 at (1000, 1000), 1 m pixels
     fs::path raster5;  // the same with 5 bands (spectral indexes)
-    fs::path dem;  // 1 band Float32, EPSG:4326, a conical mound, 80x80 at (10, 45), 0.0001 degrees
+    fs::path dem;  // 1 band Float32, EPSG:4326, a conical mound on flat ground, 80x80 at (10, 45), 0.0001 degrees
     fs::path source;   // where the files of the deltas wait
     fs::path dataset;  // holds ortho.tif, an ODM project in odm/ and the built splat scene.spz
     explicit Inputs(const std::string& name) : area(name, true) {
@@ -162,7 +162,7 @@ struct Inputs {
         mound.originY = 45.0;
         mound.pixelSize = 0.0001;
         mound.value = [](int, int x, int y) {
-            return std::max(0.0, 40.0 - std::hypot(x - 40.0, y - 40.0));
+            return std::max(0.0, 20.0 - std::hypot(x - 40.0, y - 40.0));
         };
         dem = testutils::createGeoRaster(area.getPath("mound.tif"), mound);
         source = area.getFolder("source");
@@ -290,7 +290,7 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
         {"DDBDetectStockpile",
          [=] {
              return withString([&](char** text) {
-                 return DDBDetectStockpile(dem.c_str(), 44.996, 10.004, 100.0, 0.5f, text);
+                 return DDBDetectStockpile(dem.c_str(), 44.996, 10.004, 400.0, 0.5f, text);
              });
          }},
         {"DDBExportRaster",
@@ -705,7 +705,7 @@ TEST_F(CancelToken, rasterAnalysesStopWhenCanceledInTheMiddle) {
         {"DDBDetectStockpile",
          "detectStockpile path=",
          [&](char** out) {
-             return DDBDetectStockpile(dem.c_str(), 44.996, 10.004, 100.0, 0.5f, out);
+             return DDBDetectStockpile(dem.c_str(), 44.996, 10.004, 400.0, 0.5f, out);
          }},
         {"DDBDetectAllStockpiles",
          "detectAllStockpiles path=",

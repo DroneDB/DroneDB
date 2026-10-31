@@ -7,6 +7,7 @@
 #include "dem.h"
 #include "stringutil.h"
 #include "mathutil.h"
+#include "plane_fit.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "json.h"
@@ -59,45 +60,6 @@ const char *methodName(BaseMethod m) {
         case BaseMethod::FlatPlane:        return "flat";
     }
     return "lowest_perimeter";
-}
-
-// Ax + By + C defines a plane in raster map coordinates.
-struct Plane {
-    double a = 0.0, b = 0.0, c = 0.0;
-    double at(double x, double y) const { return a * x + b * y + c; }
-};
-
-// The sums of the normal equations of a least-squares plane z = ax + by + c over n points
-struct PlaneSums {
-    double xx = 0, xy = 0, x = 0, yy = 0, y = 0, xz = 0, yz = 0, z = 0;
-    double n = 0;
-};
-
-// Solve the normal equations for a least-squares plane z = ax + by + c
-// using a 3x3 Gaussian elimination. Good enough for the tiny matrices we
-// build here (and avoids pulling Eigen into DroneDB for one call).
-bool solvePlane(const PlaneSums &s, Plane &out) {
-    double m[3][4] = {
-        {s.xx, s.xy, s.x, s.xz},
-        {s.xy, s.yy, s.y, s.yz},
-        {s.x,  s.y,  s.n, s.z}
-    };
-    for (int i = 0; i < 3; i++) {
-        int piv = i;
-        for (int k = i + 1; k < 3; k++)
-            if (std::fabs(m[k][i]) > std::fabs(m[piv][i])) piv = k;
-        if (std::fabs(m[piv][i]) < 1e-12) return false;
-        if (piv != i) std::swap(m[i], m[piv]);
-        for (int k = i + 1; k < 3; k++) {
-            const double f = m[k][i] / m[i][i];
-            for (int j = i; j < 4; j++) m[k][j] -= f * m[i][j];
-        }
-    }
-    const double c = m[2][3] / m[2][2];
-    const double b = (m[1][3] - m[1][2] * c) / m[1][1];
-    const double a = (m[0][3] - m[0][1] * b - m[0][2] * c) / m[0][0];
-    out.a = a; out.b = b; out.c = c;
-    return true;
 }
 
 std::string nowIso8601() { return utcIso8601(currentUnixTimestamp()); }
@@ -209,16 +171,12 @@ std::vector<uint8_t> rasterizeMask(const DemContext &dem, const Window &w, OGRGe
 // The valid elevations on the edge of the mask, with their map coordinates. A pixel is on the
 // perimeter if it is inside the mask but has at least one 4-neighbour outside (or is at the
 // window edge).
-struct Perimeter {
-    std::vector<double> mx, my, z;
-};
-
-Perimeter collectPerimeter(const DemContext &dem, const Window &w, const std::vector<uint8_t> &mask,
-                           const std::vector<float> &elev) {
-    Perimeter p;
-    p.mx.reserve(static_cast<size_t>(w.width) * 2 + w.height * 2);
-    p.my.reserve(p.mx.capacity());
-    p.z.reserve(p.mx.capacity());
+PlanePoints collectPerimeter(const DemContext &dem, const Window &w, const std::vector<uint8_t> &mask,
+                             const std::vector<float> &elev) {
+    PlanePoints p;
+    p.x.reserve(static_cast<size_t>(w.width) * 2 + w.height * 2);
+    p.y.reserve(p.x.capacity());
+    p.z.reserve(p.x.capacity());
 
     for (int r = 0; r < w.height; r++) {
         cancel::throwIfCanceled();
@@ -234,48 +192,13 @@ Perimeter collectPerimeter(const DemContext &dem, const Window &w, const std::ve
             if (!dem.isValid(z)) continue;
             double mx, my;
             w.cellCenter(dem.gt, r, c, mx, my);
-            p.mx.push_back(mx);
-            p.my.push_back(my);
-            p.z.push_back(z);
+            p.add(mx, my, z);
         }
     }
     return p;
 }
 
-// The least-squares plane through the perimeter, in map coordinates. A degenerate perimeter
-// (collinear points) gives the mean elevation.
-Plane bestFitPlane(const Perimeter &perim) {
-    Plane basePlane;
-    // Normalize around centroid to improve conditioning.
-    double cx = 0, cy = 0;
-    for (size_t i = 0; i < perim.z.size(); i++) { cx += perim.mx[i]; cy += perim.my[i]; }
-    cx /= perim.z.size(); cy /= perim.z.size();
-
-    PlaneSums sums;
-    sums.n = static_cast<double>(perim.z.size());
-    for (size_t i = 0; i < perim.z.size(); i++) {
-        const double x = perim.mx[i] - cx;
-        const double y = perim.my[i] - cy;
-        const double z = perim.z[i];
-        sums.xx += x * x; sums.xy += x * y; sums.x += x;
-        sums.yy += y * y; sums.y += y;
-        sums.xz += x * z; sums.yz += y * z; sums.z += z;
-    }
-    Plane local{};
-    if (!solvePlane(sums, local)) {
-        // Degenerate (collinear points): fall back to the mean.
-        basePlane.c = sums.z / sums.n;
-    } else {
-        // Rewrite plane in world coordinates: z = a(X-cx) + b(Y-cy) + c
-        //                                     = aX + bY + (c - a*cx - b*cy)
-        basePlane.a = local.a;
-        basePlane.b = local.b;
-        basePlane.c = local.c - local.a * cx - local.b * cy;
-    }
-    return basePlane;
-}
-
-Plane computeBasePlane(BaseMethod method, double flatElevation, const Perimeter &perim) {
+Plane computeBasePlane(BaseMethod method, double flatElevation, const PlanePoints &perim) {
     Plane basePlane;
     if (method == BaseMethod::FlatPlane) {
         basePlane.c = flatElevation;

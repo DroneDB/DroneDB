@@ -1496,12 +1496,15 @@ extern "C"
                                       char **output);
 
     /** Auto-detect a stockpile footprint from a click on the raster.
+     * The pile is what rises above a plane fitted to the ground around it, so a
+     * pile on a slope is measured above the slope (estimatedVolume uses that base).
      * Elevations (baseElevation) are meters above the vertical datum of the
      * DEM, volumes m^3 and areas m^2, whatever the units of the raster.
      * @param rasterPath Path to single-band elevation raster
      * @param lat Click latitude (WGS84)
      * @param lon Click longitude (WGS84)
-     * @param radius Search radius in meters (>0)
+     * @param radius Search radius in meters (>0): the pile and a ring of ground
+     *               around it must fit in it
      * @param sensitivity Detail level in [0, 1]
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, DDBERR_INVALIDARGS when there is nothing to detect (the
