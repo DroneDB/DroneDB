@@ -23,7 +23,7 @@ TARGET_DIR="${1:-build}"
 
 # Resolve default version: env var > scripts/obj2tiles-version > fallback
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_DEFAULT_VERSION="$(cat "${_SCRIPT_DIR}/obj2tiles-version" 2>/dev/null | tr -d '[:space:]' || echo 'v1.8.1')"
+_DEFAULT_VERSION="$(cat "${_SCRIPT_DIR}/obj2tiles-version" 2>/dev/null | tr -d '[:space:]' || echo 'v1.9.0')"
 VERSION="${2:-${OBJ2TILES_VERSION:-${_DEFAULT_VERSION}}}"
 
 BIN="Obj2Tiles"
@@ -72,7 +72,12 @@ case "${OS}" in
             aarch64|arm64)  ASSET="LinuxArm64" ;;
             *) echo "  Unsupported Linux architecture '${ARCH}', skipping (soft)."; exit 0 ;;
         esac ;;
-    Darwin)             ASSET="Osx64" ;;
+    Darwin)
+        # Native Apple Silicon builds are published since v1.9.0.
+        case "${ARCH}" in
+            arm64|aarch64)  ASSET="OsxArm64" ;;
+            *)              ASSET="Osx64" ;;
+        esac ;;
     *) echo "  Unsupported OS '${OS}', skipping (soft)."; exit 0 ;;
 esac
 
