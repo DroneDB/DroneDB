@@ -75,8 +75,11 @@ Upstream-Contact: DroneDB Team <support@dronedb.app>
 Source: https://github.com/DroneDB/DroneDB
 
 Files: *
-Copyright: $(date +%Y) DroneDB Team
-License: ISC License
+Copyright: 2019-$(date +%Y) Digipa S.R.L. and the DroneDB contributors
+License: MPL-2.0
+ The full text of the Mozilla Public License 2.0 is in /usr/share/doc/ddb/copyright.md.
+ The bundled programs and libraries keep their own licences: see the other
+ files in /usr/share/doc/ddb.
 EOF
 
 # Create postinst script for environment setup
