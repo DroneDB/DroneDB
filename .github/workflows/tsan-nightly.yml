@@ -45,7 +45,6 @@ jobs:
           max-size: 500M
       - name: Install Linux dependencies
         run: |
-          chmod +x ./scripts/install-dependencies.sh
           ./scripts/install-dependencies.sh
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11

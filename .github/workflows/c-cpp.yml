@@ -53,6 +53,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # The workflows run the shell scripts directly, and some only on a release tag (the
+      # Exiv2 source collection): a script committed without its executable bit would fail
+      # there first, after the tag is pushed.
+      - name: Shell scripts are executable in git
+        run: |
+          bad=$(git ls-files -s 'scripts/*.sh' | awk '$1 != "100755" {print $4}')
+          if [ -n "$bad" ]; then
+            echo "::error::not executable in git (fix with git update-index --chmod=+x): $bad"
+            exit 1
+          fi
       # Report-only until .clang-format matches the code base: the current file would flag
       # most changes (209 hunks in the last 30 commits). Open: tune it, then drop
       # --report-only so formatting of changed lines fails the job.
@@ -150,7 +160,6 @@ jobs:
           max-size: 500M
       - name: Install Linux dependencies
         run: |
-          chmod +x ./scripts/install-dependencies.sh
           ./scripts/install-dependencies.sh
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -217,7 +226,6 @@ jobs:
         # but MUST succeed on release tags so the .deb ships with untwine.
         continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
-          chmod +x ./scripts/build-untwine.sh
           ./scripts/build-untwine.sh build Release
       - name: Install Rust toolchain
         # Required to build the build-lod Gaussian Splat LOD producer (vendor/spark).
@@ -232,14 +240,12 @@ jobs:
         # build-lod is a MANDATORY dependency of Gaussian Splat builds:
         # the DDB_REQUIRE_BUILDLOD env makes missing tooling fail the gsplat tests.
         run: |
-          chmod +x ./scripts/build-buildlod.sh
           ./scripts/build-buildlod.sh build Release
       - name: Download Obj2Tiles (OGC 3D Tiles generator)
         # Optional on PR/master pushes (3D Tiles generation disabled, bm3d still
         # produced), but MUST succeed on release tags so the .deb ships with Obj2Tiles.
         continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
-          chmod +x ./scripts/download-obj2tiles.sh
           ./scripts/download-obj2tiles.sh build
       - name: Get dwg2dxf (DWG converter)
         # Optional on PR/master pushes (DWG builds fail with an actionable message),
@@ -350,7 +356,6 @@ jobs:
           done
 
           # Execute the build script
-          chmod +x scripts/build-debian-package.sh
           ./scripts/build-debian-package.sh
 
           # Test linting of Debian package
@@ -647,7 +652,6 @@ jobs:
           max-size: 500M
       - name: Install Linux dependencies
         run: |
-          chmod +x ./scripts/install-dependencies.sh
           ./scripts/install-dependencies.sh
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
