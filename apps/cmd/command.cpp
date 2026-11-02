@@ -2,15 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "include/command.h"
-#include "logger.h"
+
+#include <cstdlib>
+
 #include "exceptions.h"
+#include "json.h"
+#include "logger.h"
+#include "stringutil.h"
 
 namespace cmd
 {
-
-    Command::Command()
-    {
-    }
 
     cxxopts::Options Command::genOptions(const char *programName)
     {
@@ -24,55 +25,43 @@ namespace cmd
         return opts;
     }
 
-    void Command::run(int argc, char *argv[])
+    int Command::run(int argc, char *argv[])
     {
-        cxxopts::Options opts = genOptions(argv[0]);
+        cxxopts::Options opts = genOptions();
+        auto result = opts.parse(argc, argv);
 
-        try
+        if (result.count("help"))
         {
-            auto result = opts.parse(argc, argv);
-
-            if (result.count("help"))
-            {
-                printHelp();
-            }
-
-            if (result.count("debug"))
-            {
-                set_logger_verbose();
-            }
-
-            run(result);
+            printHelp();
+            return EXIT_SUCCESS;
         }
-        catch (const cxxopts::exceptions::exception &e)
+
+        if (result.count("debug"))
         {
-            std::cerr << "error: " << e.what() << std::endl
-                      << std::endl;
-            printHelp(std::cerr, false);
-            exit(EXIT_FAILURE);
+            ddb::logging::setVerbose();
         }
-        catch (const ddb::AppException &e)
-        {
-            std::cerr << e.what() << std::endl;
-            exit(EXIT_FAILURE);
-        }
+
+        return run(result);
     }
 
-    void Command::printHelp(std::ostream &out, bool exitAfterPrint)
+    void Command::printHelp(std::ostream &out)
     {
         out << genOptions().help({""});
-        if (exitAfterPrint)
-            exit(0);
     }
 
-    void Command::output(std::ostream &out, const json &j, const std::string &format)
+    void Command::usageError(const std::string &message)
     {
-        if (format == "json")
+        throw UsageError(message);
+    }
+
+    void Command::output(std::ostream &out, const json &j, ddb::OutputFormat format)
+    {
+        ddb::requireOutputFormat(format, {ddb::OutputFormat::Text, ddb::OutputFormat::Json});
+
+        if (format == ddb::OutputFormat::Json)
             out << j << std::endl;
-        else if (format == "text")
-            printJsonToText(out, j);
         else
-            throw ddb::InvalidArgsException("Invalid format " + format);
+            printJsonToText(out, j);
     }
 
     void Command::printJsonToText(std::ostream &out, const json &j)
@@ -87,7 +76,7 @@ namespace cmd
                 {
                     std::string k = item.key();
                     if (k.length() > 0)
-                        k[0] = std::toupper(k[0]);
+                        k[0] = ddb::str::toUpperChar(k[0]);
                     std::string v = item.value().dump();
                     if (item.value().is_string())
                         v = item.value().get<std::string>();
@@ -104,7 +93,7 @@ namespace cmd
             {
                 std::string k = item.key();
                 if (k.length() > 0)
-                    k[0] = std::toupper(k[0]);
+                    k[0] = ddb::str::toUpperChar(k[0]);
                 std::string v = item.value().dump();
                 if (item.value().is_string())
                     v = item.value().get<std::string>();

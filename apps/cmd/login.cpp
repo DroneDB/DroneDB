@@ -3,9 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "include/login.h"
-#include "registry.h"
+#include "registry_client.h"
 #include "constants.h"
-#include "utils.h"
+#include "include/terminal.h"
 
 namespace cmd
 {
@@ -19,8 +19,8 @@ namespace cmd
     .add_options()
     ("server", "Registry server to authenticate to", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY))
     ("u,username", "Username", cxxopts::value<std::string>())
-    ("p,password", "Password", cxxopts::value<std::string>())
-    ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
+    ("p,password", "Password", cxxopts::value<std::string>());
+    cmd::addInsecureOption(opts);
         // clang-format on
         opts.parse_positional({"server"});
     }
@@ -30,7 +30,7 @@ namespace cmd
         return "Authenticate with a registry.";
     }
 
-    void Login::run(cxxopts::ParseResult &opts)
+    int Login::run(cxxopts::ParseResult &opts)
     {
         std::string username;
         std::string password;
@@ -41,7 +41,7 @@ namespace cmd
         }
         else
         {
-            username = ddb::utils::getPrompt("Username: ");
+            username = terminal::getPrompt("Username: ");
         }
 
         if (opts["password"].count() > 0)
@@ -50,17 +50,18 @@ namespace cmd
         }
         else
         {
-            password = ddb::utils::getPass("Password: ");
+            password = terminal::getPass("Password: ");
         }
 
         auto sslVerify = opts["insecure"].count() == 0;
 
-        ddb::Registry reg(opts["server"].as<std::string>(), sslVerify);
+        ddb::RegistryClient reg(opts["server"].as<std::string>(), sslVerify);
         std::string token = reg.login(username, password);
         if (token.length() > 0)
         {
             std::cout << "Login succeeded for " << reg.getUrl() << std::endl;
         }
+        return EXIT_SUCCESS;
     }
 
 }

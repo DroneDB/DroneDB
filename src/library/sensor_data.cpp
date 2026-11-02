@@ -28,7 +28,7 @@ namespace ddb
             if (dbPath.empty())
                 throw DBException("Cannot find sensor database sensor_data.sqlite");
 
-            db->open(dbPath.string());
+            db->open(io::toUtf8(dbPath));
         }
     }
 
@@ -76,12 +76,6 @@ namespace ddb
             cacheMiss[sensor] = true;
             throw DBException("Cannot get focal value for " + sensor + ", no entry found");
         }
-    }
-
-    void SensorData::clearCache()
-    {
-        cacheHits.clear();
-        cacheMiss.clear();
     }
 
 }

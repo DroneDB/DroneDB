@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb STAC item",
+  "description": "DDBStac with an entry; also the features of DDBStacItemCollection. stac_version and stac_extensions are snake_case (STAC).",
+  "type": "object",
+  "required": [
+    "type",
+    "stac_version",
+    "id",
+    "collection",
+    "geometry",
+    "bbox",
+    "properties",
+    "links",
+    "assets"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "Feature"
+    },
+    "stac_version": {
+      "type": "string"
+    },
+    "stac_extensions": {
+      "$ref": "#/$defs/stacExtensions"
+    },
+    "id": {
+      "type": "string"
+    },
+    "collection": {
+      "type": "string"
+    },
+    "geometry": {
+      "$ref": "#/$defs/geometry"
+    },
+    "bbox": {
+      "$ref": "#/$defs/bbox"
+    },
+    "properties": {
+      "$ref": "#/$defs/properties"
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/link"
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/asset"
+      }
+    }
+  },
+  "$defs": {
+    "stacExtensions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "Point",
+            "Polygon"
+          ]
+        },
+        "coordinates": {
+          "type": "array"
+        }
+      }
+    },
+    "bbox": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 4,
+      "maxItems": 6
+    },
+    "properties": {
+      "type": "object",
+      "required": [
+        "datetime"
+      ],
+      "properties": {
+        "datetime": {
+          "type": "string",
+          "description": "RFC 3339 UTC: the capture time, else the file mtime"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": [
+        "href",
+        "rel",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "rel": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "required": [
+        "href",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+ "dem": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Gray",
+    "maskFlags": 8,
+    "nodata": -9999.0,
+    "overviews": 0,
+    "type": "Float32"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 512,
+  "mode": "translation",
+  "pixelsFile": "align_dem",
+  "shiftZ": -5.0,
+  "srs": "WGS 84 / Pseudo-Mercator",
+  "structure": {
+   "COMPRESSION": "LZW",
+   "INTERLEAVE": "BAND",
+   "LAYOUT": "COG",
+   "PREDICTOR": "3"
+  },
+  "success": true,
+  "width": 512
+ },
+ "ortho": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Red",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Green",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Blue",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 512,
+  "mode": "translation",
+  "pixels": "d70fb61277080573",
+  "shiftZ": 0.0,
+  "srs": "WGS 84 / Pseudo-Mercator",
+  "structure": {
+   "COMPRESSION": "YCbCr JPEG",
+   "INTERLEAVE": "PIXEL",
+   "JPEGTABLESMODE": "1",
+   "JPEG_QUALITY": "75",
+   "LAYOUT": "COG",
+   "SOURCE_COLOR_SPACE": "YCbCr"
+  },
+  "success": true,
+  "width": 512
+ }
+}

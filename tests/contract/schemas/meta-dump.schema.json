@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb meta dump",
+  "description": "DDBMetaDump (the input of DDBMetaRestore), ordered by id",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "path",
+      "key",
+      "data",
+      "mtime"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "path": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      },
+      "data": {
+        "type": "string",
+        "description": "The stored value as JSON text"
+      },
+      "mtime": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Unix epoch seconds (integer)"
+      }
+    }
+  }
+}

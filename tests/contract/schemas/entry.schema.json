@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb index entry",
+  "description": "One entry as DDBList/DDBListEntries(withDetails)/DDBGet/DDBInfo/DDBAdd write it (Entry::toJSON). Field names are frozen as they are: point_geom and polygon_geom stay snake_case, the properties keys (captureTime, ...) camelCase.",
+  "type": "object",
+  "required": [
+    "path",
+    "type",
+    "mtime",
+    "size",
+    "depth"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Dataset-relative path with '/' separators; DDBInfo writes file://<absolute path>"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the file; absent for folders"
+    },
+    "type": {
+      "$ref": "#/$defs/entryType"
+    },
+    "properties": {
+      "$ref": "#/$defs/properties"
+    },
+    "mtime": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix epoch seconds (integer)"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Bytes; 0 for folders"
+    },
+    "depth": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Folders above the entry: in the dataset, or in the absolute path for DDBInfo"
+    },
+    "point_geom": {
+      "$ref": "#/$defs/pointFeature"
+    },
+    "polygon_geom": {
+      "$ref": "#/$defs/polygonFeature"
+    },
+    "meta": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "entryType": {
+      "type": "integer",
+      "enum": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "description": "0 Undefined, 1 Directory, 2 Generic, 3 GeoImage, 4 GeoRaster, 5 PointCloud, 6 Image, 7 DroneDB, 8 Markdown, 9 Video, 10 GeoVideo, 11 Model, 12 Panorama, 13 GeoPanorama, 14 Vector, 15 GaussianSplat, 16 Tiles3D (entry_types.h)"
+    },
+    "crs": {
+      "type": "object",
+      "required": [
+        "type",
+        "properties"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "name"
+        },
+        "properties": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "const": "EPSG:4326"
+            }
+          }
+        }
+      }
+    },
+    "pointFeature": {
+      "type": "object",
+      "required": [
+        "type",
+        "geometry",
+        "properties",
+        "crs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "Feature"
+        },
+        "crs": {
+          "$ref": "#/$defs/crs"
+        },
+        "properties": {
+          "type": "object"
+        },
+        "geometry": {
+          "type": "object",
+          "required": [
+            "type",
+            "coordinates"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "Point"
+            },
+            "coordinates": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "description": "[longitude, latitude, altitude]"
+            }
+          }
+        }
+      }
+    },
+    "polygonFeature": {
+      "type": "object",
+      "required": [
+        "type",
+        "geometry",
+        "properties",
+        "crs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "Feature"
+        },
+        "crs": {
+          "$ref": "#/$defs/crs"
+        },
+        "properties": {
+          "type": "object"
+        },
+        "geometry": {
+          "type": "object",
+          "required": [
+            "type",
+            "coordinates"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "Polygon"
+            },
+            "coordinates": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "[longitude, latitude, altitude]"
+                },
+                "minItems": 4
+              }
+            }
+          }
+        }
+      }
+    },
+    "properties": {
+      "type": "object",
+      "description": "Type-specific properties. The keys listed here have a fixed type; images carry more EXIF/XMP-derived keys.",
+      "properties": {
+        "captureTime": {
+          "type": "number",
+          "description": "Images: capture time in epoch milliseconds (a float today)"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "make": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "sensor": {
+          "type": "string"
+        },
+        "orientation": {
+          "type": "integer"
+        },
+        "cameraYaw": {
+          "type": "number"
+        },
+        "cameraPitch": {
+          "type": "number"
+        },
+        "cameraRoll": {
+          "type": "number"
+        },
+        "hasCameraOrientation": {
+          "type": "boolean"
+        },
+        "projection": {
+          "type": "string",
+          "description": "GeoRaster and PointCloud: WKT"
+        },
+        "geotransform": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 6,
+          "maxItems": 6
+        },
+        "bands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "type",
+              "colorInterp"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "colorInterp": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "georeferenced": {
+          "type": "boolean",
+          "description": "Models: false when the model is in local space. Models and Gaussian splats: true when a sidecar says where the local frame of the file sits on the Earth (a splat that has none carries no member); the point geometry of the entry is then the origin of that frame."
+        },
+        "georef": {
+          "description": "Models and Gaussian splats: where the local frame (meters, X East, Y North, Z up) sits on the Earth. Present with georeferenced: true.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "origin"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "enu"
+                },
+                "origin": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "[latitude, longitude, altitude] of the origin of the local tangent plane, degrees and meters"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "crs",
+                "offset"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "projected"
+                },
+                "crs": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The projected CRS the frame is shifted in: EPSG:xxxx, a PROJ string or WKT"
+                },
+                "offset": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "description": "[x, y, z] added to a local point to get its coordinates in crs"
+                }
+              }
+            }
+          ]
+        },
+        "warning": {
+          "type": "string",
+          "description": "Why part of the metadata of the entry is missing, one string: a model or splat whose georeference could not be used, a vector file that did not parse, a point cloud with no footprint (\"footprint unavailable: <reason>\")"
+        },
+        "pointCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "vector": {
+          "type": "object",
+          "required": [
+            "driver",
+            "layers"
+          ],
+          "properties": {
+            "driver": {
+              "type": "string"
+            },
+            "layers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "featureCount",
+                  "geometryType"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "featureCount": {
+                    "type": "integer"
+                  },
+                  "geometryType": {
+                    "type": "string"
+                  },
+                  "extent": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 4,
+                    "maxItems": 4
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

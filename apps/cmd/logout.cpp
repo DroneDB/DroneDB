@@ -4,7 +4,7 @@
 
 #include "include/logout.h"
 #include "constants.h"
-#include "registry.h"
+#include "registry_client.h"
 #include "userprofile.h"
 
 namespace cmd
@@ -27,11 +27,11 @@ namespace cmd
         return "Logout from all registries. To logout from a single registry, use the --server option.";
     }
 
-    void Logout::run(cxxopts::ParseResult &opts)
+    int Logout::run(cxxopts::ParseResult &opts)
     {
         if (opts["server"].count() > 0)
         {
-            ddb::Registry reg(opts["server"].as<std::string>());
+            ddb::RegistryClient reg(opts["server"].as<std::string>());
             if (reg.logout())
             {
                 std::cout << "Logged out from " << reg.getUrl() << std::endl;
@@ -43,13 +43,14 @@ namespace cmd
             auto urls = ddb::UserProfile::get()->getAuthManager()->getAuthenticatedRegistryUrls();
             for (auto url : urls)
             {
-                ddb::Registry reg(url);
+                ddb::RegistryClient reg(url);
                 if (reg.logout())
                 {
                     std::cout << "Logged out from " << reg.getUrl() << std::endl;
                 }
             }
         }
+        return EXIT_SUCCESS;
     }
 
 }

@@ -7,7 +7,9 @@
 #include "include/build.h"
 #include <ddb.h>
 #include "dbops.h"
+#include "env.h"
 #include "fs.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -17,12 +19,15 @@ namespace cmd
         // clang-format off
     opts
         .positional_help("[args]")
-        .custom_help("build [-p path/to/file.laz] [--output out_dir]")
-        .add_options()
-        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value((fs::path(DDB_FOLDER) / DDB_BUILD_PATH).string()))
-        ("p,path", "File to process", cxxopts::value<std::string>())
-    	("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
-    	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"));
+        .custom_help("build [-p path/to/file.laz] [--output out_dir] [--threads n]");
+    cmd::addOutputOption(opts, "Output folder", ddb::io::toUtf8(fs::path(DDB_FOLDER) / DDB_BUILD_PATH));
+    opts.add_options()
+        ("p,path", "File to process", cxxopts::value<std::string>());
+    cmd::addWorkingDirOption(opts);
+    opts.add_options()
+    	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"))
+        ("threads", "Most threads one build may use, 1 to " + std::to_string(ddb::BuildOptions::MaxThreads) +
+                    " (default: the DDB_BUILD_THREADS budget)", cxxopts::value<std::string>());
 
         // clang-format on
         opts.parse_positional({"path"});
@@ -33,36 +38,38 @@ namespace cmd
         return "Build DroneDB files for efficient streaming over a network.";
     }
 
-    void Build::run(cxxopts::ParseResult &opts)
+    int Build::run(cxxopts::ParseResult &opts)
     {
 
-        try
+        const auto output = opts["output"].as<std::string>();
+        const auto ddbPath = opts["working-dir"].as<std::string>();
+        const auto force = opts["force"].as<bool>();
+        // Decimal digits only (no sign, hex or exponent), like the numeric settings of the environment
+        ddb::BuildOptions buildOptions;
+        if (opts.count("threads"))
         {
-
-            const auto output = opts["output"].as<std::string>();
-            const auto ddbPath = opts["working-dir"].as<std::string>();
-            const auto force = opts["force"].as<bool>();
-
-            if (output.length() == 0)
-                printHelp();
-
-            const auto db = ddb::open(ddbPath, true);
-
-            if (!opts.count("path"))
-            {
-                buildAll(db.get(), output, force);
-            }
-            else
-            {
-                const auto path = opts["path"].as<std::string>();
-                build(db.get(), path, output, force);
-            }
+            const auto threads = ddb::env::parseDecimal(opts["threads"].as<std::string>(), 1, ddb::BuildOptions::MaxThreads);
+            if (!threads)
+                usageError(ddb::BuildOptions::threadsRule());
+            buildOptions = ddb::BuildOptions::withThreads(static_cast<int64_t>(*threads));
         }
-        catch (ddb::InvalidArgsException &e)
+
+        if (output.length() == 0)
+            usageError();
+
+        const auto db = ddb::open(ddbPath, true);
+
+        if (!opts.count("path"))
         {
-            std::cerr << "Error: " << e.what() << std::endl;
-            printHelp();
+            buildAll(db.get(), output, force, buildOptions);
         }
+        else
+        {
+            const auto path = opts["path"].as<std::string>();
+            build(db.get(), path, output, force, buildOptions);
+        }
+
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

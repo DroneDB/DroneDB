@@ -3,8 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_inc.h"
 
+#include <algorithm>
+#include <memory>
 #include <sstream>
+#include "coordstransformer.h"
+#include "gdal_raii.h"
 #include "geo.h"
+#include "exceptions.h"
 
 namespace ddb
 {
@@ -43,7 +48,7 @@ namespace ddb
 
     double angNormalize(double x)
     {
-        x = remainderx(x, (double)(360));
+        x = remainderx(x, static_cast<double>(360));
         return x != -180 ? x : 180;
     }
 
@@ -77,51 +82,41 @@ namespace ddb
         return ss.str();
     }
 
+    namespace
+    {
+        std::string zoneLabel(const UTMZone &zone)
+        {
+            return std::to_string(zone.zone) + (zone.north ? "N" : "S");
+        }
+
+        // WGS84 <-> UTM zone transform; every failure throws and nothing leaks.
+        std::unique_ptr<CoordsTransformer> createUtmTransform(const UTMZone &zone, bool toUtm)
+        {
+            const std::string proj = getProjForUTM(zone);
+            const SrsPtr utm = srsFromProj4(proj.c_str());
+            if (!utm)
+                throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
+
+            const SrsPtr wgs84 = srsFromEpsg(4326);
+            if (!wgs84)
+                throw GDALException("Cannot import EPSG:4326 spatial reference system. Is PROJ available?");
+
+            auto ct = toUtm ? CoordsTransformer::tryCreate(srsOf(wgs84), srsOf(utm))
+                            : CoordsTransformer::tryCreate(srsOf(utm), srsOf(wgs84));
+            if (!ct)
+                throw GDALException("Cannot create coordinate transformation " +
+                                    std::string(toUtm ? "to" : "from") + " UTM zone " + zoneLabel(zone));
+            return ct;
+        }
+    }
+
     Projected2D toUTM(double latitude, double longitude, const UTMZone &zone)
     {
-        Projected2D result;
-
-        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-
-        if (hSrs == nullptr)
-            throw GDALException("Cannot create spatial reference system for UTM zone " + std::to_string(zone.zone) + (zone.north ? "N" : "S"));
-
-        std::string proj = getProjForUTM(zone);
-
-
-        if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
-        {
-            OSRDestroySpatialReference(hSrs);
-            throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
-        }
-
-        OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-
-        if (hWgs84 == nullptr)
-        {
-            OSRDestroySpatialReference(hSrs);
-            throw GDALException("Cannot create WGS84 spatial reference system for UTM zone " + std::to_string(zone.zone) + (zone.north ? "N" : "S"));
-        }
-
-        if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
-        {
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hSrs);
-            throw GDALException("Cannot import EPSG:4326 spatial reference system. Is PROJ available?");
-        }
-
-        OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hWgs84, hSrs);
+        const auto ct = createUtmTransform(zone, true);
 
         double geoX = longitude;
         double geoY = latitude;
-
-        const auto success = OCTTransform(hTransform, 1, &geoX, &geoY, nullptr) == TRUE;
-
-        OCTDestroyCoordinateTransformation(hTransform);
-        OSRDestroySpatialReference(hWgs84);
-        OSRDestroySpatialReference(hSrs);
-
-        if (!success)
+        if (!ct->tryTransform(1, &geoX, &geoY))
             throw GDALException("Cannot transform coordinates to UTM " + std::to_string(latitude) + "," + std::to_string(longitude));
 
         return Projected2D(geoX, geoY);
@@ -134,49 +129,14 @@ namespace ddb
 
     Geographic2D fromUTM(double x, double y, const UTMZone &zone)
     {
-        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-        if (hSrs == nullptr)
-            throw GDALException("Cannot create spatial reference system for UTM zone " + std::to_string(zone.zone) + (zone.north ? "N" : "S"));
-
-        OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-
-        if (hWgs84 == nullptr)
-        {
-            OSRDestroySpatialReference(hSrs);
-            throw GDALException("Cannot create WGS84 spatial reference system for UTM zone " + std::to_string(zone.zone) + (zone.north ? "N" : "S"));
-        }
-
-        std::string proj = getProjForUTM(zone);
-        if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
-        {
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hSrs);
-            throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
-        }
-
-        if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
-        {
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hSrs);
-            throw GDALException("Cannot import EPSG:4326 spatial reference system. Is PROJ available?");
-        }
-
-        OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
+        const auto ct = createUtmTransform(zone, false);
 
         double geoX = x;
         double geoY = y;
-
-        const auto success = OCTTransform(hTransform, 1, &geoX, &geoY, nullptr) == TRUE;
-
-        OCTDestroyCoordinateTransformation(hTransform);
-        OSRDestroySpatialReference(hWgs84);
-        OSRDestroySpatialReference(hSrs);
-
-        if (!success)
+        if (!ct->tryTransform(1, &geoX, &geoY))
             throw GDALException("Cannot transform coordinates from UTM " + std::to_string(x) + "," + std::to_string(y));
 
         return Geographic2D(geoX, geoY);
-
     }
 
 }

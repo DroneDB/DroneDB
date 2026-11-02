@@ -12,10 +12,10 @@
 #include "logger.h"
 #include "mio.h"
 #include "include/progressbar.h"
-#include "registry.h"
+#include "include/credentials.h"
+#include "registry_client.h"
 #include "registryutils.h"
 #include "shareservice.h"
-#include "utils.h"
 
 namespace cmd
 {
@@ -39,8 +39,9 @@ namespace cmd
             ("t,tag", "Tag to use (organization/dataset or server[:port]/organization/dataset)", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY "//"))
             ("p,password", "Optional password to protect dataset", cxxopts::value<std::string>()->default_value(""))
             ("s,server", "Registry server to share dataset with (alias of: -t <server>//)", cxxopts::value<std::string>())
-            ("q,quiet", "Do not display progress", cxxopts::value<bool>())
-            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>())
+            ("q,quiet", "Do not display progress", cxxopts::value<bool>());
+        cmd::addInsecureOption(opts);
+        opts.add_options()
             ("non-interactive", "Do not prompt for credentials. Uses DDB_USERNAME and DDB_PASSWORD env vars if available.", cxxopts::value<bool>());
 
         opts.parse_positional({"input"});
@@ -51,14 +52,11 @@ namespace cmd
         return "Share files and folders to a registry";
     }
 
-    void Share::run(cxxopts::ParseResult &opts)
+    int Share::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
-            std::cerr << "error: missing required argument 'input'" << std::endl
-                      << std::endl;
-            printHelp(std::cerr, false);
-            exit(EXIT_FAILURE);
+            usageError("missing required argument 'input'");
         }
 
         auto rawInput = opts["input"].as<std::vector<std::string>>();
@@ -73,12 +71,12 @@ namespace cmd
         auto quiet = opts["quiet"].count() > 0;
         auto sslVerify = opts["insecure"].count() == 0;
         auto nonInteractive = opts["non-interactive"].count() > 0;
-        auto cwd = ddb::io::getCwd().string();
+        auto cwd = ddb::io::toUtf8(ddb::io::getCwd());
 
         ProgressBar pb;
         ddb::ShareCallback showProgress =
             [&pb](const std::vector<ddb::ShareFileProgress *> &files,
-                  size_t txBytes, size_t totalBytes)
+                  size_t, size_t)
         {
             if (!files.empty())
             {
@@ -98,27 +96,23 @@ namespace cmd
         if (quiet)
             showProgress = nullptr;
 
-        ddb::ShareService ss;
-
-        auto share = [&]()
-        {
-            const std::string url =
-                ss.share(input, tag, password, cwd, showProgress, sslVerify);
-            if (!quiet)
-                pb.done();
-            std::cout << url << std::endl;
-        };
+        // With --non-interactive nobody is asked: the credentials come from the saved ones and the
+        // environment only
+        RefusedCredentials refused("Authentication failed. Set DDB_USERNAME and "
+                                   "DDB_PASSWORD env vars or run `ddb login` first.");
+        ddb::CredentialProvider &provider = nonInteractive ? static_cast<ddb::CredentialProvider &>(refused)
+                                                           : credentials();
 
         // Try env-var credentials before the share attempt so that the very
-        // first request has them available (the alternative would be to wait
-        // for an AuthException).
+        // first request has them available (a login saves the credentials, which is
+        // where the share looks for them).
         const auto envUser = envOrEmpty("DDB_USERNAME");
         const auto envPass = envOrEmpty("DDB_PASSWORD");
         if (!envUser.empty() && !envPass.empty())
         {
             try
             {
-                ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
+                ddb::RegistryClient reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify, registryDeps());
                 reg.login(envUser, envPass);
             }
             catch (const ddb::AppException &e)
@@ -129,39 +123,26 @@ namespace cmd
 
         try
         {
-            share();
-        }
-        catch (const ddb::AuthException &)
-        {
-            if (nonInteractive)
-            {
-                throw ddb::AuthException(
-                    "Authentication failed. Set DDB_USERNAME and "
-                    "DDB_PASSWORD env vars or run `ddb login` first.");
-            }
-
-            // Try logging-in interactively
-            auto username = ddb::utils::getPrompt("Username: ");
-            auto password = ddb::utils::getPass("Password: ");
-
-            ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
-            if (reg.login(username, password).length() > 0)
-            {
-                // Retry
-                share();
-            }
-            else
-            {
-                throw ddb::AuthException("Cannot authenticate with " +
-                                         reg.getUrl());
-            }
+            ddb::ShareService ss(registryDeps());
+            ddb::ShareRequest request;
+            request.input = input;
+            request.tag = tag;
+            request.password = password;
+            request.cwd = cwd;
+            request.callback = showProgress;
+            request.sslVerify = sslVerify;
+            const std::string url = ss.share(request, provider);
+            if (!quiet)
+                pb.done();
+            std::cout << url << std::endl;
         }
         catch (const ddb::AppException &e)
         {
             if (!quiet)
                 pb.done();
-            throw e;
+            throw;
         }
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

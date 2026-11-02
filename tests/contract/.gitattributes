@@ -1,0 +1,2 @@
+# Contract inputs are hashed byte for byte: never convert line endings
+inputs/** binary

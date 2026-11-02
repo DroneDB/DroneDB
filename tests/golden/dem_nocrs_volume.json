@@ -1,0 +1,39 @@
+{
+ "area2d": 184112.79787344768,
+ "area3d": 184172.89954096632,
+ "baseElevation": 100.37000274658203,
+ "basePlaneMethod": "lowest_perimeter",
+ "boundaryPolygon": {
+  "coordinates": [
+   [
+    [
+     10.0012,
+     44.9988
+    ],
+    [
+     10.0058,
+     44.9988
+    ],
+    [
+     10.0058,
+     44.9942
+    ],
+    [
+     10.0012,
+     44.9942
+    ],
+    [
+     10.0012,
+     44.9988
+    ]
+   ]
+  ],
+  "type": "Polygon"
+ },
+ "crs": "",
+ "cutVolume": 352196.34551950893,
+ "fillVolume": 0.0,
+ "netVolume": 352196.34551950893,
+ "pixelCount": 2101,
+ "pixelSize": 7.871993516829147
+}

@@ -5,7 +5,6 @@
 #define RASTER_PROFILE_H
 
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -31,9 +30,9 @@ namespace ddb {
  * @param samples Requested number of equispaced samples along the polyline
  *                (clamped to [2, 4096]; <2 falls back to 256)
  */
-DDB_DLL std::string getRasterProfileJson(const std::string &filePath,
-                                         const std::string &geoJsonLineString,
-                                         int samples);
+std::string getRasterProfileJson(const std::string &filePath,
+                                 const std::string &geoJsonLineString,
+                                 int samples);
 
 } // namespace ddb
 

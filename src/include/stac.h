@@ -5,32 +5,50 @@
 #define STAC_H
 
 #include <string>
-#include "ddb_export.h"
 #include "dbops.h"
 #include <vector>
 
 namespace ddb
 {
 
-    DDB_DLL json generateStac(const std::string &ddbPath,
-                              const std::string &entry = "",
-                              const std::string &stacCollectionRoot = ".",
-                              const std::string &id = "",
-                              const std::string &stacCatalogRoot = "");
+    json generateStac(const std::string &ddbPath,
+                      const std::string &entry = "",
+                      const std::string &stacCollectionRoot = ".",
+                      const std::string &id = "",
+                      const std::string &stacCatalogRoot = "");
+
+    // The filters and the page of a STAC ItemCollection
+    struct StacItemQuery
+    {
+        std::vector<double> bbox{};   // [minX, minY, maxX, maxY] in EPSG:4326; anything else = no filter
+        std::string datetimeStart{};  // RFC 3339; empty = open
+        std::string datetimeEnd{};
+        int limit = 10;               // a value of 0 or less is 10
+        int offset = 0;
+    };
+
+    // The query of a STAC API request, from its parameters as the request has them (text): bbox
+    // "minX,minY,maxX,maxY" (EPSG:4326), datetime a single instant or an interval "start/end"
+    // (".." or an empty bound is open), both may be empty (no filter). Throws
+    // InvalidArgsException for a bbox that is not four numbers.
+    StacItemQuery parseStacItemQuery(const std::string &bbox, const std::string &datetime, int limit, int offset);
 
     // Generate a STAC API ItemCollection (GeoJSON FeatureCollection of STAC Items)
     // for all geometry-bearing entries of a dataset, with optional bbox / datetime
     // filtering and limit/offset paging.
-    DDB_DLL json generateStacItemCollection(const std::string &ddbPath,
-                                            const std::string &stacCollectionRoot = ".",
-                                            const std::string &id = "",
-                                            const std::string &stacCatalogRoot = "",
-                                            const std::vector<double> &bbox = {},
-                                            const std::string &datetimeStart = "",
-                                            const std::string &datetimeEnd = "",
-                                            int limit = 10,
-                                            int offset = 0);
+    json generateStacItemCollection(const std::string &ddbPath,
+                                    const std::string &stacCollectionRoot = ".",
+                                    const std::string &id = "",
+                                    const std::string &stacCatalogRoot = "",
+                                    const StacItemQuery &query = {});
 
+    // Data-only STAC: the documents of generateStac (with id "") and
+    // generateStacItemCollection without any member built from a URL or an ID: no "id",
+    // "collection" or "links", and no asset "href". Everything else is the same. Throws
+    // EntryNotFoundException for an entry that is not in the index.
+    json generateStacData(const std::string& ddbPath, const std::string& entry = "");
+
+    json generateStacItemCollectionData(const std::string& ddbPath, const StacItemQuery& query = {});
 }
 
 #endif // STAC_H

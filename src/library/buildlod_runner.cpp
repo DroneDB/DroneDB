@@ -3,17 +3,22 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "buildlod_runner.h"
 
-#include <cstdlib>
-#include <cstdint>
-#include <mutex>
-#include <sstream>
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <string>
 #include <system_error>
 #include <vector>
 
+#include "env.h"
 #include "logger.h"
+#include "exceptions.h"
+#include "gsplat.h"
 #include "mio.h"
+#include "parallel.h"
 #include "process_runner.h"
+#include "tool_locator.h"
+#include "tool_run_support.h"
 
 namespace ddb
 {
@@ -23,127 +28,51 @@ namespace ddb
         namespace
         {
 
-#ifdef _WIN32
-            constexpr const char *kBinaryName = "build-lod.exe";
-            constexpr char kPathSep = ';';
-#else
-            constexpr const char *kBinaryName = "build-lod";
-            constexpr char kPathSep = ':';
-#endif
-
-            std::mutex g_cacheMutex;
-            bool g_cacheValid = false;
-            fs::path g_cachedBinary;
-
-            bool isExecutableFile(const fs::path &p)
-            {
-                std::error_code ec;
-                if (!fs::exists(p, ec) || ec) return false;
-                if (!fs::is_regular_file(p, ec) || ec) return false;
-#ifdef _WIN32
-                return true;
-#else
-                auto perms = fs::status(p, ec).permissions();
-                if (ec) return false;
-                using fs::perms;
-                return (perms & (perms::owner_exec | perms::group_exec | perms::others_exec)) != perms::none;
-#endif
-            }
-
-            fs::path searchOnPath()
-            {
-                const char *path = std::getenv("PATH");
-                if (!path || !*path) return {};
-
-                std::string p(path);
-                size_t start = 0;
-                while (start <= p.size())
-                {
-                    size_t end = p.find(kPathSep, start);
-                    if (end == std::string::npos) end = p.size();
-                    std::string dir = p.substr(start, end - start);
-                    if (!dir.empty())
-                    {
-                        fs::path candidate = fs::path(dir) / kBinaryName;
-                        if (isExecutableFile(candidate)) return candidate;
-                    }
-                    if (end == p.size()) break;
-                    start = end + 1;
-                }
-                return {};
-            }
-
             // Tail of the captured output included in errorOut.
             constexpr size_t kErrorTailLength = 512;
 
-            // build-lod derives its output name from the input: it replaces the input's
-            // extension with "-lod" and appends ".rad" (see rust/build-lod/src/main.rs).
-            // For "<dir>/model.spz" the produced file is "<dir>/model-lod.rad".
-            fs::path expectedLodOutput(const fs::path &input)
+            // build-lod derives its output name from the input file name: it replaces the
+            // extension with "-lod" and appends ".rad" (see rust/build-lod/src/main.rs), and it
+            // silently skips an input that already ends in "-lod.spz" or "-lod.rad". It is given a
+            // file of a name that is ours, in a folder that is ours: "source.<ext>" in a scratch
+            // folder yields "source-lod.rad" there. It never writes beside, or deletes in, the
+            // dataset folder, whatever the dataset file is called.
+            constexpr const char *kStagedStem = "source";
+            constexpr const char *kStagedOutput = "source-lod.rad";
+
+            // build-lod is one busy thread of its own (no thread option, no thread pool); the
+            // calling thread only waits for it, so it counts as one more thread beside the others
+            constexpr size_t kBuildLodThreads = 2;
+
+            // Makes `staged` name the content of `input` without writing to the dataset: a hard
+            // link, else a symbolic link (another volume), else a copy (a file system without
+            // links, or Windows without the right to create them). A dataset file that is itself
+            // a symbolic link is resolved first: a hard link to a link is a copy of the link, and
+            // a relative one names another file, or none, from the scratch folder.
+            void stageInput(const fs::path &input, const fs::path &staged)
             {
-                fs::path stem = input.stem(); // "model.spz" -> "model"
-                return input.parent_path() / (stem.string() + "-lod.rad");
+                std::error_code ec;
+                const fs::path real = fs::canonical(input, ec);
+                if (ec)
+                {
+                    LOGD << "Cannot resolve " << io::toUtf8(input) << " (" << ec.message() << "), linking it as it is";
+                }
+                const fs::path &target = ec ? input : real;
+                ec.clear();
+                fs::create_hard_link(target, staged, ec);
+                if (!ec) return;
+                LOGD << "Cannot hard link " << io::toUtf8(input) << " (" << ec.message() << "), trying a symbolic link";
+                fs::create_symlink(fs::absolute(target), staged, ec);
+                if (!ec) return;
+                LOGD << "Cannot link " << io::toUtf8(input) << " (" << ec.message() << "), copying it";
+                io::copy(target, staged);
             }
 
         } // namespace
 
         fs::path findBuildLodBinary(bool forceRefresh)
         {
-            std::lock_guard<std::mutex> lock(g_cacheMutex);
-            if (!forceRefresh && g_cacheValid) return g_cachedBinary;
-
-            fs::path found;
-
-            // 1. Explicit override via env var (authoritative when non-empty).
-            if (const char *override = std::getenv("DDB_BUILDLOD_PATH"))
-            {
-                if (override[0] != '\0')
-                {
-                    fs::path p(override);
-                    if (isExecutableFile(p)) found = p;
-                    g_cachedBinary = found;
-                    g_cacheValid = true;
-                    if (!found.empty())
-                        LOGD << "build-lod binary discovered via DDB_BUILDLOD_PATH at " << found.string();
-                    else
-                        LOGD << "DDB_BUILDLOD_PATH=" << override << " is not an executable file; treating build-lod as unavailable";
-                    return found;
-                }
-            }
-
-            // 2. Folder of the current executable (where packaging bundles build-lod).
-            {
-                fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty())
-                {
-                    fs::path candidate = exeDir / kBinaryName;
-                    if (isExecutableFile(candidate)) found = candidate;
-                }
-            }
-
-            // 3. <install_prefix>/bin (parent of exe folder + /bin).
-            if (found.empty())
-            {
-                fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty() && exeDir.has_parent_path())
-                {
-                    fs::path candidate = exeDir.parent_path() / "bin" / kBinaryName;
-                    if (isExecutableFile(candidate)) found = candidate;
-                }
-            }
-
-            // 4. System PATH.
-            if (found.empty()) found = searchOnPath();
-
-            g_cachedBinary = found;
-            g_cacheValid = true;
-
-            if (!found.empty())
-                LOGD << "build-lod binary discovered at " << found.string();
-            else
-                LOGD << "build-lod binary not found in DDB_BUILDLOD_PATH, exe folder, install prefix or PATH";
-
-            return found;
+            return tools::findTool("build-lod", "DDB_BUILDLOD_PATH", forceRefresh);
         }
 
         bool isBuildLodAvailable()
@@ -151,54 +80,67 @@ namespace ddb
             return !findBuildLodBinary().empty();
         }
 
-        bool runBuildLod(const fs::path &input,
-                         const fs::path &outputRad,
-                         std::string &errorOut,
-                         bool quality,
-                         int maxSh,
-                         const fs::path &binary)
+        std::chrono::milliseconds idleTimeoutForSplats(std::uint64_t splats)
         {
-            const auto result = runBuildLodResult(input, outputRad, quality, maxSh, binary);
-            errorOut = result.error;
-            return result.succeeded;
+            using std::chrono::seconds;
+            // In floating point: a count from a header can be any 64-bit value
+            const double scaled = static_cast<double>(splats) / 1e6 *
+                                  static_cast<double>(seconds(kIdleTimeoutPerMillionSplats).count());
+            if (scaled >= static_cast<double>(seconds(kMaxIdleTimeout).count()))
+                return kMaxIdleTimeout;
+            return std::max<std::chrono::milliseconds>(seconds(static_cast<seconds::rep>(std::ceil(scaled))),
+                                                       process::kDefaultIdleTimeout);
         }
 
-        ToolRunResult runBuildLodResult(const fs::path &input,
-                                       const fs::path &outputRad,
-                                       bool quality,
-                                       int maxSh,
-                                       const fs::path &binary,
-                                       const process::Options &options)
+        std::chrono::milliseconds idleTimeoutFor(const fs::path &input)
         {
+            const auto chosen = [&input](std::uint64_t splats, const std::string &basis) {
+                const auto limit = idleTimeoutForSplats(splats);
+                LOGD << "build-lod idle limit for " << io::toUtf8(input) << ": "
+                     << std::chrono::duration_cast<std::chrono::seconds>(limit).count() << " s (" << basis << ")";
+                return limit;
+            };
+            try
+            {
+                GaussianSplatInfo info;
+                if (getGaussianSplatInfo(io::toUtf8(input), info) && info.splatCount > 0)
+                    return chosen(info.splatCount, std::to_string(info.splatCount) + " splats");
+                std::error_code ec;
+                const std::uintmax_t size = fs::file_size(input, ec);
+                if (!ec)
+                    return chosen(size / kPlyBytesPerSplat, "estimated from " + std::to_string(size) + " bytes");
+            }
+            catch (const std::exception &e)
+            {
+                LOGD << "Cannot read the splat count of " << io::toUtf8(input) << ": " << e.what();
+            }
+            return process::kDefaultIdleTimeout;
+        }
+
+        ToolRunResult runBuildLodResult(const BuildLodRequest &request,
+                                       const process::Options &options,
+                                       const process::IProcessRunner &runner)
+        {
+            const fs::path &input = request.input;
+            const fs::path &outputRad = request.outputRad;
+            const bool quality = request.quality;
+            const int maxSh = request.maxSh;
+            const fs::path &binary = request.binary;
             ToolRunResult result;
             process::Options popts = options;
-            if (const char *raw = std::getenv("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS"))
+            const auto maxIdleSeconds = std::chrono::seconds(kMaxIdleTimeout).count();
+            const auto idle = env::readPositiveInt("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", static_cast<uint64_t>(maxIdleSeconds));
+            if (idle.state == env::Integer::State::Invalid)
             {
-                if (*raw)
-                {
-                    using Milliseconds = std::chrono::milliseconds;
-                    constexpr uint64_t limit = 86400; // 24 hours; keeps steady-clock deadlines representable.
-                    uint64_t seconds = 0;
-                    bool valid = true;
-                    for (const char *p = raw; *p; ++p)
-                    {
-                        if (*p < '0' || *p > '9' || seconds > (limit - static_cast<uint64_t>(*p - '0')) / 10)
-                        {
-                            valid = false;
-                            break;
-                        }
-                        seconds = seconds * 10 + static_cast<uint64_t>(*p - '0');
-                    }
-                    if (!valid || seconds == 0)
-                    {
-                        result.error = "Invalid DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS; expected an integer from 1 to 86400 seconds (24 hours)";
-                        return result;
-                    }
-                    popts.idleTimeout = Milliseconds(static_cast<Milliseconds::rep>(seconds * 1000));
-                }
+                result.error = "Invalid DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS; expected an integer from 1 to " +
+                               std::to_string(maxIdleSeconds) + " seconds (" +
+                               std::to_string(std::chrono::hours(kMaxIdleTimeout).count()) + " hours)";
+                return result;
             }
-            fs::path bin = binary.empty() ? findBuildLodBinary() : binary;
-            if (bin.empty() || !isExecutableFile(bin))
+            if (idle.state == env::Integer::State::Valid)
+                popts.idleTimeout = std::chrono::seconds(static_cast<std::chrono::seconds::rep>(idle.value));
+            const fs::path bin = binary.empty() ? findBuildLodBinary() : binary;
+            if (!tools::isExecutableFile(bin))
             {
                 result.error = "build-lod binary not found";
                 return result;
@@ -208,19 +150,16 @@ namespace ddb
             if (!fs::exists(input, ec) || ec)
             {
                 result.errorCode = ec;
-                result.error = "build-lod input does not exist: " + input.string();
+                result.error = "build-lod input does not exist: " + io::toUtf8(input);
                 return result;
             }
 
-            const fs::path producedRad = expectedLodOutput(input);
             // Preserve the actual error before cleanup can overwrite it.
             auto failIo = [&result](const std::string &operation, const std::error_code &code) {
                 result.errorCode = code;
                 result.error = operation + ": " + code.message();
                 return result;
             };
-            fs::remove(producedRad, ec);
-            if (ec) return failIo("Cannot remove stale build-lod output", ec);
             fs::remove(outputRad, ec);
             if (ec) return failIo("Cannot remove stale RAD output", ec);
             if (!outputRad.parent_path().empty()) {
@@ -228,45 +167,54 @@ namespace ddb
                 if (ec) return failIo("Cannot create RAD output directory", ec);
             }
 
+            // The input and what build-lod writes live in a scratch folder beside the folder of the
+            // output, not in it: that folder is a build's scratch folder, published as it is, so a
+            // scratch folder that cannot be removed must not be in it. Removed on every path out.
+            io::ScopedTempDir scratch;
+            const fs::path staged = [&]() -> fs::path {
+                try
+                {
+                    scratch = io::ScopedTempDir::createBeside(outputRad.parent_path(), "build-lod-");
+                    fs::path file = scratch.path() / io::fromUtf8(kStagedStem);
+                    file += input.extension();
+                    stageInput(input, file);
+                    return file;
+                }
+                catch (const FSException &e)
+                {
+                    result.errorCode = e.code();
+                    result.error = std::string("Cannot stage the build-lod input: ") + e.what();
+                    return fs::path();
+                }
+            }();
+            if (staged.empty()) return result;
+            const fs::path producedRad = scratch.path() / kStagedOutput;
+
             int clampedSh = maxSh < 0 ? 0 : (maxSh > 3 ? 3 : maxSh);
-            std::vector<std::string> args = {input.string(), quality ? "--quality" : "--quick",
+            std::vector<std::string> args = {io::toUtf8(staged), quality ? "--quality" : "--quick",
                                             "--max-sh=" + std::to_string(clampedSh), "--rad"};
             LOGD << "Spawning build-lod: " << process::formatCommandLine(bin, args);
 
+            const auto cpu = parallel::tryAcquireThreads(kBuildLodThreads);
+            LOGD << "build-lod CPU tokens: " << cpu.count();
+
             popts.onOutputLine = [](const std::string &line) { LOGD << "[build-lod] " << line; };
-            const process::Result res = process::run(bin, args, popts);
-            if (res.descendantsTerminated)
-                LOGW << "build-lod " << res.describe();
-            if (!res.success())
-            {
-                result.timedOut = res.timedOut;
-                std::ostringstream oss;
-                oss << "build-lod " << res.describe();
-                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
-                result.error = oss.str();
-                fs::remove(producedRad, ec);
-                return result;
-            }
+            result = tools::runToolProducingFile({"build-lod", bin, args, popts, producedRad, kErrorTailLength}, runner).result;
+            if (!result.succeeded) return result;
 
-            if (!fs::exists(producedRad, ec) || ec)
+            try
             {
-                result.errorCode = ec;
-                result.error = "build-lod reported success but expected output is missing: " + producedRad.string();
-                return result;
+                io::moveOrCopy(producedRad, outputRad);
             }
-
-            fs::rename(producedRad, outputRad, ec);
-            if (ec)
+            catch (const FSException &e)
             {
-                // Cross-device moves may succeed via copy. An identifiable full disk
-                // is terminal for this attempt rather than an unexplained tool failure.
-                if (ec == std::errc::no_space_on_device)
-                    return failIo("Cannot move build-lod output", ec);
-                std::error_code copyEc;
-                fs::copy_file(producedRad, outputRad, fs::copy_options::overwrite_existing, copyEc);
-                if (copyEc)
-                    return failIo("failed to move build-lod output to " + outputRad.string(), copyEc);
-                fs::remove(producedRad, ec);
+                // A full disk is terminal for this attempt (the code says so) rather than an
+                // unexplained tool failure
+                fs::remove(outputRad, ec);
+                result = ToolRunResult();
+                result.errorCode = e.code();
+                result.error = "Cannot move build-lod output to " + io::toUtf8(outputRad) + ": " + e.what();
+                return result;
             }
             result.succeeded = true;
             return result;

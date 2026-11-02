@@ -31,11 +31,11 @@ namespace cmd
         return "Modify EXIF values in files.";
     }
 
-    void SetExif::run(cxxopts::ParseResult &opts)
+    int SetExif::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            usageError();
         }
 
         if (opts.count("gps"))
@@ -43,38 +43,49 @@ namespace cmd
             auto gps = opts["gps"].as<std::vector<double>>();
             if (gps.size() != 3)
             {
-                printHelp();
+                usageError();
             }
         }
 
         auto input = opts["input"].as<std::vector<std::string>>();
         ddb::ExifEditor exifEditor(input);
 
-        if (!exifEditor.canEdit())
+        if (!exifEditor.canEdit(std::cerr))
         {
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
+
+        // A file that cannot be written is reported and the next one is edited; the command
+        // then fails, so a script notices that not every file holds the new values
+        bool anyFailed = false;
+        const auto report = [&anyFailed](const std::vector<ddb::ExifWriteFailure> &failures)
+        {
+            for (const auto &failure : failures)
+                std::cerr << "Cannot write metadata to " << failure.file << ": " << failure.message << std::endl;
+            if (!failures.empty()) anyFailed = true;
+        };
 
         if (opts.count("gps-alt"))
         {
-            exifEditor.SetGPSAltitude(opts["gps-alt"].as<double>());
+            report(exifEditor.SetGPSAltitude(opts["gps-alt"].as<double>()));
         }
 
         if (opts.count("gps-lat"))
         {
-            exifEditor.SetGPSLatitude(opts["gps-lat"].as<double>());
+            report(exifEditor.SetGPSLatitude(opts["gps-lat"].as<double>()));
         }
 
         if (opts.count("gps-lon"))
         {
-            exifEditor.SetGPSLongitude(opts["gps-lon"].as<double>());
+            report(exifEditor.SetGPSLongitude(opts["gps-lon"].as<double>()));
         }
 
         if (opts.count("gps"))
         {
             auto gps = opts["gps"].as<std::vector<double>>();
-            exifEditor.SetGPS(gps[0], gps[1], gps[2]);
+            report(exifEditor.SetGPS(gps[0], gps[1], gps[2]));
         }
+        return anyFailed ? EXIT_FAILURE : EXIT_SUCCESS;
     }
 
 }

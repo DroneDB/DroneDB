@@ -1,0 +1,38 @@
+name: Save vcpkg binary cache
+description: >
+  Save the vcpkg binary cache restored by ./.github/actions/vcpkg-binary-cache. After a
+  complete install it first deletes the archives that the install did not use, so ports
+  removed from vcpkg.json and old builds of kept ports are not carried into the new key.
+  An incomplete install is saved as it is, under the partial key.
+
+inputs:
+  path:
+    description: Binary cache directory (the restore action's `path` output)
+    required: true
+  key:
+    description: Exact key (the restore action's `key` output)
+    required: true
+  partial-key:
+    description: Key for an incomplete install (the restore action's `partial-key` output)
+    required: true
+  complete:
+    description: "'true' when vcpkg install finished"
+    required: true
+  installed:
+    description: vcpkg_installed directory of the finished install
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Delete unused vcpkg archives
+      if: inputs.complete == 'true'
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = Windows ]; then py=python; else py=python3; fi
+        "$py" "$GITHUB_WORKSPACE/scripts/prune-vcpkg-bincache.py" "${{ inputs.path }}" "${{ inputs.installed }}"
+    - name: Save vcpkg binary cache
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.complete == 'true' && inputs.key || inputs.partial-key }}

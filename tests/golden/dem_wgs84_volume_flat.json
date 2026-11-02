@@ -1,0 +1,39 @@
+{
+ "area2d": 184112.79787344768,
+ "area3d": 184172.89954096632,
+ "baseElevation": 100.5,
+ "basePlaneMethod": "flat",
+ "boundaryPolygon": {
+  "coordinates": [
+   [
+    [
+     10.0012,
+     44.9988
+    ],
+    [
+     10.0058,
+     44.9988
+    ],
+    [
+     10.0058,
+     44.9942
+    ],
+    [
+     10.0012,
+     44.9942
+    ],
+    [
+     10.0012,
+     44.9988
+    ]
+   ]
+  ],
+  "type": "Polygon"
+ },
+ "crs": "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AXIS[\"Latitude\",NORTH],AXIS[\"Longitude\",EAST],AUTHORITY[\"EPSG\",\"4326\"]]",
+ "cutVolume": 328370.8484319875,
+ "fillVolume": 108.66095512487396,
+ "netVolume": 328262.18747686263,
+ "pixelCount": 2101,
+ "pixelSize": 7.871993516829147
+}

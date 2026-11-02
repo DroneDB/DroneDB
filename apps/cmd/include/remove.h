@@ -14,7 +14,7 @@ namespace cmd
   public:
     Remove() {}
 
-    virtual void run(cxxopts::ParseResult &opts) override;
+    virtual int run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;
     virtual std::string description() override;
   };

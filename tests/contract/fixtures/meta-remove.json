@@ -1,0 +1,14 @@
+{
+  "call": "DDBMetaRemove(<root>, <id of the \"survey\" tag>)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "removed": 1
+  },
+  "schema": "meta-count.schema.json"
+}

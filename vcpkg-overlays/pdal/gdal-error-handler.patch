@@ -1,0 +1,282 @@
+diff --git a/pdal/Stage.cpp b/pdal/Stage.cpp
+index c171e20..03e80d6 100644
+--- a/pdal/Stage.cpp
++++ b/pdal/Stage.cpp
+@@ -155,10 +155,8 @@ QuickInfo Stage::preview()
+ {
+     m_args.reset(new ProgramArgs);
+     handleOptions();
+-    startLogging();
+-    QuickInfo qi = inspect();
+-    stopLogging();
+-    return qi;
++    LoggingScope logging(*this);
++    return inspect();
+ }
+ 
+ 
+@@ -184,21 +182,19 @@ void Stage::prepare(PointTableRef table)
+         Stage *s = *it;
+         s->m_args.reset(new ProgramArgs);
+         s->handleOptions();
+-        s->startLogging();
++        LoggingScope logging(*s);
+         s->l_initialize(table);
+         s->initialize(table);
+         s->addDimensions(table.layout());
+-        s->stopLogging();
+     }
+ 
+     // Call prepared() now that all stages are initialized.
+     for (auto it = stages.rbegin(); it != stages.rend(); it++)
+     {
+         Stage *s = *it;
+-        s->startLogging();
++        LoggingScope logging(*s);
+         s->l_prepared(table);
+         s->prepared(table);
+-        s->stopLogging();
+     }
+ }
+ 
+@@ -291,7 +287,7 @@ PointViewSet Stage::execute(PointTableRef table, PointViewSet& views)
+     PointViewSet outViews;
+     std::vector<StageRunnerPtr> runners;
+ 
+-    startLogging();
++    LoggingScope logging(*this);
+ 
+     // Put the spatial references from the views onto the table.
+     // The table's spatial references are only valid as long as the stage
+@@ -345,7 +341,6 @@ PointViewSet Stage::execute(PointTableRef table, PointViewSet& views)
+     }
+ 
+     done(table);
+-    stopLogging();
+     m_pointCount = 0;
+     m_faceCount = 0;
+     return outViews;
+@@ -386,8 +381,6 @@ void Stage::setupLog()
+     if (m_logLeader.size())
+         m_logLeader += " ";
+     m_logLeader += getName();
+-
+-    gdal::ErrorHandler::getGlobalErrorHandler().set(m_log, isDebug());
+ }
+ 
+ 
+diff --git a/pdal/Stage.hpp b/pdal/Stage.hpp
+index a4678a7..7cec009 100644
+--- a/pdal/Stage.hpp
++++ b/pdal/Stage.hpp
+@@ -260,6 +260,25 @@ public:
+     */
+     void stopLogging() const;
+ 
++    /**
++      Calls startLogging() when it is constructed and stopLogging() when it
++      is destroyed, so that the two stay paired when an exception leaves the
++      code between them.
++    */
++    class LoggingScope
++    {
++    public:
++        explicit LoggingScope(const Stage& stage) : m_stage(stage)
++            { m_stage.startLogging(); }
++        ~LoggingScope()
++            { m_stage.stopLogging(); }
++        LoggingScope(const LoggingScope&) = delete;
++        LoggingScope& operator=(const LoggingScope&) = delete;
++
++    private:
++        const Stage& m_stage;
++    };
++
+     /**
+       Determine whether the stage is in debug mode or not.
+ 
+diff --git a/pdal/Streamable.cpp b/pdal/Streamable.cpp
+index 767cba0..523827d 100644
+--- a/pdal/Streamable.cpp
++++ b/pdal/Streamable.cpp
+@@ -96,9 +96,10 @@ void Streamable::execute(StreamPointTable& table)
+         {
+             for (auto s : *this)
+             {
+-                s->startLogging();
+-                s->ready(table);
+-                s->stopLogging();
++                {
++                    Stage::LoggingScope logging(*s);
++                    s->ready(table);
++                }
+                 SpatialReference srs = s->getSpatialReference();
+                 if (!srs.empty())
+                     table.setSpatialReference(srs);
+@@ -109,9 +110,8 @@ void Streamable::execute(StreamPointTable& table)
+         {
+             for (auto s : *this)
+             {
+-                s->startLogging();
++                Stage::LoggingScope logging(*s);
+                 s->done(table);
+-                s->stopLogging();
+             }
+         }
+     };
+@@ -221,23 +221,23 @@ void Streamable::execute(StreamPointTable& table,
+         PointRef point(table, idx);
+         point_count_t pointLimit = (std::min)(count, table.capacity());
+ 
+-        reader->startLogging();
+-        // When we get false back from a reader, we're done, so set
+-        // the point limit to the number of points processed in this loop
+-        // of the table.
+-        if (!pointLimit)
+-            finished = true;
+-
+-        for (PointId idx = 0; idx < pointLimit; idx++)
+         {
+-            point.setPointId(idx);
+-            finished = !reader->processOne(point);
+-            if (finished)
+-                pointLimit = idx;
+-        }
+-        count -= pointLimit;
++            Stage::LoggingScope logging(*reader);
++            // When we get false back from a reader, we're done, so set
++            // the point limit to the number of points processed in this loop
++            // of the table.
++            if (!pointLimit)
++                finished = true;
+ 
+-        reader->stopLogging();
++            for (PointId idx = 0; idx < pointLimit; idx++)
++            {
++                point.setPointId(idx);
++                finished = !reader->processOne(point);
++                if (finished)
++                    pointLimit = idx;
++            }
++            count -= pointLimit;
++        }
+         srs = reader->getSpatialReference();
+         if (!srs.empty())
+             table.setSpatialReference(srs);
+@@ -254,7 +254,7 @@ void Streamable::execute(StreamPointTable& table,
+                 s->spatialReferenceChanged(srs);
+                 srsMap[s] = srs;
+             }
+-            s->startLogging();
++            Stage::LoggingScope logging(*s);
+ 
+             const expr::ConditionalExpression* where = s->whereExpr();
+             for (PointId idx = 0; idx < pointLimit; idx++)
+@@ -273,7 +273,6 @@ void Streamable::execute(StreamPointTable& table,
+                 srs = tempSrs;
+                 table.setSpatialReference(srs);
+             }
+-            s->stopLogging();
+         }
+ 
+         table.clear(pointLimit);
+diff --git a/pdal/private/gdal/ErrorHandler.cpp b/pdal/private/gdal/ErrorHandler.cpp
+index 44d34dd..c79923f 100644
+--- a/pdal/private/gdal/ErrorHandler.cpp
++++ b/pdal/private/gdal/ErrorHandler.cpp
+@@ -73,7 +73,7 @@ void trampoline(::CPLErr code, int num, char const* msg)
+ /**
+   Constructor for a GDAL error handler.
+ */
+-ErrorHandler::ErrorHandler() : m_errorNum(0), m_prevHandler(nullptr)
++ErrorHandler::ErrorHandler() : m_errorNum(0), m_depth(0), m_prevHandler(nullptr)
+ {
+     std::string value;
+ 
+@@ -98,11 +98,15 @@ ErrorHandler::~ErrorHandler()
+ */
+ void ErrorHandler::set(LogPtr log, bool debug)
+ {
+-    // Set an error handler
+-    if (m_prevHandler == nullptr)
+-        m_prevHandler = CPLSetErrorHandler(&trampoline);
+     setLog(log);
+     setDebug(debug);
++
++    // Install the handler for the first call only, so that the handler
++    // saved is the one GDAL had and not our own.
++    std::lock_guard<std::mutex> lock(m_installMutex);
++    if (m_depth == 0)
++        m_prevHandler = CPLSetErrorHandler(&trampoline);
++    m_depth++;
+ }
+ 
+ 
+@@ -111,8 +115,19 @@ void ErrorHandler::set(LogPtr log, bool debug)
+ */
+ void ErrorHandler::clear()
+ {
+-    CPLSetErrorHandler(m_prevHandler);
+-    m_prevHandler = nullptr;
++    std::lock_guard<std::mutex> lock(m_installMutex);
++
++    // Nothing to undo. Restoring here would install a null handler, which
++    // is GDAL's default one, over whatever the application installed.
++    if (m_depth == 0)
++        return;
++
++    m_depth--;
++    if (m_depth == 0)
++    {
++        CPLSetErrorHandler(m_prevHandler);
++        m_prevHandler = nullptr;
++    }
+ }
+ 
+ 
+diff --git a/pdal/private/gdal/ErrorHandler.hpp b/pdal/private/gdal/ErrorHandler.hpp
+index 923810a..3057213 100644
+--- a/pdal/private/gdal/ErrorHandler.hpp
++++ b/pdal/private/gdal/ErrorHandler.hpp
+@@ -64,8 +64,10 @@ public:
+     static ErrorHandler& getGlobalErrorHandler();
+ 
+     /**
+-      Set the log and debug state of the error handler.  This is
+-      a convenience and is equivalent to calling setLog() and setDebug().
++      Set the log and debug state of the error handler and install it as
++      GDAL's error handler.  Calls nest: the handler that was installed
++      before the first call is saved, and each call must be paired with a
++      call to clear().
+ 
+       \param log  Log to write to.
+       \param doDebug  Debug state of the error handler.
+@@ -74,7 +76,9 @@ public:
+ 
+ 
+     /**
+-      Clear an error handler.
++      Undo one call to set().  When the last call is undone, GDAL's error
++      handler is restored to the one that was installed before the first
++      call.  A call that is not paired with a call to set() is ignored.
+     */
+     void clear();
+ 
+@@ -108,10 +112,17 @@ public:
+ 
+ private:
+     std::mutex m_mutex;
++    // Guards m_depth and m_prevHandler.  Not m_mutex: GDAL calls handle()
++    // with its own lock held and takes it again in CPLSetErrorHandler().
++    std::mutex m_installMutex;
+     bool m_debug;
+     pdal::LogPtr m_log;
+     mutable int m_errorNum;
+     bool m_cplSet;
++    // Number of set() calls not yet cleared.
++    int m_depth;
++    // The handler GDAL had before the first set(). Never null while
++    // m_depth is not zero.
+     CPLErrorHandler m_prevHandler;
+ };
+ 

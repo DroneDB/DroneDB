@@ -3,104 +3,83 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "dbops.h"
+#include "json.h"
 #include "info.h"
 #include "exceptions.h"
+#include "mio.h"
+
+#include <optional>
 
 namespace ddb
 {
 
-    void info(const std::vector<std::string> &input, std::ostream &output,
-              const std::string &format, bool recursive, int maxRecursionDepth, const std::string &geometry,
-              bool withHash, bool stopOnError)
+    namespace
     {
+        // The GeoJSON feature collection wraps the features; entries without a geometry are left out
+        constexpr const char *kFeatureCollectionOpen =
+            R"<<<({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"EPSG:4326"}},"features":[)<<<";
+        constexpr const char *kFeatureCollectionClose = "]}";
+    } // namespace
+
+    void info(const std::vector<std::string> &input, std::ostream &output, const InfoOptions &options)
+    {
+        const OutputFormat format = options.format;
         std::vector<fs::path> filePaths;
 
-        if (recursive)
+        if (options.recursive)
         {
-            filePaths = getPathList(input, true, maxRecursionDepth);
+            filePaths = getPathList(input, true, options.maxRecursionDepth);
         }
         else
         {
-            filePaths = std::vector<fs::path>(input.begin(), input.end());
+            filePaths = io::fromUtf8(input);
         }
 
-        if (format == "json")
-        {
-            output << "[";
-        }
-        else if (format == "geojson")
-        {
-            output << R"<<<({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"EPSG:4326"}},"features":[)<<<";
-        }
-        else if (format == "text")
-        {
-            // Nothing
-        }
-        else
-        {
-            throw InvalidArgsException("Invalid format " + format);
-        }
-
-        bool first = true;
+        // Text is written entry by entry; the JSON formats are arrays of members
+        std::optional<JsonArrayWriter> writer;
+        if (format == OutputFormat::Json)
+            writer.emplace(output);
+        else if (format == OutputFormat::GeoJson)
+            writer.emplace(output, kFeatureCollectionOpen, kFeatureCollectionClose);
 
         for (auto &fp : filePaths)
         {
-            LOGD << "Parsing entry " << fp.string();
+            LOGD << "Parsing entry " << io::toUtf8(fp);
 
             try
             {
                 Entry e;
-                parseEntry(fp, "/", e, withHash);
+                parseEntry(fp, "/", e, options.withHash);
                 // We override e.path because it's relative
                 // But we want the absolute path (in the unix path format)
-                e.path = "file://" + fs::absolute(fp).generic_string();
+                e.path = "file://" + io::toGenericUtf8(fs::absolute(fp));
 
-                if (format == "json")
+                switch (format)
                 {
-                    json j;
-                    e.toJSON(j);
-                    if (!first)
-                        output << ",";
-                    output << j.dump();
-                }
-                else if (format == "geojson")
-                {
-                    json j;
-                    if (e.toGeoJSON(j, ddb::getBasicGeometryTypeFromName(geometry)))
-                    {
-                        if (!first)
-                            output << ",";
-                        output << j.dump();
-                        j.clear();
-                    }
+                case OutputFormat::Json:
+                    writer->write(e);
+                    break;
+                case OutputFormat::GeoJson:
+                    if (const auto feature = e.toGeoJSON(ddb::getBasicGeometryTypeFromName(options.geometry)))
+                        writer->write(*feature);
                     else
-                    {
-                        LOGD << "No geometries in " << fp.string() << ", skipping from GeoJSON export";
-                    }
-                }
-                else
-                {
+                        LOGD << "No geometries in " << io::toUtf8(fp) << ", skipping from GeoJSON export";
+                    break;
+                case OutputFormat::Text:
                     output << e.toString() << "\n";
+                    break;
                 }
-
-                first = false;
             }
             catch (const AppException &e)
             {
-                LOGD << "Cannot parse " << fp.string() << ", skipping: " << e.what();
-                if (stopOnError)
-                    throw e;
+                LOGD << "Cannot parse " << io::toUtf8(fp) << ", skipping: " << e.what();
+                if (options.stopOnError)
+                    throw;
             }
         }
 
-        if (format == "json")
-        {
-            output << "]";
-        }
-        else if (format == "geojson")
-        {
-            output << "]}";
-        }
+        if (writer)
+            writer->finish();
     }
 
 }

@@ -1,6 +1,6 @@
 
 # glob sources
-file(GLOB SOURCES "*.cpp")
+file(GLOB SOURCES CONFIGURE_DEPENDS "*.cpp")
 
 # Add sources to SRC_LIST
 set(SRC_LIST

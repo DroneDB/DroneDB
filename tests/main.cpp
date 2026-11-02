@@ -4,18 +4,28 @@
 
 #include <gtest/gtest.h>
 #include "logger.h"
-#include "ddb.h"
+#include "process_init.h"
 #include "utils.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "win_crash_report.h"
 #include <fstream>
 #include <iostream>
+#include <cstdlib>
 #include <cstring>
 
 int main(int argc, char **argv)
 {
+    installWindowsCrashReport();
 
-    DDBRegisterProcess(true);
+    // The profile and the caches of libddb (artefacts, thumbnails, tiles, templates, auth.json)
+    // are this process's own, in its test folder: tests of different processes (ctest -j) never
+    // share a cache file, and none touches the one of the user who runs them. A DDB_HOME that
+    // the caller set stays (the tests that run this binary as a child pass theirs).
+    if (!std::getenv("DDB_HOME"))
+        setEnv("DDB_HOME", (TestArea::processRoot() / "home").string());
+
+    ddb::registerProcess(true);
 
 
     bool cleanTestData = false;
@@ -70,6 +80,18 @@ int main(int argc, char **argv)
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - time).count();
 
     std::cout << "Tests finished in " << toHumanReadableTime(duration) << std::endl;
+
+    // Every test thread is joined: GDAL's worker threads are joined now, not left to GDAL's
+    // DllMain after ExitProcess terminated them (process_init.h)
+    ddb::finalizeProcess();
+
+    // The test areas of this process (TestArea::processRoot) are removed when it ends, but not
+    // after a failure: they are what to look at
+    if (res != 0)
+    {
+        TestArea::keepProcessRoot();
+        std::cout << "Test areas kept in " << TestArea::processRoot().string() << std::endl;
+    }
 
     return res;
 

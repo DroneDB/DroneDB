@@ -9,6 +9,7 @@
 #include "tagmanager.h"
 #include "dbops.h"
 #include "fs.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -30,13 +31,13 @@ namespace cmd
         return "Gets or sets the dataset tag.";
     }
 
-    void Tag::run(cxxopts::ParseResult &opts)
+    int Tag::run(cxxopts::ParseResult &opts)
     {
         const auto tag = opts["tag"].as<std::string>();
 
         const auto currentPath = std::filesystem::current_path();
 
-        const auto db = ddb::open(currentPath.string(), true);
+        const auto db = ddb::open(ddb::io::toUtf8(currentPath), true);
 
         ddb::TagManager manager(db.get());
 
@@ -54,6 +55,7 @@ namespace cmd
                 std::cout << res << std::endl;
             }
         }
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

@@ -1,0 +1,233 @@
+{
+ "fgb3035": {
+  "point": "POINT Z (10.040029 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 44.99996950765 0, 10.08005738111 44.99996950765 0, 10.08005738111 45.05003048029 0, 10 45.05003048029 0, 10 44.99996950765 0))",
+  "type": 14,
+  "vector": {
+   "driver": "FlatGeobuf",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      44.99996950765385,
+      10.080057381113221,
+      45.050030480285294
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "fgb3857": {
+  "point": "POINT Z (10.040000 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.08 45 0, 10.08 45.05 0, 10 45.05 0, 10 45 0))",
+  "type": 14,
+  "vector": {
+   "driver": "FlatGeobuf",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      44.999999999999986,
+      10.079999999999998,
+      45.04999999999999
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "fgb4258": {
+  "point": "POINT Z (10.040000 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.08 45 0, 10.08 45.05 0, 10 45.05 0, 10 45 0))",
+  "type": 14,
+  "vector": {
+   "driver": "FlatGeobuf",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      45.0,
+      10.08,
+      45.05
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "geojson4326": {
+  "point": "POINT Z (10.040000 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.08 45 0, 10.08 45.05 0, 10 45.05 0, 10 45 0))",
+  "type": 14,
+  "vector": {
+   "driver": "GeoJSON",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      45.0,
+      10.08,
+      45.05
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "gpkg3035": {
+  "point": "POINT Z (10.040029 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 44.99996950765 0, 10.08005738111 44.99996950765 0, 10.08005738111 45.05003048029 0, 10 45.05003048029 0, 10 44.99996950765 0))",
+  "type": 14,
+  "vector": {
+   "driver": "GPKG",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      44.99996950765385,
+      10.080057381113221,
+      45.050030480285294
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "gpkg32632": {
+  "point": "POINT Z (10.040115 45.024999 0.000000)",
+  "polygon": "POLYGONZ ((9.999478047942 44.99927332186 0, 10.08075245771 44.99927332186 0, 10.08075245771 45.05072541582 0, 9.999478047942 45.05072541582 0, 9.999478047942 44.99927332186 0))",
+  "type": 14,
+  "vector": {
+   "driver": "GPKG",
+   "layers": [
+    {
+     "extent": [
+      9.999478047941937,
+      44.99927332186109,
+      10.080752457709103,
+      45.050725415821
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "gpkg3857": {
+  "point": "POINT Z (10.040000 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.08 45 0, 10.08 45.05 0, 10 45.05 0, 10 45 0))",
+  "type": 14,
+  "vector": {
+   "driver": "GPKG",
+   "layers": [
+    {
+     "extent": [
+      10.000000000000002,
+      44.999999999999986,
+      10.079999999999995,
+      45.04999999999999
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "gpkg4258": {
+  "point": "POINT Z (10.040000 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.08 45 0, 10.08 45.05 0, 10 45.05 0, 10 45 0))",
+  "type": 14,
+  "vector": {
+   "driver": "GPKG",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      45.0,
+      10.08,
+      45.05
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "gpkg4326": {
+  "point": "POINT Z (10.040000 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.08 45 0, 10.08 45.05 0, 10 45.05 0, 10 45 0))",
+  "type": 14,
+  "vector": {
+   "driver": "GPKG",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      45.0,
+      10.08,
+      45.05
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "boxes"
+    }
+   ]
+  }
+ },
+ "shp3035": {
+  "point": "POINT Z (10.040029 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 44.99996950765 0, 10.08005738111 44.99996950765 0, 10.08005738111 45.05003048029 0, 10 45.05003048029 0, 10 44.99996950765 0))",
+  "type": 14,
+  "vector": {
+   "driver": "ESRI Shapefile",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      44.99996950765385,
+      10.080057381113221,
+      45.050030480285294
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "shp3035"
+    }
+   ]
+  }
+ },
+ "shp4258": {
+  "point": "POINT Z (10.040000 45.025000 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.08 45 0, 10.08 45.05 0, 10 45.05 0, 10 45 0))",
+  "type": 14,
+  "vector": {
+   "driver": "ESRI Shapefile",
+   "layers": [
+    {
+     "extent": [
+      10.0,
+      45.0,
+      10.08,
+      45.05
+     ],
+     "featureCount": 2,
+     "geometryType": "Polygon",
+     "name": "shp4258"
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,100 @@
+{
+  "call": "DDBInfo([<root>/DJI_0018.JPG], format=\"json\", recursive=false, maxRecursionDepth=0, geometry=\"auto\", withHash=true, stopOnError=true)",
+  "description": "test_data images/DJI_0018.JPG (DJI drone image) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "depth"
+    ]
+  },
+  "output": [
+    {
+      "depth": 0,
+      "hash": "2ce07a031764b0c67da1226327c804c6100ef243ca88d01804a5fc2080394b17",
+      "mtime": 1700000000,
+      "path": "file://<root>/DJI_0018.JPG",
+      "point_geom": {
+        "crs": {
+          "properties": {
+            "name": "EPSG:4326"
+          },
+          "type": "name"
+        },
+        "geometry": {
+          "coordinates": [
+            -91.99455988888889,
+            46.842607083333334,
+            198.30999755859375
+          ],
+          "type": "Point"
+        },
+        "properties": {},
+        "type": "Feature"
+      },
+      "polygon_geom": {
+        "crs": {
+          "properties": {
+            "name": "EPSG:4326"
+          },
+          "type": "name"
+        },
+        "geometry": {
+          "coordinates": [
+            [
+              [
+                -91.9946977338554,
+                46.842964997231924,
+                158.5099983215332
+              ],
+              [
+                -91.9950761686676,
+                46.84271189347757,
+                158.5099983215332
+              ],
+              [
+                -91.99442040670127,
+                46.84225026546232,
+                158.5099983215332
+              ],
+              [
+                -91.99404197212225,
+                46.84250336706982,
+                158.5099983215332
+              ],
+              [
+                -91.9946977338554,
+                46.842964997231924,
+                158.5099983215332
+              ]
+            ]
+          ],
+          "type": "Polygon"
+        },
+        "properties": {},
+        "type": "Feature"
+      },
+      "properties": {
+        "cameraPitch": -89.9000015258789,
+        "cameraRoll": 0.0,
+        "cameraYaw": 45.0,
+        "captureTime": 1466717519000.0,
+        "focalLength": 3.4222222222222225,
+        "focalLength35": 20.0,
+        "hasCameraOrientation": true,
+        "height": 2250,
+        "make": "DJI",
+        "model": "FC300S",
+        "orientation": 1,
+        "sensor": "dji fc300s",
+        "sensorHeight": 3.4650000000000003,
+        "sensorWidth": 6.16,
+        "width": 4000
+      },
+      "size": 4024770,
+      "type": 3
+    }
+  ],
+  "schema": "entries.schema.json"
+}

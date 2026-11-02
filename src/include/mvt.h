@@ -5,7 +5,6 @@
 #define MVT_H
 
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb
 {
@@ -70,7 +69,7 @@ namespace ddb
      *                       If <= 0 (single point / empty), returns ::kMvtMaxZoomCap.
      * @return MAXZOOM in [::kMvtMinZoomCap, ::kMvtMaxZoomCap].
      */
-    DDB_DLL int computeMvtMaxZoom(long long featureCount, double extentAreaDeg2);
+    int computeMvtMaxZoom(long long featureCount, double extentAreaDeg2);
 
 } // namespace ddb
 

@@ -1,0 +1,86 @@
+{
+  "call": "DDBStac(<root>, entry=\"\", stacCollectionRoot=\"https://hub.example/orgs/contract/ds/fixtures\", id=\"contract\", stacCatalogRoot=\"https://hub.example\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "assets": {
+      "a.txt": {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/download?path=a.txt",
+        "title": "a.txt"
+      }
+    },
+    "description": "contract",
+    "extent": {
+      "spatial": {
+        "bbox": [
+          [
+            8.25,
+            45.15347718317,
+            9.000203550941,
+            46.841
+          ]
+        ]
+      },
+      "temporal": {
+        "interval": [
+          [
+            "2024-05-06T05:08:09Z",
+            "2024-05-06T05:08:09Z"
+          ]
+        ]
+      }
+    },
+    "id": "contract",
+    "license": "proprietary",
+    "links": [
+      {
+        "href": "https://hub.example/stac",
+        "rel": "root",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/stac",
+        "rel": "parent",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+        "rel": "self",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac/Y2xvdWQubGFz",
+        "rel": "item",
+        "title": "cloud.las",
+        "type": "application/geo+json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac/bGF5ZXIuZ2VvanNvbg==",
+        "rel": "item",
+        "title": "layer.geojson",
+        "type": "application/geo+json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac/b3J0aG8udGlm",
+        "rel": "item",
+        "title": "ortho.tif",
+        "type": "application/geo+json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac/c3ViL2ltZy5qcGc=",
+        "rel": "item",
+        "title": "sub/img.jpg",
+        "type": "application/geo+json"
+      }
+    ],
+    "stac_version": "1.1.0",
+    "title": "contract",
+    "type": "Collection"
+  },
+  "schema": "stac-collection.schema.json"
+}

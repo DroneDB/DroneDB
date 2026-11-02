@@ -1,0 +1,1 @@
+{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"field","area":12.5},"geometry":{"type":"Polygon","coordinates":[[[8.25,46.84],[8.251,46.84],[8.251,46.841],[8.25,46.841],[8.25,46.84]]]}},{"type":"Feature","properties":{"name":"well","area":0},"geometry":{"type":"Point","coordinates":[8.2505,46.8405]}}]}

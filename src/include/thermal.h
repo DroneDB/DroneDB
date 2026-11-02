@@ -4,11 +4,11 @@
 #ifndef THERMAL_H
 #define THERMAL_H
 
+#include <optional>
 #include <string>
 #include <vector>
 #include <cstdint>
-#include "ddb_export.h"
-#include "json.h"
+#include "json_fwd.h"
 
 namespace ddb {
 
@@ -28,35 +28,6 @@ struct ThermalCalibration {
     bool valid = false;
 };
 
-struct ThermalInfo {
-    ThermalCalibration calibration;
-    double temperatureMin = 0.0;
-    double temperatureMax = 0.0;
-    bool isDirectTemperature = false;
-    std::string sensorId;
-    int width = 0;
-    int height = 0;
-};
-
-struct ThermalPoint {
-    double temperature = 0.0;
-    double rawValue = 0.0;
-    int x = 0;
-    int y = 0;
-    double geoX = 0.0;
-    double geoY = 0.0;
-    bool hasGeo = false;
-};
-
-struct ThermalAreaStats {
-    double min = 0.0;
-    double max = 0.0;
-    double mean = 0.0;
-    double stddev = 0.0;
-    double median = 0.0;
-    int pixelCount = 0;
-};
-
 // R-JPEG raw thermal data extracted from FLIR APP1 segment
 struct RawThermalData {
     std::vector<uint16_t> data;
@@ -66,21 +37,32 @@ struct RawThermalData {
 };
 
 // Detection
-DDB_DLL bool isThermalImage(const std::string &filePath);
-DDB_DLL bool isThermalImageFromExif(const std::string &make, const std::string &model);
+
+// Whether the tags of an image say it is thermal: the make and model of its camera (EXIF), the
+// FLIR XMP namespace or the thermal tags of DJI. The tags are read with metadata-util, which the
+// host starts and the raster helper never does: the helper gets this answer in its request.
+bool hasThermalTags(const std::string &filePath);
+
+// Whether an image or a raster is thermal: its tags (hasThermalTags), the FLIR segment of an
+// R-JPEG, or the GDAL metadata of a single-band raster (thermal keywords, a temperature unit, the
+// scale and offset of Landsat). thermalTags is what hasThermalTags says of the file when the caller
+// knows it: then no tag is read, and the FLIR segment is found by the sizes of the common thermal
+// sensors (this is how the raster helper asks). Without it the tags are read here, on the host.
+bool isThermalImage(const std::string &filePath, std::optional<bool> thermalTags = std::nullopt);
+bool isThermalImageFromExif(const std::string &make, const std::string &model);
 
 // Calibration extraction
-DDB_DLL ThermalCalibration extractThermalCalibration(const std::string &filePath);
+ThermalCalibration extractThermalCalibration(const std::string &filePath);
 
 // R-JPEG raw data extraction
-DDB_DLL RawThermalData extractRawThermalData(const std::string &filePath);
+RawThermalData extractRawThermalData(const std::string &filePath);
 
 // Temperature conversion
-DDB_DLL double rawToTemperature(uint16_t raw, const ThermalCalibration &cal);
-DDB_DLL std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal);
+double rawToTemperature(uint16_t raw, const ThermalCalibration &cal);
+std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal);
 
 // Check if a GeoTIFF contains direct temperature values (e.g., ODM output)
-DDB_DLL bool isDirectTemperatureRaster(const std::string &filePath);
+bool isDirectTemperatureRaster(const std::string &filePath);
 
 // Internal shared helpers used by raster_analysis.cpp.
 // They live here so that thermal-specific code (Planck calibration, R-JPEG extraction)
@@ -94,9 +76,9 @@ struct TemperatureData {
     std::string projection;
 };
 
-DDB_DLL TemperatureData readTemperatureData(const std::string &filePath);
-DDB_DLL void pixelToGeo(double px, double py, const double geoTransform[6],
-                        const std::string &projection, double &geoX, double &geoY);
+TemperatureData readTemperatureData(const std::string &filePath);
+void pixelToGeo(double px, double py, const double geoTransform[6],
+                const std::string &projection, double &geoX, double &geoY);
 
 } // namespace ddb
 

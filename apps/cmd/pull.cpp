@@ -8,9 +8,9 @@
 #include <constants.h>
 #include <ddb.h>
 #include <mio.h>
+#include <registry_ops.h>
 #include <registryutils.h>
 #include <tagmanager.h>
-#include <url.h>
 #include <userprofile.h>
 
 #include <fstream>
@@ -18,6 +18,7 @@
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "include/credentials.h"
 
 namespace cmd
 {
@@ -26,12 +27,12 @@ namespace cmd
         // clang-format off
         opts
             .positional_help("[args]")
-            .custom_help("pull")
-            .add_options()
-            ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
+            .custom_help("pull");
+        cmd::addRemoteOption(opts);
+        opts.add_options()
             ("t,keep-theirs", "Keep changes from remote registry and override local ones", cxxopts::value<bool>()->default_value("false"))
-            ("o,keep-ours", "Keep local changes override remote ones", cxxopts::value<bool>()->default_value("false"))
-            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
+            ("o,keep-ours", "Keep local changes override remote ones", cxxopts::value<bool>()->default_value("false"));
+        cmd::addInsecureOption(opts);
 
         // clang-format on
         // opts.parse_positional({"remote"});
@@ -42,34 +43,24 @@ namespace cmd
         return "Pulls changes from a remote repository.";
     }
 
-    void Pull::run(cxxopts::ParseResult &opts)
+    int Pull::run(cxxopts::ParseResult &opts)
     {
-        try
-        {
-            // const auto force = opts["force"].as<bool>();
-            const auto keepTheirs = opts["keep-theirs"].as<bool>();
-            const auto keepOurs = opts["keep-ours"].as<bool>();
+        // Errors reach Command::run: stderr and a non-zero exit (invalid args also print usage)
+        // const auto force = opts["force"].as<bool>();
+        const auto keepTheirs = opts["keep-theirs"].as<bool>();
+        const auto keepOurs = opts["keep-ours"].as<bool>();
 
-            auto remote = opts["remote"].as<std::string>();
-            auto sslVerify = opts["insecure"].count() == 0;
+        auto remote = opts["remote"].as<std::string>();
+        auto sslVerify = opts["insecure"].count() == 0;
 
-            ddb::MergeStrategy mergeStrategy = ddb::MergeStrategy::DontMerge;
-            if (keepTheirs)
-                mergeStrategy = ddb::MergeStrategy::KeepTheirs;
-            else if (keepOurs)
-                mergeStrategy = ddb::MergeStrategy::KeepOurs;
+        ddb::MergeStrategy mergeStrategy = ddb::MergeStrategy::DontMerge;
+        if (keepTheirs)
+            mergeStrategy = ddb::MergeStrategy::KeepTheirs;
+        else if (keepOurs)
+            mergeStrategy = ddb::MergeStrategy::KeepOurs;
 
-            ddb::pull(remote, mergeStrategy, sslVerify);
-        }
-        catch (ddb::IndexException &e)
-        {
-            std::cout << e.what() << std::endl;
-        }
-        catch (ddb::InvalidArgsException &ex)
-        {
-            std::cout << ex.what() << std::endl;
-            printHelp();
-        }
+        ddb::pull(remote, mergeStrategy, sslVerify, credentials(), std::cout, registryDeps());
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

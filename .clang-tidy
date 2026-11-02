@@ -1,0 +1,35 @@
+# clang-tidy checks for DroneDB. CI runs them on the lines a change touches only
+# (scripts/lint-changed-lines.sh tidy), report-only for now: no mass rewrite of existing code.
+#
+# Disabled checks, and why:
+#   modernize-use-trailing-return-type  a style rule, not a fix: it would flag every function
+#                                        declaration in the codebase (all use leading return types).
+#   modernize-use-nodiscard             flags every const getter; adding [[nodiscard]] across the
+#                                        public headers is an API decision, not a per-line fix.
+#   modernize-avoid-c-arrays            fixed-size buffers handed to C APIs (GDAL, OpenSSL, SQLite)
+#                                        are the norm here; std::array adds .data() noise only.
+#   bugprone-easily-swappable-parameters  fires on nearly every function taking two paths, two
+#                                        coordinates or two sizes; there is no per-line fix.
+#   bugprone-narrowing-conversions      duplicates -Wconversion, which the compiler warning ratchet
+#                                        (scripts/check-warnings.py) already tracks.
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  cppcoreguidelines-owning-memory,
+  cert-err58-cpp,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-avoid-c-arrays,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions
+
+# Report-only: CI prints the findings on changed lines but does not fail on them yet.
+WarningsAsErrors: ''
+
+# Diagnostics in our own headers only (src/include, apps/cmd/include, tests); vendor and vcpkg
+# headers are system headers and are never reported.
+HeaderFilterRegex: '.*/(src|apps|tests)/.*'
+
+FormatStyle: file

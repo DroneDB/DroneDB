@@ -1,0 +1,49 @@
+{
+  "call": "DDBMetaDump(<root>, \"[]\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "sortBy": [
+      "path",
+      "key",
+      "data"
+    ],
+    "volatileKeys": [
+      "id",
+      "mtime"
+    ]
+  },
+  "output": [
+    {
+      "data": "\"Contract dataset\"",
+      "id": "<volatile>",
+      "key": "name",
+      "mtime": 0,
+      "path": ""
+    },
+    {
+      "data": "\"2024\"",
+      "id": "<volatile>",
+      "key": "tags",
+      "mtime": 0,
+      "path": ""
+    },
+    {
+      "data": "\"survey\"",
+      "id": "<volatile>",
+      "key": "tags",
+      "mtime": 0,
+      "path": ""
+    },
+    {
+      "data": "{\"level\":2,\"note\":\"tree\"}",
+      "id": "<volatile>",
+      "key": "annotation",
+      "mtime": 0,
+      "path": "sub/img.jpg"
+    }
+  ],
+  "schema": "meta-dump.schema.json"
+}

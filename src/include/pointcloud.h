@@ -6,14 +6,10 @@
 
 #include <string>
 #include <vector>
-#include "ddb_export.h"
-#include "json.h"
+#include "build_budget.h"
+#include "build_layout.h"
+#include "json_fwd.h"
 #include "basicgeometry.h"
-
-namespace pdal
-{
-    class PointView;
-}
 
 namespace ddb
 {
@@ -26,39 +22,37 @@ namespace ddb
         std::vector<double> bounds;
         BasicPointGeometry centroid;
         BasicPolygonGeometry polyBounds;
+        /// Why polyBounds and centroid are empty although the file has a coordinate reference
+        /// system and bounds (a CRS that has no transformation to EPSG:4326, for one); "" otherwise.
+        /// The native bounds are kept: a build needs no footprint. Not part of the properties JSON.
+        std::string footprintWarning;
 
-        json toJSON();
     };
 
-    struct PointColor
-    {
-        uint8_t r;
-        uint8_t g;
-        uint8_t b;
-        uint8_t a = 0;
-    };
+    /// The properties of a point cloud entry: {"pointCount", "projection", "dimensions"}
+    void to_json(json &j, const PointCloudInfo &info);
 
-    DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyboundsSrs = 4326);
+    bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyboundsSrs = 4326);
 
     // Reads metadata from a built COPC (.copc.laz) file. `span` returns an estimated
     // root-node span (in points along the side of the root cube) used for tile-zoom heuristics,
     // analogous to the EPT span field.
-    DDB_DLL bool getCopcInfo(const std::string &copcPath, PointCloudInfo &info, int polyboundsSrs = 4326, int *span = nullptr);
+    bool getCopcInfo(const std::string &copcPath, PointCloudInfo &info, int polyboundsSrs = 4326, int *span = nullptr);
 
     // Builds a Cloud Optimized Point Cloud (COPC) file from one or more input
     // point cloud files. Output is a single file named `cloud.copc.laz` placed inside `outdir`.
-    DDB_DLL void buildCopc(const std::vector<std::string> &filenames, const std::string &outdir);
+    // Untwine builds it when it is installed (with its own fixed thread count: options do not
+    // bound it); otherwise, or when Untwine fails, PDAL's writers.copc does, on the threads of one
+    // build (DDB_BUILD_THREADS, lowered to options.threads).
+    void buildCopc(const std::vector<std::string> &filenames, const std::string &outdir,
+                   const BuildOptions &options = {});
 
-    DDB_DLL std::vector<PointColor> normalizeColors(const std::shared_ptr<pdal::PointView>& point_view);
-    DDB_DLL std::vector<PointColor> generateZBasedColors(const std::shared_ptr<pdal::PointView>& point_view, double minZ, double maxZ);
-    DDB_DLL void translateToLas(const std::string &input, const std::string &outputLas);
+    void translateToLas(const std::string &input, const std::string &outputLas);
 
-    // Standard layout of the COPC build artifact within an entry's build folder.
-    constexpr const char* CopcBuildSubfolder = "copc";
-    constexpr const char* CopcFileName = "cloud.copc.laz";
+    // The COPC artifact names (CopcBuildSubfolder, CopcFileName) are in build_layout.h.
 
     // Returns true if the path looks like a COPC file (i.e. ends with .copc.laz).
-    DDB_DLL bool isCopcPath(const std::string &filename);
+    bool isCopcPath(const std::string &filename);
 
 }
 

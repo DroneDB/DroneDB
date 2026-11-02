@@ -3,20 +3,64 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_utils.h"
 
+#include <cmath>
+#include <string>
+
+#include "cpl_error.h"
+#include "exceptions.h"
+
 namespace ddb {
+
+void requireGeoTransform(GDALDatasetH ds, double gt[6], const std::string &name) {
+    if (GDALGetGeoTransform(ds, gt) != CE_None)
+        throw GDALException("Raster has no geotransform: " + name);
+}
+
+
+BandNodata readBandNodata(GDALRasterBandH band) {
+    BandNodata nd;
+    int has = 0;
+    nd.value = GDALGetRasterNoDataValue(band, &has);
+    nd.has = has != 0;
+    return nd;
+}
+
+double alphaOpaqueValue(GDALRasterBandH alphaBand) {
+    // A band with nothing to sample (every pixel nodata) reports an error that is not one here
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    double minMax[2] = {0.0, 0.0};
+    const bool sampled = GDALComputeRasterMinMax(alphaBand, TRUE, minMax) == CE_None;
+    CPLPopErrorHandler();
+
+    if (sampled && minMax[1] > 0.0) {
+        // The all-ones value that holds the maximum: 2^bits - 1
+        const double bits = std::ceil(std::log2(std::ceil(minMax[1]) + 1.0));
+        return std::ldexp(1.0, static_cast<int>(bits)) - 1.0;
+    }
+
+    const GDALDataType type = GDALGetRasterDataType(alphaBand);
+    if (GDALDataTypeIsFloating(type)) return 1.0;
+    const int bits = GDALGetDataTypeSizeBits(type) - (GDALDataTypeIsSigned(type) ? 1 : 0);
+    return std::ldexp(1.0, bits) - 1.0;
+}
 
 RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount) {
     RasterBandNodata info;
     info.alphaBandIdx = -1;
-    info.hasNodata.resize(bandCount, 0);
-    info.nodataValues.resize(bandCount, 0.0);
+    info.bands.resize(bandCount);
 
     for (int b = 0; b < bandCount; b++) {
         GDALRasterBandH hBand = GDALGetRasterBand(hDataset, b + 1);
         if (GDALGetRasterColorInterpretation(hBand) == GCI_AlphaBand) {
             info.alphaBandIdx = b;
         }
-        info.nodataValues[b] = GDALGetRasterNoDataValue(hBand, &info.hasNodata[b]);
+        info.bands[b] = readBandNodata(hBand);
+    }
+
+    // A mask kept for the whole dataset; a nodata mask is the nodata compare already
+    if (info.alphaBandIdx < 0 && bandCount > 0) {
+        const int flags = GDALGetMaskFlags(GDALGetRasterBand(hDataset, 1));
+        info.datasetMask = (flags & GMF_PER_DATASET) != 0 && (flags & GMF_NODATA) == 0;
     }
 
     return info;
@@ -26,33 +70,28 @@ void premaskNodata(const std::vector<float*>& bandPtrs,
                    size_t pixelCount,
                    int bandCount,
                    const RasterBandNodata& info,
-                   float outputNodata) {
+                   float outputNodata,
+                   const uint8_t* datasetMask) {
     for (size_t i = 0; i < pixelCount; i++) {
-        bool masked = false;
+        bool masked = datasetMask != nullptr && datasetMask[i] == 0;
 
-        if (info.alphaBandIdx >= 0 && bandPtrs[info.alphaBandIdx][i] == 0.0f) {
+        if (!masked && info.alphaBandIdx >= 0 && bandPtrs[info.alphaBandIdx] && bandPtrs[info.alphaBandIdx][i] == 0.0f) {
             masked = true;
         }
 
         if (!masked) {
             for (int b = 0; b < bandCount; b++) {
-                if (b == info.alphaBandIdx) continue;
-                if (info.hasNodata[b]) {
-                    const double sampleValue = static_cast<double>(bandPtrs[b][i]);
-                    const bool isNodata =
-                        (std::isnan(info.nodataValues[b]) && std::isnan(sampleValue)) ||
-                        (!std::isnan(info.nodataValues[b]) && sampleValue == info.nodataValues[b]);
-                    if (isNodata) {
-                        masked = true;
-                        break;
-                    }
+                if (b == info.alphaBandIdx || !bandPtrs[b]) continue;
+                if (isNodata(bandPtrs[b][i], info.bands[b])) {
+                    masked = true;
+                    break;
                 }
             }
         }
 
         if (masked) {
             for (int b = 0; b < bandCount; b++) {
-                bandPtrs[b][i] = outputNodata;
+                if (bandPtrs[b]) bandPtrs[b][i] = outputNodata;
             }
         }
     }

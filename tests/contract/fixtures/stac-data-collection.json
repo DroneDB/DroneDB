@@ -1,0 +1,43 @@
+{
+  "call": "DDBStacData(<root>, entry=NULL)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "assets": {
+      "a.txt": {
+        "title": "a.txt"
+      }
+    },
+    "description": "dataset",
+    "extent": {
+      "spatial": {
+        "bbox": [
+          [
+            8.25,
+            45.15347718317,
+            9.000203550941,
+            46.841
+          ]
+        ]
+      },
+      "temporal": {
+        "interval": [
+          [
+            "2024-05-06T05:08:09Z",
+            "2024-05-06T05:08:09Z"
+          ]
+        ]
+      }
+    },
+    "license": "proprietary",
+    "stac_version": "1.1.0",
+    "title": "dataset",
+    "type": "Collection"
+  },
+  "schema": "stac-data-collection.schema.json"
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb entry list",
+  "description": "DDBList and DDBListEntries (withDetails=true) in json format, DDBInfo (json), DDBAdd",
+  "type": "array",
+  "items": {
+    "$ref": "entry.schema.json"
+  }
+}

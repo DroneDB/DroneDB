@@ -1,0 +1,186 @@
+{
+ "dem32": {
+  "error": "GDALNearblack failed to create output: <dir>/dem32_masked.tif"
+ },
+ "dem64": {
+  "error": "GDALNearblack failed to create output: <dir>/dem64_masked.tif"
+ },
+ "gray8": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Gray",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 96,
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "JPEG",
+   "INTERLEAVE": "BAND",
+   "JPEGTABLESMODE": "1",
+   "JPEG_QUALITY": "75",
+   "LAYOUT": "COG"
+  },
+  "width": 96
+ },
+ "rgb16": {
+  "error": "3- and 4-band masking require 8-bit Byte input (RGB/RGBA orthophoto); got UInt16"
+ },
+ "rgb8": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Red",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Green",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Blue",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 96,
+  "pixels": "fb54e356fc8df53a",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "YCbCr JPEG",
+   "INTERLEAVE": "PIXEL",
+   "JPEGTABLESMODE": "1",
+   "JPEG_QUALITY": "75",
+   "LAYOUT": "COG",
+   "SOURCE_COLOR_SPACE": "YCbCr"
+  },
+  "width": 96
+ },
+ "rgb8_nodata": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Red",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Green",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Blue",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 96,
+  "pixels": "fb54e356fc8df53a",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "YCbCr JPEG",
+   "INTERLEAVE": "PIXEL",
+   "JPEGTABLESMODE": "1",
+   "JPEG_QUALITY": "75",
+   "LAYOUT": "COG",
+   "SOURCE_COLOR_SPACE": "YCbCr"
+  },
+  "width": 96
+ },
+ "rgba8": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Red",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Green",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Blue",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 96,
+  "pixels": "c7f968b9c6e0aab3",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "2"
+  },
+  "width": 96
+ },
+ "rgbn8": {
+  "error": "4-band input must be RGBA (band 4 must be an alpha channel); for multispectral rasters (e.g. RGB+NIR) use the multispectral pipeline"
+ },
+ "u16": {
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Gray",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 96,
+  "pixels": "3e156a6ce58cad58",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "BAND",
+   "LAYOUT": "COG",
+   "PREDICTOR": "2"
+  },
+  "width": 96
+ }
+}

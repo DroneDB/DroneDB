@@ -5,16 +5,15 @@
 #define AUTHCREDENTIALS_H
 
 #include <string>
-#include "ddb_export.h"
 
 struct AuthCredentials
 {
     std::string username;
     std::string password;
 
-    DDB_DLL AuthCredentials();
-    DDB_DLL AuthCredentials(const std::string &username, const std::string &password);
-    DDB_DLL bool empty() const;
+    AuthCredentials();
+    AuthCredentials(const std::string &username, const std::string &password);
+    bool empty() const;
 };
 
 #endif // AUTHCREDENTIALS_H

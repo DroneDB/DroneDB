@@ -2,10 +2,42 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "mio.h"
-#include "utils.h"
+
+#include <cerrno>
+#include <chrono>
+#include <climits>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <fstream>
+#include <iomanip>
+#include <iterator>
+#include <sstream>
+#include <thread>
+
+#include <fcntl.h>
+
+#include "exceptions.h"
+#include "logger.h"
+#include "randomutil.h"
+#include "stringutil.h"
+
+#ifdef _WIN32
+#include <io.h>  // _wopen, _close, _wunlink, _get_osfhandle
+#include <windows.h>
+#else
+#include <dlfcn.h>     // dladdr
+#include <sys/file.h>  // flock
+#include <unistd.h>    // close, unlink, readlink
+#endif
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#endif
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
 #endif
 
 namespace ddb
@@ -13,195 +45,180 @@ namespace ddb
     namespace io
     {
 
+        bool isNetworkPath(const std::string &path)
+        {
+            return path.starts_with("http://") || path.starts_with("https://");
+        }
+
+        std::string lowerExtension(const fs::path &p)
+        {
+            std::string ext = io::toUtf8(p.extension());
+            if (ext.empty())
+                return ext;
+            ext.erase(0, 1);
+            str::toLower(ext);
+            return ext;
+        }
+
         bool Path::checkExtension(const std::initializer_list<std::string> &matches) const
         {
-            std::string ext = p.extension().string();
-            if (ext.size() < 1)
+            const std::string ext = lowerExtension(p);
+            if (ext.empty())
                 return false;
-            std::string extLowerCase = ext.substr(1, ext.length());
-            utils::toLower(extLowerCase);
 
-            for (auto &m : matches)
-            {
-                std::string ext = m;
-                utils::toLower(ext);
-                if (ext == extLowerCase)
+            for (const auto &m : matches)
+                if (str::iequals(m, ext))
                     return true;
-            }
             return false;
+        }
+
+        namespace
+        {
+            // A file time as the whole seconds since the Unix epoch (rounded down, also before
+            // 1970) and the sub-second part the file system keeps. std::chrono::clock_cast is
+            // the portable C++20 spelling of the conversion: MSVC has no file_clock::to_sys.
+            struct UnixTime
+            {
+                std::chrono::seconds seconds;
+                double fraction; // [0, 1)
+            };
+
+            UnixTime toUnixTime(fs::file_time_type t)
+            {
+                const auto sys = std::chrono::clock_cast<std::chrono::system_clock>(t);
+                const auto whole = std::chrono::floor<std::chrono::seconds>(sys);
+                return {whole.time_since_epoch(),
+                        std::chrono::duration<double>(sys - whole).count()};
+            }
+
+            fs::file_time_type fromUnixTime(std::chrono::seconds seconds, std::chrono::nanoseconds nanoseconds)
+            {
+                const std::chrono::sys_time<std::chrono::nanoseconds> sys(seconds + nanoseconds);
+                // Round down to the file clock's own tick (100 ns on Windows) BEFORE the clock
+                // conversion: clock_cast keeps the finer duration, and the 1601 -> 1970 offset
+                // (1.16e19 ns) overflows a 64-bit nanosecond count, so the time stored would be
+                // garbage and last_write_time would fail with ERROR_INVALID_PARAMETER.
+                return std::chrono::clock_cast<fs::file_time_type::clock>(
+                    std::chrono::floor<fs::file_time_type::duration>(sys));
+            }
+
+            // What a failed file system call says: "<what> <path> (<reason>)"
+            [[noreturn]] void throwFsError(const char *what, const fs::path &p, const std::error_code &ec)
+            {
+                throw FSException(std::string(what) + " " + io::toUtf8(p) + " (" + ec.message() + ")");
+            }
         }
 
         time_t Path::getModifiedTime()
         {
-#ifdef WIN32
-            HANDLE hFile;
-            FILETIME ftModified;
-            hFile = CreateFileW(p.wstring().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
-            if (hFile == INVALID_HANDLE_VALUE)
-            {
-                throw FSException("Cannot stat mtime (open) " + p.string() + " (errcode: " + std::to_string(GetLastError()) + ")");
-            }
-
-            if (!GetFileTime(hFile, NULL, NULL, &ftModified))
-            {
-                CloseHandle(hFile);
-                throw FSException("Cannot stat mtime (get time) " + p.string());
-            }
-
-            CloseHandle(hFile);
-
-            // Get the number of seconds since January 1, 1970 12:00am UTC
-            LARGE_INTEGER li;
-            li.LowPart = ftModified.dwLowDateTime;
-            li.HighPart = ftModified.dwHighDateTime;
-
-            const int64_t UNIX_TIME_START = 0x019DB1DED53E8000; // January 1, 1970 (start of Unix epoch) in "ticks"
-            const int64_t TICKS_PER_SECOND = 10000000;          // a tick is 100ns
-
-            // Convert ticks since 1/1/1970 into seconds
-            return (li.QuadPart - UNIX_TIME_START) / TICKS_PER_SECOND;
-#else
-            struct stat result;
-            if (stat(p.string().c_str(), &result) == 0)
-            {
-                return result.st_mtime;
-            }
-            else
-            {
-                throw FSException("Cannot stat mtime " + p.string());
-            }
-#endif
+            std::error_code ec;
+            const auto mtime = fs::last_write_time(p, ec);
+            if (ec)
+                throwFsError("Cannot stat mtime", p, ec);
+            return static_cast<time_t>(toUnixTime(mtime).seconds.count());
         }
 
-        bool Path::setModifiedTime(time_t mtime)
+        FileState Path::getState()
         {
-#ifdef WIN32
-            if (getModifiedTime() != mtime)
+            std::error_code ec;
+            const fs::file_status status = fs::status(p, ec);
+            if (ec)
+                throwFsError("Cannot stat", p, ec);
+
+            FileState state;
+            state.directory = status.type() == fs::file_type::directory;
+            if (!state.directory)
             {
-                HANDLE hFile;
-                FILETIME ftModified;
-                FILETIME ftCreated;
-                FILETIME ftAccessed;
-                hFile = CreateFileW(p.wstring().c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_WRITE_ATTRIBUTES, NULL);
-                if (hFile == INVALID_HANDLE_VALUE)
-                {
-                    throw FSException("Cannot stat (open) " + p.string() +
-                                      " (errcode: " + std::to_string(GetLastError()) +
-                                      ")");
-                }
-
-                if (!GetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified))
-                {
-                    CloseHandle(hFile);
-                    throw FSException("Cannot stat mtime (set time) " + p.string());
-                }
-
-                const int64_t UNIX_TIME_START =
-                    0x019DB1DED53E8000;                    // January 1, 1970 (start of Unix epoch) in
-                                                           // "ticks"
-                const int64_t TICKS_PER_SECOND = 10000000; // a tick is 100ns
-
-                // Change only mtime
-                LARGE_INTEGER li;
-                li.QuadPart = (mtime * TICKS_PER_SECOND) + UNIX_TIME_START;
-
-                ftModified.dwLowDateTime = li.LowPart;
-                ftModified.dwHighDateTime = li.HighPart;
-
-                if (!SetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified))
-                {
-                    CloseHandle(hFile);
-                    throw FSException("Cannot set mtime " + p.string());
-                }
-
-                CloseHandle(hFile);
-
-                return true;
+                state.size = fs::file_size(p, ec);
+                if (ec)
+                    throwFsError("Cannot stat size", p, ec);
             }
-            else
-            {
+
+            const auto mtime = fs::last_write_time(p, ec);
+            if (ec)
+                throwFsError("Cannot stat mtime", p, ec);
+            const UnixTime t = toUnixTime(mtime);
+            state.mtime = static_cast<double>(t.seconds.count()) + t.fraction;
+            return state;
+        }
+
+        double Path::getModifiedTimePrecise()
+        {
+            std::error_code ec;
+            const auto mtime = fs::last_write_time(p, ec);
+            if (ec)
+                throwFsError("Cannot stat mtime", p, ec);
+            const UnixTime t = toUnixTime(mtime);
+            return static_cast<double>(t.seconds.count()) + t.fraction;
+        }
+
+        bool Path::setModifiedTimePrecise(double mtime)
+        {
+            if (sameModifiedTime(mtime, getModifiedTimePrecise()))
                 return false;
-            }
-#else
-            struct stat sres;
-            if (stat(p.string().c_str(), &sres) != 0)
-            {
-                throw FSException("Cannot stat " + p.string());
-            }
 
-            if (sres.st_mtime != mtime)
-            {
-                struct utimbuf t;
-                t.modtime = mtime;
-                t.actime = sres.st_atime;
-                if (utime(p.string().c_str(), &t) != 0)
-                {
-                    throw FSException("Cannot set mtime " + p.string());
-                }
-                return true;
-            }
-            else
-            {
-                return false;
-            }
-#endif
+            const double seconds = std::floor(mtime);
+            const auto nanoseconds = std::min<long long>(std::llround((mtime - seconds) * 1e9), 999999999);
+
+            std::error_code ec;
+            fs::last_write_time(p,
+                                fromUnixTime(std::chrono::seconds(static_cast<long long>(seconds)),
+                                             std::chrono::nanoseconds(nanoseconds)),
+                                ec);
+            if (ec)
+                throwFsError("Cannot set mtime", p, ec);
+            return true;
+        }
+
+        bool sameModifiedTime(double stored, double file)
+        {
+            if (stored == std::floor(stored))
+                return std::floor(file) == stored;
+            return std::abs(stored - file) < 1e-6;
         }
 
         std::uintmax_t Path::getSize()
         {
-#ifdef WIN32
-            HANDLE hFile;
-            hFile = CreateFileW(p.wstring().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
-            if (hFile == INVALID_HANDLE_VALUE)
+            std::error_code ec;
+            const auto size = fs::file_size(p, ec);
+            if (ec)
+                throwFsError("Cannot stat size", p, ec);
+            return size;
+        }
+
+        namespace
+        {
+            // Absolute, normalized, without a trailing separator
+            std::string normalizedAbsolute(const fs::path &path)
             {
-                throw FSException("Cannot stat size (open) " + p.string() + " (errcode: " + std::to_string(GetLastError()));
+                std::string s = io::toUtf8(fs::weakly_canonical(fs::absolute(path)));
+                if (s.length() > 1 && s.back() == fs::path::preferred_separator)
+                    s.pop_back();
+                return s;
             }
 
-            LARGE_INTEGER size;
-            if (!GetFileSizeEx(hFile, &size))
+            // Whether normalized `child` is below normalized `parent` (prefixed by it AND followed
+            // by a separator: /foo is not a parent of /foobar)
+            bool isBelow(const std::string &parent, const std::string &child)
             {
-                CloseHandle(hFile);
-                throw FSException("Cannot stat size (getfilesize) " + p.string());
+                return child.size() > parent.size() && child.starts_with(parent) &&
+                       (parent.back() == fs::path::preferred_separator ||
+                        child[parent.size()] == fs::path::preferred_separator);
             }
-            CloseHandle(hFile);
-            return size.QuadPart;
-#else
-            struct stat result;
-            if (stat(p.string().c_str(), &result) == 0)
-            {
-                return result.st_size;
-            }
-            else
-            {
-                throw FSException("Cannot stat size " + p.string());
-            }
-#endif
         }
 
         bool Path::hasChildren(const std::vector<std::string> &childPaths)
         {
             try
             {
-                std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
-                if (absP.length() > 1 && absP.back() == fs::path::preferred_separator)
-                    absP.pop_back();
+                const std::string absP = normalizedAbsolute(p);
 
                 for (auto &cp : childPaths)
                 {
-                    std::string absC = fs::weakly_canonical(fs::absolute(cp)).string();
-                    if (absC.length() > 1 && absC.back() == fs::path::preferred_separator)
-                        absC.pop_back();
+                    const std::string absC = normalizedAbsolute(io::fromUtf8(cp));
 
                     // A path is contained within itself (e.g. `ddb add .` from project root).
-                    if (absC == absP)
-                        continue;
-
-                    // Must be prefixed by the parent path AND followed by a path
-                    // separator (avoid false prefix matches like /foo vs /foobar).
-                    if (absC.rfind(absP, 0) != 0)
-                        return false;
-                    if (absC.length() > absP.length() &&
-                        absC[absP.length()] != fs::path::preferred_separator)
+                    if (absC != absP && !isBelow(absP, absC))
                         return false;
                 }
 
@@ -218,13 +235,7 @@ namespace ddb
         {
             try
             {
-                std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
-                if (absP.length() > 1 && absP.back() == fs::path::preferred_separator)
-                    absP.pop_back();
-                std::string absC = fs::weakly_canonical(fs::absolute(childPath)).string();
-                if (absC.length() > 1 && absC.back() == fs::path::preferred_separator)
-                    absC.pop_back();
-                return absC.rfind(absP, 0) == 0 && absP != absC;
+                return isBelow(normalizedAbsolute(p), normalizedAbsolute(childPath));
             }
             catch (const fs::filesystem_error &e)
             {
@@ -251,7 +262,7 @@ namespace ddb
             for (auto const &it : p)
             {
                 if (it.c_str()[0] != fs::path::preferred_separator &&
-                    it.string() != fs::current_path().root_name())
+                    it != fs::current_path().root_name())
                     count++;
             }
             return std::max(count - 1, 0);
@@ -261,8 +272,11 @@ namespace ddb
         {
             try
             {
+                const fs::path absPath = weakly_canonical(absolute(p));
+                const fs::path absParent = weakly_canonical(absolute(parent));
+
                 // Special case where parent == path
-                if (weakly_canonical(absolute(p)) == weakly_canonical(absolute(parent)))
+                if (absPath == absParent)
                 {
                     return fs::path("");
                 }
@@ -271,13 +285,14 @@ namespace ddb
                 // in this case we return the relative canonical absolute path
                 if (parent == parent.root_path() || parent == "/")
                 {
-                    return fs::weakly_canonical(fs::absolute(p)).relative_path();
+                    return absPath.relative_path();
                 }
 
-                fs::path relPath = relative(weakly_canonical(absolute(p)), weakly_canonical(absolute(parent)));
-                if (relPath.generic_string() == ".")
+                // What fs::relative() returns, without canonicalizing both paths again
+                fs::path relPath = absPath.lexically_relative(absParent);
+                if (io::toGenericUtf8(relPath) == ".")
                 {
-                    return weakly_canonical(absolute(parent));
+                    return absParent;
                 }
 
                 return relPath;
@@ -298,7 +313,7 @@ namespace ddb
 
         std::string Path::generic() const
         {
-            std::string res = p.generic_string();
+            std::string res = io::toGenericUtf8(p);
 
             // Remove trailing slash from directory (unless "/")
             if (res.length() > 1 && res[res.length() - 1] == '/')
@@ -307,29 +322,90 @@ namespace ddb
             return res;
         }
 
-        std::string Path::string() const
+#ifdef _WIN32
+        namespace
         {
-            return p.string();
+            // The file name of a module (nullptr: the executable) of any length: GetModuleFileNameW
+            // cuts the name to the buffer and returns its size, so the buffer grows until the name
+            // fits. Empty when the call fails.
+            fs::path moduleFilePath(HMODULE module)
+            {
+                constexpr DWORD kMaxWideChars = 32768; // the longest path of Windows
+                std::wstring name(MAX_PATH, L'\0');
+                while (true)
+                {
+                    const DWORD length = GetModuleFileNameW(module, name.data(), static_cast<DWORD>(name.size()));
+                    if (length == 0)
+                        return {};
+                    if (length < name.size())
+                    {
+                        name.resize(length);
+                        return fs::path(name);
+                    }
+                    if (name.size() >= kMaxWideChars)
+                        return {};
+                    name.resize(name.size() * 2);
+                }
+            }
         }
+#endif
 
         fs::path getExeFolderPath()
         {
 #ifdef WIN32
-            wchar_t path[MAX_PATH] = {0};
-            GetModuleFileNameW(NULL, path, MAX_PATH);
-            return fs::path(path).parent_path();
+            return moduleFilePath(nullptr).parent_path();
 #elif __APPLE__
             char result[PATH_MAX];
             uint32_t size = sizeof(result);
             if (_NSGetExecutablePath(result, &size) == 0)
             {
-                return fs::path(result).parent_path();
+                return fromUtf8(result).parent_path();
             }
             return fs::path("");
 #else
             char result[PATH_MAX];
             ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-            return fs::path(std::string(result, static_cast<size_t>((count > 0) ? count : 0))).parent_path();
+            return fromUtf8(std::string_view(result, static_cast<size_t>((count > 0) ? count : 0))).parent_path();
+#endif
+        }
+
+        namespace
+        {
+            // Any object of this module: its address tells which file the module was loaded from
+            const char kModuleAnchor = 0;
+        }
+
+        fs::path getLibraryFolderPath()
+        {
+#ifdef _WIN32
+            HMODULE module = nullptr;
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCWSTR>(&kModuleAnchor), &module) == 0)
+            {
+                LOGD << "GetModuleHandleExW failed, error = " << GetLastError();
+                return {};
+            }
+
+            const fs::path file = moduleFilePath(module);
+            if (file.empty())
+            {
+                LOGD << "GetModuleFileNameW failed, error = " << GetLastError();
+                return {};
+            }
+            return file.parent_path();
+#else
+            Dl_info info{};
+            if (dladdr(&kModuleAnchor, &info) == 0 || info.dli_fname == nullptr || *info.dli_fname == '\0')
+                return {};
+
+            // The loader reports the name it was given, which can be relative or a symlink
+            // (a libddb.so linked into /usr/local/lib from a build folder): the tools are
+            // next to the file itself
+            const fs::path loaded = fromUtf8(info.dli_fname);
+            std::error_code ec;
+            const fs::path resolved = fs::canonical(loaded, ec);
+            return (ec ? fs::absolute(loaded, ec) : resolved).parent_path();
 #endif
         }
 
@@ -337,10 +413,11 @@ namespace ddb
         {
             // Attempt to find a path within the places we would
             // usually look for DATA files.
-            const char *ddb_data_path = std::getenv("DDB_DATA");
-            if (ddb_data_path && fs::exists(fs::path(ddb_data_path) / p))
+            if (const auto ddbDataPath = getEnvUtf8("DDB_DATA"))
             {
-                return fs::path(ddb_data_path) / p;
+                const fs::path candidate = fromUtf8(*ddbDataPath) / p;
+                if (fs::exists(candidate))
+                    return candidate;
             }
 
             fs::path exePath = getExeFolderPath();
@@ -360,33 +437,12 @@ namespace ddb
                 return cwd / p;
             }
 
-#ifdef WIN32
-            // Check same location as DLL
-            char dllPath[MAX_PATH];
-            HMODULE hm = NULL;
-
-            if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                      GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                  (LPCSTR)&getDataPath, &hm) == 0)
+            if (const fs::path libDir = getLibraryFolderPath(); !libDir.empty() && fs::exists(libDir / p))
             {
-                int ret = GetLastError();
-                LOGD << "GetModuleHandle failed, error = " << ret;
-                return "";
+                return libDir / p;
             }
 
-            if (GetModuleFileName(hm, dllPath, sizeof(dllPath)) == 0)
-            {
-                int ret = GetLastError();
-                LOGD << "GetModuleFileName failed, error = " << ret;
-                return "";
-            }
-
-            fs::path dllDir = (fs::path(dllPath)).parent_path();
-            if (fs::exists(dllDir / p))
-            {
-                return dllDir / p;
-            }
-#else
+#ifndef _WIN32
             // On *nix, check /usr/share /usr/local/share folders
             fs::path usrLocalShare = fs::path("/usr/local/share/ddb");
             if (fs::exists(usrLocalShare / p))
@@ -415,15 +471,12 @@ namespace ddb
 
         fs::path getCwd()
         {
-            char result[PATH_MAX];
-#ifdef WIN32
-            if (_getcwd(result, PATH_MAX) == NULL)
+            // Not _getcwd: it returns the folder in the ANSI code page on Windows
+            std::error_code ec;
+            fs::path cwd = fs::current_path(ec);
+            if (ec)
                 throw FSException("Cannot get cwd");
-#else
-            if (getcwd(result, PATH_MAX) == NULL)
-                throw FSException("Cannot get cwd");
-#endif
-            return fs::path(result);
+            return cwd;
         }
 
         std::string bytesToHuman(std::uintmax_t bytes)
@@ -485,7 +538,7 @@ namespace ddb
                 {
                     for (auto it = paths.begin() + 1; it != paths.end(); it++)
                     {
-                        if (std::next(it->begin(), i)->string() != std::next(smallest.begin(), i)->string())
+                        if (*std::next(it->begin(), i) != *std::next(smallest.begin(), i))
                         {
                             smallest = smallest.parent_path();
                             maxComponents--;
@@ -532,7 +585,7 @@ namespace ddb
             }
             else
             {
-                throw FSException(d.string() + " is not a valid directory (there might be a file with the same name).");
+                throw FSException(io::toUtf8(d) + " is not a valid directory (there might be a file with the same name).");
             }
         }
 
@@ -544,7 +597,7 @@ namespace ddb
                 // For some reason sometimes this is zero (success)?
                 if (e.value() != 0)
                 {
-                    throw FSException(d.string() + " is not a valid directory (error: " + e.message() + ").", e);
+                    throw FSException(io::toUtf8(d) + " is not a valid directory (error: " + e.message() + ").", e);
                 }
             }
         }
@@ -574,13 +627,72 @@ namespace ddb
 
             if (e.value())
             {
-                throw FSException(p.string() + " cannot be removed, error: " + e.message());
+                throw FSException(io::toUtf8(p) + " cannot be removed, error: " + e.message());
             }
 
             if (fs::exists(p))
             {
-                throw FSException(p.string() + " cannot be removed after multiple attempts");
+                throw FSException(io::toUtf8(p) + " cannot be removed after multiple attempts");
             }
+        }
+
+        ScopedTempDir::~ScopedTempDir()
+        {
+            reset();
+        }
+
+        ScopedTempDir::ScopedTempDir(ScopedTempDir &&other) noexcept : path_(other.release())
+        {
+        }
+
+        ScopedTempDir &ScopedTempDir::operator=(ScopedTempDir &&other) noexcept
+        {
+            if (this != &other)
+                reset(other.release());
+            return *this;
+        }
+
+        ScopedTempDir ScopedTempDir::create(const fs::path &parent, const std::string &prefix)
+        {
+            ScopedTempDir dir(parent / (prefix + randomString(16)));
+            createDirectories(dir.path());
+            return dir;
+        }
+
+        ScopedTempDir ScopedTempDir::createBeside(const fs::path &folder, const std::string &tag)
+        {
+            fs::path absolute = fs::absolute(folder.empty() ? fs::path(".") : folder).lexically_normal();
+            if (absolute.filename().empty())
+                absolute = absolute.parent_path(); // "a/b/" names b
+            if (absolute.filename().empty() || absolute == absolute.root_path())
+                throw FSException("Cannot create a folder beside " + toUtf8(folder) + ": it has no parent folder");
+            return create(absolute.parent_path(), toUtf8(absolute.filename()) + "-" + tag);
+        }
+
+        void ScopedTempDir::reset(fs::path p) noexcept
+        {
+            const fs::path old = std::exchange(path_, std::move(p));
+            if (old.empty())
+                return;
+            // Runs during stack unwinding too: never throw
+            try
+            {
+                std::error_code ec;
+                if (fs::exists(old, ec))
+                {
+                    LOGD << "Removing temporary " << io::toUtf8(old);
+                    assureIsRemoved(old);
+                }
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Cannot remove temporary " << io::toUtf8(old) << ": " << e.what();
+            }
+        }
+
+        fs::path ScopedTempDir::release() noexcept
+        {
+            return std::exchange(path_, fs::path());
         }
 
         void copy(const fs::path &from, const fs::path &to)
@@ -590,7 +702,7 @@ namespace ddb
             fs::copy(from, to, fs::copy_options::overwrite_existing, e);
             if (e.value() != 0)
             {
-                throw FSException("Cannot copy " + from.string() + " --> " + to.string() +
+                throw FSException("Cannot copy " + io::toUtf8(from) + " --> " + io::toUtf8(to) +
                                   " (" + e.message() + ")", e);
             }
         }
@@ -601,7 +713,7 @@ namespace ddb
             fs::create_hard_link(target, linkName, e);
             if (e.value() != 0)
             {
-                throw FSException("Cannot create hard link " + target.string() + " --> " + linkName.string() +
+                throw FSException("Cannot create hard link " + io::toUtf8(target) + " --> " + io::toUtf8(linkName) +
                                   " (" + e.message() + ")");
             }
         }
@@ -617,7 +729,7 @@ namespace ddb
             }
             catch (const FSException &)
             {
-                LOGD << "Falling back hard link to copy for " + target.string() + " --> " + linkName.string();
+                LOGD << "Falling back hard link to copy for " + io::toUtf8(target) + " --> " + io::toUtf8(linkName);
                 io::copy(target, linkName);
             }
         }
@@ -628,19 +740,55 @@ namespace ddb
             fs::remove(p, e);
             if (e.value() != 0)
             {
-                throw FSException("Cannot remove " + p.string() + " (" + e.message() + ")");
+                throw FSException("Cannot remove " + io::toUtf8(p) + " (" + e.message() + ")");
             }
         }
 
-        bool exists(const fs::path p)
+        bool isSamePath(const fs::path &a, const fs::path &b)
         {
-            std::error_code e;
-            bool val = fs::exists(p, e);
-            if (e.value() != 0)
-            {
+            if (a.empty() || b.empty())
                 return false;
+            std::error_code e;
+            if (fs::exists(a, e) && !e && fs::exists(b, e) && !e)
+            {
+                const bool same = fs::equivalent(a, b, e);
+                return same && !e;
             }
-            return val;
+
+            // Lexical form when the file system cannot resolve the path
+            const auto canonical = [](const fs::path &p)
+            {
+                std::error_code e;
+                fs::path abs = fs::absolute(p, e);
+                if (e)
+                    abs = p;
+                const fs::path c = fs::weakly_canonical(abs, e);
+                return e ? abs.lexically_normal() : c;
+            };
+            return canonical(a) == canonical(b);
+        }
+
+        std::vector<uint8_t> readAllBytes(const fs::path &p)
+        {
+            std::ifstream in(p, std::ios::binary | std::ios::ate);
+            if (!in)
+                throw FSException("Cannot open " + io::toUtf8(p));
+            const std::streamoff size = in.tellg();
+            if (size < 0)
+                throw FSException("Cannot read " + io::toUtf8(p));
+            std::vector<uint8_t> data(static_cast<size_t>(size));
+            in.seekg(0, std::ios::beg);
+            if (!in.read(reinterpret_cast<char *>(data.data()), size))
+                throw FSException("Cannot read " + io::toUtf8(p));
+            return data;
+        }
+
+        void assureDistinctOutput(const fs::path &input, const fs::path &output)
+        {
+            if (isSamePath(input, output))
+                throw InvalidArgsException("The output path " + io::toUtf8(output) +
+                                           " is the input file " + io::toUtf8(input) +
+                                           ": choose a different output path");
         }
 
         void rename(const fs::path &from, const fs::path &to)
@@ -649,13 +797,88 @@ namespace ddb
             fs::rename(from, to, e);
             if (e.value() != 0)
             {
-                throw FSException("Cannot move " + from.string() + " --> " + to.string() +
+                throw FSException("Cannot move " + io::toUtf8(from) + " --> " + io::toUtf8(to) +
                                   " (" + e.message() + ")", e);
             }
         }
 
-        FileLock::FileLock()
+        void writeFileAtomic(const fs::path &target, std::string_view content, const std::string &what,
+                             bool ownerOnly, const std::string &tempTag)
         {
+            const fs::path temporary = concat(target, tempTag + randomString(16));
+            try
+            {
+                std::ofstream out;
+                errno = 0;
+                out.open(temporary, std::ios::binary | std::ios::trunc);
+                const int openError = errno;
+                if (!out.is_open())
+                    throw FSException("Cannot open " + what + " " + toUtf8(temporary),
+                                      std::error_code(openError, std::generic_category()));
+#ifndef WIN32
+                if (ownerOnly)
+                {
+                    // Still empty: nothing readable by others exists at any time
+                    std::error_code permError;
+                    fs::permissions(temporary, fs::perms::owner_read | fs::perms::owner_write,
+                                    fs::perm_options::replace, permError);
+                    if (permError)
+                        throw FSException("Cannot restrict " + what + " " + toUtf8(temporary) + " to its owner (" +
+                                              permError.message() + ")",
+                                          permError);
+                }
+#else
+                (void)ownerOnly;
+#endif
+                errno = 0;
+                out.write(content.data(), static_cast<std::streamsize>(content.size()));
+                out.flush();
+                const int writeError = errno;
+                if (!out)
+                    throw FSException("Cannot write " + what + " " + toUtf8(temporary),
+                                      std::error_code(writeError, std::generic_category()));
+                errno = 0;
+                out.close();
+                const int closeError = errno;
+                if (out.fail())
+                    throw FSException("Cannot close " + what + " " + toUtf8(temporary),
+                                      std::error_code(closeError, std::generic_category()));
+#ifdef WIN32
+                // std::filesystem::rename does not replace an existing file on Windows.
+                if (!MoveFileExW(temporary.c_str(), target.c_str(),
+                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                {
+                    const std::error_code ec(GetLastError(), std::system_category());
+                    throw FSException("Cannot replace " + what + ": " + ec.message(), ec);
+                }
+#else
+                io::rename(temporary, target);
+#endif
+            }
+            catch (...)
+            {
+                std::error_code ignored;
+                fs::remove(temporary, ignored);
+                throw;
+            }
+        }
+
+        bool moveOrCopy(const fs::path &from, const fs::path &to)
+        {
+            std::error_code e;
+            const auto links = fs::hard_link_count(from, e);
+            if (!e && links == 1)
+            {
+                fs::rename(from, to, e);
+                if (!e)
+                    return true;
+                LOGD << "Cannot rename " << io::toUtf8(from) << " --> " << io::toUtf8(to) << " (" << e.message()
+                     << "), copying it";
+            }
+
+            io::copy(from, to);
+            io::remove(from);
+            return false;
         }
 
         FileLock::FileLock(const fs::path &p)
@@ -668,13 +891,56 @@ namespace ddb
             unlock();
         }
 
+        namespace
+        {
+#ifdef _WIN32
+            // Blocks until this handle holds an exclusive lock on the file (flock(LOCK_EX)); true
+            // when it does
+            bool lockExclusive(int fd)
+            {
+                HANDLE h = (HANDLE)_get_osfhandle(fd);
+                if (h == INVALID_HANDLE_VALUE)
+                    return false;
+
+                // The whole range from the start: the lock file is empty, and a lock of its size
+                // (zero bytes) excludes no one
+                OVERLAPPED ol;
+                memset(&ol, 0, sizeof ol);
+                return LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &ol) != 0;
+            }
+
+            int openLockFile(const std::string &utf8Path)
+            {
+                return _wopen(toWide(utf8Path).c_str(), O_CREAT | O_RDWR, 0644);
+            }
+
+            int closeLockFile(int fd) { return _close(fd); }
+#else
+            bool lockExclusive(int fd)
+            {
+                int r;
+                do
+                    r = ::flock(fd, LOCK_EX);
+                while (r == -1 && errno == EINTR);
+                return r == 0;
+            }
+
+            int openLockFile(const std::string &utf8Path)
+            {
+                return ::open(utf8Path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+            }
+
+            int closeLockFile(int fd) { return ::close(fd); }
+#endif
+        }
+
         void FileLock::lock(const fs::path &p)
         {
             if (!lockFile.empty())
                 throw ddb::AppException("lock() already called");
-            lockFile = (p.parent_path() / p.filename()).string() + ".lock";
+            lockFile = io::toUtf8(p.parent_path() / p.filename()) + ".lock"; // UTF-8
 
-            fd = _open(lockFile.c_str(), O_CREAT, 0644);
+            fd = openLockFile(lockFile);
             if (fd == -1)
             {
                 throw ddb::AppException("Cannot acquire lock " + lockFile);
@@ -682,7 +948,12 @@ namespace ddb
 
             // Block
             LOGD << "Acquiring lock " << lockFile;
-            flock(fd, LOCK_EX);
+            if (!lockExclusive(fd))
+            {
+                closeLockFile(fd);
+                fd = -1;
+                throw ddb::AppException("Cannot acquire lock " + lockFile);
+            }
         }
 
         void FileLock::unlock()
@@ -691,59 +962,17 @@ namespace ddb
             {
                 LOGD << "Freeing lock " + lockFile;
 
-                if (_close(fd) != 0)
+                // The file stays: a process that opened it before a removal would lock the old
+                // file while the next one creates and locks a new one, and on Windows a file being
+                // removed cannot be opened at all
+                if (closeLockFile(fd) != 0)
                 {
                     LOGD << "Cannot close lock " << lockFile;
-                }
-
-                if (_unlink(lockFile.c_str()) != 0)
-                {
-                    LOGD << "Cannot remove lock " << lockFile;
                 }
 
                 fd = -1;
             }
         }
-
-#ifdef WIN32
-        int flock(int fd, int operation)
-        {
-            HANDLE h = (HANDLE)_get_osfhandle(fd);
-
-            if (h == (HANDLE)-1)
-            {
-                errno = EBADF;
-                return -1;
-            }
-
-            operation &= ~LOCK_NB;
-
-            // We implement just LOCK_EX
-            if (LOCK_EX)
-            {
-                DWORD lower, upper;
-                OVERLAPPED ol;
-
-                int flags = LOCKFILE_EXCLUSIVE_LOCK;
-                lower = GetFileSize(h, &upper);
-                if (lower == INVALID_FILE_SIZE)
-                {
-                    errno = EBADF;
-                    return -1;
-                }
-
-                // start offset = 0
-                memset(&ol, 0, sizeof ol);
-
-                return LockFileEx(h, flags, 0, lower, upper, &ol);
-            }
-            else
-            {
-                errno = EINVAL;
-                return -1;
-            }
-        }
-#endif
 
     }
 }

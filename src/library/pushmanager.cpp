@@ -3,38 +3,31 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "pushmanager.h"
 
-#include "dbops.h"
-#include "fs.h"
+#include "exceptions.h"
+#include "json.h"
 #include "mio.h"
-#include "registry.h"
-#include "registryutils.h"
-#include "userprofile.h"
-#include "utils.h"
-#include <cpr/cpr.h>
 
 namespace ddb
 {
 
-    DDB_DLL PushInitResponse PushManager::init(const std::string &registryStampChecksum, const json &dbStamp)
+    std::string PushManager::endpoint(const std::string &name) const
     {
-        this->registry->ensureTokenValidity();
+        return "/orgs/" + this->organization + "/ds/" + this->dataset + "/push/" + name;
+    }
 
-        auto res = cpr::Post(cpr::Url(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
-                                                             this->dataset + "/push/init")),
-                             cpr::Payload{{"checksum", registryStampChecksum},
-                                          {"stamp", dbStamp.dump()}},
-                             utils::authHeader(this->registry->getAuthToken()),
-                             cpr::VerifySsl(this->registry->getSslVerify()));
+    PushInitResponse PushManager::init(const std::string &registryStampChecksum, const json &dbStamp)
+    {
+        const auto res = registry->postForm(endpoint("init"),
+                                            {{"checksum", registryStampChecksum}, {"stamp", dbStamp.dump()}},
+                                            AuthScheme::Bearer);
+        registry->expectOk(res);
 
-        if (res.status_code != 200)
-            this->registry->handleError(res);
-
-        json j = json::parse(res.text);
+        json j = json::parse(res.body);
 
         if (j.contains("pullRequired") && j["pullRequired"].get<bool>())
             throw PullRequiredException("The remote has new changes. Use \"ddb pull\" to get the latest changes before pushing.");
         if (!j.contains("neededFiles") || !j.contains("token") || !j.contains("neededMeta"))
-            this->registry->handleError(res);
+            registry->fail(res);
 
         PushInitResponse pir;
         pir.neededFiles = j["neededFiles"].get<std::vector<std::string>>();
@@ -43,47 +36,28 @@ namespace ddb
         return pir;
     }
 
-    DDB_DLL void PushManager::upload(const std::string &fullPath, const std::string &file, const std::string &token)
+    void PushManager::upload(const std::string &fullPath, const std::string &file, const std::string &token)
     {
-        this->registry->ensureTokenValidity();
-
-        auto res = cpr::Post(cpr::Url(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
-                                                             this->dataset + "/push/upload")),
-                             cpr::Multipart{{"file", cpr::File{fullPath}},
-                                            {"path", file},
-                                            {"token", token}},
-                             utils::authHeader(this->registry->getAuthToken()),
-                             cpr::VerifySsl(this->registry->getSslVerify()));
-
-        if (res.status_code != 200)
-            this->registry->handleError(res);
+        const auto res = registry->postMultipart(endpoint("upload"),
+                                                 {HttpPart::fromFile("file", io::fromUtf8(fullPath)),
+                                                  HttpPart::text("path", file),
+                                                  HttpPart::text("token", token)},
+                                                 AuthScheme::Bearer);
+        registry->expectOk(res);
     }
 
     void PushManager::meta(const json &metaDump, const std::string &token)
     {
-        auto res = cpr::Post(cpr::Url(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
-                                                             this->dataset + "/push/meta")),
-                             cpr::Payload{{"meta", metaDump.dump()},
-                                          {"token", token}},
-                             utils::authHeader(this->registry->getAuthToken()),
-                             cpr::VerifySsl(this->registry->getSslVerify()));
-
-        if (res.status_code != 200)
-            this->registry->handleError(res);
+        const auto res = registry->postForm(endpoint("meta"),
+                                            {{"meta", metaDump.dump()}, {"token", token}},
+                                            AuthScheme::Bearer);
+        registry->expectOk(res);
     }
 
-    DDB_DLL void PushManager::commit(const std::string &token)
+    void PushManager::commit(const std::string &token)
     {
-        this->registry->ensureTokenValidity();
-
-        auto res = cpr::Post(cpr::Url(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
-                                                             this->dataset + "/push/commit")),
-                             cpr::Payload{{"token", token}},
-                             utils::authHeader(this->registry->getAuthToken()),
-                             cpr::VerifySsl(this->registry->getSslVerify()));
-
-        if (res.status_code != 200)
-            this->registry->handleError(res);
+        const auto res = registry->postForm(endpoint("commit"), {{"token", token}}, AuthScheme::Bearer);
+        registry->expectOk(res);
     }
 
 } // namespace ddb

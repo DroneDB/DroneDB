@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb meta item",
+  "description": "DDBMetaAdd, DDBMetaSet, DDBMetaGet of a singular key",
+  "type": "object",
+  "required": [
+    "id",
+    "data",
+    "mtime"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "UUID"
+    },
+    "data": {
+      "description": "The JSON value stored"
+    },
+    "mtime": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix epoch seconds (integer)"
+    }
+  }
+}

@@ -5,54 +5,40 @@
 #ifndef DSMSERVICE_H
 #define DSMSERVICE_H
 
+// Elevations from a world DSM: the DSM rasters held in memory (dsm_cache.h), those downloaded
+// before into a folder of the disk, and a download of the DSM around the point when neither has
+// it (dsm_downloader.h, over an injected IHttpClient).
+
+#include <functional>
 #include <string>
-#include <vector>
-#include <unordered_map>
-#include <filesystem>
-#include "gdal_inc.h"
-#include "userprofile.h"
-#include "geo.h"
-#include "ddb_export.h"
 
-using namespace ddb;
-
-struct DSMCacheEntry
-{
-    unsigned int width, height;
-    int hasNodata;
-    float nodata;
-
-    double geoTransform[6];
-    std::vector<float> data;
-    BoundingBox<Point2D> bbox;
-
-    DDB_DLL DSMCacheEntry() : width(0), height(0), hasNodata(0), nodata(0)
-    {
-        memset(geoTransform, 0, sizeof(double) * 6);
-    }
-
-    DDB_DLL void loadData(GDALDatasetH hDataset);
-    DDB_DLL float getElevation(double latitude, double longitude);
-};
+#include "dsm_cache.h"
+#include "dsm_downloader.h"
+#include "dsm_reader.h"
+#include "fs.h"
+#include "http_client.h"
 
 class DSMService
 {
-    std::unordered_map<std::string, DSMCacheEntry> cache; // filename --> cache entry
-    DSMService();
-    ~DSMService();
-    static DSMService *instance;
-
-    static void cleanup();
+    ddb::DsmMemoryCache memory;
+    ddb::DsmDownloader downloader;
+    std::function<fs::path()> cacheDirectory;
 
 public:
-    DDB_DLL static DSMService *get();
+    // The service of the process: the user's cache folder and the library's HTTP client
+    static DSMService *get();
 
-    DDB_DLL float getAltitude(double latitude, double longitude);
+    // A service with its own HTTP client (it must outlive the service) and cache folder
+    DSMService(ddb::IHttpClient &client, std::function<fs::path()> cacheFolder);
 
-    DDB_DLL bool loadDiskCache(double latitude, double longitude);
-    DDB_DLL std::string loadFromNetwork(double latitude, double longitude);
-    DDB_DLL bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
-    DDB_DLL fs::path getCacheDir();
+    float getAltitude(double latitude, double longitude);
+
+    bool loadDiskCache(double latitude, double longitude);
+    std::string loadFromNetwork(double latitude, double longitude);
+    // Same, from the given service URL template (see buildDsmServiceUrl)
+    std::string loadFromNetwork(double latitude, double longitude, const std::string &urlTemplate);
+    bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
+    fs::path getCacheDir();
 };
 
 #endif // DSMSERVICE_H

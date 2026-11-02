@@ -1,0 +1,446 @@
+{
+  "call": "DDBGetRasterMetadata(<root>/ortho.tif, formula=NULL, bandFilter=NULL)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "algorithms": [
+      {
+        "expr": "(G - R) / (G + R - B)",
+        "help": "Areas of green vegetation on RGB images",
+        "id": "VARI",
+        "name": "Visual Atmospheric Resistance Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "expr": "(2 * G) - (R + B)",
+        "help": "Emphasizes green foliage",
+        "id": "EXG",
+        "name": "Excess Green Index"
+      },
+      {
+        "expr": "((G * 2) - R - B) / ((G * 2) + R + B)",
+        "help": "Green leaves and stems",
+        "id": "GLI",
+        "name": "Green Leaf Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "expr": "0.5268 * (R^-0.1294 * G^0.3389 * B^-0.3118)",
+        "help": "Approximated NDVI for RGB sensors",
+        "id": "vNDVI",
+        "name": "Visible NDVI"
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: RN",
+        "expr": "(N - R) / (N + R)",
+        "help": "Amount of green vegetation",
+        "id": "NDVI",
+        "name": "Normalized Difference Vegetation Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: GN",
+        "expr": "(G - N) / (G + N)",
+        "help": "Water content",
+        "id": "NDWI",
+        "name": "Normalized Difference Water Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: GN",
+        "expr": "(N - G) / (N + G)",
+        "help": "NDVI on green spectrum",
+        "id": "GNDVI",
+        "name": "Green NDVI",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: RN",
+        "expr": "(1.5 * (N - R)) / (N + R + 0.5)",
+        "help": "NDVI with soil correction",
+        "id": "SAVI",
+        "name": "Soil Adjusted Vegetation Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: RBN",
+        "expr": "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)",
+        "help": "Better where NDVI saturates",
+        "id": "EVI",
+        "name": "Enhanced Vegetation Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: NRe",
+        "expr": "(N - Re) / (N + Re)",
+        "help": "Green vegetation in mature crops",
+        "id": "NDRE",
+        "name": "Normalized Difference Red Edge",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "expr": "(G - B) / (G + B)",
+        "help": "Yellowness detection",
+        "id": "NDYI",
+        "name": "Normalized Difference Yellowness Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "expr": "(G - R) / (G + R)",
+        "help": "Photochemical reflectance",
+        "id": "MPRI",
+        "name": "Modified Photochemical Reflectance Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: RN",
+        "expr": "(N - R) / (N + R + 0.16)",
+        "help": "Optimized for sparse vegetation",
+        "id": "OSAVI",
+        "name": "Optimized Soil Adjusted Vegetation Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: GN",
+        "expr": "N / G",
+        "help": "Green ratio",
+        "id": "GRVI",
+        "name": "Green Ratio Vegetation Index"
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: GBN",
+        "expr": "((N + G) - (2*B)) / ((N + G) + (2*B))",
+        "help": "Enhanced NDVI",
+        "id": "ENDVI",
+        "name": "Enhanced NDVI"
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: RBN",
+        "expr": "(N - (2*R) + B) / (N + (2*R) + B)",
+        "help": "Corrects atmospheric effects",
+        "id": "ARVI",
+        "name": "Atmospherically Resistant Vegetation Index",
+        "range": [
+          -1.0,
+          1.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: T",
+        "expr": "pixel value (passthrough)",
+        "help": "Temperature in degrees Celsius",
+        "id": "CELSIUS",
+        "name": "Celsius Temperature",
+        "range": [
+          -40.0,
+          150.0
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: T",
+        "expr": "pixel + 273.15",
+        "help": "Temperature in Kelvin",
+        "id": "KELVIN",
+        "name": "Kelvin Temperature",
+        "range": [
+          233.15,
+          423.15
+        ]
+      }
+    ],
+    "autoBands": {
+      "filter": "RGB",
+      "match": true
+    },
+    "colormaps": [
+      {
+        "colors": [
+          "#d73027",
+          "#f59455",
+          "#fdcc7a",
+          "#dadd7d",
+          "#8acc64",
+          "#1a9850"
+        ],
+        "id": "rdylgn",
+        "name": "Red-Yellow-Green"
+      },
+      {
+        "colors": [
+          "#8b0000",
+          "#ff4500",
+          "#ffd700",
+          "#32cd32",
+          "#006400",
+          "#006400"
+        ],
+        "id": "discrete_ndvi",
+        "name": "Contrast NDVI"
+      },
+      {
+        "colors": [
+          "#9e0142",
+          "#ea8b5a",
+          "#fede99",
+          "#c1e6b4",
+          "#64aba4",
+          "#5e4fa2"
+        ],
+        "id": "spectral",
+        "name": "Spectral"
+      },
+      {
+        "colors": [
+          "#440154",
+          "#3c4180",
+          "#2b778b",
+          "#39a67b",
+          "#7dcf56",
+          "#fde725"
+        ],
+        "id": "viridis",
+        "name": "Viridis"
+      },
+      {
+        "colors": [
+          "#0d0887",
+          "#6704a1",
+          "#ac2b8b",
+          "#dd6661",
+          "#f6a939",
+          "#f0f921"
+        ],
+        "id": "plasma",
+        "name": "Plasma"
+      },
+      {
+        "colors": [
+          "#000004",
+          "#450c58",
+          "#93275e",
+          "#d45935",
+          "#f9a428",
+          "#fcffa4"
+        ],
+        "id": "inferno",
+        "name": "Inferno"
+      },
+      {
+        "colors": [
+          "#000004",
+          "#400e64",
+          "#8e287a",
+          "#d2576f",
+          "#fca073",
+          "#fcfdbf"
+        ],
+        "id": "magma",
+        "name": "Magma"
+      },
+      {
+        "colors": [
+          "#000000",
+          "#333333",
+          "#666666",
+          "#999999",
+          "#cccccc",
+          "#ffffff"
+        ],
+        "id": "grayscale",
+        "name": "Grayscale"
+      },
+      {
+        "colors": [
+          "#000000",
+          "#570f6a",
+          "#bd3754",
+          "#f97808",
+          "#ffe344",
+          "#ffffff"
+        ],
+        "id": "ironbow",
+        "name": "Ironbow"
+      },
+      {
+        "colors": [
+          "#96005a",
+          "#001cd2",
+          "#00c196",
+          "#96ff00",
+          "#ff8100",
+          "#c80000"
+        ],
+        "id": "rainbow",
+        "name": "Rainbow"
+      },
+      {
+        "colors": [
+          "#f7fcfd",
+          "#bfe7e7",
+          "#84cebc",
+          "#4bac7d",
+          "#1b7c3c",
+          "#00441b"
+        ],
+        "id": "bugn",
+        "name": "Blue-Green"
+      },
+      {
+        "colors": [
+          "#000000",
+          "#333333",
+          "#666666",
+          "#999999",
+          "#cccccc",
+          "#ffffff"
+        ],
+        "id": "whitehot",
+        "name": "White Hot"
+      },
+      {
+        "colors": [
+          "#ffffff",
+          "#cccccc",
+          "#999999",
+          "#666666",
+          "#333333",
+          "#000000"
+        ],
+        "id": "blackhot",
+        "name": "Black Hot"
+      },
+      {
+        "colors": [
+          "#000040",
+          "#0050ac",
+          "#3ca0e9",
+          "#8cd8ff",
+          "#d3f3ff",
+          "#ffffff"
+        ],
+        "id": "arctic",
+        "name": "Arctic"
+      },
+      {
+        "colors": [
+          "#000000",
+          "#660000",
+          "#cc3000",
+          "#ff8000",
+          "#ffd328",
+          "#ffffc8"
+        ],
+        "id": "lava",
+        "name": "Lava"
+      },
+      {
+        "colors": [
+          "#333399",
+          "#00b4b4",
+          "#a0d979",
+          "#ecd87a",
+          "#a97443",
+          "#ffffff"
+        ],
+        "id": "terrain",
+        "name": "Terrain"
+      },
+      {
+        "colors": [
+          "#ffffff",
+          "#cccccc",
+          "#999999",
+          "#666666",
+          "#333333",
+          "#000000"
+        ],
+        "id": "greys",
+        "name": "Greys"
+      }
+    ],
+    "detectedSensor": "",
+    "statistics": {
+      "1": {
+        "max": 252.0,
+        "mean": 126.0,
+        "min": 0.0,
+        "percentiles": {
+          "p2": -46.1679238418121,
+          "p98": 298.1679238418121
+        },
+        "std": 73.89181280764467
+      },
+      "2": {
+        "max": 248.0,
+        "mean": 124.0,
+        "min": 0.0,
+        "percentiles": {
+          "p2": -48.10484711361269,
+          "p98": 296.10484711361266
+        },
+        "std": 73.86474125047755
+      },
+      "3": {
+        "max": 252.0,
+        "mean": 126.0,
+        "min": 0.0,
+        "percentiles": {
+          "p2": -46.1679238418121,
+          "p98": 298.1679238418121
+        },
+        "std": 73.89181280764467
+      }
+    }
+  },
+  "schema": "raster-metadata.schema.json"
+}

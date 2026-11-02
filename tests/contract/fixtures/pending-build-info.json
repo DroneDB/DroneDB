@@ -1,0 +1,26 @@
+{
+  "call": "DDBBuild(<root>, \"roads.shp\") -> DDBERR_BUILDDEPMISSING, then DDBGetPendingBuildInfo(<root>)",
+  "description": "A dataset with roads.shp only (no .shx, .dbf), mtime 1700000000; DDBBuild deferred it",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "lastAttempt",
+      "retryAfter"
+    ]
+  },
+  "output": [
+    {
+      "awaitingFiles": true,
+      "hash": "afe1bd97fb41ff4dd3fc4134a9c32e95ed6a1a0af81c20e88e20b92bbc73a30c",
+      "lastAttempt": 0,
+      "missingDependencies": [
+        "roads.shx"
+      ],
+      "path": "roads.shp",
+      "retryAfter": 0
+    }
+  ],
+  "schema": "pending-build-info.schema.json"
+}

@@ -7,114 +7,112 @@
 //#include "ddb.h"
 
 #include "exceptions.h"
+#include "process_config.h"
+#include "mio.h"
 
 namespace ddb
 {
 
-    UserProfile *UserProfile::instance = nullptr;
-
     UserProfile *UserProfile::get()
     {
-        if (!instance)
-        {
-            instance = new UserProfile();
-        }
-
+        // Thread-safe initialization. Never destroyed (as before): code running during
+        // static destruction may still ask for the profile.
+        static UserProfile *const instance = new UserProfile();
         return instance;
-    }
-
-    UserProfile::UserProfile()
-    {
-        // Initialize directories
-        createDir(getProfileDir());
-
-        // Initialize auth manager
-        authManager = new AuthManager(getAuthFile());
     }
 
     void UserProfile::createDir(const fs::path &dir)
     {
         if (!fs::exists(dir))
         {
-            if (fs::create_directory(dir))
+            if (fs::create_directories(dir))
             {
-                LOGD << "Created " << dir.string();
+                LOGD << "Created " << io::toUtf8(dir);
             }
             else
             {
                 // Was it created by a competing process?
                 if (!fs::exists(dir))
-                    throw AppException("Cannot create profile directory: " + dir.string() + ". Check that you have permissions to write.");
-                LOGD << "Dir was already created (by another process?): " << dir.string();
+                    throw AppException("Cannot create profile directory: " + io::toUtf8(dir) + ". Check that you have permissions to write.");
+                LOGD << "Dir was already created (by another process?): " << io::toUtf8(dir);
             }
         }
         else
         {
-            LOGD << dir.string() << " exists";
+            LOGD << io::toUtf8(dir) << " exists";
         }
     }
 
-    fs::path UserProfile::getHomeDir()
+    namespace
     {
-        const char *ddb_home = std::getenv("DDB_HOME");
-        if (ddb_home)
-            return std::string(ddb_home);
-
-        const char *home = std::getenv("HOME");
-        if (home)
-            return std::string(home);
-
-        home = std::getenv("USERPROFILE");
-        if (home)
-            return std::string(home);
-
-        home = std::getenv("HOMEDRIVE");
-        const char *homePath = std::getenv("HOMEPATH");
-
-        if (!home || !homePath)
+        // DDB_HOME (*fromDdbHome = true), else the user's home folder
+        fs::path homeDir(bool *fromDdbHome)
         {
-            throw AppException("Cannot find home directory. Make sure that either your HOME or USERPROFILE environment variable is set and points to the current user's home directory.");
-        }
+            if (fromDdbHome != nullptr)
+                *fromDdbHome = false;
+            // UTF-8 (io::getEnvUtf8): on Windows a non-ASCII user name is common
+            if (const auto ddbHome = io::getEnvUtf8("DDB_HOME"))
+            {
+                if (fromDdbHome != nullptr)
+                    *fromDdbHome = true;
+                return io::fromUtf8(*ddbHome);
+            }
 
-        return fs::path(std::string(home)) / fs::path(std::string(homePath));
+            if (const auto home = io::getEnvUtf8("HOME"))
+                return io::fromUtf8(*home);
+
+            if (const auto home = io::getEnvUtf8("USERPROFILE"))
+                return io::fromUtf8(*home);
+
+            const auto homeDrive = io::getEnvUtf8("HOMEDRIVE");
+            const auto homePath = io::getEnvUtf8("HOMEPATH");
+
+            if (!homeDrive || !homePath)
+            {
+                throw AppException("Cannot find home directory. Make sure that either your HOME or USERPROFILE environment variable is set and points to the current user's home directory.");
+            }
+
+            return io::fromUtf8(*homeDrive) / io::fromUtf8(*homePath);
+        }
+    } // namespace
+
+    fs::path UserProfile::defaultProfileDir(bool *fromDdbHome) { return homeDir(fromDdbHome) / DDB_FOLDER; }
+
+    fs::path UserProfile::getProfileDir() { return defaultProfileDir(); }
+
+    fs::path UserProfile::getCacheDir()
+    {
+        const fs::path cacheDir = ProcessConfig::get().cacheDir();
+        createDir(cacheDir);
+        return cacheDir;
     }
 
-    fs::path UserProfile::getProfileDir() { return getHomeDir() / DDB_FOLDER; }
-
-    fs::path UserProfile::getProfilePath(const fs::path &p, bool createIfNeeded = true)
+    fs::path UserProfile::getCachePath(const fs::path &p)
     {
-        const fs::path profilePath = getProfileDir() / p;
-        if (createIfNeeded)
-            createDir(profilePath);
-        return profilePath;
+        const fs::path cachePath = getCacheDir() / p;
+        createDir(cachePath);
+        return cachePath;
     }
 
     fs::path UserProfile::getThumbsDir()
     {
-        const fs::path thumbsDir = getProfileDir() / fs::path("thumbs");
+        const fs::path thumbsDir = getCacheDir() / fs::path("thumbs");
         createDir(thumbsDir);
         return thumbsDir;
     }
 
-    fs::path UserProfile::getThumbsDir(int thumbSize)
-    {
-        const fs::path thumbsSizeDir = getThumbsDir() / fs::path(std::to_string(thumbSize));
-        createDir(thumbsSizeDir);
-        return thumbsSizeDir;
-    }
-
     fs::path UserProfile::getTilesDir()
     {
-        const fs::path tilesDir = getProfileDir() / fs::path("tiles");
+        const fs::path tilesDir = getCacheDir() / fs::path("tiles");
         createDir(tilesDir);
         return tilesDir;
     }
 
     fs::path UserProfile::getTemplatesDir()
     {
-        const fs::path tilesDir = getProfileDir() / fs::path("templates");
-        createDir(tilesDir);
-        return tilesDir;
+        const fs::path templatesDir = getCacheDir() / fs::path("templates");
+        createDir(templatesDir);
+        return templatesDir;
     }
 
     fs::path UserProfile::getAuthFile()
@@ -124,6 +122,10 @@ namespace ddb
 
     AuthManager *UserProfile::getAuthManager()
     {
+        std::call_once(authOnce, [this]() {
+            createDir(getProfileDir());
+            authManager = new AuthManager(getAuthFile());
+        });
         return authManager;
     }
 

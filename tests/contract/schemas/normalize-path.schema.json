@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb normalized entry path",
+  "description": "DDBNormalizePath: the normalized dataset-relative path, or the code of the first rule that rejects it (src/include/entry_path.h). Also the 'expected' value of every vector in vectors/entry-paths.json.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "'/' separated, no leading, trailing or repeated '/', no '.' or '..' segment, no '\\'",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![/])(?!.*[/]$)(?!.*//)(?!.*\\\\)(?!(.*/)?\\.\\.?(/|$))"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "rejected"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rejected": {
+          "enum": [
+            "empty",
+            "nul",
+            "encoding",
+            "absolute",
+            "traversal",
+            "reserved"
+          ]
+        }
+      }
+    }
+  ]
+}

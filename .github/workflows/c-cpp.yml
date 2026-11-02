@@ -8,9 +8,64 @@ on:
   pull_request:
     branches: [master]
 
+# A new push to a PR supersedes the run in progress; master and tag runs always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # LibreDWG dwg2dxf (DWG support), built once from the signed GNU release for both
+  # platforms (Windows: mingw-w64 cross build) so the binary that is tested is the
+  # binary that ships. Cached on the pinned version and the build script.
+  build_libredwg:
+    name: Build LibreDWG dwg2dxf (Linux + Windows)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache dwg2dxf
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: libredwg-out
+          key: libredwg-${{ hashFiles('scripts/libredwg-version', 'scripts/build-libredwg.sh') }}
+      - name: Build dwg2dxf (native + mingw-w64 cross)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential mingw-w64 pkg-config xz-utils gpg curl
+          export LIBREDWG_SOURCE_DIR=libredwg-out/source
+          ./scripts/build-libredwg.sh libredwg-out/linux
+          ./scripts/build-libredwg.sh libredwg-out/windows "" x86_64-w64-mingw32
+      - name: Upload dwg2dxf
+        uses: actions/upload-artifact@v4
+        with:
+          name: libredwg
+          path: libredwg-out
+          retention-days: 90
+
+  # clang-format on the lines a change touches only (no mass reformat). Fails when a
+  # changed line in src/, apps/ or tests/ does not follow .clang-format; the log shows the fix.
+  lint_format:
+    name: clang-format on changed lines
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Report-only until .clang-format matches the code base: the current file would flag
+      # most changes (209 hunks in the last 30 commits). Open: tune it, then drop
+      # --report-only so formatting of changed lines fails the job.
+      - name: Check formatting of changed lines
+        env:
+          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          ls /usr/bin/clang-format-diff* >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq clang-format; }
+          python3 scripts/lint-changed-lines.py format --base "$LINT_BASE" --report-only
+
   build_ubuntu:
     name: Build/Test on Ubuntu
+    needs: build_libredwg
     runs-on: ubuntu-24.04
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
@@ -18,7 +73,6 @@ jobs:
       PROJ_LIB: ${{ github.workspace }}/build
       PROJ_DATA: ${{ github.workspace }}/build
       VCPKG_BUILD_TYPE: release
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
       VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
       # build-lod is MANDATORY for gsplat builds: its absence fails the gsplat tests.
       DDB_REQUIRE_BUILDLOD: "1"
@@ -39,14 +93,61 @@ jobs:
           echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           ls -la
-      - name: Cache CMake build
+      - name: Check the ABI version and the release tag
+        # scripts/check-abi.py, before the build so a bad tag fails fast. The library,
+        # the C ABI and the release have one version, package.json "version" (semver): a change
+        # to src/include/ddb.symbols since the previous release tag needs a higher MINOR for an
+        # added export and a higher MAJOR for a removed one, and a v* tag must equal the version.
+        # fetch-depth: 0 above fetches the tags the base is found from.
+        shell: bash
+        run: |
+          python3 scripts/check-abi.py bump
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            python3 scripts/check-abi.py tag --tag "${GITHUB_REF_NAME}"
+          fi
+      - name: Check that every helper submodule is a release
+        # The source offers of THIRD_PARTY_LICENSES.md name the release of each helper built from a
+        # submodule (bm3d, metadata-util, gdal-util), so each submodule commit must be exactly the
+        # commit of the tag v<version> in the helper's repository, <version> being what the helper
+        # reports with --version (scripts/helper-tools.txt). --self-test checks the check first.
+        shell: bash
+        run: |
+          python3 scripts/check-helper-pins.py --self-test
+          python3 scripts/check-helper-pins.py
+      - name: Check narrow path conversions (ratchet)
+        # UTF-8 paths (src/include/mio.h, "Path encoding"): fails when a file of src/library,
+        # src/include or apps gains a raw path.string(), fs::path(<string>) or ANSI Win32 call
+        # (cmake/narrow-paths-baseline.txt). A text search, so it runs before the build.
+        run: python3 scripts/check-narrow-paths.py
+      - name: Check that the host opens no file of a user with GDAL
+        # Only gdal-util parses the files of users: fails when GDALOpen*, GDALIdentifyDriver*, OGROpen*
+        # or "/vsicurl" appear in src/ or apps/ outside the allow-list of scripts/check-gdal-opens.py,
+        # or when anything but the start of gdal-util calls enableUserFileOpens(). A text search, so
+        # it runs before the build; --self-test checks the check on built-in fixtures.
+        shell: bash
+        run: |
+          python3 scripts/check-gdal-opens.py --self-test
+          python3 scripts/check-gdal-opens.py
+      - name: Pin test_data (tests/test-data.sha)
+        # The DroneDB/test_data commit the tests read their assets from (testDataUrl, tests/testfs.h);
+        # the smoke tests below download from the same commit
+        shell: bash
+        run: echo "TEST_DATA_SHA=$(head -n 1 tests/test-data.sha)" >> "$GITHUB_ENV"
+      - name: Cache test_data downloads
+        # DDB_TEST_CACHE_DIR (integration tests): every download once, under its URL; the URLs
+        # name the pinned commit, so the content never changes for a key
         uses: actions/cache@v4
         with:
-          path: build
-          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-
-            ${{ runner.os }}-cmake-
+          path: ${{ runner.temp }}/ddb-test-cache
+          key: test-data-v2-${{ runner.os }}-${{ hashFiles('tests/test-data.sha') }}
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: ./.github/actions/vcpkg-binary-cache
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-ubuntu
+          max-size: 500M
       - name: Install Linux dependencies
         run: |
           chmod +x ./scripts/install-dependencies.sh
@@ -58,6 +159,7 @@ jobs:
           vcpkgJsonGlob: vcpkg.json
           doNotCache: false
       - name: Run CMake
+        id: configure
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 120
@@ -69,9 +171,47 @@ jobs:
             # Clean dist directory to avoid including old artifacts
             rm -rf dist/*.tgz
             mkdir -p dist
-            cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
+            cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
+      - name: Save vcpkg binary cache
+        # Saved right after vcpkg install so a later build or test failure keeps the built ports.
+        # An install that failed or was cancelled (a newer push supersedes a cold build) keeps
+        # the ports built so far under a partial key, which the next run restores first.
+        if: always() && steps.configure.outcome != 'skipped' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/vcpkg-binary-cache-save
+        with:
+          path: ${{ steps.vcpkg-cache.outputs.path }}
+          key: ${{ steps.vcpkg-cache.outputs.key }}
+          partial-key: ${{ steps.vcpkg-cache.outputs.partial-key }}
+          complete: ${{ steps.configure.outcome == 'success' }}
+          installed: build/vcpkg_installed
       - name: Build C++ lib/program and tests
-        run: cd build && make -j$(nproc)
+        # build.log feeds the warning ratchet below. ccache replays a cached compile's warnings, and
+        # build/ is fresh on every run, so the log holds the warnings of every translation unit.
+        env:
+          LC_MESSAGES: C  # untranslated "warning:" lines for the ratchet
+        run: |
+          set -o pipefail
+          # --output-sync=target: parallel compilers must not interleave diagnostics, or the
+          # warning ratchet reads cut lines (seen as "-W(no-flag)")
+          cd build && make -j$(nproc) --output-sync=target 2>&1 | tee build.log
+      - name: Check compiler warnings (ratchet)
+        # Fails on a new warning in src/, apps/ or tests/ (cmake/warnings-baseline.txt, measured with
+        # this job's GCC), and on a large unexplained drop (the baseline must then be updated).
+        # Linux only: Windows (MSVC /W4) warnings are in its build log, not ratcheted, until a
+        # Windows baseline exists.
+        run: python3 scripts/check-warnings.py build/build.log --build-dir build
+      - name: Check the exported symbols (libddb.so == src/include/ddb.symbols)
+        # The defined dynamic symbols (nm -D) are exactly the manifest, which also
+        # matches ddb.h (every DDB_DLL declaration): no C++ symbol, nothing from the static libraries
+        run: python3 scripts/check-abi.py exports --library build/libddb.so
+      - name: clang-tidy on changed lines (report-only)
+        # Findings are annotated on the PR but do not fail the job yet (scripts/lint-changed-lines.py).
+        if: github.ref_type != 'tag'
+        env:
+          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          ls /usr/bin/clang-tidy-diff*.py >/dev/null 2>&1 || sudo apt-get install -y -qq clang-tidy
+          python3 scripts/lint-changed-lines.py tidy --base "$LINT_BASE" --build-dir build
       - name: Build Untwine COPC accelerator
         # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),
         # but MUST succeed on release tags so the .deb ships with untwine.
@@ -95,28 +235,102 @@ jobs:
           chmod +x ./scripts/build-buildlod.sh
           ./scripts/build-buildlod.sh build Release
       - name: Download Obj2Tiles (OGC 3D Tiles generator)
-        # Optional on PR/master pushes (3D Tiles generation disabled, Nexus still
+        # Optional on PR/master pushes (3D Tiles generation disabled, bm3d still
         # produced), but MUST succeed on release tags so the .deb ships with Obj2Tiles.
         continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
           chmod +x ./scripts/download-obj2tiles.sh
           ./scripts/download-obj2tiles.sh build
+      - name: Get dwg2dxf (DWG converter)
+        # Optional on PR/master pushes (DWG builds fail with an actionable message),
+        # but MUST succeed on release tags so the .deb ships with dwg2dxf.
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: libredwg
+          path: libredwg-out
+      - name: Install dwg2dxf next to ddbcmd
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          cp libredwg-out/linux/dwg2dxf libredwg-out/linux/dwg2dxf.LICENSE.txt build/
+          chmod +x build/dwg2dxf
+          build/dwg2dxf --version
+      - name: Verify LibreDWG is not linked into libddb
+        # dwg2dxf (GPL) is only ever run as a subprocess; libddb must not contain LibreDWG.
+        run: |
+          if nm -D --defined-only build/libddb.so | grep -E ' (dwg_|dxf_)[a-z_]+$' | grep -q .; then
+            echo "::error::libddb.so exports LibreDWG symbols"; exit 1
+          fi
+      - name: Verify no GPL code is linked into libddb, ddbcmd or gdal-util, and no Qt into bm3d
+        # Exiv2 (GPL) lives in metadata-util and bm3d (with the Nexus/vcglib/corto code it is made
+        # of) in the bm3d program, both run as child processes; gdal-util embeds libddb like ddbcmd
+        # and is held to the same rules. Also fails on a program of scripts/helper-tools.txt that no
+        # rule of the script covers. Looks at every symbol (the version
+        # script hides the exports of linked-in code from nm -D) and at the NEEDED entries of the
+        # shipped files. bm3d is held to the same check for Qt (and the X11/GL/dbus libraries it
+        # loaded): it decodes textures with image codec libraries only. The same script fails when
+        # the symbols of the bm3d binary do not match the pattern used on libddb (a positive
+        # control: a pattern that matches nothing would let any libddb pass), and its --self-test
+        # checks the patterns and that control without a build.
+        run: |
+          python3 scripts/check-gpl-linkage.py --self-test
+          python3 scripts/check-gpl-linkage.py build
+      - name: Check the detection of the long path check (self-test)
+        # The Windows job runs the check on the executables (scripts/check-long-path-aware.py);
+        # its detection of a manifest is tested here, on made-up files
+        run: python3 scripts/check-long-path-aware.py --self-test
       - name: Verify Spark RAD format pin
         run: |
           echo "Checking vendor/spark/rust/spark-lib/src/rad.rs against the reviewed pin..."
           sha256sum -c tests/data/spark-rad-format.sha256 || { echo "::error::rad.rs changed since the last verified pin: review encoding handling in src/library/rad.cpp, then refresh with: (cd $GITHUB_WORKSPACE && sha256sum vendor/spark/rust/spark-lib/src/rad.rs > tests/data/spark-rad-format.sha256)"; exit 1; }
-      - name: Run C++ Tests
+      - name: Report the confinement of gdal-util
+        # The tests below run gdal-util in strict mode, where a worker that a sandbox layer cannot
+        # confine is refused: every layer must be active on the runner, and this names the one
+        # that is not before the tests fail on it
+        env:
+          DDB_GDAL_SANDBOX: strict
+        run: |
+          cd build
+          report="$(./gdal-util --sandbox-report)"
+          echo "$report"
+          if grep -q ': missing' <<< "$report"; then
+            echo "::error::gdal-util lacks a sandbox layer on this runner (see the report above)"
+            exit 1
+          fi
+      - name: Run unit tests
+        # ddb_unit_tests: offline, self-contained tests (tests/unit/), one process per test in random
+        # order, in parallel (initIndex publishes the empty-index template of a fresh profile
+        # atomically: InitIndexTemplate.concurrentProcessesOnFreshProfile)
+        env:
+          DDB_GDAL_SANDBOX: strict
+        run: cd build && ctest -L unit -j$(nproc) --output-on-failure --schedule-random
+      - name: Check that every header compiles on its own
+        # One translation unit per header; the installed ones also as C11 (ctest -L headers)
+        run: cd build && ctest -L headers --output-on-failure
+      - name: Run integration tests
+        env:
+          # Real-converter tests skip when the binary is absent (non-tag builds).
+          DDB_DWG2DXF_PATH: ${{ github.workspace }}/build/dwg2dxf
+          DDB_TEST_CACHE_DIR: ${{ runner.temp }}/ddb-test-cache
+          DDB_GDAL_SANDBOX: strict
         run: cd build && ./ddbtest --gtest_shuffle
+      - name: Run CLI Exit Code Tests
+        env:
+          DDB_GDAL_SANDBOX: strict
+        run: cd build && ctest -R '^cli\.' --output-on-failure
+      - name: Run the shared library smoke test
+        # The tests and the CLI contain the library objects; this runs libddb.so as a host loads it
+        env:
+          DDB_GDAL_SANDBOX: strict
+        run: cd build && ctest -L shared --output-on-failure
       - name: Run Program Smoke Test
-        run: cd build && ./ddbcmd --debug
+        run: cd build && ./ddbcmd --version --debug
       - name: Build Debian Package
         run: |
-          # Set DDB_VERSION env var for the package
+          # A release tag names the package; otherwise build-debian-package.sh uses package.json
+          # plus the commit (a Debian pre-release such as 2.0.0~git19ab8e1)
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "DDB_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-          else
-            # Use commit hash for non-tag builds
-            echo "DDB_VERSION=$(git describe --always)" >> $GITHUB_ENV
           fi
 
           # Set VCPKG_HOST_TRIPLET for the build script
@@ -127,7 +341,8 @@ jobs:
           mkdir -p build/dist build/package
 
           # Verify required files exist in build directory
-          for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
+          # The helper tools are the ones of scripts/helper-tools.txt
+          for file in ddbcmd libddb.so $(python3 scripts/check-helper-tools.py --names) proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt gdal/gdalvrt.xsd; do
             if [ ! -f "build/$file" ]; then
               echo "Error: Required file $file not found in build directory!"
               exit 1
@@ -141,6 +356,18 @@ jobs:
           # Test linting of Debian package
           echo "Running lintian on Debian package..."
           lintian ../ddb_*.deb || echo "Lintian reported issues, but continuing..."
+
+          # GDAL's data files are required on every build: without them each raster build warns
+          # "Cannot find tms_NZTM2000.json (GDAL_DATA is not defined)" in hosts that do not
+          # source /etc/profile.d/ddb.sh (libddb finds them in /usr/share/ddb/gdal).
+          echo "Checking that the GDAL data folder is included in the Debian package..."
+          for file in gdalvrt.xsd tms_NZTM2000.json; do
+            if ! dpkg -c build/package/ddb_*.deb | grep -E "/usr/share/ddb/gdal/${file}\$" >/dev/null; then
+              echo "  ✗ /usr/share/ddb/gdal/${file} NOT present in .deb"
+              exit 1
+            fi
+          done
+          echo "  ✓ GDAL data present in .deb"
 
           # Verify untwine packaging. Required on release tags, informational otherwise.
           echo "Checking whether untwine is included in the Debian package..."
@@ -164,7 +391,7 @@ jobs:
               echo "  ✗ build-lod NOT present in .deb - release builds MUST include build-lod. Failing."
               exit 1
             else
-              echo "  ! build-lod NOT present in .deb (Gaussian Splat builds deferred until build-lod is available)"
+              echo "  ! build-lod NOT present in .deb (Gaussian Splat builds fail without it)"
             fi
           fi
 
@@ -177,7 +404,20 @@ jobs:
               echo "  ✗ Obj2Tiles NOT present in .deb - release builds MUST include Obj2Tiles. Failing."
               exit 1
             else
-              echo "  ! Obj2Tiles NOT present in .deb (3D Tiles generation disabled, Nexus still produced)"
+              echo "  ! Obj2Tiles NOT present in .deb (3D Tiles generation disabled, bm3d still produced)"
+            fi
+          fi
+
+          # Verify dwg2dxf packaging. Required on release tags, informational otherwise.
+          echo "Checking whether dwg2dxf is included in the Debian package..."
+          if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/dwg2dxf$' >/dev/null; then
+            echo "  ✓ dwg2dxf present in .deb (DWG support enabled)"
+          else
+            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              echo "  ✗ dwg2dxf NOT present in .deb - release builds MUST include dwg2dxf. Failing."
+              exit 1
+            else
+              echo "  ! dwg2dxf NOT present in .deb (DWG builds fail with an actionable message)"
             fi
           fi
 
@@ -205,23 +445,48 @@ jobs:
           # the build-tree plugins even when the package ships a broken
           # layout. In a clean container the only candidate is /usr/lib,
           # exactly as in the Registry containers.
-          echo "Running E57 package smoke test in clean ubuntu:24.04..."
+          echo "Running the package smoke test (E57, GPS JPEG, helper tools) in clean ubuntu:24.04..."
           docker run --rm \
             -v "$GITHUB_WORKSPACE/build/package:/pkg:ro" \
+            -e TEST_DATA_SHA \
+            -e HELPER_TOOLS="$(python3 scripts/check-helper-tools.py --names | tr '\n' ' ')" \
             ubuntu:24.04 bash -ec '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
               apt-get install -y -qq /pkg/ddb_*.deb curl ca-certificates >/dev/null
               mkdir -p /tmp/e57smoke && cd /tmp/e57smoke
               ddb --version
-              curl -fsSL --retry 3 -o a4.e57 https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/A4.e57
+              # The helper tools libddb starts (scripts/helper-tools.txt), as installed: each
+              # must start from /usr/bin and report its version
+              for tool in $HELPER_TOOLS; do $tool --version; done
+              curl -fsSL --retry 3 -o a4.e57 https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/point-clouds/A4.e57
               ddb init . > /dev/null
               ddb add a4.e57
               ddb list | grep -q "a4\.e57"
               ddb info a4.e57 --format json | grep -qE "\"pointCount\":[1-9]"
               echo "  ✓ packaged ddb indexed an E57 file in a clean Ubuntu 24.04"
+              # A JPEG with GPS is a GeoImage only if ddb found metadata-util and read its EXIF through it
+              mkdir -p /tmp/geosmoke && cd /tmp/geosmoke
+              curl -fsSL --retry 3 -o gps.jpg https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/images/DJI_0018.JPG
+              ddb init . > /dev/null
+              ddb add gps.jpg
+              ddb info gps.jpg --format text | grep -q "^Type: GeoImage"
+              ddb list --format json | grep -qE "\"type\":3[,}]"
+              echo "  ✓ packaged ddb indexed a GPS JPEG as GeoImage through the packaged metadata-util"
+              if [ -x /usr/bin/dwg2dxf ]; then
+                mkdir -p /tmp/dwgsmoke && cd /tmp/dwgsmoke
+                base=https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/vector/autocad
+                curl -fsSL --retry 3 -o site.dwg $base/utm32n_site_dwg.dwg
+                curl -fsSL --retry 3 -o site.prj $base/utm32n_site_dwg.prj
+                ddb init . > /dev/null
+                ddb add site.dwg site.prj
+                ddb build site.dwg
+                find .ddb/build -path "*vec/source.gpkg" | grep -q .
+                find .ddb/build -path "*mvt/metadata.json" | grep -q .
+                echo "  ✓ packaged ddb built a DWG with the packaged dwg2dxf in a clean Ubuntu 24.04"
+              fi
             ' || {
-              echo "  ✗ E57 package smoke test failed - the installed package cannot index E57 (PDAL plugins?)."
+              echo "  ✗ Package smoke test failed - the installed package cannot index E57 (PDAL plugins?) or a GPS JPEG (metadata-util?), or its helper tools do not start."
               exit 1
             }
       - name: Upload Distribution Files
@@ -231,18 +496,251 @@ jobs:
           path: |
             build/package/*.deb
           retention-days: 90
-      - name: Upload Debian Package to Release
+
+  # The source vcpkg downloads while it builds Exiv2 (linked into metadata-util) is not in the tag,
+  # and the GPL asks for it with the binaries. Read from the vcpkg port files of the tag, checked
+  # against its SHA512.
+  collect_gpl_sources:
+    name: Collect Exiv2 Corresponding Source
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the vcpkg submodule (port files only, no build)
+        run: git submodule update --init --depth 1 vcpkg
+      - name: Download and verify the sources
+        run: ./scripts/fetch-vcpkg-gpl-sources.sh vcpkg gpl-sources
+      - name: Upload sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpl-sources
+          path: gpl-sources
+          retention-days: 90
+
+  # Every release asset (the .deb, the Windows zip, the LibreDWG source, the Exiv2 source, ddb.h, ddb_export.h,
+  # ddb_version.h, ddb.symbols and SHA256SUMS) goes to the release only after the build jobs passed: they upload artifacts only,
+  # this job is the one that writes to the release.
+  release_assets:
+    name: Upload Release Assets
+    needs: [build_ubuntu, build_windows, build_libredwg, collect_gpl_sources]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Get Debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: Linux-Binaries
+          path: ${{ runner.temp }}/ddb-package
+      - name: Get Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: Windows Binaries
+          path: ${{ runner.temp }}/ddb-windows
+      - name: Get LibreDWG build (dwg2dxf and its source)
+        uses: actions/download-artifact@v4
+        with:
+          name: libredwg
+          path: ${{ runner.temp }}/libredwg-out
+      - name: Get the Exiv2 source
+        uses: actions/download-artifact@v4
+        with:
+          name: gpl-sources
+          path: ${{ runner.temp }}/gpl-sources
+      - name: Checkout (ddb.h and the symbol manifest of the tag)
+        uses: actions/checkout@v4
+      - name: Collect the ABI files and write SHA256SUMS
+        # Every release publishes the C header (ddb.h and the two headers it includes:
+        # ddb_export.h, the export macro, one file for every platform, and ddb_version.h,
+        # generated from package.json by the same CMake code a build uses: the ABI is the MAJOR
+        # and MINOR of the version), the symbol manifest and SHA256SUMS, one line per release
+        # asset (the globs of the upload steps), by file name, so a consumer pins the exact
+        # download and checks it with sha256sum -c. Written before any upload: a missing asset
+        # or a duplicate name fails the job before the release changes.
+        shell: bash
+        run: |
+          set -euo pipefail
+          abi="${RUNNER_TEMP}/ddb-abi"
+          mkdir -p "$abi"
+          cp src/include/ddb.h src/include/ddb_export.h src/include/ddb.symbols "$abi/"
+          cmake -DDDB_SOURCE_DIR="$PWD" -DDDB_OUTPUT="$abi/ddb_version.h" -P cmake/GenerateVersionHeader.cmake
+          assets=("${RUNNER_TEMP}"/libredwg-out/source/* "${RUNNER_TEMP}"/gpl-sources/*
+                  "${RUNNER_TEMP}"/ddb-windows/*.zip
+                  "${RUNNER_TEMP}"/ddb-package/*.deb "$abi/ddb.h" "$abi/ddb_export.h" "$abi/ddb_version.h"
+                  "$abi/ddb.symbols")
+          for f in "${assets[@]}"; do
+            (cd "$(dirname "$f")" && sha256sum -- "$(basename "$f")")
+          done > "${RUNNER_TEMP}/SHA256SUMS"
+          duplicates=$(awk '{print $2}' "${RUNNER_TEMP}/SHA256SUMS" | sort | uniq -d)
+          if [ -n "$duplicates" ]; then echo "::error::duplicate release asset names: $duplicates"; exit 1; fi
+          mv "${RUNNER_TEMP}/SHA256SUMS" "$abi/"
+          cat "$abi/SHA256SUMS"
+      - name: Attach LibreDWG Corresponding Source to Release
+        # GPL-3.0 section 6: releases that ship dwg2dxf offer the exact source they were built from.
         uses: svenstaro/upload-release-action@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: build/package/*.deb
+          file: ${{ runner.temp }}/libredwg-out/source/*
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+      - name: Attach Exiv2 Corresponding Source to Release
+        # GPL-2.0 section 3 (Exiv2 in metadata-util): the exact archive vcpkg built, with the
+        # patches it applies. The tag holds the sources of DroneDB and the helper tools, not this.
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ runner.temp }}/gpl-sources/*
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+      - name: Upload Windows Binaries to Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ runner.temp }}/ddb-windows/*.zip
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+      - name: Upload Debian Package to Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ runner.temp }}/ddb-package/*.deb
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+      - name: Upload ddb.h, ddb_export.h, ddb_version.h, ddb.symbols and SHA256SUMS to Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ runner.temp }}/ddb-abi/*
           file_glob: true
           tag: ${{ github.ref }}
           overwrite: true
 
+  # AddressSanitizer + UndefinedBehaviorSanitizer (docs/sanitizers.md): a Debug -O1 build of
+  # the unit tests and the CLI, run under LeakSanitizer too. Suppression files list third-party
+  # frames only (docs/sanitizers.md). 3D builds are integration tests, so no unit test is
+  # excluded.
+  sanitizers_asan_ubsan:
+    name: ASan + UBSan (unit and CLI tests)
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-24.04
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-linux-release
+      VCPKG_BUILD_TYPE: release
+      VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
+    steps:
+      - name: Free Disk Space
+        uses: ShubhamTatvamasi/free-disk-space-action@master
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+      - name: Restore vcpkg binary cache
+        uses: ./.github/actions/vcpkg-binary-cache
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-ubuntu-asan
+          max-size: 500M
+      - name: Install Linux dependencies
+        run: |
+          chmod +x ./scripts/install-dependencies.sh
+          ./scripts/install-dependencies.sh
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgJsonGlob: vcpkg.json
+          doNotCache: false
+      - name: Configure (Debug -O1, ASan + UBSan)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 120
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            # Release with -g -O1 (assertions on, no NDEBUG): the CI triplet is release-only, and any other config selects
+            # link interfaces or imported locations the static vcpkg targets do not provide
+            cmake -S . -B build-asan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-g -O1" "-DCMAKE_C_FLAGS_RELEASE=-g -O1" -DDDB_ENABLE_ASAN=ON -DDDB_ENABLE_UBSAN=ON
+      - name: Build ddb_unit_tests and ddbcmd
+        run: cmake --build build-asan --target ddb_unit_tests ddbcmd -j$(nproc)
+      - name: Allow the sanitizer runtimes' memory layout
+        # The runner kernel randomizes mmap with 32 bits; the GCC 13 sanitizer runtimes expect at
+        # most 28 and fail at start-up ("unexpected memory mapping") otherwise.
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: Run unit and CLI tests
+        env:
+          # Timing assertions mean nothing under instrumentation
+          DDB_SKIP_TIMING_TESTS: "1"
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1:suppressions=${{ github.workspace }}/tests/ubsan.supp
+        run: |
+          cd build-asan
+          ctest -L unit --output-on-failure && ctest -R '^cli\.' --output-on-failure
+
+  # The dronedb/dronedb image installs the .deb that build_ubuntu just tested, so the
+  # binary that ships is the binary that was tested and nothing is compiled twice.
+  docker_image:
+    name: Docker Image
+    needs: build_ubuntu
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get Debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: Linux-Binaries
+          path: ${{ runner.temp }}/ddb-package
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: dronedb/dronedb
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=pr
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          target: runtime
+          # Replaces the source-build "package" stage with the tested .deb.
+          build-contexts: package=${{ runner.temp }}/ddb-package
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Smoke test Docker image
+        run: docker run --rm "${{ fromJSON(steps.meta.outputs.json).tags[0] }}" --version
+      - name: Push Docker image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          target: runtime
+          build-contexts: package=${{ runner.temp }}/ddb-package
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
   build_windows:
     name: Build/Test on Windows
+    needs: build_libredwg
     runs-on: windows-latest
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
@@ -250,7 +748,6 @@ jobs:
       VCPKG_BUILD_TYPE: release
       PROJ_LIB: ${{ github.workspace }}/build
       PROJ_DATA: ${{ github.workspace }}/build
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
       VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
       VCPKG_KEEP_ENV_VARS: "CMAKE_C_CLANG_TIDY;CMAKE_CXX_CLANG_TIDY"
       CMAKE_C_CLANG_TIDY: ""
@@ -262,21 +759,29 @@ jobs:
         with:
           submodules: 'recursive'
           fetch-depth: 0
-      - name: Cache CMake build
+      - name: Pin test_data (tests/test-data.sha)
+        # The DroneDB/test_data commit the tests read their assets from (testDataUrl, tests/testfs.h);
+        # the smoke tests below download from the same commit
+        shell: bash
+        run: echo "TEST_DATA_SHA=$(head -n 1 tests/test-data.sha)" >> "$GITHUB_ENV"
+      - name: Cache test_data downloads
+        # DDB_TEST_CACHE_DIR (integration tests): every download once, under its URL; the URLs
+        # name the pinned commit, so the content never changes for a key
         uses: actions/cache@v4
         with:
-          path: build
-          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-
-            ${{ runner.os }}-cmake-
+          path: ${{ runner.temp }}/ddb-test-cache
+          key: test-data-v2-${{ runner.os }}-${{ hashFiles('tests/test-data.sha') }}
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: ./.github/actions/vcpkg-binary-cache
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgJsonGlob: vcpkg.json
           doNotCache: false
-      - name: Build C++ lib/program and tests
+      - name: Run CMake
+        id: configure
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 120
@@ -289,9 +794,43 @@ jobs:
             cd build
             cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
             if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed with exit code $LASTEXITCODE" }
+      - name: Save vcpkg binary cache
+        # Saved right after vcpkg install so a later build or test failure keeps the built ports.
+        # An install that failed or was cancelled (a newer push supersedes a cold build) keeps
+        # the ports built so far under a partial key, which the next run restores first.
+        if: always() && steps.configure.outcome != 'skipped' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/vcpkg-binary-cache-save
+        with:
+          path: ${{ steps.vcpkg-cache.outputs.path }}
+          key: ${{ steps.vcpkg-cache.outputs.key }}
+          partial-key: ${{ steps.vcpkg-cache.outputs.partial-key }}
+          complete: ${{ steps.configure.outcome == 'success' }}
+          installed: build/vcpkg_installed
+      - name: Build C++ lib/program and tests
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 120
+          max_attempts: 3
+          retry_wait_seconds: 30
+          shell: pwsh
+          command: |
+            $ErrorActionPreference = 'Stop'
+            cd build
             cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
             if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
             dir
+      - name: Check the exported symbols (ddb.dll == src/include/ddb.symbols)
+        # The names in the export table of ddb.dll (read from the PE file, so no
+        # Visual Studio environment is needed for dumpbin) are exactly the manifest, as on Linux
+        run: python scripts/check-abi.py exports --library build/ddb.dll
+        shell: pwsh
+      - name: Verify no GPL code is linked into ddb.dll, ddbcmd.exe or gdal-util.exe, and no Qt into bm3d.exe
+        # Exiv2 (GPL) lives in metadata-util.exe and bm3d (with the Nexus/vcglib/corto code it is
+        # made of) in bm3d.exe, both run as child processes: dumpbin /dependents of ddb.dll,
+        # ddbcmd.exe and gdal-util.exe must not list exiv2.dll, a bm3d*.dll or Qt5*.dll, and that of bm3d.exe no
+        # Qt5*/Qt6* DLL
+        run: .\scripts\check-gpl-linkage.ps1 -BuildDir build
+        shell: pwsh
       - name: Build Untwine COPC accelerator
         # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),
         # but MUST succeed on release tags so the zip ships with untwine.exe.
@@ -311,13 +850,114 @@ jobs:
         shell: pwsh
         run: .\scripts\build-buildlod.ps1 -BuildDir build -Config Release
       - name: Download Obj2Tiles (OGC 3D Tiles generator)
-        # Optional on PR/master pushes (3D Tiles generation disabled, Nexus still
+        # Optional on PR/master pushes (3D Tiles generation disabled, bm3d still
         # produced), but MUST succeed on release tags so the zip ships with Obj2Tiles.exe.
         continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
         shell: pwsh
         run: .\scripts\download-obj2tiles.ps1 -TargetDir build
-      - name: Run C++ Tests
-        run: cd build && .\ddbtest.exe --gtest_shuffle
+      - name: Get dwg2dxf.exe (DWG converter)
+        # Optional on PR/master pushes, but MUST succeed on release tags so the zip
+        # ships with dwg2dxf.exe (cross-compiled by build_libredwg).
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: libredwg
+          path: libredwg-out
+      - name: Install dwg2dxf.exe next to ddbcmd.exe
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        run: |
+          Copy-Item libredwg-out/windows/dwg2dxf.exe, libredwg-out/windows/dwg2dxf.LICENSE.txt build/ -Force
+          & build/dwg2dxf.exe --version
+      - name: Check that the executables are long path aware
+        # Windows takes a path of 260 characters or more only in a process whose executable has
+        # <longPathAware>true</longPathAware> in its manifest (cmake/LongPathAware.cmake): the
+        # CLI, the test binaries, the helper programs (scripts/helper-tools.txt) and Untwine
+        shell: pwsh
+        run: |
+          $names = @('ddbcmd.exe', 'ddbtest.exe', 'ddb_unit_tests.exe')
+          $names += @(python scripts/check-helper-tools.py --names | ForEach-Object { "$_.exe" })
+          if (Test-Path build/untwine.exe) { $names += 'untwine.exe' }
+          python scripts/check-long-path-aware.py @($names | ForEach-Object { "build/$_" })
+          exit $LASTEXITCODE
+      - name: Allow long paths in Windows
+        # Set whatever the runner image has: the long path test (tests/unit/long_path_test.cpp)
+        # builds under a root of over 200 characters and skips itself when the system does not
+        # allow long paths. It applies to the processes started from here on, the test binaries
+        shell: pwsh
+        run: |
+          reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f
+          if ($LASTEXITCODE -ne 0) { throw "reg add LongPathsEnabled failed ($LASTEXITCODE)" }
+      - name: Enable crash dumps for the test binaries
+        shell: pwsh
+        run: |
+          foreach ($exe in 'ddbtest.exe', 'ddb_unit_tests.exe') {
+            $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\$exe"
+            New-Item -Path $key -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpFolder -PropertyType ExpandString -Value "$env:RUNNER_TEMP\ddbtest-dumps" -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpType -PropertyType DWord -Value 1 -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpCount -PropertyType DWord -Value 3 -Force | Out-Null
+          }
+      - name: Run unit tests
+        # In parallel, as in the Linux job. A test process still running after 240 s (ctest stops
+        # it at 300 s, the unit TIMEOUT) is dumped into ddbtest-dumps with its thread stacks in
+        # this log (scripts/ci-hang-watchdog.ps1): a hang, at exit too, explains itself.
+        timeout-minutes: 30
+        env:
+          _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
+        run: |
+          cd build
+          ../scripts/ci-hang-watchdog.ps1 -ProcessName ddb_unit_tests -ThresholdSeconds 240 `
+            -DumpDir "$env:RUNNER_TEMP\ddbtest-dumps" `
+            -Command { ctest -C Release -L unit -j $env:NUMBER_OF_PROCESSORS --output-on-failure --schedule-random }
+          exit $LASTEXITCODE
+        shell: pwsh
+      - name: Check that every header compiles on its own
+        # One translation unit per header; the installed ones also as C11 (ctest -L headers)
+        run: |
+          cd build
+          ctest -C Release -L headers --output-on-failure
+        shell: pwsh
+      - name: Run integration tests
+        # One process for every test (about 9 minutes): still running after 30 minutes, it is
+        # dumped with its thread stacks in this log, then stopped (scripts/ci-hang-watchdog.ps1)
+        timeout-minutes: 45
+        env:
+          DDB_DWG2DXF_PATH: ${{ github.workspace }}\build\dwg2dxf.exe
+          DDB_TEST_CACHE_DIR: ${{ runner.temp }}\ddb-test-cache
+          # The crash report resolves GDAL/GEOS frames from vcpkg's PDBs
+          _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
+        run: |
+          cd build
+          ../scripts/ci-hang-watchdog.ps1 -ProcessName ddbtest -ThresholdSeconds 1800 -Kill `
+            -DumpDir "$env:RUNNER_TEMP\ddbtest-dumps" -Command { .\ddbtest.exe --gtest_shuffle }
+          $code = $LASTEXITCODE
+          # The pwsh step wrapper turns a negative (NTSTATUS) exit code into 1: print the real one
+          "ddbtest exit code: $code (0x{0:X8})" -f $code
+          exit [int]($code -ne 0)
+        shell: pwsh
+      - name: Upload ddbtest crash dumps
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddbtest-crash-dumps
+          path: |
+            ${{ runner.temp }}/ddbtest-dumps
+            build/*.pdb
+            build/vcpkg_installed/x64-windows-release/bin/gdal*.pdb
+            build/vcpkg_installed/x64-windows-release/bin/geos*.pdb
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Run CLI Exit Code Tests
+        run: |
+          cd build
+          ctest -C Release -R '^cli\.' --output-on-failure
+        shell: pwsh
+      - name: Run the shared library smoke test
+        # The tests and the CLI contain the library objects; this runs ddb.dll as a host loads it
+        run: |
+          cd build
+          ctest -C Release -L shared --output-on-failure
         shell: pwsh
       - name: Run Program Smoke Test
         run: cd build && .\ddbcmd.exe --version --debug
@@ -348,6 +988,32 @@ jobs:
           $zipFile = Get-ChildItem build/dist/*.zip | Select-Object -First 1
           if ($zipFile) {
             Expand-Archive $zipFile.FullName -DestinationPath $zipCheckDir -Force
+
+            # The helper executables libddb starts (image metadata, 3D model builds) run from the zip
+            # with only the zip folder and System32 on PATH, so a DLL the zip does not ship fails
+            # here; they must report the package version and the zip must hold their licence texts.
+            # Then a GPS JPEG must index as GeoImage, which needs ddbcmd.exe to find metadata-util.exe.
+            $python = (Get-Command python).Source
+            $savedPath = $env:PATH
+            $env:PATH = "$zipCheckDir;$env:SystemRoot\System32"
+            try {
+              & $python scripts/check-helper-tools.py --bin-dir $zipCheckDir --licence-dir $zipCheckDir --version $version
+              if ($LASTEXITCODE -ne 0) { throw "the helper tools in the zip failed the package check ($LASTEXITCODE)" }
+              $geoSmoke = Join-Path $env:RUNNER_TEMP 'geoimage-smoke'
+              if (Test-Path $geoSmoke) { Remove-Item -Recurse -Force $geoSmoke }
+              New-Item -ItemType Directory -Force -Path $geoSmoke | Out-Null
+              Invoke-WebRequest "https://raw.githubusercontent.com/DroneDB/test_data/$env:TEST_DATA_SHA/images/DJI_0018.JPG" -OutFile (Join-Path $geoSmoke 'gps.jpg')
+              Push-Location $geoSmoke
+              $ddb = Join-Path $zipCheckDir 'ddbcmd.exe'
+              & $ddb init . | Out-Null
+              & $ddb add gps.jpg | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "ddbcmd add of a GPS JPEG failed ($LASTEXITCODE)" }
+              if (-not (& $ddb info gps.jpg --format text | Select-String -Pattern '^Type: GeoImage')) { throw "the GPS JPEG was not indexed as GeoImage" }
+              Pop-Location
+              Write-Host '  ✓ the helper executables run from the zip at the package version; ddbcmd.exe indexed a GPS JPEG as GeoImage'
+            } finally {
+              $env:PATH = $savedPath
+            }
             if (Test-Path (Join-Path $zipCheckDir 'untwine.exe')) {
               Write-Host '  ✓ untwine.exe present in zip (COPC accelerator enabled)'
             } else {
@@ -365,7 +1031,7 @@ jobs:
                 Write-Host '  ✗ Obj2Tiles.exe NOT present in zip - release builds MUST include Obj2Tiles. Failing.'
                 exit 1
               } else {
-                Write-Host '  ! Obj2Tiles.exe NOT present in zip (3D Tiles generation disabled, Nexus still produced)'
+                Write-Host '  ! Obj2Tiles.exe NOT present in zip (3D Tiles generation disabled, bm3d still produced)'
               }
             }
             if (Test-Path (Join-Path $zipCheckDir 'build-lod.exe')) {
@@ -375,7 +1041,41 @@ jobs:
                 Write-Host '  ✗ build-lod.exe NOT present in zip - release builds MUST include build-lod. Failing.'
                 exit 1
               } else {
-                Write-Host '  ! build-lod.exe NOT present in zip (Gaussian Splat builds will be deferred until build-lod is available)'
+                Write-Host '  ! build-lod.exe NOT present in zip (Gaussian Splat builds fail without it)'
+              }
+            }
+            if (Test-Path (Join-Path $zipCheckDir 'dwg2dxf.exe')) {
+              Write-Host '  ✓ dwg2dxf.exe present in zip (DWG support enabled)'
+              # Smoke test with only the zip contents and System32 on PATH: proves the
+              # converter needs no DLL we do not ship, on a real Windows host.
+              $savedPath = $env:PATH
+              $env:PATH = "$zipCheckDir;$env:SystemRoot\System32"
+              try {
+                & (Join-Path $zipCheckDir 'dwg2dxf.exe') --version
+                if ($LASTEXITCODE -ne 0) { throw "dwg2dxf.exe --version failed ($LASTEXITCODE)" }
+                $smoke = Join-Path $env:RUNNER_TEMP 'dwg-smoke'
+                New-Item -ItemType Directory -Force -Path $smoke | Out-Null
+                $base = "https://raw.githubusercontent.com/DroneDB/test_data/$env:TEST_DATA_SHA/vector/autocad"
+                Invoke-WebRequest "$base/utm32n_site_dwg.dwg" -OutFile (Join-Path $smoke 'site.dwg')
+                Invoke-WebRequest "$base/utm32n_site_dwg.prj" -OutFile (Join-Path $smoke 'site.prj')
+                Push-Location $smoke
+                $ddb = Join-Path $zipCheckDir 'ddbcmd.exe'
+                & $ddb init . | Out-Null
+                & $ddb add site.dwg site.prj | Out-Null
+                & $ddb build site.dwg
+                if ($LASTEXITCODE -ne 0) { throw "ddbcmd build of a DWG failed ($LASTEXITCODE)" }
+                if (-not (Get-ChildItem -Recurse .ddb/build -Filter source.gpkg)) { throw "no vec/source.gpkg produced" }
+                Pop-Location
+                Write-Host '  ✓ packaged ddbcmd.exe built a DWG with the packaged dwg2dxf.exe'
+              } finally {
+                $env:PATH = $savedPath
+              }
+            } else {
+              if ($env:GITHUB_REF -like 'refs/tags/v*') {
+                Write-Host '  ✗ dwg2dxf.exe NOT present in zip - release builds MUST include dwg2dxf. Failing.'
+                exit 1
+              } else {
+                Write-Host '  ! dwg2dxf.exe NOT present in zip (DWG builds fail with an actionable message)'
               }
             }
           }
@@ -384,15 +1084,6 @@ jobs:
         with:
           name: Windows Binaries
           path: build/dist/*.zip
-      - name: Upload Binaries to Release
-        uses: svenstaro/upload-release-action@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: build/dist/*.zip
-          file_glob: true
-          tag: ${{ github.ref }}
-          overwrite: true
 
   # build_macos:
   #     name: Build/Test on MacOS
@@ -422,7 +1113,7 @@ jobs:
   #         - name: Run C++ Tests
   #           run: cd build && ctest -C Release
   #         - name: Run Program Smoke Test
-  #           run: cd build && ./ddbcmd --debug
+  #           run: cd build && ./ddbcmd --version --debug
   #         - name: Create Distribution Package
   #           run: cd build && make package
   #         - name: Upload Distribution Files

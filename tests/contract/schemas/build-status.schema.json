@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb build status",
+  "description": "DDBGetBuildStatus: one item per input path, in input order",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "path",
+      "exists",
+      "buildable",
+      "complete"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "type": "string"
+      },
+      "exists": {
+        "type": "boolean"
+      },
+      "buildable": {
+        "type": "boolean"
+      },
+      "complete": {
+        "type": "boolean"
+      }
+    }
+  }
+}

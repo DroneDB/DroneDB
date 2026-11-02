@@ -1,0 +1,8 @@
+# UndefinedBehaviorSanitizer suppressions for the ASan+UBSan build (docs/sanitizers.md).
+#
+# Vendored third-party code only: submodules are not patched in this repository. A report in
+# src/, apps/ or tests/ is a bug to fix, not to list here. Each entry says what it is and why
+# it is not ours.
+#
+# No entry at present. The corto mesh codec that the 3D helper program (bm3d) is built from is
+# patched in the bm3d repository for the reports it used to produce, so the helper runs clean.

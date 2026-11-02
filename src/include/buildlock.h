@@ -6,7 +6,6 @@
 #define BUILDLOCK_H
 
 #include <string>
-#include "ddb_export.h"
 
 #ifdef WIN32
 #include <windows.h>
@@ -73,7 +72,7 @@ namespace ddb {
  * locks, flock() and no-share CreateFile are all per open file). No ThreadLock
  * is needed around a BuildLock.
  */
-class DDB_DLL BuildLock {
+class BuildLock {
 private:
     std::string lockFilePath;  ///< Full path to the lock file
     bool isLocked;             ///< Track lock state for proper cleanup
@@ -97,7 +96,7 @@ private:
      * @brief Clean up platform-specific resources
      *
      * Closes file handles/descriptors and removes the lock file.
-     * Called by the destructor but also usable for early release.
+     * Called by the destructor.
      */
     void cleanup();
 
@@ -181,14 +180,6 @@ public:
     ~BuildLock();
 
     /**
-     * @brief Check if this instance currently holds the lock
-     *
-     * @return true if the lock is currently held by this instance
-     * @return false if the lock has been released or was never acquired
-     */
-    bool isHolding() const { return isLocked; }
-
-    /**
      * @brief Get the path of the lock file
      *
      * @return const std::string& The full path to the lock file
@@ -200,23 +191,49 @@ public:
     const std::string& getLockFilePath() const { return lockFilePath; }
 
     /**
-     * @brief Manually release the lock before destructor
+     * @brief Whether a live BuildLock (of this or another process) holds the lock of an output path
      *
-     * Explicitly releases the lock and cleans up resources. This can be called
-     * multiple times safely. After calling this method, isHolding() will return false.
+     * Side-effect free: the probe never creates, truncates, writes or removes the lock file,
+     * so a listing can ask for many entries without disturbing builds or stale lock files.
+     * Only an existing "{outputPath}.building" is probed; its absence means "not held".
+     * - Linux: open(O_RDONLY) without O_CREAT, then fcntl(F_OFD_GETLK), the query matching the
+     *   F_OFD_SETLK lock that BuildLock takes. No lock is taken, so the probe never makes a
+     *   concurrent acquisition fail. OFD locks of this process are reported as well.
+     * - macOS / BSD: open(O_RDONLY), then a non-blocking shared flock() released at once
+     *   (flock() has no query). For that instant a concurrent BuildLock acquisition fails
+     *   with BuildInProgressException, as it would against a live holder.
+     * - Windows: CreateFile(GENERIC_READ, all sharing, OPEN_EXISTING) closed at once. A live
+     *   holder opened the file without sharing, so the open fails with a sharing violation
+     *   (or access denied while its delete-on-close is pending). For the instant the probe
+     *   handle is open a concurrent BuildLock acquisition fails with BuildInProgressException.
      *
-     * @note
-     * This is primarily useful when you want to release the lock early,
-     * before the BuildLock object goes out of scope.
+     * A file that exists but cannot be probed (permissions, I/O error) is reported as held:
+     * callers use the answer to leave a build alone, never to break into one.
+     *
+     * @param outputPath The output path, as given to the BuildLock constructor
+     * @return true if a live holder has the lock (or its state cannot be read)
      */
-    void release();
+    static bool isHeld(const std::string& outputPath);
+
+    /**
+     * @brief Remove the lock file of an output path when no live holder has it
+     *
+     * Not a probe: when no live holder exists the lock is taken and released at once, which
+     * removes the stale file safely (unlinked while still locked on Unix, delete-on-close on
+     * Windows). Leaves a missing file missing. Use isHeld() to only ask.
+     *
+     * @param outputPath The output path, as given to the BuildLock constructor
+     * @return true if no live holder has the lock (the stale file, if any, is gone);
+     *         false if a live holder has it or its state cannot be determined
+     */
+    static bool removeIfStale(const std::string& outputPath);
 
     // Disable copy constructor and assignment operator
     // BuildLock should not be copied as it manages an exclusive resource
     BuildLock(const BuildLock&) = delete;
     BuildLock& operator=(const BuildLock&) = delete;
 
-    // Allow move constructor and assignment for efficiency
+    // Allow move constructor and assignment (a build holds several locks in a vector)
     BuildLock(BuildLock&& other) noexcept;
     BuildLock& operator=(BuildLock&& other) noexcept;
 };

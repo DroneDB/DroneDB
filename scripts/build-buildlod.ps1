@@ -26,9 +26,9 @@ param(
     self-contained, pure-Rust binary with no system-library dependencies.
 
     This script is intentionally tolerant LOCALLY: when vendor/spark or cargo is missing it
-    exits 0 and Gaussian Splat (RAD) builds are deferred - buildGsplat throws
-    BuildDepMissingException until build-lod.exe is available (no delivery artifact is
-    produced). Set DDB_REQUIRE_BUILDLOD (done by CI) to turn a missing source/toolchain
+    exits 0. build-lod is mandatory for Gaussian Splat builds: without build-lod.exe every splat
+    build fails (buildGsplat throws an AppException that names the tool) and no delivery
+    artifact is produced. Set DDB_REQUIRE_BUILDLOD (done by CI) to turn a missing source/toolchain
     into a hard error (exit 1) instead.
 
 .PARAMETER BuildDir

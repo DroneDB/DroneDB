@@ -147,7 +147,12 @@ $cmakeArgs = @(
     "-DVCPKG_INSTALLED_DIR=$vcpkgInstalled",
     "-DCMAKE_PREFIX_PATH=$prefixPath",
     "-DPDAL_DIR=$prefixPath\share\pdal",
-    "-DBUILD_TESTING=OFF"
+    "-DBUILD_TESTING=OFF",
+    # untwine.exe writes its temporary files under the dataset, so it is declared long path aware
+    # (cmake/LongPathAware.cmake) like the other programs of the package; the CMakeLists.txt of
+    # Untwine is not ours, so the manifest is added by a file CMake reads after its project() call
+    "-DDDB_LONG_PATH_AWARE_TARGETS=untwine",
+    "-DCMAKE_PROJECT_Untwine_INCLUDE=$(Join-Path $repoRoot 'cmake\LongPathAwareProject.cmake')"
 )
 
 function Get-VSGenerator {

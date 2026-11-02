@@ -6,6 +6,7 @@
 #include "include/thumbs.h"
 #include "thumbs.h"
 #include "exceptions.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -17,8 +18,9 @@ namespace cmd
     .positional_help("[args]")
     .custom_help("thumbs [image.tif | *.JPG] -o [thumb.jpg | output/]")
     .add_options()
-    ("i,input", "File(s) to process", cxxopts::value<std::vector<std::string>>())
-    ("o,output", "Output file or directory where to store thumbnail(s)", cxxopts::value<std::string>())
+    ("i,input", "File(s) to process", cxxopts::value<std::vector<std::string>>());
+    cmd::addOutputOption(opts, "Output file or directory where to store thumbnail(s)");
+    opts.add_options()
     ("s,size", "Size of the largest side of the images", cxxopts::value<int>()->default_value("512"))
     ("use-crc", "Use CRC for output filenames", cxxopts::value<bool>());
         // clang-format on
@@ -30,11 +32,11 @@ namespace cmd
         return "Generate thumbnails for images and rasters";
     }
 
-    void Thumbs::run(cxxopts::ParseResult &opts)
+    int Thumbs::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input") || !opts.count("output"))
         {
-            printHelp();
+            usageError();
         }
 
         const auto input = opts["input"].as<std::vector<std::string>>();
@@ -42,7 +44,9 @@ namespace cmd
         const auto thumbSize = opts["size"].as<int>();
         const auto useCrc = opts["use-crc"].count();
 
-        ddb::generateThumbs(input, output, thumbSize, useCrc);
+        ddb::generateThumbs(input, ddb::io::fromUtf8(output), thumbSize, useCrc, [](const auto &thumb)
+                            { std::cout << ddb::io::toUtf8(thumb) << std::endl; });
+        return EXIT_SUCCESS;
     }
 
 }

@@ -7,14 +7,15 @@
 #include <constants.h>
 #include <ddb.h>
 #include <mio.h>
+#include <registry_ops.h>
 #include <registryutils.h>
-#include <url.h>
 
 #include <fstream>
 #include <iostream>
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "include/credentials.h"
 
 namespace cmd
 {
@@ -26,8 +27,8 @@ namespace cmd
             .custom_help("clone (tag|url) folder")
             .add_options()
             ("t,target", "Repository tag or full url", cxxopts::value<std::string>())
-            ("f,folder", "Target folder", cxxopts::value<std::string>()->default_value(""))
-            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
+            ("f,folder", "Target folder", cxxopts::value<std::string>()->default_value(""));
+        cmd::addInsecureOption(opts);
 
         // clang-format on
         opts.parse_positional({"target", "folder"});
@@ -43,34 +44,27 @@ namespace cmd
         return "\r\n\r\nClones a repository into a newly created directory.";
     }
 
-    void Clone::run(cxxopts::ParseResult &opts)
+    int Clone::run(cxxopts::ParseResult &opts)
     {
-        try
+        if (opts["target"].count() != 1)
         {
-            if (opts["target"].count() != 1)
-            {
-                printHelp();
-                return;
-            }
-
-            const auto tag =
-                ddb::RegistryUtils::parseTag(opts["target"].as<std::string>());
-
-            const auto folderRaw = opts["folder"].as<std::string>();
-
-            const auto folder = fs::absolute(folderRaw.length() > 0 ? folderRaw : tag.dataset);
-
-            auto sslVerify = opts["insecure"].count() == 0;
-
-            LOGD << "Normalized folder = " << folder.generic_string();
-
-            clone(tag, folder.generic_string(), sslVerify);
+            usageError();
         }
-        catch (ddb::InvalidArgsException &e)
-        {
-            std::cerr << "Error: " << e.what() << std::endl;
-            printHelp();
-        }
+
+        const auto tag =
+            ddb::RegistryUtils::parseTag(opts["target"].as<std::string>());
+
+        const auto folderRaw = opts["folder"].as<std::string>();
+
+        const auto folder = fs::absolute(ddb::io::fromUtf8(folderRaw.length() > 0 ? folderRaw : tag.dataset));
+
+        auto sslVerify = opts["insecure"].count() == 0;
+
+        LOGD << "Normalized folder = " << ddb::io::toGenericUtf8(folder);
+
+        ddb::clone(tag, ddb::io::toGenericUtf8(folder), sslVerify, credentials(), std::cout, registryDeps());
+
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

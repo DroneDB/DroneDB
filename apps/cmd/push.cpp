@@ -7,14 +7,15 @@
 #include <constants.h>
 #include <ddb.h>
 #include <mio.h>
+#include <registry_ops.h>
 #include <registryutils.h>
-#include <url.h>
 
 #include <fstream>
 #include <iostream>
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "include/credentials.h"
 
 namespace cmd
 {
@@ -23,10 +24,9 @@ namespace cmd
         // clang-format off
         opts
             .positional_help("[args]")
-            .custom_help("push [remote]")
-            .add_options()
-                ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
-                ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
+            .custom_help("push [remote]");
+        cmd::addRemoteOption(opts);
+        cmd::addInsecureOption(opts);
 
         // clang-format on
         opts.parse_positional({"remote"});
@@ -37,24 +37,14 @@ namespace cmd
         return "Pushes changes to a remote repository.";
     }
 
-    void Push::run(cxxopts::ParseResult &opts)
+    int Push::run(cxxopts::ParseResult &opts)
     {
-        try
-        {
-            const auto remote = opts["remote"].as<std::string>();
-            auto sslVerify = opts["insecure"].count() == 0;
+        // Errors reach Command::run: stderr and a non-zero exit (invalid args also print usage)
+        const auto remote = opts["remote"].as<std::string>();
+        auto sslVerify = opts["insecure"].count() == 0;
 
-            ddb::push(remote, sslVerify);
-        }
-        catch (ddb::IndexException &e)
-        {
-            std::cout << e.what() << std::endl;
-        }
-        catch (ddb::InvalidArgsException &ex)
-        {
-            std::cout << ex.what() << std::endl;
-            printHelp();
-        }
+        ddb::push(remote, sslVerify, credentials(), std::cout, registryDeps());
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

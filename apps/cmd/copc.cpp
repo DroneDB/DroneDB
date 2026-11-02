@@ -15,9 +15,9 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("copc outdir/ *.las")
-    .add_options()
-    ("o,output", "Output directory where to store the COPC file (cloud.copc.laz)", cxxopts::value<std::string>())
+    .custom_help("copc outdir/ *.las");
+    cmd::addOutputOption(opts, "Output directory where to store the COPC file (cloud.copc.laz)");
+    opts.add_options()
     ("i,input", "File(s) to process", cxxopts::value<std::vector<std::string>>());
 
         // clang-format on
@@ -29,17 +29,18 @@ namespace cmd
         return "Build a COPC (Cloud Optimized Point Cloud) file from point cloud inputs.";
     }
 
-    void Copc::run(cxxopts::ParseResult &opts)
+    int Copc::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input") || !opts.count("output"))
         {
-            printHelp();
+            usageError();
         }
 
         auto input = opts["input"].as<std::vector<std::string>>();
         auto output = opts["output"].as<std::string>();
 
         ddb::buildCopc(input, output);
+        return EXIT_SUCCESS;
     }
 
 }

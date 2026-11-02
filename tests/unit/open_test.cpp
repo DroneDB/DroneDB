@@ -1,0 +1,248 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+// Cost of the per-call index open.
+//
+//  - opens are no longer serialized by a process-wide mutex, and SQLite's allocation
+//    statistics (a global mutex on every malloc) are off, so concurrent opens scale;
+//  - the -wal/-shm files are kept when the last connection closes (they used to be
+//    deleted and recreated by every read-only call) and the WAL is truncated to zero
+//    bytes once checkpointed, so no stale frames sit next to the database file;
+//  - the journal mode is only written when the database is not in WAL mode yet;
+//  - the busy timeout is DroneDB's floor, not the one SpatiaLite sets.
+
+#include <atomic>
+#include <fstream>
+#include <thread>
+
+#include "gtest/gtest.h"
+
+#include "database.h"
+#include "databasepool.h"
+#include "dbops.h"
+#include "ddb.h"
+#include "test.h"
+#include "testarea.h"
+#include "utils.h"
+
+namespace
+{
+    using namespace ddb;
+
+    fs::path dbFile(const fs::path &root) { return root / DDB_FOLDER / DDB_DATABASE_FILE; }
+    fs::path walFile(const fs::path &root) { return fs::path(dbFile(root).string() + "-wal"); }
+
+    TEST(OpenIndex, sqliteMemoryStatisticsAreOff)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        auto db = ddb::open(root.string(), false);
+        Entry e;
+        ASSERT_TRUE(loadEntry(db.get(), "a.txt", e));
+
+        // Tracked only when SQLITE_CONFIG_MEMSTATUS is on (the global allocator mutex)
+        EXPECT_EQ(sqlite3_memory_used(), 0);
+    }
+
+    // spatialite_init_ex() sets a 5 s busy timeout on the connection it initializes: the
+    // DroneDB floor must be applied after it, on every connection
+    TEST(OpenIndex, busyTimeoutIsDroneDbFloor)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        const auto busyTimeout = [](const Database &db) {
+            const auto q = db.query("PRAGMA busy_timeout");
+            return q->fetch() ? q->getInt(0) : -1;
+        };
+
+        Database db;
+        db.open(dbFile(root).string());
+        EXPECT_EQ(busyTimeout(db), Database::busyTimeoutMs);
+        db.close();
+
+        const auto pooled = ddb::open(root.string(), false);
+        EXPECT_EQ(busyTimeout(*pooled), Database::busyTimeoutMs);
+    }
+
+    TEST(OpenIndex, walIsKeptAndEmptyAfterLastClose)
+    {
+        const auto root = makeIndex(TEST_NAME);
+
+        {
+            auto db = ddb::open(root.string(), false);
+            Entry e;
+            ASSERT_TRUE(loadEntry(db.get(), "a.txt", e));
+        }
+        // The pool keeps connections open: close them for real
+        DatabasePool::instance().releaseConnections(root);
+
+        ASSERT_TRUE(fs::exists(walFile(root))) << "the last close deleted the WAL";
+        EXPECT_EQ(fs::file_size(walFile(root)), 0u) << "checkpointed frames left in the WAL";
+    }
+
+    TEST(OpenIndex, writesAreInTheMainFileAfterCheckpoint)
+    {
+        const auto root = makeIndex(TEST_NAME);
+
+        {
+            auto db = ddb::open(root.string(), false);
+            std::ofstream(root / "b.txt") << "bravo";
+            addToIndex(db.get(), {(root / "b.txt").string()});
+            EXPECT_GT(fs::file_size(walFile(root)), 0u);
+        }
+        // Closing a pooled connection does not checkpoint (no fsyncs per write): whoever
+        // copies dbase.sqlite alone checkpoints first
+        EXPECT_GT(fs::file_size(walFile(root)), 0u);
+        ASSERT_TRUE(checkpointIndex(root.string()));
+        EXPECT_EQ(fs::file_size(walFile(root)), 0u);
+
+        // Copying only dbase.sqlite (templates, backups, the tests' fixtures) keeps the data
+        TestArea copyArea(std::string(TEST_NAME) + "-copy", true);
+        const auto copy = copyArea.getFolder("ds");
+        fs::create_directories(copy / DDB_FOLDER);
+        fs::copy_file(dbFile(root), dbFile(copy));
+
+        auto db = ddb::open(copy.string(), false);
+        Entry e;
+        EXPECT_TRUE(loadEntry(db.get(), "b.txt", e));
+    }
+
+    TEST(OpenIndex, replacedDatabaseFileIsNotMixedWithOldWal)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        const auto snapshot = dbFile(root).string() + ".snapshot";
+        ASSERT_TRUE(checkpointIndex(root.string())); // the file alone holds a.txt
+        fs::copy_file(dbFile(root), snapshot);
+
+        {
+            auto db = ddb::open(root.string(), false);
+            std::ofstream(root / "b.txt") << "bravo";
+            addToIndex(db.get(), {(root / "b.txt").string()});
+        }
+
+        // Put the older file back next to the kept -wal/-shm. Overwriting an index file in
+        // place requires closing this process' idle connections to it first.
+        DatabasePool::instance().releaseConnections(root);
+        fs::copy_file(snapshot, dbFile(root), fs::copy_options::overwrite_existing);
+
+        auto db = ddb::open(root.string(), false);
+        Entry e;
+        EXPECT_TRUE(loadEntry(db.get(), "a.txt", e));
+        EXPECT_FALSE(loadEntry(db.get(), "b.txt", e)) << "frames of the old WAL were replayed";
+    }
+
+    TEST(OpenIndex, readOnlyOpenDoesNotWriteTheDatabaseFile)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        { auto db = ddb::open(root.string(), false); }
+
+        const auto before = fs::last_write_time(dbFile(root));
+        const auto sizeBefore = fs::file_size(dbFile(root));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+        for (int i = 0; i < 5; i++)
+        {
+            auto db = ddb::open(root.string(), false);
+            Entry e;
+            ASSERT_TRUE(loadEntry(db.get(), "a.txt", e));
+        }
+
+        EXPECT_EQ(fs::last_write_time(dbFile(root)), before);
+        EXPECT_EQ(fs::file_size(dbFile(root)), sizeBefore);
+    }
+
+    TEST(OpenIndex, rollbackJournalDatabaseIsSwitchedToWal)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        // Leaving WAL mode needs the only connection to the file
+        DatabasePool::instance().releaseConnections(root);
+        {
+            Database db;
+            db.open(dbFile(root).string());
+            db.exec("PRAGMA journal_mode=DELETE;");
+            EXPECT_EQ(db.getJournalMode(), "delete");
+        }
+
+        // A plain connection (no afterOpen) reads the mode stored in the header
+        sqlite3 *raw = nullptr;
+        ASSERT_EQ(sqlite3_open(dbFile(root).string().c_str(), &raw), SQLITE_OK);
+        sqlite3_stmt *stmt = nullptr;
+        ASSERT_EQ(sqlite3_prepare_v2(raw, "PRAGMA journal_mode", -1, &stmt, nullptr), SQLITE_OK);
+        ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+        EXPECT_STREQ(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0)), "delete");
+        sqlite3_finalize(stmt);
+        sqlite3_close_v2(raw);
+
+        auto db = ddb::open(root.string(), false);
+        EXPECT_EQ(db->getJournalMode(), "wal");
+    }
+
+    TEST(OpenIndex, concurrentOpensAndReadsSucceed)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        constexpr int threads = 8;
+        constexpr int iterations = 40;
+        std::atomic<int> ok{0};
+        std::atomic<int> failed{0};
+        std::vector<std::string> errors(threads);
+
+        std::vector<std::thread> pool;
+        for (int t = 0; t < threads; t++)
+        {
+            pool.emplace_back([&, t]
+                              {
+                for (int i = 0; i < iterations; i++)
+                {
+                    try
+                    {
+                        auto db = ddb::open(root.string(), false);
+                        Entry e;
+                        if (loadEntryWithMeta(db.get(), "a.txt", e) && e.path == "a.txt")
+                            ok++;
+                        else
+                            failed++;
+                    }
+                    catch (const std::exception &ex)
+                    {
+                        failed++;
+                        errors[t] = ex.what();
+                    }
+                } });
+        }
+        for (auto &th : pool)
+            th.join();
+
+        for (const auto &err : errors)
+            EXPECT_TRUE(err.empty()) << err;
+        EXPECT_EQ(failed.load(), 0);
+        EXPECT_EQ(ok.load(), threads * iterations);
+    }
+
+    TEST(OpenIndex, concurrentInitIndexSucceeds)
+    {
+        TestArea ta(TEST_NAME, true);
+        constexpr int threads = 6;
+        std::vector<std::thread> pool;
+        std::vector<std::string> errors(threads);
+        for (int t = 0; t < threads; t++)
+        {
+            pool.emplace_back([&, t]
+                              {
+                try
+                {
+                    const auto dir = ta.getFolder("ds" + std::to_string(t));
+                    initIndex(dir.string());
+                    auto db = ddb::open(dir.string(), false);
+                    if (!db->tableExists("entries"))
+                        errors[t] = "no entries table";
+                }
+                catch (const std::exception &ex)
+                {
+                    errors[t] = ex.what();
+                } });
+        }
+        for (auto &th : pool)
+            th.join();
+        for (const auto &err : errors)
+            EXPECT_TRUE(err.empty()) << err;
+    }
+} // namespace

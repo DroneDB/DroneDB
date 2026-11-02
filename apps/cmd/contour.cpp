@@ -10,6 +10,7 @@
 #include "contour.h"
 #include "include/contour.h"
 #include "exceptions.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -21,18 +22,17 @@ namespace cmd
         .positional_help("[args]")
         .custom_help("contour [options] input.tif")
         .add_options()
-        ("input", "Input single-band raster (DEM/DSM/DTM)", cxxopts::value<std::string>())
-        ("o,output", "Output GeoJSON file (default: stdout)", cxxopts::value<std::string>())
+        ("input", "Input single-band raster (DEM/DSM/DTM)", cxxopts::value<std::string>());
+        cmd::addOutputOption(opts, "Output GeoJSON file (default: stdout)");
+        opts.add_options()
         ("i,interval", "Vertical interval between contour levels (raster units)",
             cxxopts::value<double>()->default_value("0"))
         ("n,count", "Target number of contour levels (used when --interval is 0)",
             cxxopts::value<int>()->default_value("0"))
         ("b,base", "Reference base elevation",
             cxxopts::value<double>()->default_value("0"))
-        ("min", "Drop contours below this elevation",
-            cxxopts::value<double>()->default_value("nan"))
-        ("max", "Drop contours above this elevation",
-            cxxopts::value<double>()->default_value("nan"))
+        ("min", "Drop contours below this elevation", cxxopts::value<double>())
+        ("max", "Drop contours above this elevation", cxxopts::value<double>())
         ("s,simplify", "Geometry simplification tolerance (raster CRS units)",
             cxxopts::value<double>()->default_value("0"))
         ("band", "1-based raster band index",
@@ -46,36 +46,33 @@ namespace cmd
         return "Generate contour lines (GeoJSON) from a DEM/DSM/DTM raster.";
     }
 
-    void Contour::run(cxxopts::ParseResult &opts)
+    int Contour::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
-            printHelp();
-            return;
+            usageError();
         }
 
         const auto input = opts["input"].as<std::string>();
         const auto interval = opts["interval"].as<double>();
         const auto count = opts["count"].as<int>();
         const auto base = opts["base"].as<double>();
-        const auto minElev = opts["min"].as<double>();
-        const auto maxElev = opts["max"].as<double>();
         const auto simplify = opts["simplify"].as<double>();
         const auto band = opts["band"].as<int>();
 
         if (interval <= 0.0 && count <= 0)
         {
-            std::cerr << "Either --interval or --count must be > 0" << std::endl;
-            printHelp();
-            return;
+            usageError("Either --interval or --count must be > 0");
         }
 
         ddb::ContourOptions o;
         if (interval > 0.0) o.interval = interval;
         if (count > 0) o.count = count;
         o.baseOffset = base;
-        if (std::isfinite(minElev)) o.minElev = minElev;
-        if (std::isfinite(maxElev)) o.maxElev = maxElev;
+        // No default value: cxxopts cannot parse "nan" as a double, which made every run of the
+        // command (and its --help) fail before it did anything
+        if (opts.count("min") && std::isfinite(opts["min"].as<double>())) o.minElev = opts["min"].as<double>();
+        if (opts.count("max") && std::isfinite(opts["max"].as<double>())) o.maxElev = opts["max"].as<double>();
         o.simplifyTolerance = std::max(0.0, simplify);
         o.bandIndex = (band > 0) ? band : 1;
 
@@ -84,7 +81,7 @@ namespace cmd
         if (opts.count("output"))
         {
             const auto outPath = opts["output"].as<std::string>();
-            std::ofstream out(outPath);
+            std::ofstream out(ddb::io::fromUtf8(outPath));
             if (!out)
                 throw ddb::AppException("Cannot open output file: " + outPath);
             out << json;
@@ -93,6 +90,7 @@ namespace cmd
         {
             std::cout << json << std::endl;
         }
+        return EXIT_SUCCESS;
     }
 
 }

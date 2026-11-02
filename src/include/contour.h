@@ -6,7 +6,6 @@
 
 #include <optional>
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb {
 
@@ -53,8 +52,8 @@ struct ContourOptions {
  *         when the raster cannot be read, or when bandIndex is invalid.
  * @throws GDALException when GDAL fails to compute contours.
  */
-DDB_DLL std::string generateContoursJson(const std::string &rasterPath,
-                                         const ContourOptions &options);
+std::string generateContoursJson(const std::string &rasterPath,
+                                 const ContourOptions &options);
 
 } // namespace ddb
 

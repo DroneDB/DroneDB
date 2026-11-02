@@ -5,6 +5,7 @@
 #include <iostream>
 #include "include/sync.h"
 #include "dbops.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -14,9 +15,8 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("sync")
-    .add_options()
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
+    .custom_help("sync");
+    cmd::addWorkingDirOption(opts);
         // clang-format on
     }
 
@@ -25,14 +25,16 @@ namespace cmd
         return "Sync files and directories in the index with changes from the filesystem";
     }
 
-    void Sync::run(cxxopts::ParseResult &opts)
+    int Sync::run(cxxopts::ParseResult &opts)
     {
         const auto workingDir = opts["working-dir"].as<std::string>();
 
-        fs::current_path(workingDir);
+        fs::current_path(ddb::io::fromUtf8(workingDir));
 
         const auto db = ddb::open(workingDir, true);
-        syncIndex(db.get());
+        syncIndex(db.get(), [](bool deleted, const std::string &path)
+                  { std::cout << (deleted ? "D\t" : "U\t") << path << std::endl; });
+        return EXIT_SUCCESS;
     }
 
 }

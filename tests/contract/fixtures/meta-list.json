@@ -1,0 +1,28 @@
+{
+  "call": "DDBMetaList(<root>, \"\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": [
+    {
+      "count": 1,
+      "key": "name",
+      "path": ""
+    },
+    {
+      "count": 2,
+      "key": "tags",
+      "path": ""
+    },
+    {
+      "count": 1,
+      "key": "annotation",
+      "path": "sub/img.jpg"
+    }
+  ],
+  "schema": "meta-list.schema.json"
+}

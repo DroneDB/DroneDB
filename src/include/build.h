@@ -4,26 +4,53 @@
 #ifndef BUILD_H
 #define BUILD_H
 
-#include "ddb_export.h"
+#include "build_budget.h"
 #include "dbops.h"
 
 #include <ctime>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace ddb
 {
 
-    DDB_DLL bool isBuildable(Database *db, const std::string &path, std::string &subfolder);
+    /**
+     * The output subfolder of the build of the entry at `path` ("<build root>/<hash>/<subfolder>"),
+     * or nothing when the entry is not buildable, neither itself nor as the sidecar of an indexed
+     * main file. Throws InvalidArgsException when `path` is not indexed.
+     */
+    std::optional<std::string> buildSubfolder(Database *db, const std::string &path);
 
-    DDB_DLL void buildAll(Database *db, const std::string &outputPath, bool force = false);
-    DDB_DLL void build(Database *db, const std::string &path, const std::string &outputPath, bool force = false);
+    /// buildSubfolder() has a value; throws InvalidArgsException when `path` is not indexed
+    bool isBuildable(Database *db, const std::string &path);
+
+    /**
+     * The indexed main files the sidecar at path belongs to (the SidecarRules of the entry
+     * handlers): .cpg/.dbf/.shx belong to a shapefile; a .prj also gives a CAD drawing its CRS.
+     * A main file has the sidecar's folder and stem (exact bytes) and a main
+     * extension in any letter case (.shp, .SHP, .Shp). Lookup order: the extensions in rule
+     * order, then lowercase, uppercase and other spellings, then byte order of the path.
+     * Empty for any other file.
+     */
+    std::vector<std::string> findSidecarMains(Database *db, const std::string &path);
+
+    /// Builds every buildable entry (a failed entry is logged and the next one builds). `options` is what the
+    /// caller asks of each build (the thread cap, see BuildOptions).
+    void buildAll(Database *db, const std::string &outputPath, bool force = false,
+                  const BuildOptions &options = {});
+    /// Builds the entry at `path`; throws what its build throws
+    void build(Database *db, const std::string &path, const std::string &outputPath, bool force = false,
+               const BuildOptions &options = {});
 
     /**
      * @brief Retry every deferred build (one per "<hash>.pending" marker in the build
-     * directory). A retry is a full build attempt of the entry: the dependency names in
-     * the marker are informational and are not matched against the index. Entries
-     * attempted less than 60 seconds ago are skipped unless @p force is set. Errors are
+     * directory) that a retry can progress. A build that awaits files (its marker lists
+     * missing dependencies) is skipped unless @p force is set: no timer retries it, adding
+     * one of those files to the index (add, move, delta) releases it, and it is retried
+     * by the next call. A retry is a full build attempt of the entry: the dependency names
+     * in the marker are not matched against the index. Entries attempted less than 60
+     * seconds ago are skipped unless @p force is set. Errors are
      * logged, never thrown: missing dependencies refresh the marker. Low disk space,
      * identifiable ENOSPC and primary-tool idle timeout preserve an existing marker;
      * permanent failures and complete builds consume it. Lock contention leaves it
@@ -31,9 +58,19 @@ namespace ddb
      * @param db database (already opened)
      * @param outputPath base build directory; if empty, uses db->buildDirectory()
      * @param force rebuild even if complete, and ignore the retry backoff
+     * @param options what the caller asks of each build (the thread cap, see BuildOptions)
      */
-    DDB_DLL void buildPending(Database *db, const std::string &outputPath, bool force = false);
-    DDB_DLL bool isBuildPending(Database *db);
+    void buildPending(Database *db, const std::string &outputPath, bool force = false,
+                      const BuildOptions &options = {});
+
+    /**
+     * @brief True when the database has a deferred build that a retry can progress: a
+     * "<hash>.pending" marker that awaits no file (a transient failure, or a build released
+     * by the add of a file it waited for). A build that only awaits missing files does not
+     * count: a host has nothing to retry until one of them is added. getPendingBuildInfo()
+     * still lists it (awaitingFiles).
+     */
+    bool isBuildPending(Database *db);
 
     /**
      * @brief Information about a single deferred build, read from a ".pending"
@@ -54,6 +91,14 @@ namespace ddb
         std::vector<std::string> missingDependencies;
         /// Unix timestamp of the last build attempt (0 if unknown/malformed)
         time_t lastAttempt = 0;
+        /// First Unix second at which buildPending() (without force) retries this build:
+        /// lastAttempt + the retry backoff (60 s). Due when the current time is at or past it.
+        /// Applies only when awaitingFiles is false.
+        time_t retryAfter = 0;
+        /// The build waits for files the dataset lacks (missingDependencies is not empty): no
+        /// timer retries it; adding a file of one of those names releases it (awaitingFiles
+        /// becomes false, due at once)
+        bool awaitingFiles = false;
     };
 
     /**
@@ -66,9 +111,13 @@ namespace ddb
      * @return list of pending build info, one per ".pending" file with a
      *         matching indexed entry
      */
-    DDB_DLL std::vector<PendingBuildInfo> getPendingBuildInfo(Database *db);
+    std::vector<PendingBuildInfo> getPendingBuildInfo(Database *db);
 
-    DDB_DLL bool isBuildActive(Database *db, const std::string &path);
+    /// {"hash", "path", "missingDependencies", "lastAttempt", "retryAfter", "awaitingFiles"}: an element of the
+    /// output of DDBGetPendingBuildInfo (tests/contract/schemas/pending-build-info.schema.json)
+    void to_json(json &j, const PendingBuildInfo &info);
+
+    bool isBuildActive(Database *db, const std::string &path);
 
     /**
      * @brief Check whether the build artifacts for an entry are present and non-empty.
@@ -83,7 +132,35 @@ namespace ddb
      * @return true if the build output is complete and valid; false otherwise
      *         (not buildable, missing, or empty artifacts)
      */
-    DDB_DLL bool isBuildComplete(Database *db, const std::string &path);
+    bool isBuildComplete(Database *db, const std::string &path);
+
+    /**
+     * @brief Build status of one entry, as reported by getBuildStatus().
+     */
+    struct BuildStatus
+    {
+        /// Entry path, as requested
+        std::string path;
+        /// The index has an entry with this path
+        bool exists = false;
+        /// Same answer as isBuildable() (false when the entry does not exist)
+        bool buildable = false;
+        /// Same answer as isBuildComplete()
+        bool complete = false;
+    };
+
+    /**
+     * @brief isBuildable() and isBuildComplete() for several entries on one connection.
+     * Reads only path, hash and type of each entry; the completeness checks are the
+     * same filesystem checks as isBuildComplete().
+     * @param db database handle
+     * @param paths dataset-relative entry paths (exact match)
+     * @return one status per input path, in input order
+     */
+    std::vector<BuildStatus> getBuildStatus(Database *db, const std::vector<std::string> &paths);
+
+    /// {"path", "exists", "buildable", "complete"}: an element of the output of DDBGetBuildStatus
+    void to_json(json &j, const BuildStatus &status);
 
     /**
      * @brief Result of a cleanup operation.
@@ -111,7 +188,10 @@ namespace ddb
      * @param outputPath base build directory; if empty, uses db->buildDirectory()
      * @return CleanupResult with the lists of removed items
      */
-    DDB_DLL CleanupResult cleanupBuild(Database *db, const std::string &outputPath = "");
+    CleanupResult cleanupBuild(Database *db, const std::string &outputPath = "");
+
+    /// {"entries": removedEntries, "builds": removedBuilds}: the output of DDBCleanup
+    void to_json(json &j, const CleanupResult &result);
 
 }
 

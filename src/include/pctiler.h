@@ -9,34 +9,57 @@
 #include <sstream>
 #include <string>
 
-#include "ddb_export.h"
 #include "fs.h"
 #include "geo.h"
 #include "tiler.h"
 #include "pointcloud.h"
+#include "coordstransformer.h"
+#include "copc_utils.h"
+#include "point_rasterizer.h"
+
+#include <functional>
+#include <memory>
 
 namespace ddb
 {
 
     // Tiler that renders web-map raster tiles from a built COPC (.copc.laz) file
-    // using PDAL's CopcReader. Drop-in replacement for the previous EptTiler.
+    // from its octree nodes. Drop-in replacement for the previous EptTiler.
+    // The constructor reads the COPC header and prepares the coordinate transforms once;
+    // every tile then streams the points of its window through PointRasterizer. An
+    // instance must not be used by two threads at once (RasterCache hands out one per
+    // caller).
+    class CopcNodeReader;
+
     class PointCloudTiler : public Tiler
     {
-        int wSize;
         PointCloudInfo pcInfo;
         bool hasColors;
+        std::unique_ptr<CoordsTransformer> toCloud;    // EPSG:3857 -> cloud CRS
+        std::unique_ptr<CoordsTransformer> toMercator; // cloud CRS -> EPSG:3857
+
+        // Reads local coloured clouds through the shared cache of decoded nodes; PDAL's
+        // readers.copc reads the others (remote files, ramp-coloured clouds)
+        std::unique_ptr<CopcNodeReader> nodeReader;
+
+        void readWithPdal(const CopcWindow &window,
+                          const std::function<void(PointBatch &)> &sink);
 
     public:
-        DDB_DLL PointCloudTiler(const std::string &copcPath,
-                                const std::string &outputFolder, int tileSize = 256,
-                                bool tms = false);
-        DDB_DLL ~PointCloudTiler();
+        PointCloudTiler(const std::string &copcPath,
+                        const std::string &outputFolder, int tileSize = 256,
+                        bool tms = false);
+        ~PointCloudTiler();
 
-        DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
+        using Tiler::tile;
+
+        std::string tile(int tz, int tx, int ty, ImageFormat format,
+                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
+
+        // Tiles are read from the COPC level this many zoom levels coarser than the tile's
+        // pixel size (DDB_PCTILE_RESOLUTION_OFFSET, default 2)
+        static int resolutionOffset();
     };
-
-    DDB_DLL void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius,
-                            uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize);
 
 } // namespace ddb
 

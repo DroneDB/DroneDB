@@ -5,25 +5,36 @@
 #define STOCKPILE_H
 
 #include <string>
-#include "ddb_export.h"
 
 namespace ddb {
 
 /**
  * Auto-detect a stockpile footprint by clicking on an elevation raster.
  *
- * Pipeline: local window -> border-based base plane -> gaussian smoothing ->
- * adaptive threshold -> 4-connected flood fill from the click point ->
- * Moore-neighbour contour tracing -> Douglas-Peucker simplification ->
- * GeoJSON polygon in WGS84.
+ * The pile is measured against the ground around it, a least-squares plane: on a
+ * slope the base takes the tilt of the slope, so the pile is what rises above
+ * the slope. Rings of growing radius around the click are fitted with a plane;
+ * the pile is the area of the click that rises above the plane of the first ring
+ * that lies on the ground all around it (a ring on the pile itself descends
+ * outwards with its flank). The base is then fitted again to the ground just
+ * around the outline of the pile, and the volume is what rises above it: the
+ * base of a "best_fit" volume of that outline. The radius limits the search: the
+ * pile and a ring of ground around it (about a quarter of its radius) must fit
+ * in it.
+ *
+ * Pipeline: local window -> growing rings of ground, each fitted with a plane ->
+ * smoothed rise above the plane -> threshold over the noise of the ground ->
+ * 4-connected flood fill from the click point -> base refitted around the
+ * outline -> Moore-neighbour contour tracing -> Douglas-Peucker simplification
+ * -> GeoJSON polygon in WGS84.
  *
  * Output JSON schema:
  * {
  *   "polygon":         GeoJSON Polygon (WGS84),
  *   "estimatedVolume": m^3,
  *   "confidence":      float in [0, 1],
- *   "baseElevation":   m,
- *   "basePlaneMethod": "auto",
+ *   "baseElevation":   m,     // mean elevation of the base under the pile
+ *   "basePlaneMethod": "auto", // the plane of the ground around the pile
  *   "searchRadius":    m,
  *   "sensitivityUsed": float in [0, 1],
  *   "pixelCount":      int
@@ -35,18 +46,20 @@ namespace ddb {
  * @param radiusMeters Search radius around the click (meters, >0)
  * @param sensitivity  [0,1] - higher = finer detail, lower = smoother boundary
  *
- * Throws InvalidArgsException for bad user input,
- * AppException for GDAL/IO errors or when no stockpile is found.
+ * Throws InvalidArgsException for bad user input, NoStockpileException (an
+ * InvalidArgsException) when no pile is found, AppException for GDAL/IO errors.
  */
-DDB_DLL std::string detectStockpileJson(const std::string &rasterPath,
-                                        double lat, double lon,
-                                        double radiusMeters,
-                                        float sensitivity);
+std::string detectStockpileJson(const std::string &rasterPath,
+                                double lat, double lon,
+                                double radiusMeters,
+                                float sensitivity);
 
 /**
  * Auto-detect ALL stockpile footprints by full-DEM scan.
  *
- * Pipeline: full raster -> low-pass base plane -> diff -> gaussian smoothing
+ * Pipeline: full raster -> terrain trend (at every cell, the least-squares
+ * plane of the elevations around it, gaussian-weighted: a tilted surface is its
+ * own trend) -> diff -> gaussian smoothing
  * -> adaptive global threshold -> two-pass connected components labeling
  * -> per-component contour tracing + Douglas-Peucker simplification
  * -> sort by estimated volume desc -> truncate to maxResults.
@@ -75,10 +88,10 @@ DDB_DLL std::string detectStockpileJson(const std::string &rasterPath,
  * @param minAreaM2   Minimum component area in square meters (>=0)
  * @param maxResults  Maximum number of stockpiles returned (>0, server-capped to 500)
  */
-DDB_DLL std::string detectAllStockpilesJson(const std::string &rasterPath,
-                                            float sensitivity,
-                                            double minAreaM2,
-                                            int maxResults);
+std::string detectAllStockpilesJson(const std::string &rasterPath,
+                                    float sensitivity,
+                                    double minAreaM2,
+                                    int maxResults);
 
 } // namespace ddb
 

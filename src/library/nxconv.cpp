@@ -21,9 +21,9 @@
 #include <vector>
 
 #include "3d.h"
+#include "stringutil.h"
 #include "logger.h"
 #include "exceptions.h"
-#include "utils.h"
 
 // libktx + stb_image_write for KTX2->PNG conversion
 #include <ktx.h>
@@ -35,10 +35,27 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #endif
 #include "stb_image_write.h"
+#include "mio.h"
 
 namespace fs = std::filesystem;
 
 namespace ddb {
+
+/**
+ * @brief stbi_write_png to a path. stb opens a file name with fopen, which reads it in the
+ * ANSI code page on Windows (mio.h, "Path encoding"): the PNG goes through a stream instead.
+ * Like stbi_write_png, returns 0 when the file cannot be created or the image encoded.
+ */
+static int writePng(const fs::path& file, int w, int h, int comp, const void* data, int stride) {
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    if (!out)
+        return 0;
+    return stbi_write_png_to_func(
+        [](void* context, void* bytes, int size) {
+            static_cast<std::ofstream*>(context)->write(static_cast<const char*>(bytes), size);
+        },
+        &out, w, h, comp, data, stride);
+}
 
 /** @brief Check if the scene contains UV texture coordinates */
 static bool sceneHasUVs(const aiScene* s) {
@@ -75,7 +92,7 @@ static void extractEmbeddedTextures(const aiScene* scene,
     if (!scene || !scene->HasTextures())
         return;
 
-    LOGD << "Extracting embedded textures to " << outputDir.string();
+    LOGD << "Extracting embedded textures to " << io::toUtf8(outputDir);
 
     fs::create_directories(outputDir);
 
@@ -97,14 +114,14 @@ static void extractEmbeddedTextures(const aiScene* scene,
             filename = "texture_" + std::to_string(i) + ".png";
         }
 
-        fs::path texturePath = outputDir / filename;
+        fs::path texturePath = outputDir / io::fromUtf8(filename);
 
         try {
             if (tex->mHeight == 0) {
                 // Compressed format - write directly
                 std::ofstream out(texturePath, std::ios::binary);
                 if (!out) {
-                    LOGW << "Failed to write texture: " << texturePath.string();
+                    LOGW << "Failed to write texture: " << io::toUtf8(texturePath);
                     continue;
                 }
                 out.write(reinterpret_cast<const char*>(tex->pcData), tex->mWidth);
@@ -124,9 +141,9 @@ static void extractEmbeddedTextures(const aiScene* scene,
                     }
                 }
 
-                if (!stbi_write_png(texturePath.string().c_str(), tex->mWidth, tex->mHeight,
-                                   4, rgba.data(), tex->mWidth * 4)) {
-                    LOGW << "Failed to write PNG texture: " << texturePath.string();
+                if (!writePng(texturePath, tex->mWidth, tex->mHeight,
+                              4, rgba.data(), tex->mWidth * 4)) {
+                    LOGW << "Failed to write PNG texture: " << io::toUtf8(texturePath);
                     continue;
                 }
                 LOGD << "Extracted uncompressed texture: " << filename
@@ -152,11 +169,11 @@ static void convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
     LOGD << "[ktx2->png] " << ktxPath << " -> " << pngPath;
 
     ktxTexture* base = nullptr;
-    KTX_error_code rc = ktxTexture_CreateFromNamedFile(ktxPath.string().c_str(),
+    KTX_error_code rc = ktxTexture_CreateFromNamedFile(io::toUtf8(ktxPath).c_str(),
                                                        KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
                                                        &base);
     if (rc != KTX_SUCCESS || !base) {
-        throw AppException("ktxTexture_CreateFromNamedFile failed for " + ktxPath.string());
+        throw AppException("ktxTexture_CreateFromNamedFile failed for " + io::toUtf8(ktxPath));
     }
 
     // If KTX2 (BasisU), transcode to RGBA8
@@ -166,7 +183,7 @@ static void convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
             rc = ktxTexture2_TranscodeBasis(tex2, KTX_TTF_RGBA32, KTX_TF_HIGH_QUALITY);
             if (rc != KTX_SUCCESS) {
                 ktxTexture_Destroy(base);
-                throw AppException("ktxTexture2_TranscodeBasis failed for " + ktxPath.string());
+                throw AppException("ktxTexture2_TranscodeBasis failed for " + io::toUtf8(ktxPath));
             }
         }
     }
@@ -176,7 +193,7 @@ static void convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
     rc = ktxTexture_GetImageOffset(base, /*level*/ 0, /*layer*/ 0, /*faceSlice*/ 0, &offset);
     if (rc != KTX_SUCCESS) {
         ktxTexture_Destroy(base);
-        throw AppException("ktxTexture_GetImageOffset failed for " + ktxPath.string());
+        throw AppException("ktxTexture_GetImageOffset failed for " + io::toUtf8(ktxPath));
     }
 
     const uint8_t* img = static_cast<const uint8_t*>(base->pData) + offset;
@@ -188,11 +205,11 @@ static void convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
     const int stride = w * comp;
 
     fs::create_directories(pngPath.parent_path());
-    int ok = stbi_write_png(pngPath.string().c_str(), w, h, comp, img, stride);
+    int ok = writePng(pngPath, w, h, comp, img, stride);
     ktxTexture_Destroy(base);
 
     if (!ok) {
-        throw AppException("stbi_write_png failed for " + pngPath.string());
+        throw AppException("stbi_write_png failed for " + io::toUtf8(pngPath));
     }
 }
 
@@ -208,7 +225,7 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
 
     std::ifstream in(mtlPath);
     if (!in) {
-        throw FSException("Cannot open MTL file: " + mtlPath.string());
+        throw FSException("Cannot open MTL file: " + io::toUtf8(mtlPath));
     }
     std::stringstream ss;
     ss << in.rdbuf();
@@ -219,7 +236,7 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
         if (s.size() < 5)
             return false;
         std::string low = s;
-        utils::toLower(low);
+        str::toLower(low);
         return low.rfind(".ktx2") == low.size() - 5;
     };
 
@@ -235,19 +252,19 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
     while (std::getline(lines, line)) {
         bool handled = false;
         for (auto* key : keys) {
-            if (line.rfind(key, 0) == 0) {
+            if (line.starts_with(key)) {
                 size_t pos = line.find_first_of(" \t");
                 std::string value = (pos == std::string::npos) ? "" : line.substr(pos + 1);
-                utils::trim(value);
+                str::trim(value);
                 if (!value.empty() && endsWithKtx2(value)) {
-                    fs::path ktxPath = mtlDir / fs::path(value).lexically_normal();
+                    fs::path ktxPath = mtlDir / io::fromUtf8(value).lexically_normal();
                     fs::path pngPath = ktxPath;
                     pngPath.replace_extension(".png");
                     try {
                         convertKtx2ToPng(ktxPath, pngPath);
-                        std::string newLine = std::string(key) + " " + pngPath.filename().string();
+                        std::string newLine = std::string(key) + " " + io::toUtf8(pngPath.filename());
                         out << newLine << "\n";
-                        LOGD << "MTL patch: " << key << " -> " << pngPath.filename().string();
+                        LOGD << "MTL patch: " << key << " -> " << io::toUtf8(pngPath.filename());
                         changed = true;
                         handled = true;
                     } catch (const AppException& e) {
@@ -265,7 +282,7 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
     if (changed) {
         std::ofstream o(mtlPath, std::ios::trunc);
         if (!o) {
-            throw FSException("Cannot write MTL file: " + mtlPath.string());
+            throw FSException("Cannot write MTL file: " + io::toUtf8(mtlPath));
         }
         o << out.str();
         o.close();
@@ -274,24 +291,108 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
 
 
 /**
+ * @brief Rewrites the embedded texture references of an exported MTL ("*0", "*1") to the files
+ * the embedded textures were extracted to. A failure is logged, not thrown.
+ *
+ * @param mtl The MTL file next to the exported OBJ
+ * @param textureMap Embedded texture index -> extracted file name
+ */
+static void fixEmbeddedTextureReferences(const fs::path& mtl, const std::map<int, std::string>& textureMap) {
+    if (textureMap.empty())
+        return;
+    try {
+        std::ifstream in(mtl);
+        if (in) {
+            std::stringstream ss;
+            ss << in.rdbuf();
+            in.close();
+
+            std::string content = ss.str();
+            std::istringstream lines(content);
+            std::ostringstream out;
+            std::string line;
+            bool changed = false;
+
+            const char* keys[] = {"map_Kd", "map_Ks", "map_Bump", "map_d",
+                                 "map_Pr", "map_Pm", "map_Ps", "map_Ke",
+                                 "map_Ka", "bump", "map_bump"};
+
+            while (std::getline(lines, line)) {
+                bool handled = false;
+                for (auto* key : keys) {
+                    if (line.starts_with(key)) {
+                        size_t pos = line.find_first_of(" \t");
+                        if (pos != std::string::npos) {
+                            std::string value = line.substr(pos + 1);
+                            str::trim(value);
+
+                            // Check if it's an embedded texture reference (e.g., "*0")
+                            if (!value.empty() && value[0] == '*') {
+                                try {
+                                    int texIndex = std::stoi(value.substr(1));
+                                    auto it = textureMap.find(texIndex);
+                                    if (it != textureMap.end()) {
+                                        std::string newLine = std::string(key) + " " + it->second;
+                                        out << newLine << "\n";
+                                        LOGD << "MTL fix: " << key << " " << value << " -> " << it->second;
+                                        changed = true;
+                                        handled = true;
+                                    }
+                                } catch (const std::invalid_argument &) {
+                                    // Not a numeric index, keep original line.
+                                } catch (const std::out_of_range &) {
+                                    // Index out of int range, keep original line.
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+                if (!handled)
+                    out << line << "\n";
+            }
+
+            if (changed) {
+                std::ofstream outFile(mtl, std::ios::trunc);
+                if (outFile) {
+                    outFile << out.str();
+                    outFile.close();
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        LOGW << "Failed to fix MTL embedded texture references: " << e.what();
+    }
+}
+
+/** How a scene is exported by @ref exportWithAssimp */
+struct AssimpExportOptions {
+    bool forcePLY;         ///< Force PLY format even if UVs are present
+    bool preferPLYIfNoUV;  ///< Prefer PLY if no UVs and vertex colors are present
+    bool hasUVs;           ///< Whether the scene has UV coordinates
+};
+
+/** The files @ref exportWithAssimp wrote */
+struct AssimpOutputs {
+    std::string geomPath;  ///< The geometry file (OBJ or PLY)
+    std::string mtlPath;   ///< The MTL file (OBJ only, empty otherwise)
+};
+
+/**
  * @brief Export a scene to OBJ or PLY format using Assimp
  *
  * @param scene The Assimp scene to export
  * @param outBaseNoExt Base output path without extension
- * @param forcePLY Force PLY format even if UVs are present
- * @param preferPLYIfNoUV Prefer PLY if no UVs and vertex colors are present
- * @param hasUVs Whether the scene has UV coordinates
- * @param outGeomPath Output parameter for the generated geometry file path
- * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
+ * @param options Which format to export
+ * @return The files written
  * @throws AppException if export fails
  */
-static void exportWithAssimp(const aiScene* scene,
-                             const fs::path& outBaseNoExt,
-                             bool forcePLY,
-                             bool preferPLYIfNoUV,
-                             bool hasUVs,
-                             std::string& outGeomPath,
-                             std::string& outMtlPath) {
+static AssimpOutputs exportWithAssimp(const aiScene* scene,
+                                      const fs::path& outBaseNoExt,
+                                      const AssimpExportOptions& options) {
+    const bool forcePLY = options.forcePLY;
+    const bool preferPLYIfNoUV = options.preferPLYIfNoUV;
+    const bool hasUVs = options.hasUVs;
     Assimp::Exporter exporter;
     fs::create_directories(outBaseNoExt.parent_path());
 
@@ -307,13 +408,13 @@ static void exportWithAssimp(const aiScene* scene,
     fs::path geomPath = outBaseNoExt;
     geomPath.replace_extension(usePLY ? ".ply" : ".obj");
 
-    auto r = exporter.Export(scene, fmt, geomPath.string());
+    auto r = exporter.Export(scene, fmt, io::toUtf8(geomPath));
     if (r != AI_SUCCESS) {
         throw AppException("Assimp export failed: " + std::string(exporter.GetErrorString()));
     }
 
-    outGeomPath = geomPath.string();
-    outMtlPath.clear();
+    AssimpOutputs outputs;
+    outputs.geomPath = io::toUtf8(geomPath);
 
     if (!usePLY) {
         // .mtl with the same base name next to the OBJ
@@ -324,80 +425,17 @@ static void exportWithAssimp(const aiScene* scene,
             mtl.replace_extension(".mtl");
         }
         if (fs::exists(mtl)) {
-            outMtlPath = mtl.string();
+            outputs.mtlPath = io::toUtf8(mtl);
 
             // Fix embedded texture references in MTL file (e.g., "*0", "*1")
-            if (!textureMap.empty()) {
-                try {
-                    std::ifstream in(mtl);
-                    if (in) {
-                        std::stringstream ss;
-                        ss << in.rdbuf();
-                        in.close();
-
-                        std::string content = ss.str();
-                        std::istringstream lines(content);
-                        std::ostringstream out;
-                        std::string line;
-                        bool changed = false;
-
-                        const char* keys[] = {"map_Kd", "map_Ks", "map_Bump", "map_d",
-                                             "map_Pr", "map_Pm", "map_Ps", "map_Ke",
-                                             "map_Ka", "bump", "map_bump"};
-
-                        while (std::getline(lines, line)) {
-                            bool handled = false;
-                            for (auto* key : keys) {
-                                if (line.rfind(key, 0) == 0) {
-                                    size_t pos = line.find_first_of(" \t");
-                                    if (pos != std::string::npos) {
-                                        std::string value = line.substr(pos + 1);
-                                        utils::trim(value);
-
-                                        // Check if it's an embedded texture reference (e.g., "*0")
-                                        if (!value.empty() && value[0] == '*') {
-                                            try {
-                                                int texIndex = std::stoi(value.substr(1));
-                                                auto it = textureMap.find(texIndex);
-                                                if (it != textureMap.end()) {
-                                                    std::string newLine = std::string(key) + " " + it->second;
-                                                    out << newLine << "\n";
-                                                    LOGD << "MTL fix: " << key << " " << value << " -> " << it->second;
-                                                    changed = true;
-                                                    handled = true;
-                                                }
-                                            } catch (const std::invalid_argument &) {
-                                                // Not a numeric index, keep original line.
-                                            } catch (const std::out_of_range &) {
-                                                // Index out of int range, keep original line.
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                            if (!handled)
-                                out << line << "\n";
-                        }
-
-                        if (changed) {
-                            std::ofstream outFile(mtl, std::ios::trunc);
-                            if (outFile) {
-                                outFile << out.str();
-                                outFile.close();
-                            }
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    LOGW << "Failed to fix MTL embedded texture references: " << e.what();
-                }
-            }
+            fixEmbeddedTextureReferences(mtl, textureMap);
         }
     }
 
-    LOGD << "Exported " << (usePLY ? "PLY: " : "OBJ: ") << outGeomPath;
-    if (!outMtlPath.empty())
-        LOGD << "MTL: " << outMtlPath;
+    LOGD << "Exported " << (usePLY ? "PLY: " : "OBJ: ") << outputs.geomPath;
+    if (!outputs.mtlPath.empty())
+        LOGD << "MTL: " << outputs.mtlPath;
+    return outputs;
 }
 
 
@@ -481,7 +519,7 @@ void convertGltfTo3dModel(const std::string& inputGltf,
     Assimp::Importer importer;
     // SortByPType alone only sorts primitives into per-type meshes, it does not drop them;
     // without this, a point/line mesh sitting next to a triangle mesh still reaches the
-    // PLY/OBJ exporter and desyncs libnexus' triangle-soup reader.
+    // PLY/OBJ exporter and desyncs bm3d's triangle-soup reader.
     importer.SetPropertyInteger(AI_CONFIG_PP_SBP_REMOVE,
                                 aiPrimitiveType_POINT | aiPrimitiveType_LINE);
     const aiScene* scene = importer.ReadFile(inputGltf, pp);
@@ -495,20 +533,16 @@ void convertGltfTo3dModel(const std::string& inputGltf,
          << " VCols=" << (hasVC ? "Y" : "N");
 
     // Export geometry
-    fs::path outBase(outputBasePath);
+    fs::path outBase = io::fromUtf8(outputBasePath);
 
-    exportWithAssimp(scene,
-                     outBase,
-                     forcePLY,
-                     preferPLYIfNoUV,
-                     hasUV,
-                     outGeomPath,
-                     outMtlPath);
+    const AssimpOutputs exported = exportWithAssimp(scene, outBase, {forcePLY, preferPLYIfNoUV, hasUV});
+    outGeomPath = exported.geomPath;
+    outMtlPath = exported.mtlPath;
 
     // For OBJ: patch MTL for KTX2 -> PNG
     if (!outMtlPath.empty()) {
         try {
-            patchMtlKtx2ToPng(outMtlPath);
+            patchMtlKtx2ToPng(io::fromUtf8(outMtlPath));
         } catch (const AppException& e) {
             LOGW << "MTL patch failed (continuing anyway): " << e.what();
         }

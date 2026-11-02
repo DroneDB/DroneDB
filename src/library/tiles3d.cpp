@@ -5,9 +5,13 @@
 
 #include <array>
 #include <cmath>
+#include <optional>
 #include <vector>
 #include <zip.h>
 
+#include "build_layout.h"
+#include "coordstransformer.h"
+#include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
 #include "ogr_spatialref.h"
@@ -84,37 +88,23 @@ namespace ddb
             return {v[0] + m[12], v[1] + m[13], v[2] + m[14]};
         }
 
-        // Transforms a geocentric ECEF point (EPSG:4978) to WGS84 lon/lat/alt (degrees,
+        // Transforms a geocentric ECEF point (EPSG:4978) to WGS84 {lon, lat, alt} (degrees,
         // meters) using traditional GIS axis order (lon, lat), matching the rest of the
-        // codebase. Returns false on failure (e.g. PROJ unavailable).
-        bool ecefToWgs84(double ecefX, double ecefY, double ecefZ,
-                         double &lon, double &lat, double &alt)
+        // codebase. Nothing on failure (e.g. PROJ unavailable).
+        std::optional<std::array<double, 3>> ecefToWgs84(const std::array<double, 3> &ecef)
         {
-            OGRSpatialReferenceH hEcef = OSRNewSpatialReference(nullptr);
-            OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-            bool ok = false;
+            const SrsPtr ecefSrs = srsFromEpsg(4978);
+            const SrsPtr wgs84 = srsFromEpsg(4326);
+            if (!ecefSrs || !wgs84)
+                return std::nullopt;
 
-            if (OSRImportFromEPSG(hEcef, 4978) == OGRERR_NONE &&
-                OSRImportFromEPSG(hWgs84, 4326) == OGRERR_NONE)
-            {
-                OSRSetAxisMappingStrategy(hEcef, OAMS_TRADITIONAL_GIS_ORDER);
-                OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
-
-                OGRCoordinateTransformationH hT =
-                    OCTNewCoordinateTransformation(hEcef, hWgs84);
-                if (hT != nullptr)
-                {
-                    lon = ecefX;
-                    lat = ecefY;
-                    alt = ecefZ;
-                    ok = OCTTransform(hT, 1, &lon, &lat, &alt) == TRUE;
-                    OCTDestroyCoordinateTransformation(hT);
-                }
-            }
-
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hEcef);
-            return ok;
+            const auto toWgs84 = CoordsTransformer::tryCreate(srsOf(ecefSrs), srsOf(wgs84));
+            if (!toWgs84)
+                return std::nullopt;
+            std::array<double, 3> geographic = ecef; // lon, lat, alt after the transform
+            if (!toWgs84->tryTransform(1, &geographic[0], &geographic[1], &geographic[2]))
+                return std::nullopt;
+            return geographic;
         }
 
         // Builds an equirectangular footprint (approximate at tileset scale) of the given
@@ -138,60 +128,32 @@ namespace ddb
             info.north = lat + dLat;
             info.hasBounds = true;
         }
-    }
 
-    bool getTiles3DInfo(const std::string &ttzPath, Tiles3DInfo &info)
-    {
-        std::string jsonStr;
-        if (!readEntryFromZip(ttzPath, "tileset.json", jsonStr))
+        // A bounding volume of `radius` meters around the centre `c` (the tileset frame, after
+        // the root transform). An ECEF centre sits about one Earth radius from the origin and
+        // gives the footprint; a local or engineering frame sits near 0 and is indexed without one.
+        void setFootprintOfCentre(Tiles3DInfo &info, const std::array<double, 3> &c, double radius)
         {
-            LOGD << "Tiles3D: tileset.json not found at root of " << ttzPath;
-            return false;
+            const double dist = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+            if (dist > 1.0e6)
+            {
+                if (const auto geographic = ecefToWgs84(c))
+                {
+                    info.georeferenced = true;
+                    setFootprintFromRadius(info, (*geographic)[0], (*geographic)[1], (*geographic)[2], radius);
+                    return;
+                }
+            }
+            info.georeferenced = false;
         }
 
-        json j;
-        try
+        // 1) region: [west, south, east, north, minHeight, maxHeight] in WGS84 radians. False when
+        // the bounding volume is not a region.
+        bool readRegionVolume(Tiles3DInfo &info, const json &bv)
         {
-            j = json::parse(jsonStr);
-        }
-        catch (const std::exception &e)
-        {
-            LOGD << "Tiles3D: cannot parse tileset.json: " << e.what();
-            return false;
-        }
-
-        // Asset metadata (best-effort).
-        if (j.contains("asset") && j["asset"].is_object() &&
-            j["asset"].contains("version") && j["asset"]["version"].is_string())
-            info.assetVersion = j["asset"]["version"].get<std::string>();
-
-        if (!j.contains("root") || !j["root"].is_object())
-        {
-            LOGD << "Tiles3D: tileset.json has no root tile";
-            return false;
-        }
-        const json &root = j["root"];
-
-        if (root.contains("geometricError") && root["geometricError"].is_number())
-            info.geometricError = root["geometricError"].get<double>();
-
-        if (!root.contains("boundingVolume") || !root["boundingVolume"].is_object())
-        {
-            LOGD << "Tiles3D: root tile has no boundingVolume";
-            return false;
-        }
-        const json &bv = root["boundingVolume"];
-
-        // Optional root transform (column-major 4x4).
-        std::vector<double> transform;
-        if (root.contains("transform") && root["transform"].is_array() &&
-            root["transform"].size() == 16)
-            transform = root["transform"].get<std::vector<double>>();
-
-        // 1) region: [west, south, east, north, minHeight, maxHeight] in WGS84 radians.
-        if (bv.contains("region") && bv["region"].is_array() &&
-            bv["region"].size() >= 4)
-        {
+            if (!(bv.contains("region") && bv["region"].is_array() &&
+                  bv["region"].size() >= 4))
+                return false;
             const auto &r = bv["region"];
             info.west = r[0].get<double>() * RAD2DEG;
             info.south = r[1].get<double>() * RAD2DEG;
@@ -207,9 +169,12 @@ namespace ddb
             return true;
         }
 
-        // 2) box: [cx, cy, cz, xHalf(3), yHalf(3), zHalf(3)] in the (transformed) frame.
-        if (bv.contains("box") && bv["box"].is_array() && bv["box"].size() >= 12)
+        // 2) box: [cx, cy, cz, xHalf(3), yHalf(3), zHalf(3)] in the (transformed) frame. False when
+        // the bounding volume is not a box.
+        bool readBoxVolume(Tiles3DInfo &info, const json &bv, const std::vector<double> &transform)
         {
+            if (!(bv.contains("box") && bv["box"].is_array() && bv["box"].size() >= 12))
+                return false;
             const auto &b = bv["box"];
             const auto c = applyTransform(transform, b[0].get<double>(),
                                           b[1].get<double>(), b[2].get<double>());
@@ -240,48 +205,80 @@ namespace ddb
                     radius = std::max(radius, std::sqrt(sq));
                 }
 
-            const double dist = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
-            // ECEF centres sit ~1 Earth radius from the origin; local frames are near 0.
-            if (dist > 1.0e6)
-            {
-                double lon, lat, alt;
-                if (ecefToWgs84(c[0], c[1], c[2], lon, lat, alt))
-                {
-                    info.georeferenced = true;
-                    setFootprintFromRadius(info, lon, lat, alt, radius);
-                    return true;
-                }
-            }
-            // Local/engineering frame: indexed without a footprint.
-            info.georeferenced = false;
+            setFootprintOfCentre(info, c, radius);
             return true;
         }
 
-        // 3) sphere: [cx, cy, cz, radius] in the (transformed) frame.
-        if (bv.contains("sphere") && bv["sphere"].is_array() &&
-            bv["sphere"].size() >= 4)
+        // 3) sphere: [cx, cy, cz, radius] in the (transformed) frame. False when the bounding volume
+        // is not a sphere.
+        bool readSphereVolume(Tiles3DInfo &info, const json &bv, const std::vector<double> &transform)
         {
+            if (!(bv.contains("sphere") && bv["sphere"].is_array() &&
+                  bv["sphere"].size() >= 4))
+                return false;
             const auto &s = bv["sphere"];
             const auto c = applyTransform(transform, s[0].get<double>(),
                                           s[1].get<double>(), s[2].get<double>());
             const double radius = s[3].get<double>();
-            const double dist = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
-            if (dist > 1.0e6)
-            {
-                double lon, lat, alt;
-                if (ecefToWgs84(c[0], c[1], c[2], lon, lat, alt))
-                {
-                    info.georeferenced = true;
-                    setFootprintFromRadius(info, lon, lat, alt, radius);
-                    return true;
-                }
-            }
-            info.georeferenced = false;
+            setFootprintOfCentre(info, c, radius);
             return true;
         }
+    }
+
+    std::optional<Tiles3DInfo> getTiles3DInfo(const std::string &ttzPath)
+    {
+        Tiles3DInfo info;
+        std::string jsonStr;
+        if (!readEntryFromZip(ttzPath, TilesetFileName, jsonStr))
+        {
+            LOGD << "Tiles3D: tileset.json not found at root of " << ttzPath;
+            return std::nullopt;
+        }
+
+        json j;
+        try
+        {
+            j = json::parse(jsonStr);
+        }
+        catch (const std::exception &e)
+        {
+            LOGD << "Tiles3D: cannot parse tileset.json: " << e.what();
+            return std::nullopt;
+        }
+
+        // Asset metadata (best-effort).
+        if (j.contains("asset") && j["asset"].is_object() &&
+            j["asset"].contains("version") && j["asset"]["version"].is_string())
+            info.assetVersion = j["asset"]["version"].get<std::string>();
+
+        if (!j.contains("root") || !j["root"].is_object())
+        {
+            LOGD << "Tiles3D: tileset.json has no root tile";
+            return std::nullopt;
+        }
+        const json &root = j["root"];
+
+        if (root.contains("geometricError") && root["geometricError"].is_number())
+            info.geometricError = root["geometricError"].get<double>();
+
+        if (!root.contains("boundingVolume") || !root["boundingVolume"].is_object())
+        {
+            LOGD << "Tiles3D: root tile has no boundingVolume";
+            return std::nullopt;
+        }
+        const json &bv = root["boundingVolume"];
+
+        // Optional root transform (column-major 4x4).
+        std::vector<double> transform;
+        if (root.contains("transform") && root["transform"].is_array() &&
+            root["transform"].size() == 16)
+            transform = root["transform"].get<std::vector<double>>();
+
+        if (readRegionVolume(info, bv) || readBoxVolume(info, bv, transform) || readSphereVolume(info, bv, transform))
+            return info;
 
         LOGD << "Tiles3D: unsupported boundingVolume type";
-        return false;
+        return std::nullopt;
     }
 
 }

@@ -1,0 +1,503 @@
+{
+  "description": "Golden vectors of libddb's dataset path rules: DDBNormalizePath and ddb::normalizeEntryPath (src/include/entry_path.h). Format: tests/contract/README.md, section 'Path vectors'.",
+  "vectors": [
+    {
+      "input": "photos/a.jpg",
+      "expected": {
+        "path": "photos/a.jpg"
+      }
+    },
+    {
+      "input": "a/",
+      "expected": {
+        "path": "a"
+      },
+      "note": "a trailing separator is dropped"
+    },
+    {
+      "input": "a//b",
+      "expected": {
+        "path": "a/b"
+      },
+      "note": "repeated separators collapse"
+    },
+    {
+      "input": "./a//b/",
+      "expected": {
+        "path": "a/b"
+      },
+      "note": "'.' segments are dropped"
+    },
+    {
+      "input": "a/./b",
+      "expected": {
+        "path": "a/b"
+      }
+    },
+    {
+      "input": "a\\b",
+      "expected": {
+        "path": "a/b"
+      },
+      "note": "'\\' separates segments, as in Registry; libddb never indexes a name containing '\\'"
+    },
+    {
+      "input": "a\\.\\b\\",
+      "expected": {
+        "path": "a/b"
+      }
+    },
+    {
+      "input": "..a/b..c/c..",
+      "expected": {
+        "path": "..a/b..c/c.."
+      },
+      "note": "dots inside a name are ordinary"
+    },
+    {
+      "input": ".ddbx/a",
+      "expected": {
+        "path": ".ddbx/a"
+      },
+      "note": "only the exact segment .ddb is reserved, not a prefix"
+    },
+    {
+      "input": ".ddb_notes.txt",
+      "expected": {
+        "path": ".ddb_notes.txt"
+      }
+    },
+    {
+      "input": "x.ddb/y",
+      "expected": {
+        "path": "x.ddb/y"
+      }
+    },
+    {
+      "input": ".DDB/x",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "a case-insensitive file system (Windows, macOS) opens .DDB as .ddb: ASCII letters match in any case, on every platform"
+    },
+    {
+      "input": ".Ddb/x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".DDB/build/x.tif",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "sub/.dDb",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".ddb./x",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "Win32 drops trailing dots and spaces from a name"
+    },
+    {
+      "input": ".ddb /x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".ddb. ./x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".ddb::$INDEX_ALLOCATION/build/x.tif",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "Windows opens an NTFS stream of a folder as the folder: what follows ':' is ignored"
+    },
+    {
+      "input": ".ddb.x/a",
+      "expected": {
+        "path": ".ddb.x/a"
+      },
+      "note": "only trailing dots and spaces are dropped"
+    },
+    {
+      "input": "DDB~1/build/x.tif",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "the NTFS 8.3 short name of .ddb opens the folder on Windows: ddb~ and one or more digits, in any case, reserved on every platform"
+    },
+    {
+      "input": "sub/ddb~2",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "DDB~12./x",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "trailing dots and spaces and an NTFS stream name are dropped as for .ddb"
+    },
+    {
+      "input": "DDB~1::$INDEX_ALLOCATION/x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "ddb/x",
+      "expected": {
+        "path": "ddb/x"
+      }
+    },
+    {
+      "input": "ddb~/x",
+      "expected": {
+        "path": "ddb~/x"
+      },
+      "note": "without a number it is no short name"
+    },
+    {
+      "input": "ddb~x/a",
+      "expected": {
+        "path": "ddb~x/a"
+      }
+    },
+    {
+      "input": "ddb~1x/a",
+      "expected": {
+        "path": "ddb~1x/a"
+      }
+    },
+    {
+      "input": "ddb~1.txt",
+      "expected": {
+        "path": "ddb~1.txt"
+      },
+      "note": "a short name with an extension is another name"
+    },
+    {
+      "input": "xddb~1/a",
+      "expected": {
+        "path": "xddb~1/a"
+      }
+    },
+    {
+      "input": " .ddb/a",
+      "expected": {
+        "path": " .ddb/a"
+      },
+      "note": "leading spaces are part of the name"
+    },
+    {
+      "input": ".DDBX/a",
+      "expected": {
+        "path": ".DDBX/a"
+      }
+    },
+    {
+      "input": ".ddb",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".ddb/x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "sub/.ddb/x",
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": ".ddb is reserved at any depth"
+    },
+    {
+      "input": "a/.ddb",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "a\\.ddb\\x",
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".uploads/x",
+      "expected": {
+        "path": ".uploads/x"
+      },
+      "note": ".uploads is reserved only when the caller says so"
+    },
+    {
+      "input": ".uploads/x",
+      "reserved": [
+        ".uploads"
+      ],
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": ".uploads",
+      "reserved": [
+        ".uploads"
+      ],
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "./.uploads/x",
+      "reserved": [
+        ".uploads"
+      ],
+      "expected": {
+        "rejected": "reserved"
+      },
+      "note": "the first segment once '.' segments are dropped"
+    },
+    {
+      "input": "photos/.uploads/x",
+      "reserved": [
+        ".uploads"
+      ],
+      "expected": {
+        "path": "photos/.uploads/x"
+      },
+      "note": "caller names are reserved as the first segment only"
+    },
+    {
+      "input": ".uploadsx/a",
+      "reserved": [
+        ".uploads"
+      ],
+      "expected": {
+        "path": ".uploadsx/a"
+      }
+    },
+    {
+      "input": ".Uploads/x",
+      "reserved": [
+        ".uploads"
+      ],
+      "expected": {
+        "path": ".Uploads/x"
+      }
+    },
+    {
+      "input": "sub/.ddb/x",
+      "reserved": [
+        ".uploads"
+      ],
+      "expected": {
+        "rejected": "reserved"
+      }
+    },
+    {
+      "input": "a/../b",
+      "expected": {
+        "rejected": "traversal"
+      }
+    },
+    {
+      "input": "..",
+      "expected": {
+        "rejected": "traversal"
+      }
+    },
+    {
+      "input": "a/..",
+      "expected": {
+        "rejected": "traversal"
+      }
+    },
+    {
+      "input": "..\\a",
+      "expected": {
+        "rejected": "traversal"
+      }
+    },
+    {
+      "input": "/abs",
+      "expected": {
+        "rejected": "absolute"
+      }
+    },
+    {
+      "input": "\\abs",
+      "expected": {
+        "rejected": "absolute"
+      }
+    },
+    {
+      "input": "/",
+      "expected": {
+        "rejected": "absolute"
+      }
+    },
+    {
+      "input": "C:\\x",
+      "expected": {
+        "rejected": "absolute"
+      },
+      "note": "a Windows drive"
+    },
+    {
+      "input": "c:/x",
+      "expected": {
+        "rejected": "absolute"
+      }
+    },
+    {
+      "input": "C:x",
+      "expected": {
+        "rejected": "absolute"
+      },
+      "note": "a drive-relative Windows path"
+    },
+    {
+      "input": "C:",
+      "expected": {
+        "rejected": "absolute"
+      }
+    },
+    {
+      "input": "ab:c",
+      "expected": {
+        "path": "ab:c"
+      },
+      "note": "a colon after more than one character is not a drive"
+    },
+    {
+      "input": "\\\\server\\share",
+      "expected": {
+        "rejected": "absolute"
+      },
+      "note": "a UNC path"
+    },
+    {
+      "input": "//server/share",
+      "expected": {
+        "rejected": "absolute"
+      }
+    },
+    {
+      "input": "\\\\?\\C:\\x",
+      "expected": {
+        "rejected": "absolute"
+      },
+      "note": "a Windows device path"
+    },
+    {
+      "input": "/../x",
+      "expected": {
+        "rejected": "absolute"
+      },
+      "note": "the first rule that applies names the rejection"
+    },
+    {
+      "input": "",
+      "expected": {
+        "rejected": "empty"
+      }
+    },
+    {
+      "input": ".",
+      "expected": {
+        "rejected": "empty"
+      }
+    },
+    {
+      "input": "./",
+      "expected": {
+        "rejected": "empty"
+      }
+    },
+    {
+      "input": ".\\.",
+      "expected": {
+        "rejected": "empty"
+      }
+    },
+    {
+      "input": "a\u0000b",
+      "cString": false,
+      "expected": {
+        "rejected": "nul"
+      },
+      "note": "C++ only: the C API takes a NUL-terminated string (Registry rejects NUL before calling)"
+    },
+    {
+      "input": "\u0000",
+      "cString": false,
+      "expected": {
+        "rejected": "nul"
+      }
+    },
+    {
+      "input": "../a\u0000",
+      "cString": false,
+      "expected": {
+        "rejected": "nul"
+      },
+      "note": "NUL is checked before every other rule but empty"
+    },
+    {
+      "input": "fotos/Überflug/été.jpg",
+      "expected": {
+        "path": "fotos/Überflug/été.jpg"
+      },
+      "note": "non-ASCII names are kept byte for byte"
+    },
+    {
+      "input": "Ελλάδα/Москва/東京.tif",
+      "expected": {
+        "path": "Ελλάδα/Москва/東京.tif"
+      }
+    },
+    {
+      "input": "emoji/🚁.jpg",
+      "expected": {
+        "path": "emoji/🚁.jpg"
+      }
+    },
+    {
+      "input": "café/x",
+      "expected": {
+        "path": "café/x"
+      },
+      "note": "no Unicode normalization: NFD stays NFD"
+    },
+    {
+      "input": " ",
+      "expected": {
+        "path": " "
+      },
+      "note": "whitespace is part of a name (Registry's whitespace-only check is its own)"
+    },
+    {
+      "input": "a/ b /c",
+      "expected": {
+        "path": "a/ b /c"
+      }
+    }
+  ]
+}
