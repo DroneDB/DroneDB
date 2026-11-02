@@ -334,13 +334,12 @@ jobs:
       - name: Build Debian Package
         run: |
           # A release tag names the package; otherwise build-debian-package.sh uses package.json
-          # plus the commit (a Debian pre-release such as 2.0.0~git19ab8e1)
+          # plus the commit (a Debian pre-release such as 2.0.0~git19ab8e1). Exported, not written
+          # to GITHUB_ENV: GITHUB_ENV reaches only the later steps, not the script of this one.
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "DDB_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+            export DDB_VERSION="${GITHUB_REF#refs/tags/v}"
           fi
-
-          # Set VCPKG_HOST_TRIPLET for the build script
-          echo "VCPKG_HOST_TRIPLET=${VCPKG_DEFAULT_TRIPLET}" >> $GITHUB_ENV
+          export VCPKG_HOST_TRIPLET="${VCPKG_DEFAULT_TRIPLET}"
 
           # Clean dist and package directories to avoid including old artifacts
           rm -rf build/dist/*.tgz build/package/*.deb
@@ -357,6 +356,15 @@ jobs:
 
           # Execute the build script
           ./scripts/build-debian-package.sh
+
+          # A release tag ships ddb_<tag version>_amd64.deb with that package version, never a
+          # ~git pre-release (which sorts before the release it was built from)
+          if [[ -n "${DDB_VERSION:-}" ]]; then
+            deb="build/package/ddb_${DDB_VERSION}_amd64.deb"
+            [ -f "$deb" ] || { echo "::error::$deb not built: $(ls build/package)"; exit 1; }
+            version="$(dpkg-deb -f "$deb" Version)"
+            [ "$version" = "$DDB_VERSION" ] || { echo "::error::$deb has package version $version, not $DDB_VERSION"; exit 1; }
+          fi
 
           # Test linting of Debian package
           echo "Running lintian on Debian package..."
