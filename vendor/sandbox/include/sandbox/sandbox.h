@@ -129,7 +129,9 @@ namespace sandbox
         // write in it. Must run before the process that writes is made low integrity. Windows
         // gives the label to what is in the folder already as well: it is for a folder that was
         // just made, never for one that holds files (a program there would start at low
-        // integrity).
+        // integrity). Labelling takes WRITE_OWNER: when the folder does not grant it (one made
+        // below C:\, whose users get only Modify), the caller, as its owner, grants it to itself
+        // on that folder alone (not inherited) and labels it.
         bool setLowIntegrityLabel(const std::string &pathUtf8, std::string *error);
         // Whether the folder (or file) has a low integrity label (or a lower one), its own or
         // one it inherited from its folder: *low says it. False when the label cannot be read,

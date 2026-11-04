@@ -22,6 +22,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "layers.h"
 
@@ -64,6 +65,71 @@ namespace sandbox
             }
         };
         using Handle = std::unique_ptr<void, HandleCloser>;
+
+        // Adds to the DACL of `path` an entry that grants the user of the calling process
+        // WRITE_OWNER on that object alone (not inherited). Works for the owner of the object,
+        // who may always change its DACL.
+        bool grantWriteOwnerToCaller(const std::wstring &path, std::string *error)
+        {
+            HANDLE rawToken = nullptr;
+            if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &rawToken))
+            {
+                *error = lastError("OpenProcessToken");
+                return false;
+            }
+            const Handle token(rawToken);
+            DWORD size = 0;
+            GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
+            if (size == 0)
+            {
+                *error = lastError("GetTokenInformation(TokenUser)");
+                return false;
+            }
+            std::vector<BYTE> user(size);
+            if (!GetTokenInformation(token.get(), TokenUser, user.data(), size, &size))
+            {
+                *error = lastError("GetTokenInformation(TokenUser)");
+                return false;
+            }
+            const PSID sid = reinterpret_cast<TOKEN_USER *>(user.data())->User.Sid;
+
+            PACL dacl = nullptr;
+            PSECURITY_DESCRIPTOR descriptor = nullptr;
+            DWORD status = GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                                 nullptr, &dacl, nullptr, &descriptor);
+            if (status != ERROR_SUCCESS)
+            {
+                *error = "GetNamedSecurityInfo(DACL) failed (error " + std::to_string(status) + ")";
+                return false;
+            }
+            const LocalMemory descriptorOwner(descriptor);
+
+            EXPLICIT_ACCESSW access{};
+            access.grfAccessPermissions = WRITE_OWNER;
+            access.grfAccessMode = GRANT_ACCESS;
+            access.grfInheritance = NO_INHERITANCE;
+            access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+            access.Trustee.TrusteeType = TRUSTEE_IS_USER;
+            access.Trustee.ptstrName = static_cast<LPWSTR>(sid);
+            PACL updated = nullptr;
+            status = SetEntriesInAclW(1, &access, dacl, &updated);
+            if (status != ERROR_SUCCESS)
+            {
+                *error = "SetEntriesInAcl failed (error " + std::to_string(status) + ")";
+                return false;
+            }
+            const LocalMemory updatedOwner(updated);
+
+            std::wstring mutablePath = path;
+            status = SetNamedSecurityInfoW(&mutablePath[0], SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                           nullptr, updated, nullptr);
+            if (status != ERROR_SUCCESS)
+            {
+                *error = "SetNamedSecurityInfo(DACL) failed (error " + std::to_string(status) + ")";
+                return false;
+            }
+            return true;
+        }
     } // namespace
 
     namespace windows
@@ -137,8 +203,25 @@ namespace sandbox
             }
 
             std::wstring path = widen(pathUtf8);
-            const DWORD status = SetNamedSecurityInfoW(&path[0], SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION, nullptr,
-                                                       nullptr, nullptr, sacl);
+            DWORD status = SetNamedSecurityInfoW(&path[0], SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION, nullptr,
+                                                 nullptr, nullptr, sacl);
+            if (status == ERROR_ACCESS_DENIED)
+            {
+                // Labelling takes WRITE_OWNER. A folder below one that grants its users only
+                // Modify (C:\ and the folders made in it, such as C:\repos) gives its owner no
+                // WRITE_OWNER, but the owner may always change the DACL: it grants itself that
+                // right on the folder alone and labels again
+                std::string grantError;
+                if (!grantWriteOwnerToCaller(path, &grantError))
+                {
+                    *error = "SetNamedSecurityInfo failed for '" + pathUtf8 +
+                             "' (error 5, access denied), and the caller cannot grant itself WRITE_OWNER on it: " +
+                             grantError;
+                    return false;
+                }
+                status = SetNamedSecurityInfoW(&path[0], SE_FILE_OBJECT, LABEL_SECURITY_INFORMATION, nullptr, nullptr,
+                                               nullptr, sacl);
+            }
             if (status != ERROR_SUCCESS)
             {
                 *error = "SetNamedSecurityInfo failed for '" + pathUtf8 + "' (error " + std::to_string(status) + ")";
