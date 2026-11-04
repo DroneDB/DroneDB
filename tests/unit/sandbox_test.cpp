@@ -1216,6 +1216,14 @@ namespace
 
 #ifdef _WIN32
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <aclapi.h>
+#include <sddl.h>
+
 #include <fstream>
 
 #include "mio.h"
@@ -1257,6 +1265,54 @@ namespace
         EXPECT_FALSE(sandbox::windows::hasLowIntegrityLabel(missing, &low, &error));
         EXPECT_FALSE(low);
         EXPECT_NE(error.find("not-there"), std::string::npos) << error;
+    }
+
+    // A folder made below one that grants its users only Modify, as C:\ does to the folders made
+    // in it (C:\repos\...\registry-data of a Registry, where every vector build failed with "has
+    // no low integrity label"), gives its owner no WRITE_OWNER, which labelling takes. The owner
+    // grants it to itself on that folder, and labels it.
+    TEST(Sandbox, aFolderBelowOneThatGrantsOnlyModifyIsGivenTheLowLabel)
+    {
+        TestArea area("Sandbox.aFolderBelowOneThatGrantsOnlyModify", true);
+        const fs::path parent = area.getFolder("modify-only");
+
+        // The DACL of C:\ for what is made below it: Authenticated Users, Modify, inherited
+        PSECURITY_DESCRIPTOR descriptor = nullptr;
+        ASSERT_TRUE(ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:P(A;OICI;0x1301bf;;;AU)", SDDL_REVISION_1,
+                                                                         &descriptor, nullptr));
+        BOOL present = FALSE;
+        BOOL defaulted = FALSE;
+        PACL dacl = nullptr;
+        ASSERT_TRUE(GetSecurityDescriptorDacl(descriptor, &present, &dacl, &defaulted) && present);
+        std::wstring parentPath = parent.wstring();
+        const DWORD status =
+            SetNamedSecurityInfoW(&parentPath[0], SE_FILE_OBJECT,
+                                  DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                                  dacl, nullptr);
+        LocalFree(descriptor);
+        ASSERT_EQ(status, static_cast<DWORD>(ERROR_SUCCESS));
+
+        const fs::path folder = parent / "out";
+        ASSERT_TRUE(fs::create_directory(folder));
+        // The folder gives the test process no WRITE_OWNER: labelling it as is fails
+        const HANDLE probe = CreateFileW(folder.c_str(), WRITE_OWNER, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        const DWORD probeError = GetLastError();
+        if (probe != INVALID_HANDLE_VALUE)
+            CloseHandle(probe);
+        ASSERT_EQ(probe, INVALID_HANDLE_VALUE) << "the folder grants WRITE_OWNER, the test shows nothing";
+        ASSERT_EQ(probeError, static_cast<DWORD>(ERROR_ACCESS_DENIED));
+
+        std::string error;
+        ASSERT_TRUE(sandbox::windows::setLowIntegrityLabel(io::toUtf8(folder), &error)) << error;
+        EXPECT_TRUE(lowLabelled(folder));
+        std::ofstream(folder / "made-after.txt") << "written after the label";
+        EXPECT_TRUE(lowLabelled(folder / "made-after.txt"));
+        EXPECT_FALSE(lowLabelled(parent));
+
+        std::error_code ec;
+        fs::remove_all(parent, ec);
+        EXPECT_FALSE(ec) << ec.message();
     }
 
     // The process does not label its output folders: a label given to a folder goes to the files

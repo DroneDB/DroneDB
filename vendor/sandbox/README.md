@@ -82,7 +82,9 @@ process (the helper cannot start another) and the user interface restrictions (d
 settings, exit windows, global atoms, other processes' handles, the clipboard, system
 parameters). `integrity-level`: every folder of `writePaths` must have a low integrity label
 already, which the host gives to the folder it makes for the output while the folder is empty
-(`windows::setLowIntegrityLabel`); a folder without it is refused, in every mode but `off`.
+(`windows::setLowIntegrityLabel`; labelling takes `WRITE_OWNER`, and when the folder does not
+grant it, as below `C:\`, whose users get only Modify, the owner grants it to itself on that
+folder alone first); a folder without it is refused, in every mode but `off`.
 Then the process drops its token to low integrity, which stops it writing anywhere without that
 label. The layer labels nothing itself: Windows carries a new label of a folder down to the files
 already in it, and a program among them would start at low integrity from then on.
