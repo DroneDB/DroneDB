@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -319,7 +320,9 @@ std::vector<uint8_t> componentAtClick(const DifferenceMap &map, int width, int h
 }
 
 // The elevations of the search window, on the ground around the click: x east of it and y south
-// of it, in meters (the window has square pixels on the ground only in a projected CRS)
+// of it, in meters (the window has square pixels on the ground only in a projected CRS). A coarser
+// copy of the window (coarserGrid) has the click within one of its cells, at subCol, subRow cells
+// from its centre.
 struct ClickGrid {
     const DemContext &dem;
     const std::vector<float> &z;
@@ -327,9 +330,11 @@ struct ClickGrid {
     int col = 0, row = 0;   // the click
     PixelSize pixel;
     double pixelMeters = 0;
+    int factor = 1;         // pixels of the window on each side of a cell
+    double subCol = 0, subRow = 0;
 
-    double x(int c) const { return (c - col) * pixel.x; }
-    double y(int r) const { return (r - row) * pixel.y; }
+    double x(int c) const { return (c - col - subCol) * pixel.x; }
+    double y(int r) const { return (r - row - subRow) * pixel.y; }
     double distance(int c, int r) const { return std::hypot(x(c), y(r)); }
     float at(int c, int r) const { return z[static_cast<size_t>(r) * width + c]; }
     bool valid(int c, int r) const { return dem.isValid(at(c, r)); }
@@ -365,6 +370,7 @@ struct PileCandidate {
     double peak = 0;            // meters: the highest smoothed rise of the area
     double groundRms = 0;       // meters: how far the ground pixels are from the base (RMS of the ones it was fitted to)
     bool closed = false;        // the area stays within the limit of the measure and the box: the ground surrounds it
+    const ClickGrid *grid = nullptr; // the grid of the box and the mask
 };
 
 // The smallest rise above the base that counts, meters: the noise of a perfectly flat DEM is that
@@ -380,6 +386,7 @@ PileCandidate measurePile(const ClickGrid &g, const Box &box, const std::vector<
                           double limit, float sigma, float sensitivity) {
     PileCandidate p;
     p.box = box;
+    p.grid = &g;
 
     PlanePoints points;
     points.x.reserve(ground.size());
@@ -521,25 +528,134 @@ double ringDescent(const ClickGrid &g, const Box &box, const std::vector<size_t>
     return sxx > 0 ? -sxy / sxx : 0.0;
 }
 
+// A grid half as fine as `g`: each cell is the mean of the valid ones of its 2 x 2 cells (NaN when
+// fewer than two are valid), stored in `storage`. `windowCol`, `windowRow` is the click in the window.
+ClickGrid coarserGrid(const ClickGrid &g, int windowCol, int windowRow, std::vector<float> &storage) {
+    const int width = g.width / 2, height = g.height / 2;
+    storage.assign(static_cast<size_t>(width) * height, std::numeric_limits<float>::quiet_NaN());
+    for (int r = 0; r < height; r++) {
+        cancel::throwIfCanceled();
+        for (int c = 0; c < width; c++) {
+            double sum = 0;
+            int n = 0;
+            for (int k = 0; k < 4; k++) {
+                const int fc = 2 * c + (k & 1), fr = 2 * r + (k >> 1);
+                if (g.valid(fc, fr)) { sum += g.at(fc, fr); n++; }
+            }
+            if (n >= 2) storage[static_cast<size_t>(r) * width + c] = static_cast<float>(sum / n);
+        }
+    }
+    // A cell of `factor` pixels covers the pixels [c * factor, (c + 1) * factor) of the window: its
+    // centre is the pixel c * factor + (factor - 1) / 2, so the click is that far in cells
+    const int factor = g.factor * 2;
+    const double colAt = (windowCol - (factor - 1) / 2.0) / factor;
+    const double rowAt = (windowRow - (factor - 1) / 2.0) / factor;
+    ClickGrid out{g.dem, storage, width, height,
+                  std::clamp(static_cast<int>(std::floor(colAt)), 0, width - 1),
+                  std::clamp(static_cast<int>(std::floor(rowAt)), 0, height - 1),
+                  PixelSize{g.pixel.x * 2.0, g.pixel.y * 2.0}, g.pixelMeters * 2.0, factor};
+    out.subCol = colAt - out.col;
+    out.subRow = rowAt - out.row;
+    return out;
+}
+
+// A pixel of the ground a pile was found on, in the meters of the click, whatever the grid
+struct GroundSample {
+    double x, y;
+    float z;
+};
+
+std::vector<GroundSample> groundSamples(const ClickGrid &g, const Box &box, const std::vector<size_t> &ring) {
+    std::vector<GroundSample> out;
+    out.reserve(ring.size());
+    for (size_t i : ring) {
+        const int c = box.col0 + static_cast<int>(i % static_cast<size_t>(box.width));
+        const int r = box.row0 + static_cast<int>(i / static_cast<size_t>(box.width));
+        out.push_back({g.x(c), g.y(r), g.at(c, r)});
+    }
+    return out;
+}
+
+// The share of the samples that lie in the area of the pile
+double shareInPile(const PileCandidate &p, const std::vector<GroundSample> &samples) {
+    if (samples.empty()) return 0.0;
+    const ClickGrid &g = *p.grid;
+    size_t inside = 0;
+    for (const GroundSample &s : samples) {
+        const int c = static_cast<int>(std::lround(s.x / g.pixel.x + g.col + g.subCol)) - p.box.col0;
+        const int r = static_cast<int>(std::lround(s.y / g.pixel.y + g.row + g.subRow)) - p.box.row0;
+        if (c >= 0 && r >= 0 && c < p.box.width && r < p.box.height && p.mask[p.box.index(c, r)]) inside++;
+    }
+    return static_cast<double>(inside) / static_cast<double>(samples.size());
+}
+
+// How high the samples stand above the base of the pile, meters: the median of their elevations
+// above it, as they are (the smoothing of the rise spreads a pile over the ground around it)
+double medianRise(const PileCandidate &p, const std::vector<GroundSample> &samples) {
+    if (samples.empty()) return 0.0;
+    std::vector<double> rise;
+    rise.reserve(samples.size());
+    for (const GroundSample &s : samples) rise.push_back(s.z - p.base.at(s.x, s.y));
+    const auto middle = rise.begin() + static_cast<std::ptrdiff_t>(rise.size() / 2);
+    std::nth_element(rise.begin(), middle, rise.end());
+    return *middle;
+}
+
+// Whether the pile found so far is a hump on the top of the larger one: the ground it was found on
+// lies in the area of the larger pile and is raised above its base by at least the height of the
+// hump, which is at most half the height of the larger pile. A pile on a raised pad, a bench or a
+// berm rises above it by more than the pad is raised: the pad is its ground, not a pile it is the
+// top of. Two piles side by side, which the smoothing can join, stand on the same ground.
+bool isHumpOn(const PileCandidate &earlier, const std::vector<GroundSample> &earlierGround,
+              const PileCandidate &larger) {
+    return earlier.peak <= 0.5 * larger.peak && shareInPile(larger, earlierGround) >= 0.5 &&
+           medianRise(larger, earlierGround) >= earlier.peak;
+}
+
+// The rings are measured on a coarser copy of the window once they are large: a ring that reaches
+// r meters from the click sees cells of at most r / kRingCells, so the box of every ring has at
+// most about (4 kRingCells)^2 cells, however fine the DEM. The pile is then measured on the window.
+constexpr double kRingCells = 128.0;
+
 // The pile of the click. The ground around it is a ring around the click, fitted with a plane:
 // on a slope that plane is the slope, so what rises above it is the pile and not the slope.
-// The ring grows from a few pixels. While it is on the pile, the area above its plane is the top
-// of the pile, and the ring descends outwards about as steeply as the pile does from that top to
-// it. The first ring that does not, with a pile inside it that rises clearly above the noise of the
-// ring and does not cross it, is the ground around the pile. Its base is then fitted again to the
-// ground just around the outline of the pile: the base a best-fit volume of that outline has.
+// The ring grows from a few pixels to the edge of the window. While it is on the pile, the area
+// above its plane is the top of the pile, and the ring descends outwards about as steeply as the
+// pile does from that top to it. A ring that does not, with a pile inside it that rises clearly
+// above the noise of the ring and does not cross it, may be the ground around the pile; but the
+// broad, nearly level top of a large pile looks like ground too, and a hump on it like a pile. So
+// the rings keep growing to the edge of the window: when a larger ring has a pile that the pile
+// found so far is a hump on (isHumpOn), the ring of that one was not ground but the top of the
+// larger pile, which takes its place. The base of the pile is then fitted again, on the window, to
+// the ground just around its outline: the base a best-fit volume of that outline has.
 // Throws NoStockpileException when no ring of the window surrounds a pile.
 PileCandidate findPile(const ClickGrid &g, double reach, float sensitivity) {
     auto ringWidth = [&](double r) { return std::max(2.0 * g.pixelMeters, 0.25 * r); };
-    // The smoothing of the rise: wider at a lower sensitivity, but no wider than a third of the
-    // ring, or it spreads the pile over the ring that should be its ground
+    // The smoothing of the rise, in pixels of the window: wider at a lower sensitivity, but no
+    // wider than a third of the ring, or it spreads the pile over the ring that should be its ground
     const float baseSigma = (1.0f - sensitivity) * 10.0f + 1.0f;
     auto smoothing = [&](double r) {
         return std::min(baseSigma, std::max(1.0f, static_cast<float>(ringWidth(r) / g.pixelMeters / 3.0)));
     };
 
+    // The window and its coarser copies, built when a ring needs them
+    std::deque<std::vector<float>> storage;
+    std::deque<ClickGrid> levels{g};
+    auto gridFor = [&](double outer) -> const ClickGrid & {
+        while (levels.back().pixelMeters * 2.0 * kRingCells <= outer && levels.back().width >= 64 &&
+               levels.back().height >= 64) {
+            storage.emplace_back();
+            levels.push_back(coarserGrid(levels.back(), g.col, g.row, storage.back()));
+        }
+        for (const ClickGrid &level : levels) {
+            if (level.pixelMeters * 2.0 * kRingCells > outer) return level;
+        }
+        return levels.back();
+    };
+
     std::optional<PileCandidate> chosen;
     double chosenRadius = 0;
+    std::vector<GroundSample> chosenGround; // the ring the chosen pile was found in
     // The rings grow by a quarter, and the last one is the largest that the window holds
     const double lastRadius = std::min(reach / 1.25, reach - 2.0 * g.pixelMeters);
     auto nextRadius = [&](double r) {
@@ -549,25 +665,53 @@ PileCandidate findPile(const ClickGrid &g, double reach, float sensitivity) {
     for (double r = 4.0 * g.pixelMeters; r + ringWidth(r) <= reach + 1e-9; r = nextRadius(r)) {
         cancel::throwIfCanceled();
         const double w = ringWidth(r);
-        const Box box = boxAround(g, r + w);
-        const std::vector<size_t> ring = ringPixels(g, box, r, r + w);
+        const ClickGrid &level = gridFor(r + w);
+        const Box box = boxAround(level, r + w);
+        const std::vector<size_t> ring = ringPixels(level, box, r, r + w);
         // A ring mostly off the raster or over nodata says little about the ground
-        const double expected = kPi * ((r + w) * (r + w) - r * r) / (g.pixel.x * g.pixel.y);
+        const double expected = kPi * ((r + w) * (r + w) - r * r) / (level.pixel.x * level.pixel.y);
         if (ring.size() < 8 || static_cast<double>(ring.size()) < 0.2 * expected) continue;
-        PileCandidate current = measurePile(g, box, ring, r + w, smoothing(r), sensitivity);
-        const double descent = ringDescent(g, box, ring, current);
-        LOGD << "stockpile ring r=" << r << " count=" << current.count << " closed=" << current.closed
-             << " peak=" << current.peak << " threshold=" << current.threshold << " descent=" << descent
-             << " flank=" << current.peak / r;
+        const float sigma = std::max(1.0f, smoothing(r) / static_cast<float>(level.factor));
+        PileCandidate current = measurePile(level, box, ring, r + w, sigma, sensitivity);
+        const double descent = ringDescent(level, box, ring, current);
+        LOGD << "stockpile ring r=" << r << " cells of " << level.factor << " count=" << current.count
+             << " closed=" << current.closed << " peak=" << current.peak << " threshold=" << current.threshold
+             << " descent=" << descent << " flank=" << current.peak / r;
         // The ring is on the ground when it descends much less than the pile does from its top to it
-        if (isPile(current) && descent <= 0.25 * current.peak / r) {
-            chosen = std::move(current);
-            chosenRadius = r;
-            break;
-        }
+        if (!isPile(current) || descent > 0.25 * current.peak / r) continue;
+        // A larger pile takes the place of the one found so far when that one is a hump on its top
+        if (chosen && !isHumpOn(*chosen, chosenGround, current)) continue;
+        LOGD << "stockpile ring r=" << r << " holds the pile" << (chosen ? " (the earlier one is a hump on it)" : "");
+        chosen = std::move(current);
+        chosenRadius = r;
+        chosenGround = groundSamples(level, box, ring);
     }
     if (!chosen)
         throw NoStockpileException("No stockpile detected at this location");
+
+    // A pile found on a coarser grid: its area on the window, where the base is fitted again below
+    if (chosen->grid->factor > 1) {
+        const int factor = chosen->grid->factor;
+        PileCandidate fine = *chosen;
+        fine.grid = &g;
+        fine.box = boxAround(g, chosenRadius + ringWidth(chosenRadius));
+        fine.mask.assign(fine.box.size(), 0);
+        fine.count = 0;
+        for (int r = 0; r < fine.box.height; r++) {
+            for (int c = 0; c < fine.box.width; c++) {
+                const int wc = fine.box.col0 + c, wr = fine.box.row0 + r;
+                const int cc = wc / factor - chosen->box.col0, cr = wr / factor - chosen->box.row0;
+                if (cc < 0 || cr < 0 || cc >= chosen->box.width || cr >= chosen->box.height) continue;
+                if (chosen->mask[chosen->box.index(cc, cr)] && g.valid(wc, wr)) {
+                    fine.mask[fine.box.index(c, r)] = 1;
+                    fine.count++;
+                }
+            }
+        }
+        if (fine.count == 0)
+            throw NoStockpileException("No stockpile detected at this location");
+        chosen = std::move(fine);
+    }
 
     // The base fitted to the ground just around the outline of the pile
     const int bandWidth = std::clamp(static_cast<int>(std::lround(0.125 * chosenRadius / g.pixelMeters)), 2, 10);
@@ -586,6 +730,74 @@ PileCandidate findPile(const ClickGrid &g, double reach, float sensitivity) {
         if (change < 0.02) break;
     }
     return std::move(*chosen);
+}
+
+// How surely the outline of the pile is its foot, in [0, 1]. Around the foot of a pile the ground
+// lies about on its base, at least along part of the way around: the ground of a pile on a bench
+// or a berm falls away across it, but not along it. Around the top of a larger pile (a pile wider
+// than the window, or a hump on its top) it falls away in every direction. So the ground beyond
+// the outline, out to about twice the reach of the pile, is cut into 16 sectors around the click;
+// the fall of a sector below the base is the median of its pixels (other piles and pits move it
+// little), and the fall of the ground is the one that three sectors in four reach. The outline is
+// sure while that fall is less than a quarter of the height of the pile, unsure when it is all of
+// it. 1 when too little of the window lies beyond the outline.
+double footOf(const ClickGrid &g, const PileCandidate &p) {
+    if (!(p.peak > 0)) return 1.0;
+    double outlineReach = 0.0; // meters: the farthest pixel of the pile from the click
+    for (int r = 0; r < p.box.height; r++) {
+        for (int c = 0; c < p.box.width; c++) {
+            if (p.mask[p.box.index(c, r)])
+                outlineReach = std::max(outlineReach, g.distance(p.box.col0 + c, p.box.row0 + r));
+        }
+    }
+    // Past the band of ground the base was fitted to
+    const double inner = outlineReach + std::max(2.0 * g.pixelMeters, 0.125 * outlineReach);
+    const double outer = inner + std::max(2.0 * outlineReach, 10.0 * g.pixelMeters);
+
+    constexpr int kSectors = 16;
+    std::vector<std::vector<float>> sectors(kSectors);
+    const Box around = boxAround(g, outer);
+    for (int r = around.row0; r < around.row0 + around.height; r++) {
+        cancel::throwIfCanceled();
+        for (int c = around.col0; c < around.col0 + around.width; c++) {
+            const double d = g.distance(c, r);
+            if (d <= inner || d > outer || !g.valid(c, r)) continue;
+            const double angle = std::atan2(g.y(r), g.x(c)) + kPi; // [0, 2 pi]
+            const int s = std::min(kSectors - 1, static_cast<int>(angle / (2.0 * kPi) * kSectors));
+            sectors[s].push_back(static_cast<float>(g.at(c, r) - p.base.at(g.x(c), g.y(r))));
+        }
+    }
+    std::vector<double> falls;
+    for (auto &sector : sectors) {
+        if (sector.size() < 8) continue;
+        const auto middle = sector.begin() + static_cast<std::ptrdiff_t>(sector.size() / 2);
+        std::nth_element(sector.begin(), middle, sector.end());
+        falls.push_back(-static_cast<double>(*middle));
+    }
+    if (falls.size() < 4) return 1.0;
+    std::sort(falls.begin(), falls.end());
+    const double fall = falls[falls.size() / 4];
+    LOGD << "stockpile foot: the ground " << inner << "-" << outer << " m from the click falls " << fall
+         << " m below the base in three directions in four, peak " << p.peak;
+    return std::clamp(1.0 - (fall - 0.25 * p.peak) / (0.75 * p.peak), 0.0, 1.0);
+}
+
+// The length of a traced contour, in pixels: a diagonal step is longer than a straight one
+double contourLength(const std::vector<std::pair<int, int>> &contour) {
+    double length = 0.0;
+    for (size_t i = 1; i < contour.size(); i++)
+        length += std::hypot(contour[i].first - contour[i - 1].first, contour[i].second - contour[i - 1].second);
+    return length;
+}
+
+// The confidence of a detection, in [0, 1]: the foot of the outline (footOf) weighs on everything
+// else, so an outline of the top of a pile stays below one half however clear its edge is. The
+// rest is the contrast of the pile, its peak against the noise of the ground it was measured on
+// (on a log scale: nothing at 3 times the noise, all of it at 300 times), and how compact it is.
+double confidenceOf(const PileCandidate &p, double foot, double compactness) {
+    const double snr = p.peak / std::max(p.groundRms, 1e-4);
+    const double contrast = std::clamp(std::log10(std::max(snr, 1e-9) / 3.0) / 2.0, 0.0, 1.0);
+    return std::clamp((0.4 + 0.35 * contrast + 0.25 * compactness) * (0.25 + 0.75 * foot), 0.0, 1.0);
 }
 
 // The Douglas-Peucker tolerance, in map units, of a distance of `pixels` pixels of `groundPixel`
@@ -686,12 +898,9 @@ std::string detectStockpileJson(const std::string &rasterPath,
     }
     const double baseElev = baseSum / static_cast<double>(pile.count);
 
-    // Confidence: scale by shape compactness + component size.
-    const double areaPx = static_cast<double>(pile.count);
-    const double compactness = compactnessOf(areaPx, static_cast<double>(contourPx.size()));
-    const double windowArea = static_cast<double>(win.width) * win.height;
-    const double fillRatio = std::min(1.0, areaPx / windowArea);
-    const double confidence = std::clamp(0.4 + 0.4 * compactness + 0.2 * fillRatio, 0.0, 1.0);
+    // Confidence: whether the outline is the foot of the pile, its contrast and its shape
+    const double compactness = compactnessOf(static_cast<double>(pile.count), contourLength(contourPx));
+    const double confidence = confidenceOf(pile, footOf(grid, pile), compactness);
 
     json result;
     result["polygon"] = polygonJson(ring);

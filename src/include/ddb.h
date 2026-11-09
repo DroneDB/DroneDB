@@ -1567,6 +1567,9 @@ extern "C"
     /** Auto-detect a stockpile footprint from a click on the raster.
      * The pile is what rises above a plane fitted to the ground around it, so a
      * pile on a slope is measured above the slope (estimatedVolume uses that base).
+     * A click on the top of a pile finds its foot, when the radius holds it; an
+     * outline whose ground falls away around it (the top of a pile wider than
+     * the radius) has a confidence below 0.5.
      * Elevations (baseElevation) are meters above the vertical datum of the
      * DEM, volumes m^3 and areas m^2, whatever the units of the raster.
      * @param rasterPath Path to single-band elevation raster
