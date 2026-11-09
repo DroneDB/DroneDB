@@ -21,6 +21,8 @@
 #include "exceptions.h"
 #include "exif.h"
 #include "exifeditor.h"
+#include "entry.h"
+#include "entry_types.h"
 
 #include <fstream>
 #include <cstring>
@@ -1217,6 +1219,303 @@ TEST(multispectral, mergeRegressionNoAlignment) {
     EXPECT_EQ(GDALGetRasterXSize(hOut), 50);
     EXPECT_EQ(GDALGetRasterYSize(hOut), 50);
     GDALClose(hOut);
+}
+
+// ============================================================
+// FR-PRC-05 / FR-PRC-14: merged camera captures
+// ============================================================
+
+namespace {
+
+// The five bands of the MicaSense capture IMG_0180
+std::vector<std::string> micaSenseBands(TestArea &ta) {
+    const std::string baseUrl = testDataUrl("multispectral/");
+    std::vector<std::string> inputs;
+    for (int i = 1; i <= 5; i++) {
+        const std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
+        inputs.push_back(ta.downloadTestAsset(baseUrl + filename, filename).string());
+    }
+    return inputs;
+}
+
+// The four bands of the Parrot Sequoia capture IMG_180822_135805_0467 (green, near infrared, red, red edge)
+std::vector<std::string> sequoiaBands(TestArea &ta) {
+    const std::string baseUrl = testDataUrl("multispectral/parrot_sequoia/");
+    std::vector<std::string> inputs;
+    for (const char *suffix : {"_GRE.TIF", "_NIR.TIF", "_RED.TIF", "_REG.TIF"}) {
+        const std::string filename = std::string("IMG_180822_135805_0467") + suffix;
+        inputs.push_back(ta.downloadTestAsset(baseUrl + filename, filename).string());
+    }
+    return inputs;
+}
+
+std::string bandDescription(const std::string &path, int band) {
+    GDALDatasetH ds = GDALOpen(path.c_str(), GA_ReadOnly);
+    EXPECT_NE(ds, nullptr);
+    if (!ds) return {};
+    const char *d = GDALGetDescription(GDALGetRasterBand(ds, band));
+    const std::string description = d ? d : "";
+    GDALClose(ds);
+    return description;
+}
+
+}  // namespace
+
+TEST(multispectral, validateMicaSenseGivesOneWarningTheOutputSizeAndTheBandNames) {
+    TestArea ta(TEST_NAME);
+    const auto inputs = micaSenseBands(ta);
+
+    const auto result = validateMergeMultispectral(inputs);
+    ASSERT_TRUE(result.ok);
+
+    // One warning for the five bands that have no map coordinates, not one for each of them. The
+    // bands carry a GPS position, which the result gets: it is placed on the map by it
+    int withoutCoordinates = 0;
+    for (const auto &w : result.warnings) {
+        EXPECT_EQ(w.find("Cannot read geotransform"), std::string::npos) << w;
+        EXPECT_EQ(w.find("will not be placed on the map"), std::string::npos) << w;
+        if (w == "These are camera images without map coordinates: the result is placed on the map by its GPS "
+                 "position, like the source images, not as a georeferenced raster.")
+            withoutCoordinates++;
+    }
+    EXPECT_EQ(withoutCoordinates, 1);
+    // That one and the one about the misalignment of the bands
+    EXPECT_EQ(result.warnings.size(), 2u);
+
+    // The size of the merged raster: the area that the five bands cover
+    EXPECT_EQ(result.summary.width, 1261);
+    EXPECT_EQ(result.summary.height, 942);
+    EXPECT_EQ(result.summary.sourceWidth, 1280);
+    EXPECT_EQ(result.summary.sourceHeight, 960);
+    EXPECT_EQ(result.summary.estimatedSize, 1261u * 942u * 5u * 2u);
+
+    ASSERT_EQ(result.alignment.bands.size(), 5u);
+    const char *names[] = {"Blue", "Green", "Red", "NIR", "Red edge"};
+    for (size_t i = 0; i < 5; i++) EXPECT_EQ(result.alignment.bands[i].bandName, names[i]) << i;
+}
+
+TEST(multispectral, validateReturnsTheBandNamesWhenNoShiftIsDetected) {
+    TestArea ta(TEST_NAME);
+
+    // Two bands of a camera that names them and gives no principal point: no shift, and the names
+    // are returned all the same
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    std::vector<std::string> inputs;
+    const char *names[] = {"Green", "NIR"};
+    for (int i = 0; i < 2; i++) {
+        const fs::path p = ta.getPath("named_" + std::to_string(i) + ".tif");
+        GDALDatasetH ds = GDALCreate(tifDrv, p.string().c_str(), 40, 30, 1, GDT_UInt16, nullptr);
+        ASSERT_NE(ds, nullptr);
+        const std::string packet =
+            std::string("<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>"
+                        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
+                        "<rdf:Description rdf:about=\"\" xmlns:Camera=\"http://pix4d.com/camera/1.0/\">"
+                        "<Camera:BandName>") + names[i] + "</Camera:BandName>"
+                        "<Camera:CentralWavelength>" + (i == 0 ? "560" : "840") + "</Camera:CentralWavelength>"
+                        "</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>";
+        char *list[2] = {const_cast<char *>(packet.c_str()), nullptr};
+        ASSERT_EQ(GDALSetMetadata(ds, list, "xml:XMP"), CE_None);
+        GDALClose(ds);
+        inputs.push_back(p.string());
+    }
+    const auto result = validateMergeMultispectral(inputs);
+    EXPECT_FALSE(result.alignment.detected);
+    ASSERT_EQ(result.alignment.bands.size(), 2u);
+    EXPECT_EQ(result.alignment.bands[0].bandName, "Green");
+    EXPECT_EQ(result.alignment.bands[0].centralWavelength, 560);
+    EXPECT_EQ(result.alignment.bands[1].bandName, "NIR");
+    EXPECT_EQ(result.alignment.bands[1].centralWavelength, 840);
+    // Nothing crops them: the size of the bands
+    EXPECT_EQ(result.summary.width, 40);
+    EXPECT_EQ(result.summary.height, 30);
+    EXPECT_EQ(result.warnings.size(), 1u);
+    EXPECT_EQ(result.warnings[0],
+              "These are camera images without map coordinates: the result will not be placed on the map");
+
+    // And the merged raster names them
+    const fs::path output = ta.getPath("named_merged.tif");
+    mergeMultispectral(inputs, output.string());
+    EXPECT_EQ(bandDescription(output.string(), 1), "Green");
+    EXPECT_EQ(bandDescription(output.string(), 2), "NIR");
+}
+
+TEST(multispectral, validateNamesTheFilesThatHaveNoMapCoordinatesAmongOthersThatHaveThem) {
+    TestArea ta(TEST_NAME);
+
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    const double gt[6] = {11.0, 0.00001, 0, 45.0, 0, -0.00001};
+    const char *proj = "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 3; i++) {
+        const fs::path p = ta.getPath("mixed_" + std::to_string(i) + ".tif");
+        GDALDatasetH ds = GDALCreate(tifDrv, p.string().c_str(), 20, 20, 1, GDT_UInt16, nullptr);
+        ASSERT_NE(ds, nullptr);
+        if (i != 2) {
+            GDALSetGeoTransform(ds, gt);
+            GDALSetProjection(ds, proj);
+        }
+        GDALClose(ds);
+        inputs.push_back(p.string());
+    }
+    const auto result = validateMergeMultispectral(inputs);
+    int mentions = 0;
+    for (const auto &w : result.warnings)
+        if (w.find("map coordinates") != std::string::npos) {
+            mentions++;
+            EXPECT_EQ(w, "1 of 3 files have no map coordinates, the others do: mixed_2.tif");
+        }
+    EXPECT_EQ(mentions, 1);
+}
+
+namespace {
+
+// Two UInt16 bands with neither a geotransform nor a CRS (camera images); with `gps`, both carry
+// the GPS position of the capture
+std::vector<std::string> cameraBands(TestArea &ta, const std::string &prefix, bool gps) {
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 2; i++) {
+        const fs::path p = ta.getPath(prefix + std::to_string(i) + ".tif");
+        GDALDatasetH ds = GDALCreate(tifDrv, p.string().c_str(), 20, 20, 1, GDT_UInt16, nullptr);
+        EXPECT_NE(ds, nullptr);
+        GDALClose(ds);
+        if (gps) EXPECT_TRUE(ExifEditor(p.string()).SetGPS(45.4642, 9.19, 120.5).empty());
+        inputs.push_back(p.string());
+    }
+    return inputs;
+}
+
+}  // namespace
+
+// FR-PRC-05 gives the result of camera images the GPS position of the first band: the warning says
+// it is placed on the map by it, not that it is not placed
+TEST(multispectral, validateSaysCameraImagesWithGpsArePlacedByTheirGpsPosition) {
+    TestArea ta(TEST_NAME, true);
+    const auto result = validateMergeMultispectral(cameraBands(ta, "gps_cam_", true));
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(result.warnings.size(), 1u);
+    EXPECT_EQ(result.warnings[0],
+              "These are camera images without map coordinates: the result is placed on the map by its GPS "
+              "position, like the source images, not as a georeferenced raster.");
+}
+
+TEST(multispectral, validateSaysCameraImagesWithoutGpsAreNotPlacedOnTheMap) {
+    TestArea ta(TEST_NAME, true);
+    const auto result = validateMergeMultispectral(cameraBands(ta, "plain_cam_", false));
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(result.warnings.size(), 1u);
+    EXPECT_EQ(result.warnings[0],
+              "These are camera images without map coordinates: the result will not be placed on the map");
+}
+
+TEST(multispectral, mergeOfAMicaSenseCaptureKeepsItsCameraMetadataAndNamesItsBands) {
+    TestArea ta(TEST_NAME, true);
+    const auto inputs = micaSenseBands(ta);
+    const fs::path output = ta.getPath("IMG_0180_merged.tif");
+    mergeMultispectral(inputs, output.string());
+
+    // The bands are named as the camera names them
+    const char *names[] = {"Blue", "Green", "Red", "NIR", "Red edge"};
+    for (int i = 0; i < 5; i++) EXPECT_EQ(bandDescription(output.string(), i + 1), names[i]) << i;
+
+    // The camera, the time and the position of the capture
+    const auto parser = readExifParser(output);
+    ASSERT_NE(parser, nullptr);
+    EXPECT_EQ(parser->extractMake(), "MicaSense");
+    EXPECT_EQ(parser->extractModel(), "RedEdge-M");
+    EXPECT_DOUBLE_EQ(parser->extractCaptureTime(), 1534932504000.0);
+    GeoLocation geo;
+    ASSERT_TRUE(parser->extractGeo(geo));
+    EXPECT_NEAR(geo.latitude, 50.9805, 0.001);
+    EXPECT_NEAR(geo.longitude, 21.4302, 0.001);
+    EXPECT_NEAR(geo.altitude, 294.979, 1.0);
+
+    // So that it is indexed as the band is: a georeferenced image with a footprint, which is what
+    // the Hub offers Plant Health on
+    Entry entry;
+    parseEntry(output, ta.getFolder(), entry, false);
+    EXPECT_EQ(entry.type, EntryType::GeoImage);
+    EXPECT_FALSE(entry.polygon_geom.empty());
+    EXPECT_EQ(entry.properties.value("make", ""), "MicaSense");
+    EXPECT_EQ(entry.properties.value("model", ""), "RedEdge-M");
+    EXPECT_EQ(entry.properties.value("sensor", ""), "micasense rededge-m");
+    EXPECT_EQ(entry.properties.value("width", 0), 1261);
+    EXPECT_EQ(entry.properties.value("height", 0), 942);
+}
+
+TEST(multispectral, mergeOfASequoiaCaptureKeepsItsCameraOrientation) {
+    TestArea ta(TEST_NAME, true);
+    const auto inputs = sequoiaBands(ta);
+    const fs::path output = ta.getPath("IMG_180822_135805_0467_merged.tif");
+    mergeMultispectral(inputs, output.string());
+
+    const char *names[] = {"Green", "NIR", "Red", "Red edge"};
+    for (int i = 0; i < 4; i++) EXPECT_EQ(bandDescription(output.string(), i + 1), names[i]) << i;
+
+    Entry entry;
+    parseEntry(output, ta.getFolder(), entry, false);
+    EXPECT_EQ(entry.type, EntryType::GeoImage);
+    EXPECT_FALSE(entry.polygon_geom.empty());
+    EXPECT_EQ(entry.properties.value("make", ""), "Parrot");
+    EXPECT_EQ(entry.properties.value("model", ""), "Sequoia");
+    EXPECT_TRUE(entry.properties.value("hasCameraOrientation", false));
+    EXPECT_NEAR(entry.properties.value("cameraYaw", 0.0), -57.31, 0.01);
+    EXPECT_NEAR(entry.properties.value("cameraPitch", 0.0), 28.40, 0.01);
+    EXPECT_NEAR(entry.properties.value("cameraRoll", 0.0), 1.06, 0.01);
+}
+
+TEST(multispectral, mergeOfGeoreferencedBandsKeepsTheirGeoreferenceAndNamesTheBandsTheyName) {
+    TestArea ta(TEST_NAME, true);
+
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    const double gt[6] = {11.0, 0.00001, 0, 45.0, 0, -0.00001};
+    const char *proj = "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 2; i++) {
+        const fs::path p = ta.getPath("geo_" + std::to_string(i) + ".tif");
+        GDALDatasetH ds = GDALCreate(tifDrv, p.string().c_str(), 30, 30, 1, GDT_UInt16, nullptr);
+        ASSERT_NE(ds, nullptr);
+        GDALSetGeoTransform(ds, gt);
+        GDALSetProjection(ds, proj);
+        GDALSetDescription(GDALGetRasterBand(ds, 1), i == 0 ? "Red" : "NIR");
+        GDALClose(ds);
+        inputs.push_back(p.string());
+    }
+    const fs::path output = ta.getPath("geo_merged.tif");
+    mergeMultispectral(inputs, output.string());
+
+    GDALDatasetH ds = GDALOpen(output.string().c_str(), GA_ReadOnly);
+    ASSERT_NE(ds, nullptr);
+    double out[6];
+    ASSERT_EQ(GDALGetGeoTransform(ds, out), CE_None);
+    EXPECT_DOUBLE_EQ(out[0], 11.0);
+    EXPECT_DOUBLE_EQ(out[1], 0.00001);
+    EXPECT_DOUBLE_EQ(out[3], 45.0);
+    EXPECT_DOUBLE_EQ(out[5], -0.00001);
+    GDALClose(ds);
+    EXPECT_EQ(bandDescription(output.string(), 1), "Red");
+    EXPECT_EQ(bandDescription(output.string(), 2), "NIR");
+}
+
+TEST(multispectral, aFailedMergeOfACameraCaptureLeavesTheExistingOutputAsItWas) {
+    TestArea ta(TEST_NAME, true);
+    auto inputs = micaSenseBands(ta);
+    const fs::path output = ta.getPath("existing.tif");
+    {
+        std::ofstream f(output, std::ios::binary);
+        f << "existing";
+    }
+    // The last band is not an image: the merge fails after the others were read
+    const fs::path notAnImage = ta.getPath("band_5.tif");
+    {
+        std::ofstream f(notAnImage, std::ios::binary);
+        f << "not a tiff";
+    }
+    inputs[4] = notAnImage.string();
+    EXPECT_ANY_THROW(mergeMultispectral(inputs, output.string(), true));
+    std::ifstream f(output, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, "existing");
 }
 
 }  // namespace

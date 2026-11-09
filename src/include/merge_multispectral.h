@@ -28,8 +28,13 @@ struct MergeValidationResult {
     std::vector<std::string> warnings;
     struct {
         std::string crs;
+        // The size of the merged raster: the area that every band covers once the alignment
+        // correction applies (alignment.correctionApplied), the size of the bands otherwise
         int width = 0;
         int height = 0;
+        // The size of the bands (the first band)
+        int sourceWidth = 0;
+        int sourceHeight = 0;
         double pixelSizeX = 0;
         double pixelSizeY = 0;
         std::string dataType;
@@ -53,7 +58,9 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
 /// The validation as JSON (DDBValidateMergeMultispectral): ok, errors, warnings, summary
 /// {totalBands, dataType, width, height, crs, pixelSizeX, pixelSizeY, estimatedSize} and
 /// alignment {detected, maxShiftPixels, correctionApplied, shiftSource, bands: [{index, name,
-/// wavelength, shiftX, shiftY}]}
+/// wavelength, shiftX, shiftY}]}. width and height are the size of the
+/// merged raster (smaller than the bands when the alignment correction crops them); bands names
+/// every band that the camera metadata names, whether a shift was detected or not.
 std::string mergeValidationToJson(const MergeValidationResult &r);
 
 void previewMergeMultispectral(const std::vector<std::string> &inputPaths,

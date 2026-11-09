@@ -9,8 +9,12 @@
 #include "fs.h"
 #include "testarea.h"
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -783,6 +787,277 @@ namespace
         {
             EXPECT_NE(std::string(e.what()).find("nothing to match"), std::string::npos) << e.what();
         }
+    }
+
+    // ─── FR-PRC-17: the aligned raster is the source with another georeference ─────
+
+    // A 5 cm RGBA raster in EPSG:32617, DEFLATE compressed, with a transparent strip on its left
+    // edge; `originX` and `originY` place it
+    static void createRgbaOrtho(const std::string &path, int W, int H, double originX, double originY)
+    {
+        GDALDriverH hDrv = GDALGetDriverByName("GTiff");
+        const char *options[] = {"COMPRESS=DEFLATE", "PREDICTOR=2", nullptr};
+        GDALDatasetH hDs = GDALCreate(hDrv, path.c_str(), W, H, 4, GDT_Byte, const_cast<char **>(options));
+        const double gt[6] = {originX, 0.05, 0, originY, 0, -0.05};
+        GDALSetGeoTransform(hDs, gt);
+        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(hSrs, 32617);
+        char *wkt = nullptr;
+        OSRExportToWkt(hSrs, &wkt);
+        GDALSetProjection(hDs, wkt);
+        CPLFree(wkt);
+        OSRDestroySpatialReference(hSrs);
+        GDALSetRasterColorInterpretation(GDALGetRasterBand(hDs, 4), GCI_AlphaBand);
+
+        std::vector<uint8_t> row(static_cast<size_t>(W));
+        for (int b = 1; b <= 4; b++)
+        {
+            for (int r = 0; r < H; r++)
+            {
+                for (int c = 0; c < W; c++)
+                {
+                    // The texture is a function of the ground position, so that the source and the
+                    // reference show the same ground
+                    const int gr = r + static_cast<int>(std::lround((4700000.0 - originY) / 0.05));
+                    const int gc = c - static_cast<int>(std::lround((originX - 500000.0) / 0.05));
+                    const double v = 60.0 + 130.0 * hash01(gr + b, gc) + 30.0 * (std::sin(gr * 0.06) + std::cos(gc * 0.05));
+                    row[c] = b == 4 ? (c < 12 ? 0 : 255) : static_cast<uint8_t>(std::clamp(v, 0.0, 255.0));
+                }
+                GDALRasterIO(GDALGetRasterBand(hDs, b), GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Byte, 0, 0);
+            }
+        }
+        GDALClose(hDs);
+    }
+
+    TEST_F(AlignTest, OutputKeepsCrsPixelSizeBandsAndLosslessCompression)
+    {
+        TestArea ta(TEST_NAME);
+        const auto refPath = ta.getPath("ref.tif").string();
+        const auto srcPath = ta.getPath("src.tif").string();
+        const auto outPath = ta.getPath("src_tr2.tif").string();
+        // The source is 0.2 m east and 0.15 m south of the ground it shows
+        createRgbaOrtho(refPath, 400, 400, 500000.0, 4700000.0);
+        createRgbaOrtho(srcPath, 400, 400, 500000.2, 4699999.85);
+
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        const auto r = ddb::alignRaster(srcPath, refPath, outPath, opts);
+        ASSERT_TRUE(r.success);
+
+        GDALDatasetH hOut = GDALOpen(outPath.c_str(), GA_ReadOnly);
+        ASSERT_NE(hOut, nullptr);
+
+        // The CRS of the source (not Web Mercator) and its pixel size
+        OGRSpatialReferenceH expected = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(expected, 32617);
+        OGRSpatialReferenceH actual = OSRNewSpatialReference(GDALGetProjectionRef(hOut));
+        EXPECT_TRUE(OSRIsSame(expected, actual));
+        OSRDestroySpatialReference(expected);
+        OSRDestroySpatialReference(actual);
+        double gt[6];
+        ASSERT_EQ(GDALGetGeoTransform(hOut, gt), CE_None);
+        EXPECT_NEAR(gt[1], 0.05, 1e-9);
+        EXPECT_NEAR(gt[5], -0.05, 1e-9);
+
+        // Its bands, alpha included, and a compression without loss
+        EXPECT_EQ(GDALGetRasterCount(hOut), 4);
+        EXPECT_EQ(GDALGetRasterDataType(GDALGetRasterBand(hOut, 1)), GDT_Byte);
+        EXPECT_EQ(GDALGetRasterColorInterpretation(GDALGetRasterBand(hOut, 4)), GCI_AlphaBand);
+        const char *compression = GDALGetMetadataItem(hOut, "COMPRESSION", "IMAGE_STRUCTURE");
+        ASSERT_NE(compression, nullptr);
+        EXPECT_STREQ(compression, "DEFLATE");
+
+        // The transparent strip of the source is transparent in the output
+        const int W = GDALGetRasterXSize(hOut), H = GDALGetRasterYSize(hOut);
+        std::vector<uint8_t> alpha(static_cast<size_t>(W) * H);
+        ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(hOut, 4), GF_Read, 0, 0, W, H, alpha.data(), W, H, GDT_Byte, 0, 0),
+                  CE_None);
+        EXPECT_GT(std::count(alpha.begin(), alpha.end(), static_cast<uint8_t>(0)), 0);
+        EXPECT_GT(std::count(alpha.begin(), alpha.end(), static_cast<uint8_t>(255)), W * H / 2);
+        GDALClose(hOut);
+
+        // Nothing is left beside the output
+        for (const auto &entry : fs::directory_iterator(ta.getFolder()))
+            EXPECT_NE(entry.path().filename().string().rfind(".align-stage-", 0), 0u) << entry.path();
+    }
+
+    // A failed alignment leaves the output that was there as it was, and an output that exists is
+    // replaced only when asked
+    TEST_F(AlignTest, AFailedAlignmentLeavesTheExistingOutputAsItWas)
+    {
+        TestArea ta(TEST_NAME);
+        GroundRaster ref;
+        GroundRaster src = ref;
+        src.error.shiftX = 5000.0;
+        src.error.shiftY = 3000.0;
+        const auto refPath = ta.getPath("ref.tif").string(), srcPath = ta.getPath("src.tif").string();
+        writeGroundRaster(refPath, ref);
+        writeGroundRaster(srcPath, src);
+        const auto out = ta.getPath("out.tif");
+        {
+            std::ofstream f(out, std::ios::binary);
+            f << "existing";
+        }
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        opts.patchSize = 32; opts.searchRadius = 16; opts.maxPatches = 64;
+        opts.overwrite = true;
+        EXPECT_THROW(ddb::alignRaster(srcPath, refPath, out.string(), opts), ddb::AppException);
+        std::ifstream f(out, std::ios::binary);
+        const std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        EXPECT_EQ(content, "existing");
+    }
+
+    // ─── FR-PRC-17 / F4: the Z offset keeps the data type and the size of a DEM ─────
+
+    // A single-band DEM of `type` in EPSG:32632 on a 1 m grid: textured elevations around 1000 m
+    // with a fraction that Float32 cannot hold (Float64), or whole metres (integer types), plus
+    // zOffset
+    static void createTypedDem(const std::string &path, int W, int H, const double gt[6], GDALDataType type,
+                               double zOffset)
+    {
+        GDALDriverH hDrv = GDALGetDriverByName("GTiff");
+        GDALDatasetH hDs = GDALCreate(hDrv, path.c_str(), W, H, 1, type, nullptr);
+        GDALSetGeoTransform(hDs, const_cast<double *>(gt));
+        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(hSrs, 32632);
+        char *wkt = nullptr;
+        OSRExportToWkt(hSrs, &wkt);
+        GDALSetProjection(hDs, wkt);
+        CPLFree(wkt);
+        OSRDestroySpatialReference(hSrs);
+        const bool integer = !GDALDataTypeIsFloating(type);
+        std::vector<double> row(static_cast<size_t>(W));
+        for (int r = 0; r < H; r++)
+        {
+            for (int c = 0; c < W; c++)
+            {
+                const double v = 1000.0 + 80.0 * hash01(r, c) + 20.0 * (std::sin(r * 0.06) + std::cos(c * 0.05));
+                row[c] = (integer ? std::round(v) : v + 1.0e-7 * ((r * 31 + c) % 7)) + zOffset;
+            }
+            GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float64, 0, 0);
+        }
+        GDALClose(hDs);
+    }
+
+    static std::vector<double> readBand(GDALDatasetH hDs)
+    {
+        const int W = GDALGetRasterXSize(hDs), H = GDALGetRasterYSize(hDs);
+        std::vector<double> v(static_cast<size_t>(W) * H);
+        EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Read, 0, 0, W, H, v.data(), W, H, GDT_Float64, 0, 0),
+                  CE_None);
+        return v;
+    }
+
+    // What an aligned DEM keeps of its source: compares every interior output pixel that falls on
+    // a pixel centre of the source (moved by the reported shift) with that source pixel plus
+    // `zApplied`; returns how many were compared
+    static size_t expectSourcePlusZ(const std::string &srcPath, const std::string &outPath, const ddb::AlignResult &r,
+                                    double zApplied, double tolerance)
+    {
+        GDALDatasetH hSrc = GDALOpen(srcPath.c_str(), GA_ReadOnly);
+        GDALDatasetH hOut = GDALOpen(outPath.c_str(), GA_ReadOnly);
+        EXPECT_NE(hSrc, nullptr);
+        EXPECT_NE(hOut, nullptr);
+        if (!hSrc || !hOut) return 0;
+        double gs[6], go[6];
+        GDALGetGeoTransform(hSrc, gs);
+        GDALGetGeoTransform(hOut, go);
+        const int SW = GDALGetRasterXSize(hSrc), SH = GDALGetRasterYSize(hSrc);
+        const int OW = GDALGetRasterXSize(hOut), OH = GDALGetRasterYSize(hOut);
+        const auto src = readBand(hSrc);
+        const auto out = readBand(hOut);
+        GDALClose(hSrc);
+        GDALClose(hOut);
+        size_t compared = 0, mismatched = 0;
+        for (int i = 2; i < OH - 2; i++)
+            for (int j = 2; j < OW - 2; j++)
+            {
+                const double x = go[0] + (j + 0.5) * go[1] - r.txMapUnits;
+                const double y = go[3] + (i + 0.5) * go[5] - r.tyMapUnits;
+                const double sc = (x - gs[0]) / gs[1] - 0.5, sr = (y - gs[3]) / gs[5] - 0.5;
+                const double c = std::round(sc), rr = std::round(sr);
+                if (std::abs(sc - c) > 1e-6 || std::abs(sr - rr) > 1e-6) continue;
+                if (c < 2 || rr < 2 || c >= SW - 2 || rr >= SH - 2) continue;
+                compared++;
+                const double expected = src[static_cast<size_t>(rr) * SW + static_cast<size_t>(c)] + zApplied;
+                const double actual = out[static_cast<size_t>(i) * OW + j];
+                if (std::abs(actual - expected) > tolerance && mismatched++ < 5)
+                    ADD_FAILURE() << "pixel " << i << "," << j << ": " << std::setprecision(17) << actual << " != "
+                                  << expected;
+            }
+        EXPECT_EQ(mismatched, 0u);
+        return compared;
+    }
+
+    TEST_F(AlignTest, ZOffsetOfAFloat64DemKeepsItsPrecisionAndItsSize)
+    {
+        TestArea ta(TEST_NAME);
+        const double refGt[6] = {500000.0, 1.0, 0, 5000000.0, 0, -1.0};
+        const double srcGt[6] = {500004.0, 1.0, 0, 4999997.0, 0, -1.0};
+        const auto refPath = ta.getPath("ref.tif").string(), srcPath = ta.getPath("src.tif").string();
+        const auto outPath = ta.getPath("out.tif").string();
+        createTypedDem(refPath, 400, 400, refGt, GDT_Float64, 0.0);
+        createTypedDem(srcPath, 400, 400, srcGt, GDT_Float64, 12.25);
+
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        const auto r = ddb::alignRaster(srcPath, refPath, outPath, opts);
+        ASSERT_TRUE(r.success);
+        ASSERT_NEAR(r.shiftZ, -12.25, 1.0);
+
+        // Float64 still, and every sample is the source's plus the offset in double precision (a
+        // Float32 sum is off by ~1e-5 at 1000 m)
+        GDALDatasetH hOut = GDALOpen(outPath.c_str(), GA_ReadOnly);
+        ASSERT_NE(hOut, nullptr);
+        EXPECT_EQ(GDALGetRasterDataType(GDALGetRasterBand(hOut, 1)), GDT_Float64);
+        const char *compression = GDALGetMetadataItem(hOut, "COMPRESSION", "IMAGE_STRUCTURE");
+        ASSERT_NE(compression, nullptr);
+        EXPECT_STREQ(compression, "DEFLATE");
+        GDALClose(hOut);
+        EXPECT_GT(expectSourcePlusZ(srcPath, outPath, r, r.shiftZ, 1e-9), 100000u);
+
+        // Not inflated by the offset: no bigger than a fresh DEFLATE copy of the same samples (a
+        // rewrite of a compressed file appends every block again, up to twice the size)
+        const auto freshPath = ta.getPath("fresh.tif").string();
+        {
+            GDALDatasetH hSrc = GDALOpen(outPath.c_str(), GA_ReadOnly);
+            ASSERT_NE(hSrc, nullptr);
+            const char *args[] = {"-of", "GTiff", "-co", "COMPRESS=DEFLATE", "-co", "PREDICTOR=3", nullptr};
+            GDALTranslateOptions *o = GDALTranslateOptionsNew(const_cast<char **>(args), nullptr);
+            GDALDatasetH hFresh = GDALTranslate(freshPath.c_str(), hSrc, o, nullptr);
+            GDALTranslateOptionsFree(o);
+            ASSERT_NE(hFresh, nullptr);
+            GDALClose(hFresh);
+            GDALClose(hSrc);
+        }
+        const auto outSize = fs::file_size(outPath), freshSize = fs::file_size(freshPath);
+        EXPECT_LE(static_cast<double>(outSize), 1.2 * static_cast<double>(freshSize))
+            << outSize << " bytes vs " << freshSize;
+    }
+
+    TEST_F(AlignTest, ZOffsetOfAnInt16DemKeepsWholeValues)
+    {
+        TestArea ta(TEST_NAME);
+        const double refGt[6] = {500000.0, 1.0, 0, 5000000.0, 0, -1.0};
+        const double srcGt[6] = {500004.0, 1.0, 0, 4999997.0, 0, -1.0};
+        const auto refPath = ta.getPath("ref.tif").string(), srcPath = ta.getPath("src.tif").string();
+        const auto outPath = ta.getPath("out.tif").string();
+        createTypedDem(refPath, 400, 400, refGt, GDT_Int16, 0.0);
+        createTypedDem(srcPath, 400, 400, srcGt, GDT_Int16, 12.0);
+
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        const auto r = ddb::alignRaster(srcPath, refPath, outPath, opts);
+        ASSERT_TRUE(r.success);
+        ASSERT_NEAR(r.shiftZ, -12.0, 1.0);
+
+        GDALDatasetH hOut = GDALOpen(outPath.c_str(), GA_ReadOnly);
+        ASSERT_NE(hOut, nullptr);
+        EXPECT_EQ(GDALGetRasterDataType(GDALGetRasterBand(hOut, 1)), GDT_Int16);
+        GDALClose(hOut);
+        // The same whole number of metres on every sample: -12
+        EXPECT_GT(expectSourcePlusZ(srcPath, outPath, r, -12.0, 0.0), 100000u);
     }
 
 } // namespace

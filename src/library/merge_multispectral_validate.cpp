@@ -9,8 +9,10 @@
 #include <cmath>
 
 #include "artefact_cache.h"
+#include "exif.h"
 #include "gdal_raii.h"
 #include "logger.h"
+#include "merge_crop.h"
 #include "merge_multispectral.h"
 #include "mio.h"
 
@@ -50,10 +52,8 @@ ReferenceRaster checkReference(GDALDatasetH hRef, const std::string &displayName
     ref.height = GDALGetRasterYSize(hRef);
     ref.type = GDALGetRasterDataType(GDALGetRasterBand(hRef, 1));
 
+    // A file without a geotransform is reported once for all the files (reportGeoTransforms)
     ref.hasGeoTransform = (GDALGetGeoTransform(hRef, ref.gt) == CE_None);
-    if (!ref.hasGeoTransform) {
-        result.warnings.push_back("Cannot read geotransform from reference file: " + displayName);
-    }
 
     const char *refProj = GDALGetProjectionRef(hRef);
     ref.srs.reset(OSRNewSpatialReference(refProj));
@@ -63,6 +63,8 @@ ReferenceRaster checkReference(GDALDatasetH hRef, const std::string &displayName
     result.summary.crs = ref.projection;
     result.summary.width = ref.width;
     result.summary.height = ref.height;
+    result.summary.sourceWidth = ref.width;
+    result.summary.sourceHeight = ref.height;
     result.summary.pixelSizeX = ref.gt[1];
     result.summary.pixelSizeY = ref.gt[5];
     result.summary.dataType = gdalTypeName(ref.type);
@@ -81,12 +83,13 @@ ReferenceRaster checkReference(GDALDatasetH hRef, const std::string &displayName
     return ref;
 }
 
-// Compares the grid of one file with the reference's: the pixel size and the origin
+// Compares the grid of one file with the reference's: the pixel size and the origin. A file
+// without a geotransform has none to compare: its name goes to withoutGeoTransform.
 void checkGeoTransform(GDALDatasetH hDs, const ReferenceRaster &ref, const std::string &displayName,
-                       MergeValidationResult &result) {
+                       MergeValidationResult &result, std::vector<std::string> &withoutGeoTransform) {
     double gt[6];
     if (GDALGetGeoTransform(hDs, gt) != CE_None) {
-        result.warnings.push_back("Cannot read geotransform from: " + displayName);
+        withoutGeoTransform.push_back(displayName);
         return;
     }
 
@@ -117,7 +120,7 @@ void checkGeoTransform(GDALDatasetH hDs, const ReferenceRaster &ref, const std::
 
 // Compares one more file with the reference; returns how many bands it adds
 int checkAgainstReference(GDALDatasetH hDs, const ReferenceRaster &ref, const std::string &displayName,
-                          MergeValidationResult &result) {
+                          MergeValidationResult &result, std::vector<std::string> &withoutGeoTransform) {
     // CRS check
     const char *proj = GDALGetProjectionRef(hDs);
     const SrsPtr srs(OSRNewSpatialReference(proj));
@@ -139,13 +142,43 @@ int checkAgainstReference(GDALDatasetH hDs, const ReferenceRaster &ref, const st
             " (" + gdalTypeName(dt) + " vs " + gdalTypeName(ref.type) + ")");
     }
 
-    checkGeoTransform(hDs, ref, displayName, result);
+    checkGeoTransform(hDs, ref, displayName, result, withoutGeoTransform);
 
     if (GDALGetRasterCount(hDs) > 1) {
         result.warnings.push_back(displayName + " has " + std::to_string(GDALGetRasterCount(hDs)) + " bands");
     }
 
     return GDALGetRasterCount(hDs);
+}
+
+// Whether the first file carries a GPS position: the merge gives it to the result (all bands come
+// from one capture), which is then placed on the map by it as the bands are
+bool firstBandHasGps(const std::string &path) {
+    const auto parser = readExifParser(io::fromUtf8(path));
+    GeoLocation location;
+    return parser && parser->extractGeo(location);
+}
+
+// The warning about the files that have no geotransform: one for all of them. Camera images
+// (none of the files has one) are the usual case: whether the result is placed on the map depends
+// on the GPS position of the first band. A few files without one among others that have one name
+// the files.
+void reportGeoTransforms(const std::vector<std::string> &withoutGeoTransform, const std::vector<std::string> &inputPaths,
+                         MergeValidationResult &result) {
+    if (withoutGeoTransform.empty()) return;
+    const size_t fileCount = inputPaths.size();
+    if (withoutGeoTransform.size() == fileCount) {
+        result.warnings.push_back(
+            firstBandHasGps(inputPaths[0])
+                ? "These are camera images without map coordinates: the result is placed on the map by its GPS "
+                  "position, like the source images, not as a georeferenced raster."
+                : "These are camera images without map coordinates: the result will not be placed on the map");
+        return;
+    }
+    std::string names;
+    for (const auto &name : withoutGeoTransform) names += (names.empty() ? "" : ", ") + name;
+    result.warnings.push_back(std::to_string(withoutGeoTransform.size()) + " of " + std::to_string(fileCount) +
+                              " files have no map coordinates, the others do: " + names);
 }
 
 // True when the files are georeferenced already (a CRS and a geotransform that is not the identity
@@ -250,6 +283,9 @@ void assessAlignment(const std::vector<std::string> &inputPaths, const Reference
                      MergeValidationResult &result) {
     auto alignInfo = detectBandAlignment(inputPaths);
 
+    // What the camera calls each band is returned with or without a shift
+    result.alignment.bands = alignInfo;
+
     int detectedCount = 0;
     for (const auto &a : alignInfo) {
         if (a.detected) detectedCount++;
@@ -269,11 +305,18 @@ void assessAlignment(const std::vector<std::string> &inputPaths, const Reference
     }
     result.alignment.maxShiftPixels = maxShift;
     result.alignment.shiftSource = source;
-    result.alignment.bands = alignInfo;
 
     result.alignment.correctionApplied = correctionApplies(alignInfo, ref, detectedCount, maxShift);
 
     addAlignmentWarnings(result, alignInfo, detectedCount, maxShift);
+
+    // The merge writes the area that every band covers: that is the size the user gets
+    if (result.alignment.correctionApplied) {
+        if (const auto crop = planAlignmentCrop(alignInfo, ref.width, ref.height)) {
+            result.summary.width = crop->outW;
+            result.summary.height = crop->outH;
+        }
+    }
 }
 
 }  // namespace
@@ -301,6 +344,8 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     }
     ReferenceRaster ref = checkReference(datasetHandle(refDs), displayNames[0], result);
     int totalBands = ref.bands;
+    std::vector<std::string> withoutGeoTransform;
+    if (!ref.hasGeoTransform) withoutGeoTransform.push_back(displayNames[0]);
 
     for (size_t i = 1; i < inputPaths.size(); i++) {
         const auto dataset = raster::openInputRaster(inputPaths[i]);
@@ -308,16 +353,20 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
             result.errors.push_back("Cannot open " + displayNames[i]);
             continue;
         }
-        totalBands += checkAgainstReference(datasetHandle(dataset), ref, displayNames[i], result);
+        totalBands += checkAgainstReference(datasetHandle(dataset), ref, displayNames[i], result, withoutGeoTransform);
     }
 
     refDs.reset();
 
+    reportGeoTransforms(withoutGeoTransform, inputPaths, result);
+
     result.summary.totalBands = totalBands;
-    result.summary.estimatedSize = static_cast<size_t>(ref.width) * ref.height * totalBands * GDALGetDataTypeSizeBytes(ref.type);
     result.ok = result.errors.empty();
 
     assessAlignment(inputPaths, ref, result);
+
+    result.summary.estimatedSize = static_cast<size_t>(result.summary.width) * result.summary.height * totalBands *
+                                   GDALGetDataTypeSizeBytes(ref.type);
 
     return result;
 }

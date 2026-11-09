@@ -1410,11 +1410,12 @@ extern "C"
                                           const char *referencePath,
                                           char **output);
 
-    /** Align source GeoTIFF to reference GeoTIFF and write output COG.
+    /** Align source GeoTIFF to reference GeoTIFF and write the aligned output.
      * @param sourcePath Absolute path to source GeoTIFF
      * @param referencePath Absolute path to reference GeoTIFF
-     * @param outputPath Absolute path for the aligned output (COG). Note: the
-     *   output is always reprojected to EPSG:3857 regardless of the source CRS.
+     * @param outputPath Absolute path for the aligned output: a GeoTIFF in the CRS and with the
+     *   pixel size and the bands (alpha included) of the source, compressed without loss; only
+     *   its georeference changes (before 2.1 it was a COG in EPSG:3857, JPEG compressed).
      *   An output that exists is refused (since 2.1; DDBAlignRasterEx replaces it when asked),
      *   and so is one that is the source or the reference.
      * @param mode "similarity" (default) or "translation"

@@ -96,6 +96,11 @@ namespace ddb
                           {"Exif.GPSInfo.GPSLongitudeRef", longitude >= 0.0 ? "E" : "W"}});
     }
 
+    std::vector<ExifWriteFailure> ExifEditor::SetTags(const exif::TagAssignments &tags)
+    {
+        return writeTags(tags);
+    }
+
     // Convert a double into a DMS string
     const std::string ExifEditor::doubleToDMS(double d)
     {

@@ -8,7 +8,6 @@
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "raster_utils.h"
-#include "cog.h"        // buildCog() - DRY reuse of the COG pattern
 #include "coordstransformer.h"
 #include "exceptions.h"
 #include "logger.h"
@@ -820,12 +819,19 @@ static void applyWarp(const std::string &sourcePath,
     if (GDALSetGeoTransform(hVrt, ngt) != CE_None || GDALSetProjection(hVrt, targetCrs.c_str()) != CE_None)
         throw GDALException("Cannot georeference the VRT wrapper for warp");
 
-    // GDALWarp → temporary LZW GTiff
+    // GDALWarp → the aligned GTiff, uncompressed: the CRS and the pixel size of the source (only the
+    // georeference changes), the bands and the data type of the source (an alpha band is the alpha
+    // of the output). -tr keeps the pixel size of the source, whatever the scale of the transform.
+    // It is uncompressed so that the Z offset of a DEM rewrites its samples in place without growing
+    // it; the published file is a compressed copy of it (compressAligned).
     CPLStringList args;
     args.AddString("-of");    args.AddString("GTiff");
     args.AddString("-t_srs"); args.AddString(targetCrs.c_str());
+    args.AddString("-tr");
+    args.AddString(CPLSPrintf("%.17g", std::abs(gt[1])));
+    args.AddString(CPLSPrintf("%.17g", std::abs(gt[5])));
     args.AddString("-r");     args.AddString("bilinear");
-    GtiffOptions().compress(GtiffOptions::Codec::Lzw).bigTiffIfSafer().appendTo(args);
+    GtiffOptions().bigTiffIfSafer().appendTo(args);
 
     const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
     auto out = adoptDataset(
@@ -912,14 +918,20 @@ void applyZOffset(const std::string &path, double zOffset) {
     GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
     int W = GDALGetRasterXSize(hDs), H = GDALGetRasterYSize(hDs);
     const BandNodata nd = readBandNodata(hBand);
-    std::vector<float> row(W);
+    // The samples are read and written as Float64, which holds every sample of a DEM type exactly:
+    // a Float64 DEM keeps its precision. An integer DEM gets the offset rounded to a whole number,
+    // the same for every sample (GDAL would round each sum on its own, half away from zero).
+    const bool integerType = !GDALDataTypeIsFloating(GDALGetRasterDataType(hBand));
+    const double offset = integerType ? std::round(zOffset) : zOffset;
+    if (offset == 0.0) return;
+    std::vector<double> row(W);
     for (int r = 0; r < H; r++) {
-        if (GDALRasterIO(hBand, GF_Read, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0) != CE_None)
+        if (GDALRasterIO(hBand, GF_Read, 0, r, W, 1, row.data(), W, 1, GDT_Float64, 0, 0) != CE_None)
             throw GDALException("Cannot read row " + std::to_string(r) + " of " + path);
-        for (float &v : row)
+        for (double &v : row)
             if (!isNodata(v, nd))
-                v += static_cast<float>(zOffset);
-        if (GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0) != CE_None)
+                v += offset;
+        if (GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float64, 0, 0) != CE_None)
             throw GDALException("Cannot write row " + std::to_string(r) + " of " + path);
     }
 }
@@ -1020,8 +1032,8 @@ struct AlignInputs {
     // The folder of this alignment for the rasters it writes and reads back: an artefact place
     // (artefact_cache.h), so reading them needs no copy
     fs::path scratch;
-    // Replace an output that exists (AlignOptions::overwrite): buildCog checks it again right
-    // before it publishes the COG
+    // Replace an output that exists (AlignOptions::overwrite): checked again right before the
+    // aligned raster is published
     bool overwrite = true;
     bool isDem = false;
     double targetGsd = 0;
@@ -1081,16 +1093,58 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
     return in;
 }
 
-// Applies the transform to the source and writes the COG: warp into a temporary file, DEM Z
-// offset, then buildCog; sets result.shiftZ for a DEM
+// The private folder beside the output that the aligned raster is staged in
+constexpr const char *kAlignStagingPrefix = ".align-stage-";
+
+// Writes the uncompressed warp `produced` to `staged` compressed without loss: DEFLATE with the
+// predictor of its data type
+void compressAligned(const fs::path &produced, const fs::path &staged) {
+    const auto src = raster::openArtefactRaster(produced);
+    if (!src) throw GDALException("Cannot open " + io::toUtf8(produced) + " to compress it");
+    GDALDatasetH hSrc = datasetHandle(src);
+    CPLStringList args;
+    args.AddString("-of");
+    args.AddString("GTiff");
+    GtiffOptions().compress(GtiffOptions::Codec::Deflate)
+        .predictorFor(GDALGetRasterDataType(GDALGetRasterBand(hSrc, 1)))
+        .bigTiffIfSafer().appendTo(args);
+    const GdalOptionsPtr<GDALTranslateOptions> tOpts(GDALTranslateOptionsNew(args.List(), nullptr));
+    const std::string stagedPath = io::toUtf8(staged);
+    auto out = adoptDataset(GDALTranslate(stagedPath.c_str(), hSrc, tOpts.get(), nullptr));
+    if (!out) throw GDALException("Cannot write the aligned raster " + stagedPath);
+    closeOutputOrThrow(std::move(out), stagedPath);
+}
+
+// Applies the transform to the source and writes the aligned GTiff: an uncompressed warp into a
+// file of the scratch folder (the CRS and the grid of the source), the DEM Z offset in place in
+// it, then a copy of it compressed without loss in a private folder beside the output replaces the
+// output in one rename (raster::publishArtefact: a failed alignment leaves the output that was
+// there as it was); sets result.shiftZ for a DEM. The display COG is the one of the normal build
+// of the file.
 void writeAligned(const AlignInputs &in, const Similarity2D &sim, AlignResult &result) {
-    const std::string tmpWarp = io::toUtf8(in.scratch / "warp.tif");
+    const fs::path target = fs::absolute(io::fromUtf8(in.outputPath));
+    if (!target.has_filename())
+        throw InvalidArgsException("Not the path of a file for an aligned raster: " + in.outputPath);
+
+    const fs::path produced = in.scratch / "warp.tif";
+    const std::string tmpWarp = io::toUtf8(produced);
     applyWarp(in.sourcePath, tmpWarp, sim, in.sourceCrs);
     if (in.isDem) {
         result.shiftZ = computeZOffset(tmpWarp, in.effectiveReference);
         applyZOffset(tmpWarp, result.shiftZ);
     }
-    buildCog(tmpWarp, in.outputPath, {}, in.overwrite);
+
+    // The staging folder beside the output, in which this process writes the file that is published
+    // (the scratch folder is one of the artefacts of the cache, which may be on another device and
+    // is not the place of a file of the user's)
+    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), kAlignStagingPrefix,
+                                                                raster::PrivateFolderWriter::Host);
+    const fs::path staged = staging.path() / target.filename();
+    compressAligned(produced, staged);
+
+    // The output may have appeared while the alignment ran: it is replaced only when asked
+    io::assureReplaceable(io::fromUtf8(in.outputPath), in.overwrite);
+    raster::publishArtefact(staged, target);
 }
 
 // The centre of the area that both rasters share: the point the reported shift is the shift of

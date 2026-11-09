@@ -81,21 +81,25 @@ AlignValidationResult validateAlignRaster(
     const std::string &sourcePath,
     const std::string &referencePath);
 
-/** Align sourcePath to referencePath and write outputPath (COG).
- *  The output CRS is the one produced by buildCog (Web Mercator).
+/** Align sourcePath to referencePath and write outputPath: a GeoTIFF in the CRS, the pixel size and
+ *  with the bands (alpha included) of the source, compressed without loss (DEFLATE); only its
+ *  georeference changes. The display COG is the one of the normal build of the file.
  *  Similarity falls back to Translation when the source has too few tie points.
  *  Throws AppException, and writes nothing, when either raster has nothing to match or the
  *  solution fails the checks of AlignOptions (the aligned source does not lie on the reference).
  *  Before it reads anything: InvalidArgsException for an output that is the source or the
- *  reference, OutputExistsException for one that exists unless opts.overwrite. */
+ *  reference, OutputExistsException for one that exists unless opts.overwrite. The output is
+ *  written in a private folder beside it and replaces an existing output in one rename
+ *  (raster::publishArtefact): a failed alignment leaves it as it was. */
 AlignResult alignRaster(
     const std::string &sourcePath,
     const std::string &referencePath,
     const std::string &outputPath,
     const AlignOptions &opts = {});
 
-/** Adds zOffset to every sample of band 1 of the DEM at path, in place (nodata stays as it is);
- *  an offset below 1e-6 leaves the file alone. */
+/** Adds zOffset to every sample of band 1 of the DEM at path, in place (nodata stays as it is),
+ *  in double precision; an integer DEM gets zOffset rounded to a whole number. An offset below
+ *  1e-6 (or that rounds to 0 for an integer DEM) leaves the file alone. */
 void applyZOffset(const std::string &path, double zOffset);
 
 std::string alignResultToJson(const AlignResult &r);

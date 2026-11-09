@@ -40,6 +40,8 @@ namespace ddb
     [[nodiscard]] std::vector<ExifWriteFailure> SetGPSLatitude(double latitude);
     [[nodiscard]] std::vector<ExifWriteFailure> SetGPSLongitude(double longitude);
     [[nodiscard]] std::vector<ExifWriteFailure> SetGPS(double latitude, double longitude, double altitude);
+    /// Sets the given EXIF tags, (key, value) in the text form of the tag ("46/1 4/1 12000/10000" for a rational)
+    [[nodiscard]] std::vector<ExifWriteFailure> SetTags(const exif::TagAssignments &tags);
 
   protected:
     // Sends one write request per file with the tags to set

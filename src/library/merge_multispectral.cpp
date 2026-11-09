@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <map>
+#include <sstream>
 
 #include "exceptions.h"
 #include "exif.h"
@@ -19,6 +21,7 @@
 #include "gtiff_options.h"
 #include "logger.h"
 #include "mathutil.h"
+#include "merge_crop.h"
 #include "merge_vrt.h"
 #include "mio.h"
 #include "parallel.h"
@@ -92,67 +95,208 @@ SourceGps readSourceGps(const std::string &path) {
     return gps;
 }
 
-// The integer shift of every band against the reference band, and the margins that cropping to
-// the area all bands cover takes off each side
-struct AlignmentCrop {
-    std::vector<int> dx, dy;
-    int padLeft = 0, padRight = 0, padTop = 0, padBottom = 0;
-    int outW = 0, outH = 0;
+// What a merged raster keeps of the camera capture it was made from, read from the first band
+// (all bands come from one capture) before the merge: the EXIF and XMP that the index reads to
+// place the file (make, model, time, focal length, sensor, camera orientation, altitude)
+struct CameraMetadata {
+    // EXIF tags to set, in the text form of the tag
+    exif::TagAssignments exifTags;
+    // XMP properties that describe the capture, as (prefix, name, value)
+    struct XmpProperty {
+        std::string prefix, name, value;
+    };
+    std::vector<XmpProperty> xmp;
+    // The namespace of each prefix of xmp, as the first band declares it
+    std::map<std::string, std::string> namespaces;
 };
 
-// Plans the crop of the validated alignment; nothing when the shift is so large that no area
-// would be left
-std::optional<AlignmentCrop> planAlignmentCrop(const MergeValidationResult &validation) {
-    LOGD << "Applying band alignment shift correction (max shift: "
-         << validation.alignment.maxShiftPixels << " px)";
+// The EXIF tags of the capture that the merge copies: not the ones that describe one band (its
+// size, strips, compression, colour space). The GPS position is written by the merge itself
+// (it moves with the crop), and so are its own latitude, longitude and altitude tags.
+constexpr const char *kCapturedExifTags[] = {
+    "Exif.Image.Make", "Exif.Image.Model", "Exif.Image.DateTime", "Exif.Image.Orientation",
+    "Exif.Photo.LensMake", "Exif.Photo.LensModel",
+    "Exif.Photo.DateTimeOriginal", "Exif.Photo.DateTimeDigitized",
+    "Exif.Photo.SubSecTime", "Exif.Photo.SubSecTimeOriginal", "Exif.Photo.SubSecTimeDigitized",
+    "Exif.Photo.OffsetTime", "Exif.Photo.OffsetTimeOriginal", "Exif.Photo.OffsetTimeDigitized",
+    "Exif.Photo.FocalLength", "Exif.Photo.FocalLengthIn35mmFilm",
+    "Exif.Photo.FocalPlaneXResolution", "Exif.Photo.FocalPlaneYResolution",
+    "Exif.Photo.FocalPlaneResolutionUnit",
+    "Exif.GPSInfo.GPSDateStamp", "Exif.GPSInfo.GPSTimeStamp", "Exif.GPSInfo.GPSDOP",
+    "Exif.GPSInfo.GPSMapDatum", "Exif.GPSInfo.GPSImgDirection", "Exif.GPSInfo.GPSImgDirectionRef",
+    "Exif.GPSInfo.GPSTrack", "Exif.GPSInfo.GPSTrackRef"};
 
-    const auto &alignBands = validation.alignment.bands;
-    const size_t N = alignBands.size();
-    int w = validation.summary.width;
-    int h = validation.summary.height;
+// The XMP properties of the capture that the merge copies: the camera orientation, the accuracy
+// of the position and the altitudes. Not the ones of one band (its name, wavelength, principal
+// point, vignetting), which differ between the bands.
+struct CapturedXmpProperty {
+    const char *prefix;
+    const char *name;
+    const char *fallbackNamespace;
+};
+constexpr CapturedXmpProperty kCapturedXmpProperties[] = {
+    {"Camera", "Yaw", "http://pix4d.com/camera/1.0/"},
+    {"Camera", "Pitch", "http://pix4d.com/camera/1.0/"},
+    {"Camera", "Roll", "http://pix4d.com/camera/1.0/"},
+    {"Camera", "GPSXYAccuracy", "http://pix4d.com/camera/1.0/"},
+    {"Camera", "GPSZAccuracy", "http://pix4d.com/camera/1.0/"},
+    {"drone-dji", "AbsoluteAltitude", "http://www.dji.com/drone-dji/1.0/"},
+    {"drone-dji", "RelativeAltitude", "http://www.dji.com/drone-dji/1.0/"},
+    {"drone-dji", "GimbalPitchDegree", "http://www.dji.com/drone-dji/1.0/"},
+    {"drone-dji", "GimbalYawDegree", "http://www.dji.com/drone-dji/1.0/"},
+    {"drone-dji", "GimbalRollDegree", "http://www.dji.com/drone-dji/1.0/"},
+    {"drone-dji", "FlightYawDegree", "http://www.dji.com/drone-dji/1.0/"}};
 
-    // Calculate integer shifts
-    // Find REF (the band with shiftX=0 and shiftY=0)
-    size_t REF = 0;
-    for (size_t i = 0; i < N; i++) {
-        if (alignBands[i].detected && alignBands[i].shiftX == 0 && alignBands[i].shiftY == 0) {
-            REF = i;
-            break;
+// The namespace that the XMP packet declares for prefix (xmlns:prefix="..."), empty when it
+// declares none
+std::string declaredNamespace(const std::string &packet, const std::string &prefix) {
+    const std::string marker = "xmlns:" + prefix + "=\"";
+    const auto at = packet.find(marker);
+    if (at == std::string::npos) return {};
+    const auto from = at + marker.size();
+    const auto to = packet.find('"', from);
+    return to == std::string::npos ? std::string() : packet.substr(from, to - from);
+}
+
+// The XMP packet of the raster at path, as GDAL reads it (empty when it has none)
+std::string xmpPacketOf(const std::string &path) {
+    const auto dataset = raster::openInputRaster(path);
+    if (!dataset) return {};
+    const CPLStringList xmp(CSLDuplicate(GDALGetMetadata(datasetHandle(dataset), "xml:XMP")), TRUE);
+    return xmp.Count() > 0 ? std::string(xmp[0]) : std::string();
+}
+
+CameraMetadata readCameraMetadata(const std::string &path) {
+    CameraMetadata camera;
+    // A file with no metadata the reader can give has none to keep
+    const auto parser = readExifParser(io::fromUtf8(path));
+    if (!parser) return camera;
+
+    for (const char *key : kCapturedExifTags) {
+        const auto tag = parser->findExifKey(key);
+        if (tag && !tag->truncated() && !tag->toString().empty())
+            camera.exifTags.emplace_back(key, tag->toString());
+    }
+
+    const std::string packet = xmpPacketOf(path);
+    // The band sequences of the merged raster are in the namespace that the bands declare
+    const std::string cameraNamespace = declaredNamespace(packet, "Camera");
+    if (!cameraNamespace.empty()) camera.namespaces["Camera"] = cameraNamespace;
+    for (const auto &property : kCapturedXmpProperties) {
+        const auto tag = parser->findXmpKey(std::string("Xmp.") + property.prefix + "." + property.name);
+        if (!tag || tag->truncated() || tag->toString().empty()) continue;
+        camera.xmp.push_back({property.prefix, property.name, tag->toString()});
+        if (!camera.namespaces.count(property.prefix)) {
+            const std::string declared = declaredNamespace(packet, property.prefix);
+            camera.namespaces[property.prefix] = declared.empty() ? property.fallbackNamespace : declared;
         }
     }
+    return camera;
+}
 
-    AlignmentCrop crop;
-    crop.dx.assign(N, 0);
-    crop.dy.assign(N, 0);
-    for (size_t i = 0; i < N; i++) {
-        if (i == REF || !alignBands[i].detected || alignBands[i].isThermal) continue;
-        crop.dx[i] = static_cast<int>(std::round(alignBands[i].shiftX));
-        crop.dy[i] = static_cast<int>(std::round(alignBands[i].shiftY));
+// The name of each band of the merged raster, in order: what the camera calls the band (the
+// BandName of its XMP, which the alignment detection read), else the description of the band in
+// its file; empty for a band that has neither
+struct MergedBand {
+    std::string name;
+    int wavelength = 0;
+};
+
+std::vector<MergedBand> mergedBands(const std::vector<std::string> &inputPaths,
+                                    const std::vector<BandAlignmentInfo> &alignBands) {
+    std::vector<MergedBand> bands;
+    for (size_t i = 0; i < inputPaths.size(); i++) {
+        const auto dataset = raster::openInputRaster(inputPaths[i]);
+        if (!dataset) throw GDALException("Cannot open " + inputPaths[i]);
+        GDALDatasetH hDs = datasetHandle(dataset);
+        const int count = GDALGetRasterCount(hDs);
+        const BandAlignmentInfo *info = i < alignBands.size() ? &alignBands[i] : nullptr;
+
+        for (int b = 1; b <= count; b++) {
+            MergedBand band;
+            // The camera names a band of a file that has only that band
+            if (count == 1 && info) {
+                band.name = info->bandName;
+                band.wavelength = info->centralWavelength;
+            }
+            if (band.name.empty()) {
+                const char *description = GDALGetDescription(GDALGetRasterBand(hDs, b));
+                if (description) band.name = description;
+            }
+            bands.push_back(band);
+        }
     }
+    return bands;
+}
 
-    // Calculate asymmetric padding (intersection area)
-    int padLeft = *std::max_element(crop.dx.begin(), crop.dx.end());
-    int padRight = -(*std::min_element(crop.dx.begin(), crop.dx.end()));
-    int padTop = *std::max_element(crop.dy.begin(), crop.dy.end());
-    int padBottom = -(*std::min_element(crop.dy.begin(), crop.dy.end()));
-    crop.padLeft = std::max(0, padLeft);
-    crop.padRight = std::max(0, padRight);
-    crop.padTop = std::max(0, padTop);
-    crop.padBottom = std::max(0, padBottom);
-
-    crop.outW = w - crop.padLeft - crop.padRight;
-    crop.outH = h - crop.padTop - crop.padBottom;
-
-    LOGD << "Alignment crop: pad L=" << crop.padLeft << " R=" << crop.padRight
-         << " T=" << crop.padTop << " B=" << crop.padBottom
-         << " => output " << crop.outW << "x" << crop.outH
-         << " (from " << w << "x" << h << ")";
-
-    if (crop.outW <= 0 || crop.outH <= 0) {
-        LOGD << "Shift too large, output would be empty. Falling back to no-shift merge.";
-        return std::nullopt;
+std::string xmlEscape(const std::string &text) {
+    std::string out;
+    for (const char c : text) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            default: out += c;
+        }
     }
-    return crop;
+    return out;
+}
+
+// The XMP packet of the merged raster: the properties of the capture of the first band, and
+// the name and wavelength of every band of the merged raster in order (as the cameras that
+// write one file per band write their own, as a sequence per property). Empty when there is
+// nothing to say.
+std::string mergedXmpPacket(const CameraMetadata &camera, const std::vector<MergedBand> &bands) {
+    bool anyName = false, anyWavelength = false;
+    for (const auto &band : bands) {
+        anyName = anyName || !band.name.empty();
+        anyWavelength = anyWavelength || band.wavelength > 0;
+    }
+    if (camera.xmp.empty() && !anyName && !anyWavelength) return {};
+
+    // The prefix of the band sequences is Camera, as the cameras write them
+    std::map<std::string, std::string> namespaces = camera.namespaces;
+    if ((anyName || anyWavelength) && !namespaces.count("Camera"))
+        namespaces["Camera"] = "http://pix4d.com/camera/1.0/";
+
+    std::ostringstream xml;
+    xml << "<?xpacket begin=\"\xEF\xBB\xBF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n"
+        << "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
+        << " <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+        << "  <rdf:Description rdf:about=\"\"";
+    for (const auto &[prefix, uri] : namespaces)
+        xml << " xmlns:" << prefix << "=\"" << xmlEscape(uri) << "\"";
+    xml << ">\n";
+    for (const auto &property : camera.xmp)
+        xml << "   <" << property.prefix << ":" << property.name << ">" << xmlEscape(property.value) << "</"
+            << property.prefix << ":" << property.name << ">\n";
+    if (anyName) {
+        xml << "   <Camera:BandName><rdf:Seq>";
+        for (const auto &band : bands) xml << "<rdf:li>" << xmlEscape(band.name) << "</rdf:li>";
+        xml << "</rdf:Seq></Camera:BandName>\n";
+    }
+    if (anyWavelength) {
+        xml << "   <Camera:CentralWavelength><rdf:Seq>";
+        for (const auto &band : bands) xml << "<rdf:li>" << band.wavelength << "</rdf:li>";
+        xml << "</rdf:Seq></Camera:CentralWavelength>\n";
+    }
+    xml << "  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>";
+    return xml.str();
+}
+
+// Names the bands of the output and gives it the XMP of the capture: what the output has to say
+// before it is closed (GTiff writes both in its own tags)
+void describeMergedOutput(GDALDatasetH out, const std::vector<MergedBand> &bands, const std::string &xmpPacket) {
+    const int count = GDALGetRasterCount(out);
+    for (int i = 0; i < count && i < static_cast<int>(bands.size()); i++) {
+        if (!bands[i].name.empty()) GDALSetDescription(GDALGetRasterBand(out, i + 1), bands[i].name.c_str());
+    }
+    if (!xmpPacket.empty()) {
+        char *list[2] = {const_cast<char *>(xmpPacket.c_str()), nullptr};
+        if (GDALSetMetadata(out, list, "xml:XMP") != CE_None)
+            LOGD << "Could not write the XMP of the capture to the merged output";
+    }
 }
 
 // The VRT over the inputs cropped to the area every band covers, each band shifted into place
@@ -332,6 +476,11 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     // All bands come from the same capture position, so we use the first file
     SourceGps srcGps = readSourceGps(inputPaths[0]);
 
+    // The camera metadata of that capture, and how each band is called: the merged raster keeps
+    // them, so that it is placed on the map and opened by the tools as a band of the capture is
+    const CameraMetadata camera = readCameraMetadata(inputPaths[0]);
+    const std::vector<MergedBand> bands = mergedBands(inputPaths, validation.alignment.bands);
+
     // Build VRT with separate=TRUE
     SeparateVrt merged =
         buildSeparateVrt(openAll(inputPaths), {}, ".vrt", "Cannot build VRT for merge");
@@ -367,7 +516,8 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
         // Check if alignment shift should be applied
         std::optional<AlignmentCrop> crop;
         if (validation.alignment.correctionApplied)
-            crop = planAlignmentCrop(validation);
+            crop = planAlignmentCrop(validation.alignment.bands, validation.summary.sourceWidth,
+                                     validation.summary.sourceHeight);
 
         if (crop) {
             // Close the original VRT and datasets; the shifted ones replace them
@@ -379,7 +529,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
             // GPS correction for center shift
             if (srcGps.present) {
-                const auto camera = readCameraGeometry(inputPaths[0], validation.summary.width);
+                const auto camera = readCameraGeometry(inputPaths[0], validation.summary.sourceWidth);
                 correctGpsForCrop(srcGps.location, *crop, camera);
             }
         } else {
@@ -392,13 +542,34 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
         throw GDALException("Cannot create merged output: " + outputPath);
     }
 
+    describeMergedOutput(datasetHandle(out), bands, mergedXmpPacket(camera, bands));
     closeOutputOrThrow(std::move(out), outputPath);
 
     // A no-op when the shift path already closed them
     merged.close();
 
-    // Write GPS coordinates from source to merged output. A reader that cannot work (no metadata-util)
-    // propagates; a file that cannot be written does not fail the merge.
+    // Write the EXIF of the capture and the GPS coordinates from the source to the merged output. A
+    // reader that cannot work (no metadata-util) propagates; a file that cannot be written does not
+    // fail the merge.
+    if (!camera.exifTags.empty()) {
+        try {
+            ExifEditor editor(produced);
+            // One request writes all the tags and fails as a whole when a value is not valid: the
+            // tags are then written one by one, so that one bad value costs only that tag
+            if (!editor.SetTags(camera.exifTags).empty()) {
+                for (const auto &tag : camera.exifTags) {
+                    const auto failures = editor.SetTags({tag});
+                    if (!failures.empty())
+                        LOGD << "Could not write " << tag.first << " to " << outputPath << ": "
+                             << failures.front().message;
+                }
+            }
+        } catch (const HelperUnavailableException &) {
+            throw;
+        } catch (const std::exception &e) {
+            LOGD << "Could not write the camera EXIF to " << outputPath << ": " << e.what();
+        }
+    }
     if (srcGps.present) {
         try {
             ExifEditor editor(produced);

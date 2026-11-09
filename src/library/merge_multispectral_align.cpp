@@ -14,6 +14,7 @@
 #include "exceptions.h"
 #include "exif.h"
 #include "logger.h"
+#include "merge_crop.h"
 #include "merge_multispectral.h"
 #include "mio.h"
 #include "sensor_data.h"
@@ -377,6 +378,55 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
     }
 
     return alignInfo;
+}
+
+std::optional<AlignmentCrop> planAlignmentCrop(const std::vector<BandAlignmentInfo> &alignBands,
+                                               int width, int height) {
+    const size_t N = alignBands.size();
+    if (N == 0) return std::nullopt;
+
+    // Find REF (the band with shiftX=0 and shiftY=0)
+    size_t REF = 0;
+    for (size_t i = 0; i < N; i++) {
+        if (alignBands[i].detected && alignBands[i].shiftX == 0 && alignBands[i].shiftY == 0) {
+            REF = i;
+            break;
+        }
+    }
+
+    // Calculate integer shifts
+    AlignmentCrop crop;
+    crop.dx.assign(N, 0);
+    crop.dy.assign(N, 0);
+    for (size_t i = 0; i < N; i++) {
+        if (i == REF || !alignBands[i].detected || alignBands[i].isThermal) continue;
+        crop.dx[i] = static_cast<int>(std::round(alignBands[i].shiftX));
+        crop.dy[i] = static_cast<int>(std::round(alignBands[i].shiftY));
+    }
+
+    // Calculate asymmetric padding (intersection area)
+    const int padLeft = *std::max_element(crop.dx.begin(), crop.dx.end());
+    const int padRight = -(*std::min_element(crop.dx.begin(), crop.dx.end()));
+    const int padTop = *std::max_element(crop.dy.begin(), crop.dy.end());
+    const int padBottom = -(*std::min_element(crop.dy.begin(), crop.dy.end()));
+    crop.padLeft = std::max(0, padLeft);
+    crop.padRight = std::max(0, padRight);
+    crop.padTop = std::max(0, padTop);
+    crop.padBottom = std::max(0, padBottom);
+
+    crop.outW = width - crop.padLeft - crop.padRight;
+    crop.outH = height - crop.padTop - crop.padBottom;
+
+    LOGD << "Alignment crop: pad L=" << crop.padLeft << " R=" << crop.padRight
+         << " T=" << crop.padTop << " B=" << crop.padBottom
+         << " => output " << crop.outW << "x" << crop.outH
+         << " (from " << width << "x" << height << ")";
+
+    if (crop.outW <= 0 || crop.outH <= 0) {
+        LOGD << "Shift too large, output would be empty. Falling back to no-shift merge.";
+        return std::nullopt;
+    }
+    return crop;
 }
 
 }  // namespace ddb
