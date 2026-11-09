@@ -13,20 +13,40 @@ namespace ddb {
  *
  * The pile is measured against the ground around it, a least-squares plane: on a
  * slope the base takes the tilt of the slope, so the pile is what rises above
- * the slope. Rings of growing radius around the click are fitted with a plane;
- * the pile is the area of the click that rises above the plane of the first ring
- * that lies on the ground all around it (a ring on the pile itself descends
- * outwards with its flank). The base is then fitted again to the ground just
- * around the outline of the pile, and the volume is what rises above it: the
- * base of a "best_fit" volume of that outline. The radius limits the search: the
- * pile and a ring of ground around it (about a quarter of its radius) must fit
- * in it.
+ * the slope. Rings of growing radius around the click, up to the edge of the
+ * search window, are fitted with a plane; the pile is the area of the click
+ * that rises above the plane of a ring that lies on the ground all around it (a
+ * ring on the pile itself descends outwards with its flank). The broad, nearly
+ * level top of a large pile looks like ground too: when the pile found in a
+ * ring is a hump on the top of a larger pile found in a larger ring (its ground
+ * lies in that pile, raised above its base by at least the height of the hump,
+ * which is at most half as high as the larger pile), the larger pile takes its
+ * place, so a click on the top of a pile finds its foot, however wide and level
+ * that top is. A pile on a raised pad, a bench or a berm that rises above it by
+ * more than it is raised stays the pile. One no taller than the pad is raised
+ * is a hump on the top of the pad by that rule: the outline is then the foot of
+ * the pad, the volume that of the pad and the pile, and the confidence high
+ * (the ground around the pad is level). Large rings are measured on a coarser
+ * copy of the window (a ring that reaches r meters sees cells of at most
+ * r / 128), so the search costs about the same on any DEM; a pile found there
+ * is measured again on the DEM, against the same base. The base is then fitted
+ * again, at the resolution of the DEM, to the ground just around the outline of
+ * the pile, and the volume is what rises above it: the base of a "best_fit"
+ * volume of that outline. The radius limits the search: the pile and a ring of
+ * ground around it (about a quarter of its radius) must fit in it.
+ *
+ * The confidence weighs whether the outline is the foot of the pile (the ground
+ * beyond it, out to about twice its reach, lies about on its base in at least a
+ * quarter of the directions around it; below 0.5 when it falls away all around
+ * by about the height of the pile, as around the top of a pile wider than the
+ * window), the contrast of the pile (its peak against the noise of its ground,
+ * on a log scale up to 300 times) and how compact it is.
  *
  * Pipeline: local window -> growing rings of ground, each fitted with a plane ->
  * smoothed rise above the plane -> threshold over the noise of the ground ->
- * 4-connected flood fill from the click point -> base refitted around the
- * outline -> Moore-neighbour contour tracing -> Douglas-Peucker simplification
- * -> GeoJSON polygon in WGS84.
+ * 4-connected flood fill from the click point -> the largest pile the others
+ * are humps on -> base refitted around the outline -> Moore-neighbour contour
+ * tracing -> Douglas-Peucker simplification -> GeoJSON polygon in WGS84.
  *
  * Output JSON schema:
  * {

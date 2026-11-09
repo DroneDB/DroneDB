@@ -7,6 +7,7 @@
 #include "testarea.h"
 
 #include "stockpile.h"
+#include "volume.h"
 #include "ddb.h"
 #include "gdal_inc.h"
 #include "exceptions.h"
@@ -16,8 +17,12 @@
 #include "raster_test_utils.h"
 #include "synthetic_dem_support.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -504,6 +509,425 @@ TEST(stockpile, detectAllOnASlopeFindsThePilesNotTheSlope) {
         const auto [lon, lat] = lonLatAt(second.east, second.south);
         EXPECT_NEAR(all["stockpiles"][0]["centroid"][0].get<double>(), lon, 1e-5);
         EXPECT_NEAR(all["stockpiles"][0]["centroid"][1].get<double>(), lat, 1e-5);
+    }
+}
+
+// ---- A landfill mound -----------------------------------------------------------------------
+//
+// The 9 m mound of the audit's landfill DEM (FR-MAP-01: about 3,000 m^2 and 8,100-10,100 m^3 within
+// a hand-drawn outline), modelled where the DEM itself is not at hand: a broad, nearly level top
+// 9 m across with a 1 m hump where one clicks, concave flanks down to a foot 31 m from the top,
+// on ground that rises 1.5 degrees with +-3 cm of noise, between a smaller pile and a long ridge.
+// A ring on that top hardly descends: the detection took it for the ground and the hump for the
+// pile (a 139 m^2 patch of the summit, at 76% confidence).
+
+constexpr double kLandfillPixel = 0.1;
+constexpr int kLandfillSize = 1200; // 120 m
+const golden::DemSpec kLandfillSpec{"landfill", 32632, 578000.0, 4985000.0, kLandfillPixel, kLandfillSize};
+constexpr double kMoundEast = 60.0, kMoundSouth = 60.0; // its top, meters from the upper-left corner
+
+// The height of the mound above the ground, `d` meters from its top
+double moundHeight(double d) {
+    constexpr double kTop = 9.0, kFoot = 31.0, kShoulder = 8.0, kCrown = 0.005;
+    constexpr double kHump = 1.0, kHumpRadius = 4.0;
+    double h = 0.0;
+    if (d < kTop) h = kShoulder + kCrown * (kTop * kTop - d * d);
+    else if (d < kFoot) h = kShoulder * std::pow(1.0 - (d - kTop) / (kFoot - kTop), 1.5);
+    return h + kHump * std::max(0.0, 1.0 - d / kHumpRadius);
+}
+
+double distanceToSegment(double e, double s, double e0, double s0, double e1, double s1) {
+    const double ve = e1 - e0, vs = s1 - s0;
+    const double t = std::clamp(((e - e0) * ve + (s - s0) * vs) / (ve * ve + vs * vs), 0.0, 1.0);
+    return std::hypot(e - (e0 + t * ve), s - (s0 + t * vs));
+}
+
+// The height of the ridge above the ground: 30 m long, 10 m wide, 2.5 m high
+double ridgeHeight(double e, double s) {
+    return 2.5 * std::max(0.0, 1.0 - distanceToSegment(e, s, 20.0, 105.0, 50.0, 108.0) / 5.0);
+}
+
+fs::path makeLandfillDem(const fs::path &path) {
+    testutils::GeoRasterSpec spec;
+    spec.width = spec.height = kLandfillSize;
+    spec.bands = 1;
+    spec.type = GDT_Float32;
+    spec.epsg = kLandfillSpec.epsg;
+    spec.originX = kLandfillSpec.originX;
+    spec.originY = kLandfillSpec.originY;
+    spec.pixelSize = kLandfillPixel;
+    const double rise = std::tan(1.5 * kPi / 180.0);
+    spec.value = [=](int, int x, int y) {
+        const double e = (x + 0.5) * kLandfillPixel, s = (y + 0.5) * kLandfillPixel;
+        double z = 100.0 + rise * (0.8 * e + 0.6 * s) + 1.5 * noiseAt(x, y);
+        z += moundHeight(std::hypot(e - kMoundEast, s - kMoundSouth));
+        z += 3.0 * std::max(0.0, 1.0 - std::hypot(e - 105.0, s - 60.0) / 7.0);                 // a smaller pile
+        z += ridgeHeight(e, s);
+        return z;
+    };
+    testutils::createGeoRaster(path, spec);
+    return path;
+}
+
+json detectOnLandfill(const fs::path &dem, double radius, float sensitivity, double east = kMoundEast,
+                      double south = kMoundSouth) {
+    const auto [lon, lat] = golden::lonLatOfPixel(kLandfillSpec, east / kLandfillPixel, south / kLandfillPixel);
+    return json::parse(detectStockpileJson(dem.string(), lat, lon, radius, sensitivity));
+}
+
+double landfillArea(const json &pile) {
+    return pile["pixelCount"].get<double>() * kLandfillPixel * kLandfillPixel;
+}
+
+// The volume of a pile of the landfill, summed over the pixels: its height at `east`, `south`
+template <typename Height>
+double landfillVolume(Height height) {
+    double v = 0.0;
+    for (int y = 0; y < kLandfillSize; y++) {
+        for (int x = 0; x < kLandfillSize; x++)
+            v += height((x + 0.5) * kLandfillPixel, (y + 0.5) * kLandfillPixel);
+    }
+    return v * kLandfillPixel * kLandfillPixel;
+}
+
+double moundVolume() {
+    return landfillVolume([](double e, double s) { return moundHeight(std::hypot(e - kMoundEast, s - kMoundSouth)); });
+}
+
+// The best-fit volume within a hand-drawn outline: a 24-sided polygon 32 m around the top, as the
+// audit drew it
+double handDrawnVolume(const fs::path &dem) {
+    json ring = json::array();
+    for (int k = 0; k <= 24; k++) {
+        const double a = 2.0 * kPi * (k % 24) / 24.0;
+        const auto [lon, lat] = golden::lonLatOfPixel(kLandfillSpec, (kMoundEast + 32.0 * std::cos(a)) / kLandfillPixel,
+                                                      (kMoundSouth + 32.0 * std::sin(a)) / kLandfillPixel);
+        ring.push_back({lon, lat});
+    }
+    const json polygon{{"type", "Polygon"}, {"coordinates", json::array({ring})}};
+    return json::parse(calculateVolumeJson(dem.string(), polygon.dump(), "best_fit", 0.0))["netVolume"].get<double>();
+}
+
+// A click on the top of the mound, at the default sensitivity and radius, outlines its foot: the
+// whole mound, not the hump on its top
+TEST(stockpile, aClickOnTheTopOfAMoundFindsItsFoot) {
+    TestArea ta(TEST_NAME);
+    const fs::path dem = makeLandfillDem(ta.getPath("landfill.tif"));
+    const json pile = detectOnLandfill(dem, 50.0, 0.5f);
+    const double volume = pile["estimatedVolume"].get<double>();
+    EXPECT_GE(landfillArea(pile), 2700.0);
+    EXPECT_LE(landfillArea(pile), 3300.0);
+    EXPECT_GE(volume, 8100.0);
+    EXPECT_LE(volume, 10100.0);
+    EXPECT_NEAR(volume, moundVolume(), moundVolume() * 0.05);
+    const double drawn = handDrawnVolume(dem);
+    EXPECT_NEAR(volume, drawn, drawn * 0.1);
+    // Its ground is around it: a sure outline
+    EXPECT_GE(pile["confidence"].get<double>(), 0.7);
+}
+
+// A higher sensitivity finds no less of the mound: it was 3,012 m^3 at 0, 137 m^3 at 0.4 and
+// 8,741 m^3 at 0.7 on the audit's landfill
+TEST(stockpile, theVolumeDoesNotDecreaseWhenTheSensitivityIncreases) {
+    TestArea ta(TEST_NAME);
+    const fs::path dem = makeLandfillDem(ta.getPath("landfill.tif"));
+    double previous = 0.0;
+    for (float sensitivity : {0.0f, 0.25f, 0.4f, 0.5f, 0.6f, 0.7f, 1.0f}) {
+        SCOPED_TRACE(sensitivity);
+        const double volume = detectOnLandfill(dem, 50.0, sensitivity)["estimatedVolume"].get<double>();
+        EXPECT_GE(volume, 8100.0);
+        EXPECT_LE(volume, 10100.0);
+        EXPECT_GE(volume, previous);
+        previous = volume;
+    }
+}
+
+// A search radius that cannot hold the mound outlines its top only: that outline does not reach
+// the foot of the pile, and its confidence says so at every sensitivity (the broad top is nearly
+// level near the hump: it was 0.76 at 0 and 0.46 at 0.5 when all the ground beyond the outline
+// was weighed, and not its farther half)
+TEST(stockpile, anOutlineOfTheTopOnlyHasALowConfidence) {
+    TestArea ta(TEST_NAME);
+    const fs::path dem = makeLandfillDem(ta.getPath("landfill.tif"));
+    for (float sensitivity : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+        SCOPED_TRACE(sensitivity);
+        const json pile = detectOnLandfill(dem, 20.0, sensitivity);
+        EXPECT_LT(landfillArea(pile), 300.0);
+        EXPECT_LT(pile["confidence"].get<double>(), 0.5);
+    }
+}
+
+// A click on a long pile finds all of it, from end to end
+TEST(stockpile, aClickOnALongPileFindsItWhole) {
+    TestArea ta(TEST_NAME);
+    const fs::path dem = makeLandfillDem(ta.getPath("landfill.tif"));
+    const json pile = detectOnLandfill(dem, 50.0, 0.5f, 35.0, 106.5);
+    const double volume = landfillVolume(ridgeHeight);
+    EXPECT_NEAR(pile["estimatedVolume"].get<double>(), volume, volume * 0.1);
+    EXPECT_GE(pile["confidence"].get<double>(), 0.7);
+}
+
+// ---- The audit's landfill DEM ------------------------------------------------------------------
+//
+// FR-MAP-01 on the DEM the audit clicked on: DTM22ok2025.tif, a 7 cm landfill DEM in SWEREF99 13 30
+// (757 MB, not in the test data). Set DDB_TEST_LANDFILL_DEM to its path, or to a crop of it that
+// holds the 50 m around the top of the mound, to run these; they are skipped when it is not set,
+// and fail when it names no file.
+
+std::optional<fs::path> landfillDem() {
+    const char *path = std::getenv("DDB_TEST_LANDFILL_DEM");
+    if (path == nullptr || *path == '\0') return std::nullopt;
+    return fs::path(path);
+}
+
+// The top of the 9 m mound, where the audit clicked
+constexpr double kAuditMoundLon = 13.70764, kAuditMoundLat = 56.19565;
+
+// The area of the footprint, m^2: its pixels, of the size of the pixels of the DEM (meters)
+double auditArea(const fs::path &dem, const json &pile) {
+    GDALDatasetH ds = GDALOpen(dem.string().c_str(), GA_ReadOnly);
+    if (ds == nullptr) throw std::runtime_error("Cannot open " + dem.string());
+    double gt[6];
+    const CPLErr err = GDALGetGeoTransform(ds, gt);
+    GDALClose(ds);
+    if (err != CE_None) throw std::runtime_error("No geotransform in " + dem.string());
+    return pile["pixelCount"].get<double>() * std::fabs(gt[1] * gt[5]);
+}
+
+// An outline drawn by hand around the mound, a few meters out on the ground beyond its foot, as
+// the audit drew it: 2,885 m^2, 9,440 m^3 above its best-fit base
+json auditDrawnOutline() {
+    const std::vector<std::pair<double, double>> lonLat{
+        {13.707363, 56.195820}, {13.707514, 56.195837}, {13.707646, 56.195876}, {13.707781, 56.195873},
+        {13.707905, 56.195843}, {13.708068, 56.195732}, {13.708096, 56.195598}, {13.708069, 56.195560},
+        {13.708139, 56.195425}, {13.708106, 56.195369}, {13.708023, 56.195334}, {13.707859, 56.195354},
+        {13.707645, 56.195346}, {13.707240, 56.195457}, {13.707074, 56.195589}, {13.707073, 56.195646},
+        {13.707363, 56.195820}};
+    json ring = json::array();
+    for (const auto &[lon, lat] : lonLat) ring.push_back({lon, lat});
+    return {{"type", "Polygon"}, {"coordinates", json::array({ring})}};
+}
+
+// A click on the top of the mound at the default radius outlines its foot, at every sensitivity,
+// and finds no less of it at a higher one. At the default sensitivity the volume is within 10% of
+// the best-fit volume of the hand-drawn outline. The foot on the DEM measures about 2,150 m^2:
+// the 3,000 m^2 of the audit is that of its outline, drawn a few meters beyond the foot.
+TEST(stockpile, aClickOnTheTopOfTheAuditMoundFindsItsFoot) {
+    const auto dem = landfillDem();
+    if (!dem) GTEST_SKIP() << "DDB_TEST_LANDFILL_DEM is not set";
+    ASSERT_TRUE(fs::is_regular_file(*dem)) << "DDB_TEST_LANDFILL_DEM names no file: " << dem->string();
+    const double drawn = json::parse(calculateVolumeJson(dem->string(), auditDrawnOutline().dump(), "best_fit",
+                                                         0.0))["netVolume"].get<double>();
+    double previous = 0.0;
+    for (float sensitivity : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+        SCOPED_TRACE(sensitivity);
+        const json pile = json::parse(detectStockpileJson(dem->string(), kAuditMoundLat, kAuditMoundLon, 50.0, sensitivity));
+        const double volume = pile["estimatedVolume"].get<double>();
+        EXPECT_GE(volume, previous);
+        previous = volume;
+        // The foot, inside the hand-drawn outline; a summit would be a few hundred m^2
+        EXPECT_GT(auditArea(*dem, pile), 1700.0);
+        EXPECT_LT(auditArea(*dem, pile), 2885.0);
+        EXPECT_GE(pile["confidence"].get<double>(), 0.7);
+        if (sensitivity == 0.5f) {
+            EXPECT_GE(volume, 8100.0);
+            EXPECT_LE(volume, 10100.0);
+            EXPECT_NEAR(volume, drawn, drawn * 0.1);
+        }
+    }
+}
+
+// A search radius that cannot hold the mound outlines its summit only, with a low confidence
+TEST(stockpile, anOutlineOfTheSummitOfTheAuditMoundHasALowConfidence) {
+    const auto dem = landfillDem();
+    if (!dem) GTEST_SKIP() << "DDB_TEST_LANDFILL_DEM is not set";
+    ASSERT_TRUE(fs::is_regular_file(*dem)) << "DDB_TEST_LANDFILL_DEM names no file: " << dem->string();
+    const json pile = json::parse(detectStockpileJson(dem->string(), kAuditMoundLat, kAuditMoundLon, 20.0, 0.5f));
+    EXPECT_LT(auditArea(*dem, pile), 300.0);
+    EXPECT_LT(pile["confidence"].get<double>(), 0.5);
+}
+
+// ---- Piles on raised ground ---------------------------------------------------------------------
+//
+// Ground in UTM that rises 2 cm per meter to the east, with +-3 cm of noise, and something on it:
+// a pile on a raised pad, on a berm across the window. The pile is measured, not what it stands on.
+
+// A site of `size` x `size` pixels of `pixel` meters, the corner of the landfill DEM
+golden::DemSpec siteSpec(double pixel, int size) {
+    return golden::DemSpec{"site", 32632, 578000.0, 4985000.0, pixel, size};
+}
+
+template <typename Height>
+fs::path makeSiteDem(const fs::path &path, const golden::DemSpec &site, Height height) {
+    testutils::GeoRasterSpec spec;
+    spec.width = spec.height = site.size;
+    spec.bands = 1;
+    spec.type = GDT_Float32;
+    spec.epsg = site.epsg;
+    spec.originX = site.originX;
+    spec.originY = site.originY;
+    spec.pixelSize = site.pixel;
+    const double pixel = site.pixel;
+    spec.value = [=](int, int x, int y) {
+        const double e = (x + 0.5) * pixel, s = (y + 0.5) * pixel;
+        return 100.0 + 0.02 * e + 1.5 * noiseAt(x, y) + height(e, s);
+    };
+    testutils::createGeoRaster(path, spec);
+    return path;
+}
+
+json detectOnSite(const fs::path &dem, const golden::DemSpec &site, double east, double south, double radius,
+                  float sensitivity) {
+    const auto [lon, lat] = golden::lonLatOfPixel(site, east / site.pixel, south / site.pixel);
+    return json::parse(detectStockpileJson(dem.string(), lat, lon, radius, sensitivity));
+}
+
+// A cone on a square pad, both centred 60 m from the corner of the site
+struct PileOnPad {
+    double padHalf, padHeight; // meters: half the side of the pad, its height (its sides slope at 45 degrees)
+    double height, radius;     // of the cone
+    double volume() const { return kPi * radius * radius * height / 3.0; }
+    double at(double e, double s) const {
+        const double inside = std::min({e - (60.0 - padHalf), 60.0 + padHalf - e, s - (60.0 - padHalf), 60.0 + padHalf - s});
+        return padHeight * std::clamp(inside / padHeight, 0.0, 1.0) +
+               height * std::max(0.0, 1.0 - std::hypot(e - 60.0, s - 60.0) / radius);
+    }
+};
+
+// A pile on a pad lower than itself is the pile: the pad is its ground. It was taken for a hump on
+// the top of the pad, which became the pile (2,323 m^3 for a pile of 113 m^3 on a 1.5 m pad)
+TEST(stockpile, aPileOnARaisedPadIsThePileNotThePad) {
+    TestArea ta(TEST_NAME);
+    const golden::DemSpec site = siteSpec(kLandfillPixel, kLandfillSize);
+    for (const PileOnPad &pad : {PileOnPad{20.0, 1.5, 3.0, 6.0}, PileOnPad{20.0, 1.0, 2.0, 5.0},
+                                 PileOnPad{20.0, 1.5, 4.0, 6.0}, PileOnPad{10.0, 1.5, 3.0, 6.0},
+                                 PileOnPad{20.0, 0.6, 1.0, 4.0}}) {
+        SCOPED_TRACE(std::to_string(pad.padHalf) + " " + std::to_string(pad.padHeight) + " " + std::to_string(pad.height));
+        const fs::path dem = makeSiteDem(ta.getPath("pad.tif"), site, [&](double e, double s) { return pad.at(e, s); });
+        const json pile = detectOnSite(dem, site, 60.0, 60.0, 50.0, 0.5f);
+        EXPECT_NEAR(pile["estimatedVolume"].get<double>(), pad.volume(), pad.volume() * 0.15);
+        EXPECT_LT(landfillArea(pile), kPi * pad.radius * pad.radius * 1.5);
+        EXPECT_GE(pile["confidence"].get<double>(), 0.5);
+    }
+}
+
+// The pile on a pad is the same pile at every sensitivity and search radius: it was 2,330 m^3 at
+// 0.5 and 120 m^3 at 1
+TEST(stockpile, aPileOnAPadIsTheSameAtEverySensitivityAndRadius) {
+    TestArea ta(TEST_NAME);
+    const golden::DemSpec site = siteSpec(kLandfillPixel, kLandfillSize);
+    const PileOnPad pad{20.0, 1.5, 3.2, 6.0};
+    const fs::path dem = makeSiteDem(ta.getPath("pad.tif"), site, [&](double e, double s) { return pad.at(e, s); });
+    double previous = 0.0;
+    for (float sensitivity : {0.0f, 0.5f, 1.0f}) {
+        SCOPED_TRACE(sensitivity);
+        const double volume = detectOnSite(dem, site, 60.0, 60.0, 50.0, sensitivity)["estimatedVolume"].get<double>();
+        EXPECT_NEAR(volume, pad.volume(), pad.volume() * 0.15);
+        EXPECT_GE(volume, previous);
+        previous = volume;
+    }
+    const double wide = detectOnSite(dem, site, 60.0, 60.0, 50.0, 0.5f)["estimatedVolume"].get<double>();
+    const double narrow = detectOnSite(dem, site, 60.0, 60.0, 20.0, 0.5f)["estimatedVolume"].get<double>();
+    EXPECT_NEAR(narrow, wide, wide * 0.05);
+}
+
+// A flat-topped pile, 4 m high, with a level top 40 m across and a 1 m hump 5 m across where one
+// clicks: the hump is found first, on the level top, and the top stays level for 20 m around it.
+// The rings went on to the edge of the window only while the ground had not stayed level around the
+// pile found so far for three times its reach: they stopped on the top, before any of them passed
+// the foot of the pile, and the hump came out as the pile, its outline sure (the top around it is
+// level). A click on the hump finds the whole pile, at every sensitivity.
+TEST(stockpile, aHumpOnALevelTopFarWiderThanItIsFoundWithTheWholePile) {
+    TestArea ta(TEST_NAME);
+    const golden::DemSpec site = siteSpec(kLandfillPixel, kLandfillSize);
+    constexpr double kTop = 20.0, kFoot = 26.0, kHeight = 4.0, kHump = 1.0, kHumpRadius = 2.5;
+    auto height = [](double e, double s) {
+        const double d = std::hypot(e - 60.0, s - 60.0);
+        return kHeight * std::clamp((kFoot - d) / (kFoot - kTop), 0.0, 1.0) +
+               kHump * std::max(0.0, 1.0 - d / kHumpRadius);
+    };
+    const fs::path dem = makeSiteDem(ta.getPath("plateau.tif"), site, height);
+    const double volume = landfillVolume(height);
+    const double area = kPi * kFoot * kFoot;
+    for (float sensitivity : {0.0f, 0.5f, 1.0f}) {
+        SCOPED_TRACE(sensitivity);
+        const json pile = detectOnSite(dem, site, 60.0, 60.0, 50.0, sensitivity);
+        EXPECT_NEAR(pile["estimatedVolume"].get<double>(), volume, volume * 0.1);
+        // The smoothing of sensitivity 0 spreads the sharp foot of the pile by a meter or so
+        EXPECT_GT(landfillArea(pile), area * 0.85);
+        EXPECT_LT(landfillArea(pile), area * 1.2);
+        // Its ground is around it: a sure outline
+        EXPECT_GE(pile["confidence"].get<double>(), 0.7);
+    }
+}
+
+// A pile on a berm that crosses the window: the ground falls away across the berm, not along it,
+// so the outline is the foot of the pile and a sure one (the ground beyond the whole window fell
+// away by more than the height of the pile, and the confidence was 0.25)
+TEST(stockpile, aPileOnABermAcrossTheWindowIsSure) {
+    TestArea ta(TEST_NAME);
+    const golden::DemSpec site = siteSpec(kLandfillPixel, kLandfillSize);
+    const Cone cone{60.0, 60.0, 5.0, 2.5};
+    const fs::path dem = makeSiteDem(ta.getPath("berm.tif"), site, [&](double e, double s) {
+        return 3.0 * std::clamp((10.0 - std::fabs(s - 60.0)) / 3.0, 0.0, 1.0) +
+               cone.height * std::max(0.0, 1.0 - std::hypot(e - cone.east, s - cone.south) / cone.radius);
+    });
+    const json pile = detectOnSite(dem, site, 60.0, 60.0, 50.0, 0.5f);
+    EXPECT_NEAR(pile["estimatedVolume"].get<double>(), cone.volume(), cone.volume() * 0.15);
+    EXPECT_GE(pile["confidence"].get<double>(), 0.5);
+}
+
+// The default search radius on a fine DEM: the rings far from the click are measured on a coarser
+// copy of the window, so their cost does not grow with the resolution (on a 2 cm DEM a click took
+// 36 s and 750 MB more when every ring was measured on the window). Sanitizer builds skip these
+// (DDB_SKIP_TIMING_TESTS, docs/sanitizers.md).
+void expectAQuickClick(const golden::DemSpec &site, const Cone &cone, std::chrono::seconds limit) {
+    TestArea ta(TEST_NAME);
+    const fs::path dem = makeSiteDem(ta.getPath("fine.tif"), site, [&](double e, double s) {
+        return cone.height * std::max(0.0, 1.0 - std::hypot(e - cone.east, s - cone.south) / cone.radius);
+    });
+    const auto start = std::chrono::steady_clock::now();
+    const json pile = detectOnSite(dem, site, cone.east, cone.south, 50.0, 0.5f);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    EXPECT_NEAR(pile["estimatedVolume"].get<double>(), cone.volume(), cone.volume() * 0.1);
+    EXPECT_GE(pile["confidence"].get<double>(), 0.7);
+    EXPECT_LT(elapsed, limit);
+}
+
+// A small pile on a 4 cm DEM: about 0.5 s on the dev box
+TEST(stockpile, aClickWithTheDefaultRadiusOnAFineDemIsQuick) {
+    if (std::getenv("DDB_SKIP_TIMING_TESTS") != nullptr)
+        GTEST_SKIP() << "timing test disabled";
+    expectAQuickClick(siteSpec(0.04, 2500), Cone{50.0, 50.0, 6.0, 3.0}, std::chrono::seconds(8)); // 100 m
+}
+
+// A large pile on a 2 cm DEM: the pile, measured again on the window, covers millions of its
+// pixels, and the ground the confidence weighs (footOf) most of the window: 25 million pixels
+TEST(stockpile, aClickOnALargePileOnAVeryFineDemIsQuick) {
+    if (std::getenv("DDB_SKIP_TIMING_TESTS") != nullptr)
+        GTEST_SKIP() << "timing test disabled";
+    expectAQuickClick(siteSpec(0.02, 5000), Cone{50.0, 50.0, 18.0, 6.0}, std::chrono::seconds(15)); // 100 m
+}
+
+// A click a few decimeters off the foot of a large pile on a 2 cm DEM finds the pile. Only a ring
+// that surrounds the whole pile holds it, on a copy of the window of 32 cm cells; measured again
+// on the window, its area was seeded at its pixel nearest to the click, on the outer edge of a cell
+// of the foot and below the threshold there, with no pixel above it within the 8 pixels the seed
+// is nudged by: no pile, for the pile the coarser copy had found
+TEST(stockpile, aClickJustOffTheFootOfALargePileOnAVeryFineDemFindsIt) {
+    TestArea ta(TEST_NAME);
+    const golden::DemSpec site = siteSpec(0.02, 5000); // 100 m
+    const Cone cone{50.0, 50.0, 18.0, 6.0};
+    const fs::path dem = makeSiteDem(ta.getPath("fine.tif"), site, [&](double e, double s) {
+        return cone.height * std::max(0.0, 1.0 - std::hypot(e - cone.east, s - cone.south) / cone.radius);
+    });
+    for (double off : {0.2, 0.4}) {
+        SCOPED_TRACE(off);
+        const json pile = detectOnSite(dem, site, cone.east + cone.radius + off, cone.south, 50.0, 0.5f);
+        EXPECT_NEAR(pile["estimatedVolume"].get<double>(), cone.volume(), cone.volume() * 0.1);
+        const double area = pile["pixelCount"].get<double>() * site.pixel * site.pixel;
+        EXPECT_GT(area, kPi * cone.radius * cone.radius * 0.8);
+        EXPECT_LT(area, kPi * cone.radius * cone.radius * 1.2);
     }
 }
 
