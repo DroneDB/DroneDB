@@ -281,14 +281,6 @@ Registry has to adopt first.
 * 2026-10-21: baseline (DroneDB `fixes-and-optimizations` after `7ee39d2`).
 * 2026-10-21: `capabilities` added (2.0.0). Its `symbols` list is
   `src/include/ddb.symbols`, so every new export updates this fixture too.
-* 2026-11-09: `capabilities` lists the raster value exports of 2.1 (U-201: `DDBGetRasterValueInfoEx`,
-  `DDBGetRasterPointValueEx`, `DDBGetRasterAreaStatsEx`, `DDBGetRasterProfileEx`,
-  `DDBGenerateContoursEx`, `DDBGenerateMemoryThumbnailEx2`, `DDBMemoryTileEx2`, `DDBExportRaster3`, and the
-  pixel exports for a raster without a map, an R-JPEG: `DDBGetRasterPointValuePixelEx`,
-  `DDBGetRasterAreaStatsPixelEx`), which take a `DDBRasterOptions` (NoData override, formula, WGS84 window).
-  The point result adds `unit` (of the band, or of the thermal formula). The value info JSON grows
-  (`nodata`, `nodataOverridden`, `nodataInvalid`, `pixelCount`, `validPixelCount`, `windowPixelCount`,
-  `stretch`, `scale`, `offset`); the point result of a map coordinate adds `lon` and `lat`.
 * 2026-10-21: `normalize-path`, `normalize-path-rejected` and `vectors/entry-paths.json` added
   (2.0.0: `DDBNormalizePath`); `capabilities` lists the new export.
 * 2026-10-21: `stac-data-collection`, `stac-data-item-georaster`, `stac-data-item-image` and
@@ -545,3 +537,17 @@ Registry has to adopt first.
   changed (the three schemas gain `key`); no other fixture did. Registry's exact-JSON adapter tests of
   these outputs need the member before Registry moves to a libddb build that has it. No version bump is
   made here: the members are additive and the ABI minor goes up with the release that ships them.
+
+* 2026-11-09: `capabilities` lists the raster value exports of 2.2 (U-201: `DDBGetRasterValueInfoEx`,
+  `DDBGetRasterPointValueEx`, `DDBGetRasterAreaStatsEx`, `DDBGetRasterProfileEx`,
+  `DDBGenerateContoursEx`, `DDBGenerateMemoryThumbnailEx2`, `DDBMemoryTileEx2`, `DDBExportRaster3`, and the
+  pixel exports for a raster without a map, an R-JPEG: `DDBGetRasterPointValuePixelEx`,
+  `DDBGetRasterAreaStatsPixelEx`), which take a `DDBRasterOptions` (NoData override, formula, WGS84 window).
+  The point result adds `unit` (of the band, or of the thermal formula). The value info JSON grows
+  (`nodata`, `nodataOverridden`, `nodataInvalid`, `pixelCount`, `validPixelCount`, `windowPixelCount`,
+  `stretch`, `scale`, `offset`); the point result of a map coordinate adds `lon` and `lat`.
+
+* 2026-11-09: 2.2.0 (ABI 2.2): `capabilities` has `abi.minor` 2. 2.2 ships the raster value exports and
+  `DDBRasterOptions` of U-201 (above; all ten are in `cancellable` too) and the build key members of U-210
+  (`key`, `buildKey`, `buildKeyChanged`). Additive: no export was removed or changed its signature. A host
+  that reads `key` or calls one of the new exports checks `DDBGetAbiVersion()` for 2.2 or later.

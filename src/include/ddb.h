@@ -743,7 +743,7 @@ extern "C"
      *              Valid types: generic, geoimage, georaster, pointcloud, image, dronedb, markdown, video, geovideo, model, panorama, geopanorama, vector, gaussiansplat
      * @param stopOnError whether to stop processing on first error (default true)
      * @return DDBERR_NONE on success, an error otherwise. Each element of the output of an entry that was
-     *         re-read also has "buildKey", the key of its build folder now ("<hash>", or
+     *         re-read also has (since 2.2) "buildKey", the key of its build folder now ("<hash>", or
      *         "<hash>-<georef digest>" for a model or a splat that has a georeference, see "Build
      *         manifest"), and "buildKeyChanged", true when that is not the key of the build the entry
      *         had: its build must be made again (a changed file, a changed georeference, and the first
@@ -961,7 +961,7 @@ extern "C"
      *   source     dataset-relative path of the entry the artifacts belong to: the entry itself,
      *              or the main file of a sidecar
      *   hash       the content hash of source
-     *   key        the build key of source, which names its build (URLs: ".../build/{key}/{path}"):
+     *   key        (new in 2.2) the build key of source, which names its build (URLs: ".../build/{key}/{path}"):
      *              the hash for a type whose build depends on the content only, and "<hash>-<digest>"
      *              (16 hexadecimal characters of the SHA-256 of the entry's "georef" property) for a
      *              model or a splat that has a georeference, so the same file in two places has a
@@ -1039,7 +1039,7 @@ extern "C"
      * of the artifact the file belongs to, as DDBGetBuildArtifacts lists it now (the same for
      * the index and the tiles of a directory artifact), absent only when it cannot be read.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param hash the key of the build ("key" of a build object): 64 hexadecimal characters, then for a
+     * @param hash the key of the build ("key" of a build object, since 2.2): 64 hexadecimal characters, then for a
      *             model or a splat with a georeference '-' and 16 more
      * @param path the file, relative to the build root: an artifact's path, or a file below a
      *             directory artifact ("mvt/3/4/2.pbf"). The dataset path rules apply
@@ -1068,7 +1068,7 @@ extern "C"
      * @param hash the key of the build ("key" of a build object)
      * @param output pointer to C-string where to store the JSON (free with DDBFree):
      *               {"hash": string, "key": string, "artifacts": [artifact], "pending": bool}: the
-     *               content hash and the key, the artifacts of the destination after the copy (as in
+     *               content hash and the key (new in 2.2), the artifacts of the destination after the copy (as in
      *               a build object) and whether it has a pending marker
      * @return DDBERR_NONE on success, also when the source has nothing built (nothing copied);
      *         DDBERR_INVALIDARGS when an argument is NULL or empty, the hash is malformed or
@@ -1429,7 +1429,7 @@ extern "C"
      * @param referencePath Absolute path to reference GeoTIFF
      * @param outputPath Absolute path for the aligned output: a GeoTIFF in the CRS and with the
      *   pixel size and the bands (alpha included) of the source, compressed without loss; only
-     *   its georeference changes (before 2.1 it was a COG in EPSG:3857, JPEG compressed).
+     *   its georeference changes (before 2.2 it was a COG in EPSG:3857, JPEG compressed).
      *   An output that exists is refused (since 2.1; DDBAlignRasterEx replaces it when asked),
      *   and so is one that is the source or the reference.
      * @param mode "similarity" (default) or "translation"
@@ -1512,7 +1512,7 @@ extern "C"
                                     int tileSize,
                                     DDBProgressCallback progress, void *progressUserData);
 
-    /** Options of the raster value exports (new in 2.1): the NoData value that replaces the one of the band
+    /** Options of the raster value exports (new in 2.2): the NoData value that replaces the one of the band
      * (FR-RAS-31), the formula of the values and a WGS84 window. One type for every endpoint, not a
      * parameter per endpoint. A NULL options pointer is every option unset. Set structSize to
      * sizeof(DDBRasterOptions) and every other field explicitly. A later version may append fields: a
@@ -1531,7 +1531,7 @@ extern "C"
     #define DDB_RASTER_OPT_NODATA 0x1u
     #define DDB_RASTER_OPT_BBOX   0x2u
 
-    /** DDBGetRasterValueInfo with options (new in 2.1). The info also has the exact range of the pixels that
+    /** DDBGetRasterValueInfo with options (new in 2.2). The info also has the exact range of the pixels that
      * have a value in the units of the band (valueMin, valueMax: raw * scale + offset), "nodata" (the value
      * that applies), "nodataInvalid" (the NoData value of the band cannot be held by its type),
      * "pixelCount" and "validPixelCount", "windowPixelCount" (with the bbox option: the source pixels in
@@ -1544,7 +1544,7 @@ extern "C"
      *         cannot compute, or invalid options; an error otherwise */
     DDB_DLL DDBErr DDBGetRasterValueInfoEx(const char *filePath, const DDBRasterOptions *options, char **output);
 
-    /** The value of the raster at a map coordinate (new in 2.1): the pixel of the file under the WGS84 point,
+    /** The value of the raster at a map coordinate (new in 2.2): the pixel of the file under the WGS84 point,
      * found with the one geo-to-pixel conversion of libddb (the point is moved to the CRS of the file and
      * converted with the inverse geotransform of the file), in the units of the band.
      * @param filePath Path to the raster
@@ -1558,7 +1558,7 @@ extern "C"
     DDB_DLL DDBErr DDBGetRasterPointValueEx(const char *filePath, double lon, double lat,
                                             const DDBRasterOptions *options, char **output);
 
-    /** Value statistics for a WGS84 rectangle (new in 2.1): the pixels of the file whose centre is inside it
+    /** Value statistics for a WGS84 rectangle (new in 2.2): the pixels of the file whose centre is inside it
      * ("bounds" are those pixels), in the units of the band.
      * @param filePath Path to the raster
      * @param minLon, minLat, maxLon, maxLat The rectangle (WGS84)
@@ -1570,7 +1570,7 @@ extern "C"
                                            double maxLon, double maxLat,
                                            const DDBRasterOptions *options, char **output);
 
-    /** DDBGetRasterPointValue with options (new in 2.1): the value at a PIXEL of the raster, for a raster that
+    /** DDBGetRasterPointValue with options (new in 2.2): the value at a PIXEL of the raster, for a raster that
      * has no map (an R-JPEG: a pixel of its raw thermal grid). The NoData value of the options replaces the one
      * of the band (a pixel whose raw sample equals it has no value); a thermal formula (CELSIUS, KELVIN) gives
      * the value in its unit, converted from the unit of the band (D-022), and the result says it in "unit".
@@ -1585,7 +1585,7 @@ extern "C"
     DDB_DLL DDBErr DDBGetRasterPointValuePixelEx(const char *filePath, int x, int y,
                                                  const DDBRasterOptions *options, char **output);
 
-    /** DDBGetRasterAreaStats with options (new in 2.1): the statistics of a rectangle of PIXELS, for a raster
+    /** DDBGetRasterAreaStats with options (new in 2.2): the statistics of a rectangle of PIXELS, for a raster
      * that has no map (an R-JPEG). The options as for DDBGetRasterPointValuePixelEx: the NoData value leaves its
      * pixels out, a thermal formula gives the statistics in its unit ("unit"). NULL options are
      * DDBGetRasterAreaStats.
@@ -1598,18 +1598,18 @@ extern "C"
     DDB_DLL DDBErr DDBGetRasterAreaStatsPixelEx(const char *filePath, int x0, int y0, int x1, int y1,
                                                 const DDBRasterOptions *options, char **output);
 
-    /** DDBGetRasterProfile with options (new in 2.1): the NoData value of the options replaces the one of the band. */
+    /** DDBGetRasterProfile with options (new in 2.2): the NoData value of the options replaces the one of the band. */
     DDB_DLL DDBErr DDBGetRasterProfileEx(const char *filePath, const char *geoJsonLineString, int samples,
                                          const DDBRasterOptions *options, char **output);
 
-    /** DDBGenerateContours with options (new in 2.1): the NoData value of the options replaces the one of the
+    /** DDBGenerateContours with options (new in 2.2): the NoData value of the options replaces the one of the
      * band; the levels, the statistics and the elevations of the output are in the units of the band
      * (raw * scale + offset). */
     DDB_DLL DDBErr DDBGenerateContoursEx(const char *rasterPath, double interval, int count, double baseOffset,
                                          double minElev, double maxElev, double simplifyTolerance, int bandIndex,
                                          const DDBRasterOptions *options, char **output);
 
-    /** DDBGenerateMemoryThumbnailEx with options (new in 2.1): the NoData value of the options replaces the one
+    /** DDBGenerateMemoryThumbnailEx with options (new in 2.2): the NoData value of the options replaces the one
      * of the bands (a pixel equal to it is transparent and out of the stretch). */
     DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx2(const char *filePath, int size,
                                                   const char *preset, const char *bands,
@@ -1618,7 +1618,7 @@ extern "C"
                                                   const DDBRasterOptions *options,
                                                   uint8_t **outBuffer, int *outBufferSize);
 
-    /** DDBMemoryTileEx with options (new in 2.1): the NoData value of the options replaces the one of the bands
+    /** DDBMemoryTileEx with options (new in 2.2): the NoData value of the options replaces the one of the bands
      * (a pixel equal to it is transparent and out of the stretch). */
     DDB_DLL DDBErr DDBMemoryTileEx2(const char *inputPath,
                                      int tz, int tx, int ty,
@@ -1630,7 +1630,7 @@ extern "C"
                                      const DDBRasterOptions *options,
                                      uint8_t **outBuffer, int *outBufferSize);
 
-    /** DDBExportRaster2 with options (new in 2.1): the NoData value of the options replaces the one of the
+    /** DDBExportRaster2 with options (new in 2.2): the NoData value of the options replaces the one of the
      * bands (a pixel equal to it is not exported). */
     DDB_DLL DDBErr DDBExportRaster3(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
