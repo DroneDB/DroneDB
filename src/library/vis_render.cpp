@@ -157,14 +157,19 @@ namespace ddb
         plan.bandCount = GDALGetRasterCount(ds);
         plan.filter = filter;
 
+        // A formula that does not exist, or that this raster cannot compute, is refused: the same
+        // call can never succeed, so every C export returns it as DDBERR_INVALIDARGS
+        // (RefusedArgumentException), with the reason alone
         plan.formula = ve.getFormula(formulaId);
         if (!plan.formula)
-            throw InvalidArgsException("Unknown formula: " + formulaId);
+            throw RefusedArgumentException("Unknown formula: " + formulaId);
 
-        // The one rule of what a raster can compute (the lists of formulas ask it too)
-        const std::string refusal = VegetationEngine::dataRefusal(*plan.formula, rasterDataKind(ds));
+        // The rule of what a raster can compute (the lists of formulas ask its base,
+        // unavailableReason): a band the filter does not map ("Requires bands: RN" for NDVI over
+        // an RGB raster; not for CELSIUS and KELVIN, which read the first band), then the data
+        const std::string refusal = VegetationEngine::renderRefusal(*plan.formula, filter, rasterDataKind(ds));
         if (!refusal.empty())
-            throw InvalidArgsException(refusal);
+            throw RefusedArgumentException(refusal);
 
         if (withColormap)
         {

@@ -49,8 +49,11 @@ extern "C"
      * codes its documentation names, DDBERR_NONE and DDBERR_EXCEPTION. In 2.0 the exports
      * that existed in 1.x keep the codes they always returned: an invalid argument and a
      * retryable failure are DDBERR_EXCEPTION there; DDBERR_INVALIDARGS and DDBERR_RETRYABLE are
-     * returned by the exports added in 2.0 only, with one exception: an entry path that the
-     * path rules refuse is DDBERR_INVALIDARGS in every export (see "Entry paths"). Every export but the exempt ones (see
+     * returned by the exports added in 2.0 only, with two exceptions: an entry path that the
+     * path rules refuse is DDBERR_INVALIDARGS in every export (see "Entry paths"), and so is a
+     * formula that does not exist or that the raster cannot compute ("Unknown formula: X",
+     * "Requires bands: RN": DDBGetRasterMetadata, DDBMemoryTileEx, DDBExportRaster,
+     * DDBExportRaster2; not yet the thumbnails). Every export but the exempt ones (see
      * DDBShutdown) returns DDBERR_SHUTDOWN once DDBShutdown started, and DDBERR_CANCELED when
      * the caller set a cancel token on the thread (DDBSetThreadCancelToken) and canceled it. */
     typedef enum DDBErr
@@ -376,7 +379,7 @@ extern "C"
      * (so "a\b", "./a//b/" and "a/b" are one entry). A path that is absolute, has a ".." segment,
      * names the reserved ".ddb" folder (at any depth) or is not valid UTF-8 is refused: the call
      * returns DDBERR_INVALIDARGS (also the exports of 1.x, whose other invalid arguments stay
-     * DDBERR_EXCEPTION), changes nothing, and DDBGetLastError() reads
+     * DDBERR_EXCEPTION, but a refused formula: see "Error codes"), changes nothing, and DDBGetLastError() reads
      * "Invalid <argument> '<path>': <rejection code>" (DDBGetLastErrorReason() is ""). Only the
      * paths of these exports are entry paths:
      *   DDBGet (path), DDBListEntries and DDBListEntriesEx (folder: "" and "." are the root),
@@ -1293,7 +1296,8 @@ extern "C"
      * @param formula Optional formula (e.g., "NDVI"), NULL for raw bands
      * @param bandFilter Band order (e.g., "RGB", "RGBNRe"), NULL for auto-detect
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for a formula that does not exist or that
+     *         the raster cannot compute (DDBGetLastError: "Unknown formula: X", "Requires bands: RN"); an error otherwise */
     DDB_DLL DDBErr DDBGetRasterMetadata(const char *path, const char *formula, const char *bandFilter, char **output);
 
     /** Generate memory thumbnail with band mapping, formula, and stretch
@@ -1331,7 +1335,8 @@ extern "C"
      * @param rescale Rescale range, or NULL
      * @param outBuffer Pointer to output buffer (caller frees with DDBVSIFree)
      * @param outBufferSize Pointer to receive buffer size
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for a formula that does not exist or that
+     *         the raster cannot compute (DDBGetLastError: "Unknown formula: X", "Requires bands: RN"); an error otherwise */
     DDB_DLL DDBErr DDBMemoryTileEx(const char *inputPath,
                                     int tz, int tx, int ty,
                                     int tileSize, bool tms,
@@ -1461,7 +1466,8 @@ extern "C"
      * @param bandFilter Band order (e.g., "RGB"), or NULL
      * @param colormap Colormap ID (e.g., "rdylgn"), or NULL
      * @param rescale Rescale range "min,max", or NULL
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for a formula that does not exist or that
+     *         the raster cannot compute (DDBGetLastError: "Unknown formula: X", "Requires bands: RN"); an error otherwise */
     DDB_DLL DDBErr DDBExportRaster(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,
@@ -1482,7 +1488,8 @@ extern "C"
      * @param tileSize Tile size in pixels for windowed processing; 0 = auto
      * @param progress Optional progress callback (may be NULL)
      * @param progressUserData Opaque pointer forwarded to the progress callback
-     * @return DDBERR_NONE on success, DDBERR_CANCELED if canceled, an error otherwise */
+     * @return DDBERR_NONE on success, DDBERR_CANCELED if canceled; DDBERR_INVALIDARGS for a formula that does not exist or that
+     *         the raster cannot compute (DDBGetLastError: "Unknown formula: X", "Requires bands: RN"); an error otherwise */
     DDB_DLL DDBErr DDBExportRaster2(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,

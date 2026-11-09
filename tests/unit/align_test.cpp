@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace
@@ -62,7 +63,7 @@ namespace
     // ─── Helper: create a synthetic GeoTIFF with rich, broadband texture ─────────
     static void createSyntheticGeoTiff(const std::string &path,
                                        int W, int H, double gt[6],
-                                       bool isDem = false)
+                                       bool isDem = false, int epsg = 32632)
     {
         GDALDriverH hDrv = GDALGetDriverByName("GTiff");
         GDALDatasetH hDs = GDALCreate(hDrv, path.c_str(), W, H,
@@ -71,7 +72,7 @@ namespace
         GDALSetGeoTransform(hDs, gt);
 
         OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-        OSRImportFromEPSG(hSrs, 32632);
+        OSRImportFromEPSG(hSrs, epsg);
         char *wkt = nullptr;
         OSRExportToWkt(hSrs, &wkt);
         GDALSetProjection(hDs, wkt);
@@ -182,6 +183,52 @@ namespace
         auto r = ddb::validateAlignRaster(aPath, bPath);
         EXPECT_FALSE(r.ok);
         EXPECT_FALSE(r.errors.empty());
+    }
+
+    // ─── Test 3b: Validation - different CRSs, compared after reprojection ────────
+    // The extent of the reference is taken into the CRS of the source before the 5% rule: two
+    // rasters in different CRSs that do not meet are refused before the run, with the message of
+    // the run ("Insufficient overlap after reprojection"), and two that overlap are accepted.
+    // The source is in UTM 32N (EPSG:32632); the references are the same ground in UTM 33N
+    // (EPSG:32633), where the eastings differ by hundreds of kilometres, so the raw extents never meet.
+    TEST_F(AlignTest, ValidateDifferentCrsComparesAfterReprojection)
+    {
+        TestArea ta(TEST_NAME);
+        // Source: 64 m x 64 m at E 500000, N 5000000 (UTM 32N, 9 E)
+        double srcGt[6] = {500000.0, 0.5, 0, 5000000.0, 0, -0.5};
+        auto srcPath = ta.getPath("src_32632.tif").string();
+        createSyntheticGeoTiff(srcPath, 128, 128, srcGt);
+
+        // The same corner in UTM 33N (15 E central meridian)
+        OGRSpatialReference utm32, utm33;
+        utm32.importFromEPSG(32632);
+        utm33.importFromEPSG(32633);
+        utm32.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        utm33.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        std::unique_ptr<OGRCoordinateTransformation> ct(OGRCreateCoordinateTransformation(&utm32, &utm33));
+        ASSERT_NE(ct, nullptr);
+        double x = srcGt[0], y = srcGt[3];
+        ASSERT_TRUE(ct->Transform(1, &x, &y));
+        // Overlapping: a reference 1 m east of the corner of the source, 128 px of 0.5 m
+        double nearGt[6] = {x + 1.0, 0.5, 0, y - 1.0, 0, -0.5};
+        auto nearPath = ta.getPath("near_32633.tif").string();
+        createSyntheticGeoTiff(nearPath, 128, 128, nearGt, false, 32633);
+        // Disjoint: 20 km away from it
+        double farGt[6] = {x + 20000.0, 0.5, 0, y + 20000.0, 0, -0.5};
+        auto farPath = ta.getPath("far_32633.tif").string();
+        createSyntheticGeoTiff(farPath, 128, 128, farGt, false, 32633);
+
+        auto overlapping = ddb::validateAlignRaster(srcPath, nearPath);
+        EXPECT_TRUE(overlapping.summary.crsMismatch);
+        EXPECT_TRUE(overlapping.ok) << (overlapping.errors.empty() ? "" : overlapping.errors.front());
+        EXPECT_GT(overlapping.summary.overlapPercent, 80.0);
+
+        auto disjoint = ddb::validateAlignRaster(srcPath, farPath);
+        EXPECT_TRUE(disjoint.summary.crsMismatch);
+        EXPECT_FALSE(disjoint.ok);
+        EXPECT_EQ(disjoint.summary.overlapPercent, 0.0);
+        ASSERT_EQ(disjoint.errors.size(), 1u);
+        EXPECT_EQ(disjoint.errors.front(), "Insufficient overlap after reprojection (0%)");
     }
 
     // ─── Test 4: Validation - missing source ─────────────────────────────────────

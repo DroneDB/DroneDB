@@ -83,7 +83,8 @@ constexpr CodeSet codeSet(Codes... codes) noexcept {
 // DDBERR_RETRYABLE are returned by the exports added in 2.0 only; the older exports switch
 // in a later version, together with Registry. One exception: a refused argument
 // (RefusedArgumentException: an entry path the path rules refuse, a raster query of a place
-// without data) is DDBERR_INVALIDARGS in every export.
+// without data, a formula that does not exist or that the raster cannot compute) is
+// DDBERR_INVALIDARGS in every export.
 inline constexpr CodeSet kFrozenCodes = codeSet(DDBERR_BUSY);
 // The exports added in 2.0: every code a failure maps to
 inline constexpr CodeSet kNewExportCodes = codeSet(DDBERR_BUSY,
@@ -112,8 +113,9 @@ struct Failure {
 //   ShutdownException          SHUTDOWN (a call stopped by DDBShutdown)
 //   CanceledException          CANCELED
 //   RefusedArgumentException   INVALIDARGS, returned by every export (a refused entry path,
-//                              a raster query of a place without data)
-//   InvalidArgsException       INVALIDARGS
+//                              a raster query of a place without data, a formula refused by
+//                              planFormula)
+//   InvalidArgsException      INVALIDARGS
 //   RetryableBuildException    RETRYABLE, reason from kRetryableReasons
 //   std::bad_alloc             EXCEPTION, "Out of memory"
 //   anything else              EXCEPTION, what() ("Unknown error occurred" when not an exception)

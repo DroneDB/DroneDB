@@ -81,10 +81,19 @@ public:
     const std::vector<VegetationFormula>& getAllFormulas() const { return formulas_; }
 
     // Why a raster cannot compute a formula, "" when it can: the one availability rule, which
-    // the list of formulas of the raster metadata and the planning of every
-    // render (planFormula) both ask. A band the filter does not map is "Requires bands: ..."
+    // the list of formulas of the raster metadata asks, and on which the planning of every
+    // render (renderRefusal, planFormula) is built. A band the filter does not map is
+    // "Requires bands: ..."
     static std::string unavailableReason(const VegetationFormula &formula, const BandFilter &filter,
                                          const RasterDataKind &data);
+
+    // Why a render (planFormula: thumbnails, tiles, exports, statistics) refuses a formula, ""
+    // when it computes it: unavailableReason, but for the thermal passthroughs (CELSIUS,
+    // KELVIN), which read the first band of the raster whatever the filter maps (a DEM, a
+    // thermal ortho without a sensor profile), a band the filter does not map is no refusal:
+    // only the data rule applies to them
+    static std::string renderRefusal(const VegetationFormula &formula, const BandFilter &filter,
+                                     const RasterDataKind &data);
 
     // The part of the rule that is about the data: "" or why the formula needs another type
     // ("SAVI needs reflectance values: the raster is UInt16 ..."). Does not look at the bands, so

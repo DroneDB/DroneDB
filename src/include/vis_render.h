@@ -85,10 +85,13 @@ namespace ddb
 
     /// Resolves formulaId, the band filter (bandFilter, "" = detected from the sensor profile of
     /// rasterPath, VegetationEngine::autoDetectFilter with thermalTags) and, with withColormap, the
-    /// colormap (colormapId, "" = "rdylgn"). Throws
-    /// InvalidArgsException for an unknown formula or colormap, and for a formula that needs
-    /// reflectance over a raster whose data is not floating point (SAVI, OSAVI, EVI over UInt16):
-    /// every render of a formula plans it here, so none can skip the rule.
+    /// colormap (colormapId, "" = "rdylgn"). Throws InvalidArgsException for an unknown colormap,
+    /// and RefusedArgumentException (DDBERR_INVALIDARGS in every C export) for an unknown formula,
+    /// for a formula whose bands the filter does not map ("Requires bands: RN" for NDVI over an
+    /// RGB raster; not CELSIUS and KELVIN, which read the first band), and for a formula that
+    /// needs reflectance over a raster whose data is not floating point (SAVI, OSAVI, EVI over
+    /// UInt16): the rule of VegetationEngine::renderRefusal. Every render of a formula plans it
+    /// here, so none can skip the rule.
     FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
                             const std::string &bandFilter, const std::string &colormapId, bool withColormap,
                             std::optional<bool> thermalTags = std::nullopt);

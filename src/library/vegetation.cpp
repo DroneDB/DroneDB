@@ -379,6 +379,14 @@ void runFormula(FormulaKind kind, const FormulaInput &in) {
 
 } // anonymous namespace
 
+std::string VegetationEngine::renderRefusal(const VegetationFormula &formula, const BandFilter &filter,
+                                            const RasterDataKind &data) {
+    // The thermal passthroughs read the first band (FormulaInput::thermal), not a band of the filter
+    const FormulaKind kind = formulaKind(formula.id);
+    if (kind == FormulaKind::CELSIUS || kind == FormulaKind::KELVIN) return dataRefusal(formula, data);
+    return unavailableReason(formula, filter, data);
+}
+
 void VegetationEngine::applyFormula(const VegetationFormula &formula,
                                      const BandFilter &filter,
                                      const std::vector<float*> &bandData,

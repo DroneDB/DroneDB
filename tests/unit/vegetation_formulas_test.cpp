@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -26,6 +27,8 @@
 #include "raster_test_utils.h"
 
 #include "ddb.h"
+#include "gdaltiler.h"
+#include "tilerhelper.h"
 #include "raster_utils.h"
 #include "vegetation.h"
 #include "vis_render.h"
@@ -488,5 +491,182 @@ namespace
                 EXPECT_FALSE(algorithm.contains("disabled")) << id;
             }
         }
+    }
+
+    // A formula whose bands the raster does not have is refused by planFormula, as the metadata
+    // marks it disabled, with the same reason: NDVI over a 3-band RGB orthophoto is "Requires
+    // bands: RN" for the render, the tiles, the export and the statistics, not a one-colour image.
+    // VARI, which reads R, G and B, is planned and rendered; an unknown formula is "Unknown formula"
+    TEST_F(VegetationFormulas, aFormulaWhoseBandsAreMissingIsRefusedWithItsReason)
+    {
+        TestArea ta(TEST_NAME, true);
+        testutils::GeoRasterSpec spec;
+        spec.width = 8;
+        spec.height = 8;
+        spec.bands = 3;
+        spec.type = GDT_Byte;
+        spec.value = [](int band, int x, int y) { return 40.0 * band + x + y; };
+        const fs::path rgb = testutils::createGeoRaster(ta.getPath("rgb.tif"), spec);
+
+        std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(rgb.string().c_str(), GA_ReadOnly)));
+        ASSERT_NE(ds, nullptr);
+        GDALDatasetH handle = GDALDataset::ToHandle(ds.get());
+        const std::string path = rgb.string();
+
+        const auto refusal = [&](const auto &plan) -> std::string {
+            try
+            {
+                plan();
+            }
+            catch (const InvalidArgsException &e)
+            {
+                return e.what();
+            }
+            return "";
+        };
+
+        // The band filter detected from the raster (the render, the tiles, the export) and one given
+        EXPECT_EQ(refusal([&] { planFormula(handle, path, "NDVI", "", "", true); }), "Requires bands: RN");
+        EXPECT_EQ(refusal([&] { planFormula(handle, "NDVI", VegetationEngine::parseFilter("RGB", 3), "", false); }),
+                  "Requires bands: RN");
+        ThumbVisParams ndvi;
+        ndvi.formula = "NDVI";
+        const RasterWindow window{0, 0, 8, 8, 8, 8};
+        EXPECT_EQ(refusal([&] { renderFormulaRgba(handle, path, window, ndvi); }), "Requires bands: RN");
+
+        EXPECT_EQ(planFormula(handle, path, "VARI", "", "", true).formula->id, "VARI");
+        ThumbVisParams vari;
+        vari.formula = "VARI";
+        EXPECT_EQ(renderFormulaRgba(handle, path, window, vari).size(), window.outPixels() * 4);
+
+        EXPECT_EQ(refusal([&] { planFormula(handle, path, "BOGUS", "", "", true); }), "Unknown formula: BOGUS");
+        ds.reset();
+
+        // The statistics of the metadata plan the formula too: the same reason, not numbers
+        char *buffer = nullptr;
+        EXPECT_NE(DDBGetRasterMetadata(path.c_str(), "NDVI", nullptr, &buffer), DDBERR_NONE);
+        EXPECT_NE(std::string(DDBGetLastError()).find("Requires bands: RN"), std::string::npos) << DDBGetLastError();
+        ASSERT_EQ(DDBGetRasterMetadata(path.c_str(), nullptr, nullptr, &buffer), DDBERR_NONE) << DDBGetLastError();
+        const json metadata = json::parse(buffer);
+        DDBFree(buffer);
+        for (const json &algorithm : metadata["algorithms"])
+            if (algorithm["id"] == "NDVI")
+                EXPECT_EQ(algorithm.value("disabledReason", ""), "Requires bands: RN");
+    }
+
+    // What a caller of the C ABI gets for a formula whose bands the raster does not have: the
+    // plain reason as the last error, with no path, from the metadata, the tiles, the exports and
+    // the thumbnail. The metadata, the tiles and the exports plan the formula in the process and
+    // return DDBERR_INVALIDARGS (RefusedArgumentException, which every export returns). The
+    // thumbnail is rendered by gdal-util, whose protocol has no error code for an invalid
+    // argument yet: it is DDBERR_EXCEPTION, with the same message
+    TEST_F(VegetationFormulas, theCAbiRefusesAFormulaWhoseBandsAreMissingWithThePlainReason)
+    {
+        TestArea ta(TEST_NAME, true);
+        testutils::GeoRasterSpec spec;
+        spec.width = 64;
+        spec.height = 64;
+        spec.bands = 3;
+        spec.type = GDT_Byte;
+        spec.value = [](int band, int x, int y) { return 40.0 * band + x + y; };
+        const std::string path = testutils::createGeoRaster(ta.getPath("rgb.tif"), spec).string();
+        const std::string exported = ta.getPath("out.tif").string();
+
+        uint8_t *bytes = nullptr;
+        int size = 0;
+        char *text = nullptr;
+        struct Call
+        {
+            std::string name;
+            std::function<DDBErr()> call;
+            DDBErr expected = DDBERR_INVALIDARGS;
+        };
+        const std::vector<Call> calls = {
+            {"metadata", [&] { return DDBGetRasterMetadata(path.c_str(), "NDVI", nullptr, &text); }},
+            {"tile", [&] { return DDBMemoryTileEx(path.c_str(), 14, 8192, 8192, 256, false, true, nullptr, nullptr, nullptr,
+                                                  "NDVI", nullptr, nullptr, nullptr, &bytes, &size); }},
+            {"export", [&] { return DDBExportRaster(path.c_str(), exported.c_str(), nullptr, nullptr, "NDVI", nullptr, nullptr, nullptr); }},
+            {"export2", [&] { return DDBExportRaster2(path.c_str(), exported.c_str(), nullptr, nullptr, "NDVI", nullptr, nullptr,
+                                                     nullptr, 256, nullptr, nullptr); }},
+            {"thumbnail", [&] { return DDBGenerateMemoryThumbnailEx(path.c_str(), 64, nullptr, nullptr, "NDVI", nullptr, nullptr,
+                                                                    nullptr, &bytes, &size); },
+             DDBERR_EXCEPTION},
+        };
+        for (const auto &c : calls)
+        {
+            EXPECT_EQ(c.call(), c.expected) << c.name;
+            EXPECT_EQ(std::string(DDBGetLastError()), "Requires bands: RN") << c.name;
+        }
+        EXPECT_FALSE(fs::exists(exported));
+
+        EXPECT_EQ(DDBGetRasterMetadata(path.c_str(), "BOGUS", nullptr, &text), DDBERR_INVALIDARGS);
+        EXPECT_EQ(std::string(DDBGetLastError()), "Unknown formula: BOGUS");
+    }
+
+    // CELSIUS and KELVIN read the first band of the raster whatever the band filter maps, so a
+    // render plans them over a single-band Float32 raster that is not thermal (a DEM, which the
+    // Hub colourises with CELSIUS), whose detected filter is RGB: no "Requires bands: T". The list
+    // of formulas keeps them disabled there, and NDVI over RGB is still refused
+    TEST_F(VegetationFormulas, theThermalPassthroughsRenderTheFirstBandOfANonThermalRaster)
+    {
+        TestArea ta(TEST_NAME, true);
+        testutils::GeoRasterSpec spec;
+        spec.width = 64;
+        spec.height = 64;
+        spec.bands = 1;
+        spec.type = GDT_Float32;
+        spec.value = [](int, int x, int y) { return 120.0 + 0.5 * x + 0.25 * y; };
+        const std::string dem = testutils::createGeoRaster(ta.getPath("dem.tif"), spec).string();
+        ASSERT_EQ(VegetationEngine::instance().autoDetectFilter(dem).id, "RGB");
+
+        {
+            std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(dem.c_str(), GA_ReadOnly)));
+            ASSERT_NE(ds, nullptr);
+            GDALDatasetH handle = GDALDataset::ToHandle(ds.get());
+            const RasterWindow window{0, 0, 64, 64, 64, 64};
+            for (const char *id : {"CELSIUS", "KELVIN"})
+            {
+                SCOPED_TRACE(id);
+                EXPECT_EQ(planFormula(handle, dem, id, "", "", true).formula->id, id);
+                ThumbVisParams vis;
+                vis.formula = id;
+                const std::vector<uint8_t> rgba = renderFormulaRgba(handle, dem, window, vis);
+                ASSERT_EQ(rgba.size(), window.outPixels() * 4);
+                EXPECT_EQ(rgba[3], 255); // computed, not transparent
+                EXPECT_NE(std::vector<uint8_t>(rgba.begin(), rgba.begin() + 3),
+                          std::vector<uint8_t>(rgba.end() - 4, rgba.end() - 1)); // not one colour
+            }
+        }
+
+        char *text = nullptr;
+        ASSERT_EQ(DDBGetRasterMetadata(dem.c_str(), "CELSIUS", nullptr, &text), DDBERR_NONE) << DDBGetLastError();
+        const json metadata = json::parse(text);
+        DDBFree(text);
+        EXPECT_TRUE(metadata["statistics"]["1"].contains("min"));
+        for (const json &algorithm : metadata["algorithms"])
+            if (algorithm["id"] == "CELSIUS" || algorithm["id"] == "KELVIN")
+                EXPECT_EQ(algorithm.value("disabledReason", ""), "Requires bands: T");
+
+        // A tile of the raster at its deepest zoom level (the tiler that gives it is closed first)
+        const auto [zoom, tile] = [&] {
+            GDALTiler tiler(TilerHelper::toGeoTIFF(dem).string(), "", 256, false);
+            const auto z = tiler.getMinMaxZ();
+            return std::make_pair(z.max, tiler.getMinMaxCoordsForZ(z.max).min);
+        }();
+        uint8_t *bytes = nullptr;
+        int size = 0;
+        ASSERT_EQ(DDBMemoryTileEx(dem.c_str(), zoom, tile.x, tile.y, 256, false, true, nullptr, nullptr, nullptr, "KELVIN",
+                                  nullptr, nullptr, nullptr, &bytes, &size),
+                  DDBERR_NONE)
+            << DDBGetLastError();
+        EXPECT_GT(size, 0);
+        DDBVSIFree(bytes);
+
+        // The other formulas keep the band rule
+        spec.bands = 3;
+        spec.type = GDT_Byte;
+        const std::string rgb = testutils::createGeoRaster(ta.getPath("rgb.tif"), spec).string();
+        EXPECT_EQ(DDBGetRasterMetadata(rgb.c_str(), "NDVI", nullptr, &text), DDBERR_INVALIDARGS);
+        EXPECT_EQ(std::string(DDBGetLastError()), "Requires bands: RN");
     }
 }

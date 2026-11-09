@@ -9,6 +9,7 @@
 #include "gtiff_options.h"
 #include "raster_utils.h"
 #include "cog.h"        // buildCog() - DRY reuse of the COG pattern
+#include "coordstransformer.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "json.h"
@@ -82,6 +83,34 @@ struct Extent {
         return (area > 0) ? 100.0 * (ox * oy) / area : 0.0;
     }
 };
+
+/**
+ * The extent of a raster in the CRS `toWkt`, from its extent in the CRS `fromWkt`: the bounds of
+ * the reprojected outline, densified (OCTTransformBounds), so that a curved edge is covered.
+ * False when GDAL cannot transform it (no operation between the two CRSs, a point that fails, or
+ * bounds across the antimeridian of a geographic CRS), for a caller that cannot tell the overlap.
+ */
+static bool transformExtent(const Extent &e, const std::string &fromWkt, const std::string &toWkt,
+                            Extent &out) {
+    try {
+        const SrsPtr from = srsFromWkt(fromWkt.c_str());
+        const SrsPtr to = srsFromWkt(toWkt.c_str());
+        if (!from || !to) return false;
+        const auto ct = CoordsTransformer::tryCreate(horizontalSrs(srsOf(from)), horizontalSrs(srsOf(to)));
+        if (!ct) return false;
+        Extent t;
+        if (!OCTTransformBounds(OGRCoordinateTransformation::ToHandle(ct->get()), e.x0, e.y0, e.x1, e.y1,
+                                &t.x0, &t.y0, &t.x1, &t.y1, 21))
+            return false;
+        if (!std::isfinite(t.x0) || !std::isfinite(t.y0) || !std::isfinite(t.x1) || !std::isfinite(t.y1) ||
+            t.x1 < t.x0 || t.y1 < t.y0)
+            return false;
+        out = t;
+        return true;
+    } catch (const GDALException &) {
+        return false;
+    }
+}
 
 // ─── B  Raster to common float32 grid ───────────────────────────────────────
 
@@ -936,13 +965,25 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
     r.summary.sourceGsdM    = std::abs(gts[1]);
     r.summary.referenceGsdM = std::abs(gtr[1]);
 
-    // bbox overlap (no reprojection for validation only)
-    r.summary.overlapPercent = Extent::of(hS, gts).overlapPercent(Extent::of(hR, gtr));
-    // When CRS differ the envelopes are in incompatible coordinate systems;
-    // the raw overlap percentage is meaningless and must not block validation -
-    // alignRaster() will reproject the reference before checking real overlap.
-    if (!r.summary.crsMismatch && r.summary.overlapPercent < 5.0)
-        r.errors.push_back("Insufficient overlap (" +
+    // How much of the source the reference covers: when the CRSs differ, the extent of the
+    // reference is first taken into the CRS of the source, as alignRaster() reprojects it, so
+    // that the same 5% rule refuses rasters that do not meet before the run
+    const Extent sourceExtent = Extent::of(hS, gts);
+    Extent referenceExtent = Extent::of(hR, gtr);
+    // (a missing CRS is an error already, and leaves nothing to reproject)
+    const bool bothCrs = !r.summary.sourceCrs.empty() && !r.summary.referenceCrs.empty();
+    bool overlapKnown = !r.summary.crsMismatch;
+    if (r.summary.crsMismatch && bothCrs) {
+        overlapKnown = transformExtent(referenceExtent, r.summary.referenceCrs, r.summary.sourceCrs,
+                                       referenceExtent);
+        if (!overlapKnown)
+            r.warnings.push_back("Cannot reproject the reference extent to the source CRS: the "
+                                 "overlap is checked after reprojection");
+    }
+    r.summary.overlapPercent = overlapKnown ? sourceExtent.overlapPercent(referenceExtent) : 0.0;
+    if (overlapKnown && r.summary.overlapPercent < 5.0)
+        r.errors.push_back(std::string(r.summary.crsMismatch ? "Insufficient overlap after reprojection ("
+                                                             : "Insufficient overlap (") +
                            std::to_string(static_cast<int>(r.summary.overlapPercent)) + "%)");
 
     r.ok = r.errors.empty();
@@ -1014,10 +1055,10 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
     const Extent ref = Extent::of(hR, gtr);
     const Extent ov = src.overlap(ref);
 
-    // When the CRS differed, validateAlignRaster() could not check the real
-    // overlap (the envelopes were in incompatible coordinate systems). Now that
-    // the reference shares the source CRS, verify the overlap and fail fast with
-    // a clear message instead of relying on a later "empty window" error.
+    // When the CRS differed, validateAlignRaster() checked the overlap of the
+    // reprojected bounds of the reference (or could not reproject them). Now that
+    // the reference raster shares the source CRS, verify the overlap again and fail
+    // fast with a clear message instead of relying on a later "empty window" error.
     if (val.summary.crsMismatch) {
         const double overlapPct = src.overlapPercent(ref);
         if (overlapPct < 5.0) {
