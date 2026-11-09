@@ -549,9 +549,11 @@ namespace
         ASSERT_EQ(DDBGetRasterMetadata(path.c_str(), nullptr, nullptr, &buffer), DDBERR_NONE) << DDBGetLastError();
         const json metadata = json::parse(buffer);
         DDBFree(buffer);
-        for (const json &algorithm : metadata["algorithms"])
-            if (algorithm["id"] == "NDVI")
+        for (const json &algorithm : metadata["algorithms"]) {
+            if (algorithm["id"] == "NDVI") {
                 EXPECT_EQ(algorithm.value("disabledReason", ""), "Requires bands: RN");
+            }
+        }
     }
 
     // What a caller of the C ABI gets for a formula whose bands the raster does not have: the
@@ -643,9 +645,11 @@ namespace
         const json metadata = json::parse(text);
         DDBFree(text);
         EXPECT_TRUE(metadata["statistics"]["1"].contains("min"));
-        for (const json &algorithm : metadata["algorithms"])
-            if (algorithm["id"] == "CELSIUS" || algorithm["id"] == "KELVIN")
+        for (const json &algorithm : metadata["algorithms"]) {
+            if (algorithm["id"] == "CELSIUS" || algorithm["id"] == "KELVIN") {
                 EXPECT_EQ(algorithm.value("disabledReason", ""), "Requires bands: T");
+            }
+        }
 
         // A tile of the raster at its deepest zoom level (the tiler that gives it is closed first)
         const auto [zoom, tile] = [&] {

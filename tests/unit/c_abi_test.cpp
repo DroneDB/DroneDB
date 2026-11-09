@@ -912,8 +912,9 @@ namespace
             {
                 const DDBErr err = DDBAlignRasterEx(source.c_str(), reference.c_str(), outputText.c_str(), "translation",
                                                     options, &out);
-                if (err == DDBERR_NONE)
+                if (err == DDBERR_NONE) {
                     EXPECT_TRUE(json::parse(take(out)).is_object());
+                }
                 return err;
             });
 
