@@ -20,6 +20,8 @@
 #include "3d.h"
 #include "timeutil.h"
 #include "build.h"
+#include "build_layout.h"
+#include "build_manifest.h"
 #include "buildlock.h"
 #include "buildlod_runner.h"
 #include "dbops.h"
@@ -88,22 +90,20 @@ struct Dataset : IndexFixture {
     }
 
     fs::path pendingFile(const std::string& rel) {
-        return db->buildDirectory() / (indexedHash(db.get(), rel) + ".pending");
+        return db->buildDirectory() / pendingMarkerName(indexedHash(db.get(), rel), rel);
     }
 
     std::vector<std::string> pendingDeps(const std::string& rel) {
-        const auto hash = indexedHash(db.get(), rel);
         for (const auto& p : ddb::getPendingBuildInfo(db.get()))
-            if (p.hash == hash)
+            if (p.path == rel)
                 return p.missingDependencies;
         return {};
     }
 
     // The marker of rel awaits files (getPendingBuildInfo awaitingFiles); false without marker
     bool awaitingFiles(const std::string& rel) {
-        const auto hash = indexedHash(db.get(), rel);
         for (const auto& p : ddb::getPendingBuildInfo(db.get()))
-            if (p.hash == hash)
+            if (p.path == rel)
                 return p.awaitingFiles;
         return false;
     }
@@ -831,6 +831,39 @@ void deferObjAwaitingMtl(Dataset& ds, const std::string& obj, const std::string&
     ASSERT_TRUE(ds.awaitingFiles(obj));
 }
 
+// FR-PRC-23 (D-020): the same OBJ in two folders is two entries with two markers. Each waits for the MTL of its own
+// folder, and the MTL of the first does not release (nor complete) the second.
+TEST(PendingBuild, IdenticalModelsInTwoFoldersWaitEachForTheirOwnMtl) {
+    Dataset ds(TEST_NAME);
+    for (const char* obj : {"mixA/model.obj", "mixB/model.obj"})
+        writeFile(ds.path(obj), objWithMtllib("mtllib brighton.mtl"));
+    ds.add({"mixA/model.obj", "mixB/model.obj"});
+    ASSERT_EQ(indexedHash(ds.db.get(), "mixA/model.obj"), indexedHash(ds.db.get(), "mixB/model.obj"));
+    expectDeferred(ds, "mixA/model.obj");
+    expectDeferred(ds, "mixB/model.obj");
+
+    // Two markers, each naming its own folder
+    EXPECT_NE(ds.pendingFile("mixA/model.obj"), ds.pendingFile("mixB/model.obj"));
+    EXPECT_EQ(ds.pendingDeps("mixA/model.obj"), std::vector<std::string>{"mixA/brighton.mtl"});
+    EXPECT_EQ(ds.pendingDeps("mixB/model.obj"), std::vector<std::string>{"mixB/brighton.mtl"});
+    EXPECT_EQ(ddb::getPendingBuildInfo(ds.db.get()).size(), 2u);
+
+    // The MTL of mixA releases the marker of mixA and builds it; mixB goes on waiting for its own
+    writeFile(ds.path("mixA/brighton.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writePng(ds.path("mixA/tex.png"));
+    ds.add({"mixA/brighton.mtl", "mixA/tex.png"});
+    EXPECT_TRUE(ds.released("mixA/model.obj"));
+    EXPECT_TRUE(ds.awaitingFiles("mixB/model.obj"));
+    ddb::buildPending(ds.db.get(), "", false);
+
+    EXPECT_TRUE(ds.bm3dBuilt("mixA/model.obj"));
+    EXPECT_FALSE(fs::exists(ds.pendingFile("mixA/model.obj")));
+    EXPECT_TRUE(ds.awaitingFiles("mixB/model.obj")) << "its own MTL has not arrived";
+    EXPECT_EQ(ds.pendingDeps("mixB/model.obj"), std::vector<std::string>{"mixB/brighton.mtl"});
+    EXPECT_EQ(getBuildArtifactsJson(ds.db.get(), {"mixB/model.obj"})[0]["build"]["state"], "pending");
+    EXPECT_EQ(getBuildArtifactsJson(ds.db.get(), {"mixA/model.obj"})[0]["build"]["state"], "complete");
+}
+
 // A build that only awaits missing files is neither retried by buildPending (even
 // long past the backoff) nor counted by isBuildPending; force still retries it.
 TEST(PendingBuild, AwaitingMarkerIsNotRetriedNorCounted) {
@@ -876,15 +909,22 @@ TEST(PendingBuild, TransientMarkerIsRetriedBesideAnAwaitingOne) {
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
 }
 
-// The release matches the file name, case-insensitively, wherever the file lands:
-// a name the builder cannot use costs one retry, which defers the build again.
-TEST(PendingBuild, AddReleasesByFileNameIgnoringCaseAndFolder) {
+// The release matches the path the marker awaits, case-insensitively: the same file name in another
+// folder does not release it (D-020, FR-PRC-23); a name the builder cannot use costs one retry, which
+// defers the build again.
+TEST(PendingBuild, AddReleasesByPathIgnoringCaseNotByFileName) {
     Dataset ds(TEST_NAME);
     deferObjAwaitingMtl(ds, "sub/m.obj", "Model.MTL");
     EXPECT_EQ(ds.pendingDeps("sub/m.obj"), std::vector<std::string>{"sub/Model.MTL"});
+    const auto before = markerContents(ds.pendingFile("sub/m.obj"));
 
     writeFile(ds.path("elsewhere/model.mtl"), mtlWithTexture("map_Kd tex.png"));
     ds.add({"elsewhere/model.mtl"});
+    EXPECT_EQ(markerContents(ds.pendingFile("sub/m.obj")), before) << "another folder: not its file";
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+
+    writeFile(ds.path("sub/model.mtl"), mtlWithTexture("map_Kd tex.png"));
+    ds.add({"sub/model.mtl"});
     EXPECT_TRUE(ds.released("sub/m.obj"));
     EXPECT_TRUE(ddb::isBuildPending(ds.db.get()));
 
@@ -940,12 +980,11 @@ TEST(PendingBuild, MoveIntoTheMissingNameReleases) {
     EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
 
     // A folder: mats/n.mtl arrives as upload/n.mtl, then upload is moved to mats. The
-    // add already releases it (same file name), and the retry defers it again
+    // add does not release it (another folder), the move does
     deferObjAwaitingMtl(ds, "n.obj", "mats/n.mtl");
     writeFile(ds.path("upload/n.mtl"), mtlWithTexture("map_Kd ../tex.png"));
     ds.add({"upload"});
-    EXPECT_TRUE(ds.released("n.obj"));
-    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_FALSE(ds.released("n.obj"));
     ASSERT_TRUE(ds.awaitingFiles("n.obj"));
     fs::rename(ds.path("upload"), ds.path("mats"));
     ddb::moveEntry(ds.db.get(), "upload", "mats");

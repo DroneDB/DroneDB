@@ -254,7 +254,7 @@ void removeStaleEntries(Database* db, CleanupResult& result) {
 }
 
 // Whether a build of the orphan directory may be running: a held lock, or a directory that cannot
-// be scanned for locks. Lock files live one level deep: <hash>/<subfolder>.building. Uses a
+// be scanned for locks. Lock files live one level deep: <key>/<subfolder>.building. Uses a
 // non-recursive scan and treats any iteration error as "potentially active" to avoid wrongly
 // deleting a locked dir.
 bool mayHaveActiveBuild(const fs::path& p) {
@@ -285,17 +285,25 @@ bool mayHaveActiveBuild(const fs::path& p) {
     return false;
 }
 
-// A directory of the build folder: a referenced hash keeps its output (and loses its stale temp
-// folders), an orphan hash is removed unless a build may be running in it
-void cleanupBuildDirectory(const fs::path& p, const std::string& name,
-                           const std::unordered_set<std::string>& validHashes, CleanupResult& result) {
-    // Directory name is expected to be a content hash. Skip anything
+// What the index references: the keys of the build folders, the names of the pending markers of its
+// entries and the content hashes (which name a legacy marker, "<hash>.pending")
+struct ReferencedBuilds {
+    std::unordered_set<std::string> keys;
+    std::unordered_set<std::string> markers;
+    std::unordered_set<std::string> hashes;
+};
+
+// A directory of the build folder: a referenced key keeps its output (and loses its stale temp
+// folders), an orphan key is removed unless a build may be running in it
+void cleanupBuildDirectory(const fs::path& p, const std::string& name, const ReferencedBuilds& referenced,
+                           CleanupResult& result) {
+    // Directory name is expected to be a build key. Skip anything
     // that doesn't look like one to avoid clobbering unrelated dirs.
-    if (!isHashLike(name)) {
-        LOGD << "Skipping non-hash directory: " << io::toUtf8(p);
+    if (!isBuildKey(name)) {
+        LOGD << "Skipping directory that is not a build key: " << io::toUtf8(p);
         return;
     }
-    if (validHashes.find(name) != validHashes.end()) {
+    if (referenced.keys.find(name) != referenced.keys.end()) {
         // Still referenced: keep the build output, but reclaim any
         // orphaned "<subfolder>-temp-<rand>" scratch folders left behind
         // by a build that crashed before its RAII cleanup ran (a SIGSEGV
@@ -319,17 +327,18 @@ void cleanupBuildDirectory(const fs::path& p, const std::string& name,
     }
 }
 
-// <hash>.pending: removed when no entry has that hash
-void cleanupPendingFile(const fs::path& p, const std::unordered_set<std::string>& validHashes,
-                        CleanupResult& result) {
-    // .pending file naming convention: <hash>.pending. Validate the
-    // stem before deleting so we never touch unrelated *.pending files.
-    const std::string hash = io::toUtf8(p.stem());
-    if (!isHashLike(hash)) {
-        LOGD << "Skipping non-hash pending file: " << io::toUtf8(p);
+// <key>.<pathId>.pending: removed when no entry has that path and key; the legacy <hash>.pending when
+// no entry has that hash
+void cleanupPendingFile(const fs::path& p, const ReferencedBuilds& referenced, CleanupResult& result) {
+    // .pending file naming convention: build_layout.h. Validate the name
+    // before deleting so we never touch unrelated *.pending files.
+    const std::string fileName = io::toUtf8(p.filename());
+    const auto name = parsePendingMarkerName(fileName);
+    if (!name) {
+        LOGD << "Skipping pending file that is not a marker: " << io::toUtf8(p);
         return;
     }
-    if (validHashes.find(hash) != validHashes.end())
+    if (name->legacy() ? referenced.hashes.count(name->key) != 0 : referenced.markers.count(fileName) != 0)
         return;
 
     std::error_code rmErr;
@@ -371,9 +380,8 @@ void cleanupPendingMarkerTemp(const fs::path& p, CleanupResult& result) {
 }
 
 // Phase 2: removes the orphan build artifacts of the build folder
-void removeOrphanArtifacts(const fs::path& buildDir, const std::unordered_set<std::string>& validHashes,
-                           CleanupResult& result) {
-    // Artifact names are validated with isHashLike() before deleting so we never
+void removeOrphanArtifacts(const fs::path& buildDir, const ReferencedBuilds& referenced, CleanupResult& result) {
+    // Artifact names are validated (isBuildKey(), parsePendingMarkerName()) before deleting so we never
     // wipe unrelated files/directories that may live in a user-specified output path.
 
     std::error_code iterErr;
@@ -398,9 +406,9 @@ void removeOrphanArtifacts(const fs::path& buildDir, const std::unordered_set<st
 
         std::error_code typeErr;
         if (entry.is_directory(typeErr)) {
-            cleanupBuildDirectory(p, name, validHashes, result);
+            cleanupBuildDirectory(p, name, referenced, result);
         } else if (entry.is_regular_file(typeErr) && p.extension() == PendingMarkerExtension) {
-            cleanupPendingFile(p, validHashes, result);
+            cleanupPendingFile(p, referenced, result);
         } else if (entry.is_regular_file(typeErr) && isPendingMarkerTempName(name)) {
             cleanupPendingMarkerTemp(p, result);
         }
@@ -427,19 +435,18 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
         return result;
     }
 
-    // Collect valid hashes from DB (after phase 1)
-    std::unordered_set<std::string> validHashes;
-    {
-        auto qHashes = db->query(
-            "SELECT DISTINCT hash FROM entries WHERE hash IS NOT NULL AND hash <> ''");
-        while (qHashes->fetch())
-            validHashes.insert(qHashes->getText(0));
-    }
+    // Collect the keys and the markers the index references (after phase 1)
+    ReferencedBuilds referenced;
+    forEachIndexedBuild(db, [&](const std::string& path, const std::string& hash, const std::string& key) {
+        referenced.hashes.insert(hash);
+        referenced.keys.insert(key);
+        referenced.markers.insert(pendingMarkerName(key, path));
+    });
 
-    LOGD << "cleanupBuild: " << validHashes.size() << " valid hash(es) in DB; scanning "
+    LOGD << "cleanupBuild: " << referenced.keys.size() << " referenced build key(s) in DB; scanning "
          << io::toUtf8(buildDir);
 
-    removeOrphanArtifacts(buildDir, validHashes, result);
+    removeOrphanArtifacts(buildDir, referenced, result);
     return result;
 }
 

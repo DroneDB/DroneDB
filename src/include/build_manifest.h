@@ -29,7 +29,7 @@ namespace ddb {
 // The state of the build of an entry, in this order of precedence:
 //   Building  a live BuildLock holds its output folder (BuildLock::isHeld: a stale lock file
 //             is not a build, and is left alone)
-//   Pending   "<hash>.pending" exists: a build deferred until its missing dependencies arrive
+//   Pending   the pending marker of the entry exists: a build deferred until its missing dependencies arrive
 //   Complete  the artifacts are complete (isBuildComplete)
 //   None      none of the above (not built yet, failed, or an incomplete output)
 enum class BuildState { None, Pending, Building, Complete };
@@ -44,12 +44,15 @@ struct EntryBuild {
     // The entry whose artifacts these are: the entry itself, or the main file a sidecar
     // belongs to ("" when not buildable)
     std::string source;
-    // The hash of source, the name of its build root ("" when not buildable)
+    // The hash of source ("" when not buildable)
     std::string hash;
-    // The absolute build root "<dataset>/.ddb/build/<hash>" (empty when not buildable)
+    // The build key of source (build_layout.h buildKey()), the name of its build root: the hash, and for
+    // a model or a splat that has a georeference the digest of it after a '-' ("" when not buildable)
+    std::string key;
+    // The absolute build root "<dataset>/.ddb/build/<key>" (empty when not buildable)
     fs::path root;
     BuildState state = BuildState::None;
-    // From "<hash>.pending", when it exists
+    // From the pending marker of the entry ("<key>.<pathId>.pending"), when it exists
     std::vector<std::string> missingDependencies;
     // The pending build waits for files the dataset lacks (PendingMarker::awaitsFiles()): no
     // timer retries it, adding one of those files releases it; false without a marker
@@ -66,8 +69,8 @@ struct EntryBuild {
 // {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?,
 // "version"}: an artifact that exists
 void to_json(json& j, const BuildArtifact& artifact);
-// {"buildable", "source", "hash", "root", "state", "missingDependencies", "awaitingFiles",
-// "lastAttempt", "retryAfter", "artifacts"}; source, hash, root, lastAttempt and retryAfter are null when they
+// {"buildable", "source", "hash", "key", "root", "state", "missingDependencies", "awaitingFiles",
+// "lastAttempt", "retryAfter", "artifacts"}; source, hash, key, root, lastAttempt and retryAfter are null when they
 // do not apply
 void to_json(json& j, const EntryBuild& build);
 
@@ -102,22 +105,24 @@ struct ResolvedBuildFile {
     json toJson() const;
 };
 
-// The file at relativePath ('/'-separated) in the build root of hash, when relativePath lies
-// inside one of the artifacts of an entry with that hash (a file artifact itself, or a file
+// The file at relativePath ('/'-separated) in the build root of the build key `hash` (the "key" of the build
+// object; the content hash for a place-independent type), when relativePath lies
+// inside one of the artifacts of an entry with that key (a file artifact itself, or a file
 // below a directory artifact), with the version of that artifact.
-// Throws InvalidArgsException when hash is not a SHA-256 hex string or relativePath breaks the
+// Throws InvalidArgsException when hash is not a build key (a SHA-256 hex string, with a georeference digest
+// after a '-' for a model or a splat) or relativePath breaks the
 // dataset path rules (normalizeEntryPath: absolute, "..", empty, invalid UTF-8, ...);
 // EntryNotFoundException when no entry has that hash, the path is not inside one of its
 // artifacts, the file does not exist, or it resolves (through a link) outside the build root.
 ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const std::string& relativePath);
 
-// DDBCopyBuildArtifacts: copies the artifact folders of hash (those of the types of the
-// entries of source with that hash, legacy folders included) and its pending marker from the
+// DDBCopyBuildArtifacts: copies the artifact folders of the build key `hash` (those of the types of the
+// entries of source with that key, legacy folders included) and the pending markers of its entries from the
 // build root of source to the one of destination, replacing what the destination had in
-// those folders. Returns {"hash", "artifacts": [...the existing artifacts of the destination
-// afterwards...], "pending": <the destination has a pending marker>}. A copied marker that awaits
+// those folders. Returns {"hash", "key", "artifacts": [...the existing artifacts of the destination
+// afterwards...], "pending": <the destination has a pending marker>}; "hash" is the content hash. A copied marker that awaits
 // a file the destination indexes already is released (releasePendingMarkerIfIndexed()).
-// Throws InvalidArgsException for an invalid hash or when both are the same dataset,
+// Throws InvalidArgsException for an invalid key or when both are the same dataset,
 // EntryNotFoundException when no entry of source has that hash, BuildInProgressException
 // when a build of hash runs in either dataset (nothing is copied), RetryableBuildException
 // when the destination's disk is (nearly) full.

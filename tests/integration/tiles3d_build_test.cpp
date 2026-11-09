@@ -29,6 +29,7 @@
 
 #include "3d.h"
 #include "build.h"
+#include "build_layout.h"
 #include "build_manifest.h"
 #include "buildlock.h"
 #include "dbops.h"
@@ -628,7 +629,7 @@ TEST(tiles3dBuild, completeModelDefersRecoveryUnderLiveTilesLock) {
     writeFile(old / "tileset.json", "{}");
     writeFile(old / "marker", "previous");
     writeFile(tiles / "unfinished", "in flight");
-    const fs::path pending(base.string() + ".pending");
+    const fs::path pending = pendingMarkerPath(ds.db->buildDirectory(), ds.hashes.at("model.obj"), "model.obj");
     writeFile(pending, "original marker\n");
     {
         BuildLock holder(tiles.string());

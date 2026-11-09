@@ -87,6 +87,7 @@ void to_json(json& j, const EntryBuild& build) {
     j = {{"buildable", build.buildable},
          {"source", stringOrNull(build.source)},
          {"hash", stringOrNull(build.hash)},
+         {"key", stringOrNull(build.key)},
          {"root", build.root.empty() ? json(nullptr) : json(io::toUtf8(build.root))},
          {"state", std::string(buildStateName(build.state))},
          {"missingDependencies", build.missingDependencies},
@@ -296,10 +297,13 @@ EntryBuild BuildStateReader::read(const Entry& e) {
     build.buildable = true;
     build.source = target->entry.path;
     build.hash = target->entry.hash;
-    build.root = buildDirectory_ / target->entry.hash;
+    build.key = target->key;
+    build.root = buildDirectory_ / io::fromUtf8(target->key);
 
     const auto rootNames = probe_.list(build.root);
-    const auto marker = probe_.readPendingMarker(pendingMarkerPath(build.root));
+    // The marker of this entry's build: the one of its path (a twin of the same content has its own)
+    const auto marker =
+        probe_.readPendingMarker(pendingMarkerPath(buildDirectory_, target->key, target->entry.path));
     if (marker) {
         build.missingDependencies = marker->missingDependencies;
         build.awaitingFiles = marker->awaitsFiles();
@@ -357,18 +361,28 @@ std::string listEntriesJson(Database* db, const EntryQuery& query, bool withBuil
 
 namespace {
 
-void requireBuildHash(const std::string& hash) {
-    if (!isHashLike(hash))
-        throw InvalidArgsException("Invalid build hash '" + hash + "': expected 64 hexadecimal characters");
+void requireBuildKey(const std::string& key) {
+    if (!isBuildKey(key))
+        throw InvalidArgsException("Invalid build hash '" + key +
+                                   "': expected a build key (64 hexadecimal characters, then optionally '-' and " +
+                                   std::to_string(GeorefDigestLength) + " more)");
 }
 
-// The handlers of the types of the entries with this hash (usually one), by type value
-std::vector<const EntryHandler*> handlersOfHash(Database* db, const std::string& hash) {
-    const auto q = db->query("SELECT DISTINCT type FROM entries WHERE hash = ? ORDER BY type");
-    q->bind(1, hash);
+// The handlers of the types of the entries whose build has this key (usually one), by type value
+std::vector<const EntryHandler*> handlersOfKey(Database* db, const std::string& key) {
+    const auto q = db->query(
+        "SELECT type, json_extract(properties, '$.georef') FROM entries WHERE hash = ? ORDER BY type");
+    q->bind(1, std::string(buildKeyHash(key)));
     std::vector<const EntryHandler*> handlers;
-    while (q->fetch())
-        handlers.push_back(&entryHandler(static_cast<EntryType>(q->getInt(0))));
+    const std::string hash(buildKeyHash(key));
+    while (q->fetch()) {
+        const auto type = static_cast<EntryType>(q->getInt(0));
+        if (buildKeyOfRow(hash, type, q->getText(1)) != key)
+            continue;
+        const EntryHandler& handler = entryHandler(type);
+        if (std::find(handlers.begin(), handlers.end(), &handler) == handlers.end())
+            handlers.push_back(&handler);
+    }
     return handlers;
 }
 
@@ -398,13 +412,14 @@ json ResolvedBuildFile::toJson() const {
 }
 
 ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const std::string& relativePath) {
-    requireBuildHash(hash);
+    // The name of the build is its key: the hash of the entries that name a place-independent build
+    requireBuildKey(hash);
     const EntryPathResult normalized = normalizeEntryPath(relativePath);
     if (!normalized.accepted())
         throw InvalidArgsException("Invalid build file path '" + relativePath + "' (" +
                                    std::string(normalized.rejected) + ")");
 
-    const auto handlers = handlersOfHash(db, hash);
+    const auto handlers = handlersOfKey(db, hash);
     if (handlers.empty())
         throw EntryNotFoundException("No entry has the build hash " + hash);
     // The artifact of the first handler that names the file as the one a client opens, else of
@@ -423,7 +438,7 @@ ResolvedBuildFile resolveBuildFile(Database* db, const std::string& hash, const 
     if (!artifact)
         throw EntryNotFoundException("'" + normalized.path + "' is not a build artifact of " + hash);
 
-    const fs::path root = fs::absolute(db->buildDirectory() / hash);
+    const fs::path root = fs::absolute(db->buildDirectory() / io::fromUtf8(hash));
     // The request names the file with '/' (the separator of build URLs and of the manifest): the
     // host serves the returned path as it is, so it is the native form, '\\' on Windows
     const fs::path file = (root / io::fromUtf8(normalized.path)).make_preferred();
@@ -455,6 +470,19 @@ void appendUnique(std::vector<std::string>& list, const std::string& value) {
         list.push_back(value);
 }
 
+// The pending markers (build_layout.h) of the build with this key that are in a build directory
+std::vector<fs::path> pendingMarkersOfKey(const fs::path& buildDirectory, const std::string& key) {
+    std::vector<fs::path> markers;
+    std::error_code ec;
+    fs::directory_iterator it(buildDirectory, ec);
+    for (const fs::directory_iterator end; !ec && it != end; it.increment(ec)) {
+        const auto name = parsePendingMarkerName(io::toUtf8(it->path().filename()));
+        if (name && !name->legacy() && name->key == key)
+            markers.push_back(it->path());
+    }
+    return markers;
+}
+
 // Replaces the folder to with a copy of the folder from. The copy is made in a sibling scratch
 // folder "<to>-temp-<rand16>" (removed on failure), then renamed onto to, so a reader never sees
 // a half-copied folder under the artifact's name.
@@ -478,12 +506,12 @@ void copyFolderReplacing(const fs::path& from, const fs::path& to) {
 }  // namespace
 
 json copyBuildArtifacts(Database* source, Database* destination, const std::string& hash) {
-    requireBuildHash(hash);
+    requireBuildKey(hash);
     if (io::isSamePath(source->buildDirectory(), destination->buildDirectory()))
         throw InvalidArgsException("The source and the destination of a build copy are the same dataset");
 
     std::vector<const EntryHandler*> handlers;
-    for (const EntryHandler* h : handlersOfHash(source, hash))
+    for (const EntryHandler* h : handlersOfKey(source, hash))
         if (h->buildable())
             handlers.push_back(h);
     if (handlers.empty())
@@ -501,8 +529,8 @@ json copyBuildArtifacts(Database* source, Database* destination, const std::stri
             appendUnique(copyFolders, folder);
     }
 
-    const fs::path sourceRoot = fs::absolute(source->buildDirectory() / hash);
-    const fs::path destinationRoot = fs::absolute(destination->buildDirectory() / hash);
+    const fs::path sourceRoot = fs::absolute(source->buildDirectory() / io::fromUtf8(hash));
+    const fs::path destinationRoot = fs::absolute(destination->buildDirectory() / io::fromUtf8(hash));
 
     // A build running in the source may be publishing its output: copy nothing
     for (const auto& folder : lockFolders)
@@ -523,10 +551,9 @@ json copyBuildArtifacts(Database* source, Database* destination, const std::stri
             if (fs::is_directory(sourceRoot / folder, ec) && !ec)
                 copyFolderReplacing(sourceRoot / folder, destinationRoot / folder);
         }
-        const fs::path sourceMarker = pendingMarkerPath(sourceRoot);
-        std::error_code ec;
-        if (fs::is_regular_file(sourceMarker, ec) && !ec) {
-            const fs::path destinationMarker = pendingMarkerPath(destinationRoot);
+        // The markers of the entries whose build this is, one per path
+        for (const auto& sourceMarker : pendingMarkersOfKey(source->buildDirectory(), hash)) {
+            const fs::path destinationMarker = destination->buildDirectory() / sourceMarker.filename();
             copyPendingMarker(sourceMarker, destinationMarker);
             // A transfer indexes its files in the destination before it copies the builds: the
             // add of a file the marker awaits came first and released nothing. Checked after the
@@ -553,9 +580,12 @@ json copyBuildArtifacts(Database* source, Database* destination, const std::stri
                 artifacts.push_back(a);
             }
     }
-    return {{"hash", hash},
+    const auto destinationMarkers = pendingMarkersOfKey(destination->buildDirectory(), hash);
+    return {{"hash", std::string(buildKeyHash(hash))},
+            {"key", hash},
             {"artifacts", std::move(artifacts)},
-            {"pending", probe.isFile(pendingMarkerPath(destinationRoot))}};
+            {"pending", std::any_of(destinationMarkers.begin(), destinationMarkers.end(),
+                                    [&](const fs::path& m) { return probe.isFile(m); })}};
 }
 
 }  // namespace ddb

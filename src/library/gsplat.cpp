@@ -296,7 +296,8 @@ namespace ddb
             throw AppException("The file of the Gaussian splat " + entryPath + " does not exist in the dataset");
         cancel::throwIfCanceled();
 
-        const fs::path baseOutputPath = fs::absolute(db->buildDirectory() / entry->hash);
+        const fs::path baseOutputPath =
+            fs::absolute(db->buildDirectory() / io::fromUtf8(entryHandler(entry->type).buildKey(*entry)));
         const fs::path outputFolder = baseOutputPath / GsplatBuildSubfolder;
         if (!fs::is_directory(baseOutputPath, ec) || ec)
             throw EntryNotFoundException("The Gaussian splat " + entryPath + " is not built: build it first");

@@ -85,13 +85,14 @@ namespace {
 class BuildAttempt {
   public:
     BuildAttempt(Database* db, const Entry& target, const EntryHandler& handler, const fs::path& baseOutputPath,
-                 const std::string& outputFolder, bool force, const BuildOptions& options)
+                 const fs::path& pendingMarker, const std::string& outputFolder, bool force,
+                 const BuildOptions& options)
         : db_(db), target_(target), handler_(handler), baseOutputPath_(baseOutputPath),
           outputFolder_(outputFolder), force_(force), options_(options),
           // Marker snapshot is read after exclusive primary ownership. Mutation waits
           // until serialized Model recovery has finished, so a busy tiles holder leaves
           // the original attempt timestamp untouched.
-          pendFile_(pendingMarkerPath(baseOutputPath)),
+          pendFile_(pendingMarker),
           tempFolder_(outputFolder + TempFolderInfix + randomString(16)) {}
 
     void run() {
@@ -300,8 +301,16 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         LOGD << "Triggering build of " << target.path << " because of " << e.path;
     }
 
-    const fs::path baseOutputPath = io::fromUtf8(outPath) / target.hash;
+    // The build of an entry lives in the folder of its key, and its pending marker is its own
+    // (build_layout.h): an entry with the same content, or the same content and another place,
+    // neither shares the marker nor, for a georeference-dependent type, the build
+    const fs::path baseOutputPath = io::fromUtf8(outPath) / io::fromUtf8(resolved->key);
+    const fs::path pendingMarker = pendingMarkerPath(io::fromUtf8(outPath), resolved->key, target.path);
     const std::string outputFolder = io::toUtf8(baseOutputPath / subfolder);
+
+    // A marker of the layout before the build key held for every entry of this content: it is the
+    // entry's now, and its twins'
+    migrateLegacyPendingMarker(db, io::fromUtf8(outPath), target.hash);
 
     // Ensure the output directory structure exists before attempting to acquire the lock
     // This prevents BuildLockDirectoryException when multiple processes race to build
@@ -319,7 +328,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // corrupt the in-progress output of the other process.
     BuildLock processLock(outputFolder);
 
-    BuildAttempt attempt(db, target, handler, baseOutputPath, outputFolder, force, options);
+    BuildAttempt attempt(db, target, handler, baseOutputPath, pendingMarker, outputFolder, force, options);
     try {
         attempt.run();
     } catch (...) {

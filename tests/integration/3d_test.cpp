@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 #include "3d.h"
 #include "build.h"
+#include "build_layout.h"
 #include "dbops.h"
 #include "entry.h"
 #include "test.h"
@@ -1055,7 +1056,7 @@ namespace
             EXPECT_NE(std::string(e.what()).find(mentions), std::string::npos) << e.what();
         }
         EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
-        EXPECT_FALSE(fs::exists(ds.db->buildDirectory() / (indexedHash(ds.db.get(), rel) + ".pending")));
+        EXPECT_FALSE(fs::exists(ds.db->buildDirectory() / pendingMarkerName(indexedHash(ds.db.get(), rel), rel)));
         EXPECT_FALSE(ddb::isBuildComplete(ds.db.get(), rel));
     }
 

@@ -521,3 +521,19 @@ Registry has to adopt first.
   `cancellable` too. Additive: no other member and no other fixture changed. The old
   `DDBAlignRaster`, `DDBMaskBorders` and `DDBMergeMultispectral` now refuse an output that
   exists (`DDBERR_EXCEPTION`).
+
+* 2026-11-09: one build key (FR-XC-28, D-020). The build folder of an entry is named by its build key: the
+  hash for a type whose build depends on the content only, and `<hash>-<16 hex characters of the SHA-256 of
+  the georef property>` for a model or a splat that has a georeference (the same file in two folders builds
+  once for each georeference). The pending marker is the entry's own (`<key>.<pathId>.pending`), so two
+  entries with the same content have two markers; the markers of the earlier layout (`<hash>.pending`) are
+  moved by the rescan and by `DDBBuild` with `pendingOnly`. Additive, required members: `key` in the build
+  object (`build-artifacts`, `build-artifacts-pending`, `list-entries-ex`; null when the entry is not
+  buildable), in `pending-build-info` and in `copy-build-artifacts`; `hash` is still the content hash.
+  `DDBResolveBuildFile` and `DDBCopyBuildArtifacts` take the key (`hash` argument): a hash alone names the
+  build of a place-independent type. `DDBRescan` and `DDBRescanEx` add `buildKey` and `buildKeyChanged` to the
+  element of an entry they re-read (no fixture lists a rescan): `buildKeyChanged` is true when the entry's
+  build is not in the folder of its key, which a host rebuilds. The schemas and the five fixtures above
+  changed (the three schemas gain `key`); no other fixture did. Registry's exact-JSON adapter tests of
+  these outputs need the member before Registry moves to a libddb build that has it. No version bump is
+  made here: the members are additive and the ABI minor goes up with the release that ships them.

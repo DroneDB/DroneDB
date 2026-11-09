@@ -63,6 +63,7 @@
         "buildable",
         "source",
         "hash",
+        "key",
         "root",
         "state",
         "missingDependencies",
@@ -90,6 +91,14 @@
           ],
           "pattern": "^[0-9a-f]{64}$",
           "description": "The hash of source, which names its build; null when not buildable"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}(-[0-9a-f]{16})?$",
+          "description": "The build key of source (build_layout.h buildKey), the name of its build root: the hash, or the hash and the digest of the georeference of a model or a splat that has one; null when not buildable"
         },
         "root": {
           "type": [

@@ -68,7 +68,7 @@ namespace ddb
     void to_json(json &j, const SplatSpzExport &exported);
 
     // Makes the splat of the entry at `entryPath` available as a single .spz file for other tools:
-    // `<build root>/<hash>/gsplat/export.spz`, the artifact of the role gsplat.export, converted from the
+    // `<build root>/<key>/gsplat/export.spz`, the artifact of the role gsplat.export, converted from the
     // dataset file by convertToSpz (splat_convert.h; ply, splat and spz are converted, other formats are an
     // InvalidArgsException). The file is kept in the build folder: it is returned as it is while it exists,
     // is not empty and is not older than the dataset file, and made again otherwise. A build of the entry

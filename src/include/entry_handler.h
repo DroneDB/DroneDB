@@ -43,7 +43,7 @@ enum class ArtifactKind { File, Directory };
 struct BuildArtifact {
     // What the artifact is for, never where it is: "raster.cog", "vector.mvt", ...
     std::string role;
-    // Relative to the entry's build root "<build root>/<hash>/", '/'-separated
+    // Relative to the entry's build root "<build root>/<key>/", '/'-separated
     std::string path;
     ArtifactKind kind = ArtifactKind::File;
     // Of the file a client opens: the file itself, or the index of a Directory. Hosts send it
@@ -155,7 +155,7 @@ struct BuildContext {
     // Absolute path of the entry's file
     fs::path inputPath;
     fs::path datasetRoot;
-    // "<build root>/<hash>"
+    // "<build root>/<key>" (EntryHandler::buildKey)
     fs::path baseOutputPath;
     // baseOutputPath / subfolder()
     fs::path outputFolder;
@@ -213,15 +213,23 @@ class EntryHandler {
 
     // ---- Build
 
-    // Primary output subfolder in "<build root>/<hash>/" (build_layout.h); empty when the type
+    // Primary output subfolder in "<build root>/<key>/" (build_layout.h); empty when the type
     // is not built. Its ".building" lock guards the whole build.
     virtual std::string subfolder() const { return {}; }
     bool buildable() const { return !subfolder().empty(); }
     // An entry of this type is built (a handler may exclude some entries, e.g. by location)
     virtual bool isBuildable(const Entry& /*e*/) const { return buildable(); }
+    // The build of this type depends on the georeference found next to the file (its `georef`
+    // property), not only on the content: an entry with a georeference builds in the folder
+    // "<hash>-<georef digest>", so the same file in two places builds once for each (buildKey()).
+    // The default: it does not.
+    virtual bool buildDependsOnGeoref() const { return false; }
+    // The key of the build folder of e, an entry of this type: its hash, with the digest of its
+    // georeference when buildDependsOnGeoref() (build_layout.h buildKey()). e holds its properties.
+    std::string buildKey(const Entry& e) const;
     // Every artifact a build of this type can produce (the build manifest)
     virtual std::vector<BuildArtifact> artifacts() const { return {}; }
-    // The top-level folders of artifacts() in "<build root>/<hash>/", in order, without
+    // The top-level folders of artifacts() in "<build root>/<key>/", in order, without
     // duplicates. The folders a build writes; includeLegacy adds the ones it only reads, which
     // are the data that follows the entry (copy) or goes stale with it (cleanup)
     std::vector<std::string> artifactFolders(bool includeLegacy = false) const {
@@ -243,7 +251,7 @@ class EntryHandler {
     virtual bool usesTempFolder() const { return true; }
     // Repairs an interrupted publish under the build lock, before completeness is checked
     virtual void recoverOutput(const fs::path& /*baseOutputPath*/) const {}
-    // The artifacts in baseOutputPath ("<build root>/<hash>") exist and are not empty.
+    // The artifacts in baseOutputPath ("<build root>/<key>") exist and are not empty.
     // reportRecoverable: an output recoverOutput() would repair counts as incomplete.
     // The default: the output subfolder holds a non-empty file (the file names may vary by input).
     virtual bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/ = true) const {

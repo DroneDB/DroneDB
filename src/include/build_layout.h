@@ -4,10 +4,12 @@
 #ifndef BUILD_LAYOUT_H
 #define BUILD_LAYOUT_H
 
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include "fs.h"
+#include "json_fwd.h"
 #include "mio.h"
 
 /**
@@ -16,15 +18,20 @@
  * spells one out. Registry, the Hub and existing datasets depend on these exact bytes, so a
  * value here never changes without a migration (tests/unit/build_layout_test.cpp pins them).
  *
- * Layout under the build root (<dataset>/.ddb/DDB_BUILD_PATH, see database.h):
+ * Layout under the build root (<dataset>/.ddb/DDB_BUILD_PATH, see database.h). <key> is the
+ * build key of an entry (buildKey(), D-020): the content hash, followed by "-" and the digest of
+ * the georeference for a type whose build depends on it (a model, a splat). <pathId> is the digest
+ * of the entry's path (entryPathId()): the marker of a deferred build is the entry's, not the content's.
  *
- *     <hash>.pending                   deferred build marker (PendingMarkerExtension)
- *     <hash>.pending.tmp-<rand16>      marker being replaced (PendingMarkerTempTag)
- *     <hash>/<subfolder>/...           artifacts of one entry (the *BuildSubfolder names)
- *     <hash>/<subfolder>.building      build lock of that output folder (BuildLockSuffix)
- *     <hash>/<subfolder>-temp-<rand>   scratch folder of a build (TempFolderInfix)
- *     <hash>/3dtiles-old               previous tileset during a swap (BackupFolderSuffix)
- *     <hash>/3dtiles-temp-trash-<rand> 3D Tiles leftovers moved aside by a cleanup
+ *     <key>.<pathId>.pending                deferred build marker (PendingMarkerExtension)
+ *     <key>.<pathId>.pending.tmp-<rand16>   marker being replaced (PendingMarkerTempTag)
+ *     <hash>.pending                        marker of a build deferred before the build key: read and
+ *                                           moved to the markers above by the rescan (legacy)
+ *     <key>/<subfolder>/...                 artifacts of one build (the *BuildSubfolder names)
+ *     <key>/<subfolder>.building            build lock of that output folder (BuildLockSuffix)
+ *     <key>/<subfolder>-temp-<rand>         scratch folder of a build (TempFolderInfix)
+ *     <key>/3dtiles-old                     previous tileset during a swap (BackupFolderSuffix)
+ *     <key>/3dtiles-temp-trash-<rand>       3D Tiles leftovers moved aside by a cleanup
  *
  * The role-tagged artifact manifest is composed from these names.
  */
@@ -32,9 +39,9 @@ namespace ddb {
 
 // ---- Markers and scratch names -------------------------------------------------------------
 
-// "<hash>.pending": a build deferred until its missing dependencies are uploaded.
+// "<key>.<pathId>.pending": a build deferred until its missing dependencies are uploaded.
 constexpr const char* PendingMarkerExtension = ".pending";
-// "<hash>.pending.tmp-<rand16>": the sibling written before the atomic replace of a marker.
+// "<marker>.tmp-<rand16>": the sibling written before the atomic replace of a marker.
 constexpr const char* PendingMarkerTempTag = ".tmp-";
 // "<output folder>.building": the BuildLock file of an output folder.
 constexpr const char* BuildLockSuffix = ".building";
@@ -119,12 +126,7 @@ inline std::string buildLockPath(const std::string& outputPath) {
     return outputPath + BuildLockSuffix;
 }
 
-// "<build root>/<hash>.pending" for the entry folder "<build root>/<hash>"
-inline fs::path pendingMarkerPath(const fs::path& entryBuildDir) {
-    return io::concat(entryBuildDir, PendingMarkerExtension);
-}
-
-// ".pending.tmp-": the infix of a marker being replaced, after the 64-character hash
+// ".pending.tmp-": the infix of a marker being replaced, after the stem of the marker
 inline std::string pendingMarkerTempInfix() {
     return std::string(PendingMarkerExtension) + PendingMarkerTempTag;
 }
@@ -159,6 +161,86 @@ inline bool isHashLike(std::string_view s) {
     }
     return true;
 }
+
+
+// ---- Build key (D-020) ---------------------------------------------------------------------
+
+// Characters of the digest of a georeference in a build key
+constexpr size_t GeorefDigestLength = 16;
+// Characters of the digest of an entry path in the name of a pending marker
+constexpr size_t PathIdLength = 16;
+// Between the hash and the digest of the georeference in a build key
+constexpr char BuildKeySeparator = '-';
+// The length of a content hash
+constexpr size_t HashLength = 64;
+
+/**
+ * The key of a build folder: the one function that names it (FR-XC-28, D-020). Builds, pending
+ * markers, completeness, artifact URLs, cleanup, the manifest and the Registry readers all take the
+ * key from it, so they agree on where an entry's build lives.
+ *
+ * The key is `<hash>` for a type whose build depends on nothing but the content of the file, and
+ * `<hash>-<georef digest>` for a type whose build also depends on the georeference found next to the
+ * file (EntryHandler::buildDependsOnGeoref: a model, a splat), when the entry has one: the same
+ * file in two folders then builds once for each georeference. The digest is the first
+ * GeorefDigestLength hex characters of the SHA-256 of the `georef` property of the entry, in its
+ * canonical JSON text. An entry without a georeference (null, empty or not an object) has the
+ * plain hash as its key, so the folders already on disk keep their names.
+ */
+std::string buildKey(const std::string& hash, const json* georef = nullptr);
+
+// A build key: a content hash, alone or followed by BuildKeySeparator and a digest of GeorefDigestLength
+// hexadecimal characters (the names a resolve or a copy of a build is asked for)
+inline bool isBuildKey(std::string_view s) {
+    if (s.size() == HashLength)
+        return isHashLike(s);
+    if (s.size() != HashLength + 1 + GeorefDigestLength || s[HashLength] != BuildKeySeparator)
+        return false;
+    if (!isHashLike(s.substr(0, HashLength)))
+        return false;
+    for (const char c : s.substr(HashLength + 1)) {
+        const bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!hex)
+            return false;
+    }
+    return true;
+}
+
+// The content hash of a build key (its first HashLength characters)
+inline std::string_view buildKeyHash(std::string_view key) {
+    return key.substr(0, HashLength);
+}
+
+// The digest of an entry path (dataset-relative, '/'-separated, UTF-8) in the name of its pending marker
+std::string entryPathId(const std::string& entryPath);
+
+// "<key>.<pathId>.pending": the file name of the pending marker of the entry at entryPath whose build
+// has this key. The markers of two entries with the same content are two files.
+std::string pendingMarkerName(const std::string& key, const std::string& entryPath);
+
+// "<build root>/<key>.<pathId>.pending"
+inline fs::path pendingMarkerPath(const fs::path& buildRoot, const std::string& key, const std::string& entryPath) {
+    return buildRoot / io::fromUtf8(pendingMarkerName(key, entryPath));
+}
+
+// "<build root>/<hash>.pending": the marker of a build deferred before the build key, which holds for
+// every entry of that content
+inline fs::path legacyPendingMarkerPath(const fs::path& buildRoot, const std::string& hash) {
+    return buildRoot / io::fromUtf8(hash + PendingMarkerExtension);
+}
+
+// What the name of a pending marker file says
+struct PendingMarkerName {
+    // The build key ("<hash>" alone for a legacy marker, which names no entry)
+    std::string key;
+    // The digest of the entry path; empty for a legacy marker "<hash>.pending"
+    std::string pathId;
+    bool legacy() const { return pathId.empty(); }
+};
+
+// The parts of a marker file name ("<key>.<pathId>.pending" or the legacy "<hash>.pending"); nothing for
+// any other name, so unrelated files of a user-specified output path are never touched
+std::optional<PendingMarkerName> parsePendingMarkerName(std::string_view fileName);
 
 }  // namespace ddb
 

@@ -7,6 +7,7 @@
     "type": "object",
     "required": [
       "hash",
+      "key",
       "path",
       "missingDependencies",
       "lastAttempt",
@@ -18,6 +19,11 @@
       "hash": {
         "type": "string",
         "pattern": "^[0-9a-f]{64}$"
+      },
+      "key": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}(-[0-9a-f]{16})?$",
+        "description": "The build key of the entry (build_layout.h buildKey): the hash, or the hash and the digest of the georeference of a model or a splat that has one. The marker is the entry's: a copy of the file in another folder has its own"
       },
       "path": {
         "type": "string"

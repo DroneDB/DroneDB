@@ -742,7 +742,14 @@ extern "C"
      * @param types comma-separated list of entry types to rescan (e.g., "image,geoimage,pointcloud"), or empty for all.
      *              Valid types: generic, geoimage, georaster, pointcloud, image, dronedb, markdown, video, geovideo, model, panorama, geopanorama, vector, gaussiansplat
      * @param stopOnError whether to stop processing on first error (default true)
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success, an error otherwise. Each element of the output of an entry that was
+     *         re-read also has "buildKey", the key of its build folder now ("<hash>", or
+     *         "<hash>-<georef digest>" for a model or a splat that has a georeference, see "Build
+     *         manifest"), and "buildKeyChanged", true when that is not the key of the build the entry
+     *         had: its build must be made again (a changed file, a changed georeference, and the first
+     *         rescan after the upgrade for a model or a splat with a georeference); the rest of the
+     *         entries keep their builds. The rescan also moves the pending markers of the layout
+     *         before the build key to the markers of their entries */
     DDB_DLL DDBErr DDBRescan(const char *ddbPath, char **output, const char *types, bool stopOnError);
 
     /** Rescan the files in the index that match both a type and an extension filter
@@ -848,7 +855,7 @@ extern "C"
      *  does not consume ".pending" marker files or trigger any build.
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param output pointer to C-string where to store result (JSON array).
-     *               Each element: { "hash": "...", "path": "...",
+     *               Each element: { "hash": "...", "key": "...", "path": "...",
      *               "missingDependencies": ["..."], "lastAttempt": 1721612345,
      *               "retryAfter": 1721612405, "awaitingFiles": true }
      *               (caller must free with DDBFree). lastAttempt and retryAfter are Unix
@@ -856,7 +863,8 @@ extern "C"
      *               retries the build, as in the build object of DDBGetBuildArtifacts (see
      *               "Build manifest"). awaitingFiles is true when missingDependencies is not
      *               empty: no timer retries such a build (retryAfter does not apply), adding
-     *               a file of one of those names (by file name, any folder, any case)
+     *               the file of one of those names (its path, or relative to the folder of the entry, any case; the same
+     *               file name in another folder does not release it)
      *               releases it, after which it is due at once and awaitingFiles is false
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetPendingBuildInfo(const char *ddbPath, char **output);
@@ -945,15 +953,20 @@ extern "C"
      *                 while it was read
      *
      * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
-     *   {"buildable": bool, "source": string|null, "hash": string|null, "root": string|null,
+     *   {"buildable": bool, "source": string|null, "hash": string|null, "key": string|null, "root": string|null,
      *    "state": "none"|"pending"|"building"|"complete", "missingDependencies": [string],
      *    "awaitingFiles": bool, "lastAttempt": integer|null, "retryAfter": integer|null,
      *    "artifacts": [artifact]}
      *   buildable  the entry is built, by itself or as a sidecar of its main file (a .dbf of a .shp)
      *   source     dataset-relative path of the entry the artifacts belong to: the entry itself,
      *              or the main file of a sidecar
-     *   hash       the hash of source, which names its build (URLs: ".../build/{hash}/{path}")
-     *   root       the absolute build root of source (UTF-8); it may not exist yet
+     *   hash       the content hash of source
+     *   key        the build key of source, which names its build (URLs: ".../build/{key}/{path}"):
+     *              the hash for a type whose build depends on the content only, and "<hash>-<digest>"
+     *              (16 hexadecimal characters of the SHA-256 of the entry's "georef" property) for a
+     *              model or a splat that has a georeference, so the same file in two places has a
+     *              build for each. The pending marker is the entry's, not the content's
+     *   root       the absolute build root of source (UTF-8, named by the key); it may not exist yet
      *   state      in this order: "building" a live build holds the build lock of the entry;
      *              "pending" a build waits for missing dependencies; "complete" the artifacts
      *              are complete (as DDBIsBuildComplete); "none" not built, failed or incomplete
@@ -1026,7 +1039,8 @@ extern "C"
      * of the artifact the file belongs to, as DDBGetBuildArtifacts lists it now (the same for
      * the index and the tiles of a directory artifact), absent only when it cannot be read.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param hash the hash of the build ("hash" of a build object): 64 hexadecimal characters
+     * @param hash the key of the build ("key" of a build object): 64 hexadecimal characters, then for a
+     *             model or a splat with a georeference '-' and 16 more
      * @param path the file, relative to the build root: an artifact's path, or a file below a
      *             directory artifact ("mvt/3/4/2.pbf"). The dataset path rules apply
      *             (DDBNormalizePath: '/' or '\' separators, no "..", not absolute).
@@ -1051,11 +1065,11 @@ extern "C"
      * DDBGetPendingBuildInfo) is released, as the add of that file came before the copy.
      * @param sourceDdbPath path to the DroneDB database the build is copied from
      * @param destinationDdbPath path to the DroneDB database it is copied to (another dataset)
-     * @param hash the hash of the build ("hash" of a build object)
+     * @param hash the key of the build ("key" of a build object)
      * @param output pointer to C-string where to store the JSON (free with DDBFree):
-     *               {"hash": string, "artifacts": [artifact], "pending": bool}: the artifacts
-     *               of the destination after the copy (as in a build object) and whether it has
-     *               a pending marker
+     *               {"hash": string, "key": string, "artifacts": [artifact], "pending": bool}: the
+     *               content hash and the key, the artifacts of the destination after the copy (as in
+     *               a build object) and whether it has a pending marker
      * @return DDBERR_NONE on success, also when the source has nothing built (nothing copied);
      *         DDBERR_INVALIDARGS when an argument is NULL or empty, the hash is malformed or
      *         both paths are the same dataset; DDBERR_NOTFOUND when no buildable entry of the

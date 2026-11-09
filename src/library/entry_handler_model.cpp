@@ -81,6 +81,10 @@ class ModelEntryHandler : public EntryHandler {
 
     std::string subfolder() const override { return Bm3dBuildSubfolder; }
 
+    // The georeference found next to the file is part of the build (the splat's bounds.json, the
+    // origin of the 3D Tiles): the same file in two folders builds once for each
+    bool buildDependsOnGeoref() const override { return true; }
+
     // A model built before bm3d has its Nexus file in nxs/ and is served as model.nexus until a
     // rebuild publishes bm3d/ (the dispatcher then removes nxs/). A Nexus file stands in for
     // model.bm3d, not for the whole entry: such a model usually has 3D Tiles as well.

@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "build.h"
+#include "build_layout.h"
 #include "timeutil.h"
 #include "dbops.h"
 #include "ddb.h"
@@ -49,13 +50,14 @@ protected:
         return ::indexedHash(db.get(), fs::relative(absolutePath, dbPath).string());
     }
 
-    // Writes a ".pending" marker file with the given timestamp and missing
-    // dependency names, mirroring the format written by buildInternal().
+    // Writes the ".pending" marker file of layer.shp (build_layout.h: "<key>.<pathId>.pending") with the
+    // given timestamp and missing dependency names, mirroring the format written by buildInternal().
+    // A name that is not a hash is written as it is, with the extension.
     static fs::path writePendingFile(const fs::path& buildDir,
                                       const std::string& hash,
                                       const std::string& timestampLine,
                                       const std::vector<std::string>& deps) {
-        const fs::path p = buildDir / (hash + ".pending");
+        const fs::path p = buildDir / (isHashLike(hash) ? pendingMarkerName(hash, "layer.shp") : hash + ".pending");
         fs::create_directories(buildDir);
         std::ofstream f(p);
         f << timestampLine << std::endl;
@@ -228,6 +230,34 @@ TEST_F(GetPendingBuildInfoTest, RetryAfterTellsWhenBuildPendingRetries) {
     EXPECT_TRUE(pending[0].awaitingFiles);
 }
 
+// A marker of the layout before the build key ("<hash>.pending", one for every entry of the content) is
+// still listed, and buildPending() moves it to the marker of its entry (the rescan does the same), released:
+// its names may be those of another entry of the content, so the retry checks the files of this one
+TEST_F(GetPendingBuildInfoTest, ALegacyMarkerIsListedAndMovedToTheMarkerOfItsEntry) {
+    const auto hash = indexedHash(vectorPath);
+    const fs::path buildDir = db->buildDirectory();
+    const fs::path legacy = buildDir / (hash + ".pending");
+    fs::create_directories(buildDir);
+    std::ofstream(legacy) << "1721612345\nlayer.dbf\n";
+
+    auto pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_EQ(pending[0].path, "layer.shp");
+    EXPECT_EQ(pending[0].key, hash);
+
+    const time_t beforeRetry = ddb::currentUnixTimestamp();
+    ddb::buildPending(db.get(), "", false);
+    EXPECT_FALSE(fs::exists(legacy));
+    const fs::path moved = buildDir / pendingMarkerName(hash, "layer.shp");
+    ASSERT_TRUE(fs::exists(moved));
+    pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_GE(pending[0].lastAttempt, beforeRetry) << "the released marker was retried at once";
+    EXPECT_EQ(pending[0].missingDependencies, std::vector<std::string>{"layer.shx"})
+        << "the file the entry misses on disk, not the name of the legacy marker";
+    EXPECT_TRUE(pending[0].awaitingFiles);
+}
+
 // --- C API round-trip ---
 
 TEST_F(GetPendingBuildInfoTest, CApiReturnsValidJson) {
@@ -244,6 +274,7 @@ TEST_F(GetPendingBuildInfoTest, CApiReturnsValidJson) {
     ASSERT_TRUE(j.is_array());
     ASSERT_EQ(j.size(), 1u);
     EXPECT_EQ(j[0]["hash"].get<std::string>(), hash);
+    EXPECT_EQ(j[0]["key"].get<std::string>(), hash) << "a vector is built by its content: its key is its hash";
     EXPECT_EQ(j[0]["lastAttempt"].get<long long>(), 1721612345LL);
     ASSERT_TRUE(j[0]["retryAfter"].is_number_integer());
     EXPECT_EQ(j[0]["retryAfter"].get<long long>(), 1721612405LL);

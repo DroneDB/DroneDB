@@ -61,15 +61,15 @@ namespace ddb
                 return *relative.begin() != "..";
             }
 
-            // The path under "<hash>" of the build root that holds `path`, '/'-separated; nullopt
-            // when `path` is not in "<something>/.ddb/build/<hash>/"
+            // The path under "<key>" (build_layout.h) of the build root that holds `path`, '/'-separated;
+            // nullopt when `path` is not in "<something>/.ddb/build/<key>/"
             std::optional<std::string> buildRelativePath(const fs::path &path)
             {
                 const std::vector<fs::path> parts(path.begin(), path.end());
                 for (size_t i = 0; i + 3 < parts.size(); i++)
                 {
                     if (parts[i] != DDB_FOLDER || parts[i + 1] != DDB_BUILD_PATH ||
-                        !isHashLike(io::toUtf8(parts[i + 2])))
+                        !isBuildKey(io::toUtf8(parts[i + 2])))
                         continue;
                     std::string relative;
                     for (size_t j = i + 3; j < parts.size(); j++)

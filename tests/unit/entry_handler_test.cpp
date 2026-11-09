@@ -409,7 +409,7 @@ TEST(entryHandler, FakeTypeIsDetectedParsedAndBuiltWithoutAnyOtherChange) {
         ASSERT_TRUE(fs::exists(outA));
         EXPECT_EQ(slurp(outA), "alpha");
         EXPECT_TRUE(isBuildComplete(fx.db.get(), "a.ddbfake"));
-        EXPECT_FALSE(fs::exists(fx.db->buildDirectory() / (a.hash + ".pending")));
+        EXPECT_FALSE(fs::exists(pendingMarkerPath(fx.db->buildDirectory(), a.hash, "a.ddbfake")));
 
         // buildAll takes its type list from the registry
         EXPECT_FALSE(isBuildComplete(fx.db.get(), "b.DDBFAKE"));

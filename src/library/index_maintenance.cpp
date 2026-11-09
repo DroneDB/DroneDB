@@ -7,6 +7,7 @@
 
 #include "build.h"
 #include "build_internal.h"
+#include "build_layout.h"
 #include "entry_filters.h"
 #include "entry_path.h"
 #include "exceptions.h"
@@ -21,6 +22,7 @@
 
 #include <ctime>
 #include <map>
+#include <optional>
 
 namespace ddb
 {
@@ -37,6 +39,26 @@ namespace ddb
         }
     }
 
+    // The key of the build an entry has before a rescan (D-020, see rescanIndex): the key its index row names
+    // by the rules of the build key. The folders written before the build key are named by the hash alone:
+    // a row whose key is another name, with no folder of that key but a folder of its hash, still has its
+    // build in the folder of its hash, and the rescan reports the move. With neither folder (a build that is
+    // deferred or keeps failing) there is nothing to move: the key of the row is the key before, so the entry
+    // is not reported again at every rescan.
+    std::string buildKeyBeforeRescan(const fs::path &buildDirectory, const std::string &hash, EntryType type,
+                                     const std::string &georefText)
+    {
+        const std::string key = buildKeyOfRow(hash, type, georefText);
+        if (key == hash)
+            return key;
+        const auto isFolder = [&](const std::string &name)
+        {
+            std::error_code ec;
+            return fs::is_directory(buildDirectory / io::fromUtf8(name), ec) && !ec;
+        };
+        return !isFolder(key) && isFolder(hash) ? hash : key;
+    }
+
     // Deletes the entries matching a predicate, and their metadata, inside the caller's
     // transaction. The statements are prepared once for one predicate sql and bound again
     // for each run, so removing many paths does not prepare three statements per path.
@@ -47,13 +69,14 @@ namespace ddb
     public:
         RowDeleter(Database *db, const std::string &predicateSql)
             : metaDelete_(db->query("DELETE FROM entries_meta WHERE " + predicateSql)),
-              select_(db->query("SELECT path, hash FROM entries WHERE " + predicateSql)),
+              select_(db->query("SELECT path, hash, type, json_extract(properties, '$.georef') FROM entries WHERE " +
+                                predicateSql)),
               delete_(db->query("DELETE FROM entries WHERE " + predicateSql))
         {
         }
 
         // `predicate` has the sql given to the constructor. Appends the deleted paths and
-        // their (non-empty) hashes; returns the count.
+        // the build keys of those with a hash (the names of their build folders); returns the count.
         int run(const PathPredicate &predicate, std::vector<std::string> &deletedPaths,
                 std::vector<std::string> &deletedHashes)
         {
@@ -67,7 +90,8 @@ namespace ddb
                 deletedPaths.push_back(select_->getText(0));
                 const auto hash = select_->getText(1);
                 if (!hash.empty())
-                    deletedHashes.push_back(hash);
+                    deletedHashes.push_back(buildKeyOfRow(hash, static_cast<EntryType>(select_->getInt(2)),
+                                                          select_->getText(3)));
                 count++;
             }
             select_->reset();
@@ -98,19 +122,19 @@ namespace ddb
         return matches;
     }
 
-    // Removes the build folders of deleted entries, on the I/O threads (ioThreads), outside any
-    // transaction.
-    void deleteBuildFolders(Database *db, const std::vector<std::string> &hashes)
+    // Removes the build folders (named by build key) of deleted entries, on the I/O threads (ioThreads),
+    // outside any transaction.
+    void deleteBuildFolders(Database *db, const std::vector<std::string> &keys)
     {
-        if (hashes.empty())
+        if (keys.empty())
             return;
 
         const auto buildDir = db->buildDirectory();
-        parallel::forEachIndexIo(hashes.size(), [&](size_t i)
+        parallel::forEachIndexIo(keys.size(), [&](size_t i)
                                  {
             try
             {
-                removeBuildFolder(buildDir / hashes[i]);
+                removeBuildFolder(buildDir / io::fromUtf8(keys[i]));
             }
             catch (const std::exception &e)
             {
@@ -120,10 +144,10 @@ namespace ddb
 
     } // namespace
 
-    void checkDeleteBuild(Database *db, const std::string &hash)
+    void checkDeleteBuild(Database *db, const std::string &key)
     {
-        if (!hash.empty())
-            removeBuildFolder(db->buildDirectory() / hash);
+        if (!key.empty())
+            removeBuildFolder(db->buildDirectory() / io::fromUtf8(key));
     }
 
     void checkDeleteMeta(Database *db, const std::string &path)
@@ -200,7 +224,7 @@ namespace ddb
     {
         const fs::path directory = db->rootDirectory();
 
-        auto q = db->query("SELECT path,mtime,hash FROM entries");
+        auto q = db->query("SELECT path,mtime,hash,type,json_extract(properties, '$.georef') FROM entries");
         auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
         const auto updateQ = db->query(kUpdateEntrySql);
 
@@ -218,6 +242,8 @@ namespace ddb
             Entry e;
             const auto mtime = q->getDouble(1);
             const auto hash = q->getText(2);
+            const auto type = static_cast<EntryType>(q->getInt(3));
+            const auto georef = q->getText(4);
             double fileMtime = 0;
             const auto status = checkUpdate(e, p, mtime, hash, &fileMtime);
 
@@ -228,7 +254,8 @@ namespace ddb
                 // Removed
                 deleteQ->bind(1, relPath.generic());
                 deleteQ->execute();
-                checkDeleteBuild(db, hash);
+                if (!hash.empty())
+                    checkDeleteBuild(db, buildKeyOfRow(hash, type, georef));
                 checkDeleteMeta(db, relPath.generic());
                 if (callback)
                     callback(true, relPath.generic());
@@ -250,7 +277,7 @@ namespace ddb
     }
 
     void rescanIndex(Database *db, const std::vector<EntryType> &types, const std::vector<std::string> &extensions,
-                     bool stopOnError, RescanCallback callback)
+                     bool stopOnError, RescanCallback callback, RescanKeyCallback keyCallback)
     {
         const fs::path directory = db->rootDirectory();
 
@@ -266,6 +293,9 @@ namespace ddb
         conditions.bind(*q);
 
         const auto updateQ = db->query(kUpdateEntrySql);
+        // What the index holds of an entry before it is re-read: the build key reads it (D-020)
+        const auto beforeQ = db->query("SELECT hash, type, json_extract(properties, '$.georef') FROM entries WHERE path = ?");
+        const fs::path buildDirectory = db->buildDirectory();
 
         // Deliberately one IMMEDIATE transaction for the whole rescan (design choice, kept):
         // the entries table is always left in a consistent, fully re-parsed state, even for
@@ -306,9 +336,26 @@ namespace ddb
 
             try
             {
+                std::string keyBefore;
+                if (keyCallback != nullptr)
+                {
+                    beforeQ->bind(1, path);
+                    if (beforeQ->fetch())
+                        keyBefore = buildKeyBeforeRescan(buildDirectory, beforeQ->getText(0),
+                                                         static_cast<EntryType>(beforeQ->getInt(1)),
+                                                         beforeQ->getText(2));
+                    beforeQ->reset();
+                }
+
                 Entry e;
                 parseEntry(fullPath, directory, e, true);
                 doUpdate(updateQ.get(), e);
+
+                if (keyCallback != nullptr)
+                {
+                    const std::string keyAfter = entryHandler(e.type).buildKey(e);
+                    keyCallback(e, keyAfter, keyAfter != keyBefore);
+                }
 
                 if (callback != nullptr)
                 {
@@ -335,6 +382,10 @@ namespace ddb
         }
 
         tx.commit();
+
+        // The markers of the layout before the build key become those of their entries, with the keys
+        // the rescan gave them
+        migrateLegacyPendingMarkers(db, buildDirectory);
     }
 
     // Sets the modified times of files in the filesystem
@@ -439,6 +490,59 @@ namespace ddb
             return res;
         }
 
+        // The build key the index row at path names (build_layout.h), nothing for a folder or a path not indexed
+        std::optional<std::string> buildKeyAt(Database *db, const std::string &path)
+        {
+            auto q = db->query("SELECT hash, type, json_extract(properties, '$.georef') FROM entries WHERE path = ?");
+            q->bind(1, path);
+            if (!q->fetch() || q->getText(0).empty())
+                return std::nullopt;
+            return buildKeyOfRow(q->getText(0), static_cast<EntryType>(q->getInt(1)), q->getText(2));
+        }
+
+        // A file moved from oldPath (whose build key was oldKey) to newPath: its pending marker is named by its
+        // path (build_layout.h), so it follows the file, or the moved entry would lose it and a cleanup would
+        // remove it as the marker of no entry. The names a marker that awaits files holds are those of the old
+        // place: it is released, so the next retry looks for the files of the new place and names them. A
+        // marker left at the new name by an entry that had that path (replaced by the move) is of no entry now.
+        // Failures are logged: the index is committed already.
+        void movePendingMarker(Database *db, const std::string &oldPath, const std::optional<std::string> &oldKey,
+                               const std::string &newPath)
+        {
+            const auto newKey = buildKeyAt(db, newPath);
+            if (!newKey)
+                return;
+            const fs::path buildDirectory = db->buildDirectory();
+            const fs::path to = pendingMarkerPath(buildDirectory, *newKey, newPath);
+            std::error_code ec;
+            if (oldKey && *oldKey == *newKey)
+            {
+                const fs::path from = pendingMarkerPath(buildDirectory, *oldKey, oldPath);
+                if (fs::is_regular_file(from, ec) && !ec)
+                {
+                    fs::rename(from, to, ec);
+                    if (ec)
+                    {
+                        LOGW << "Cannot move the pending marker of " << oldPath << " to " << newPath << ": "
+                             << ec.message();
+                        return;
+                    }
+                    const auto marker = readPendingMarker(to);
+                    if (marker && marker->awaitsFiles())
+                        releasePendingMarker(to);
+                    return;
+                }
+            }
+            if (fs::is_regular_file(to, ec) && !ec)
+            {
+                LOGD << "Removing the pending marker " << io::toUtf8(to.filename()) << " of the entry " << newPath
+                     << " replaced by a move";
+                fs::remove(to, ec);
+                if (ec)
+                    LOGW << "Cannot remove the pending marker '" << io::toUtf8(to) << "': " << ec.message();
+            }
+        }
+
     } // namespace
 
     void replacePath(Database *db, const std::string &source, const std::string &dest)
@@ -509,6 +613,10 @@ namespace ddb
 
         const fs::path directory = db->rootDirectory();
 
+        // The files moved (old path, new path) and their build keys before the move: their pending markers follow them
+        std::vector<std::pair<std::string, std::string>> movedFiles;
+        std::vector<std::optional<std::string>> movedKeys;
+
         Transaction tx(db);
 
         // If we are moving a file
@@ -518,6 +626,8 @@ namespace ddb
             if (destExists)
                 deleteEntry(db, dest);
 
+            movedFiles.emplace_back(source, dest);
+            movedKeys.push_back(buildKeyAt(db, source));
             replacePath(db, source, dest);
 
             // If the file extension changed, re-detect the entry type
@@ -547,6 +657,11 @@ namespace ddb
                 auto newPath = dest + std::string(path).substr(source.length(), std::string::npos);
 
                 deleteEntry(db, newPath);
+                if (auto key = buildKeyAt(db, path))
+                {
+                    movedFiles.emplace_back(path, newPath);
+                    movedKeys.push_back(std::move(key));
+                }
                 replacePath(db, path, newPath);
             }
 
@@ -554,6 +669,18 @@ namespace ddb
         }
 
         tx.commit();
+
+        for (size_t i = 0; i < movedFiles.size(); i++)
+        {
+            try
+            {
+                movePendingMarker(db, movedFiles[i].first, movedKeys[i], movedFiles[i].second);
+            }
+            catch (const std::exception &ex)
+            {
+                LOGW << "Cannot move the pending marker of " << movedFiles[i].first << ": " << ex.what();
+            }
+        }
 
         // A file moved to a name a build waits for releases it, as an add does
         releasePendingBuildsAwaiting(db, sourceEntry.type != EntryType::Directory ? std::vector<std::string>{dest}

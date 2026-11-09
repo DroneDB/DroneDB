@@ -16,7 +16,7 @@ namespace ddb
 {
 
     /**
-     * The output subfolder of the build of the entry at `path` ("<build root>/<hash>/<subfolder>"),
+     * The output subfolder of the build of the entry at `path` ("<build root>/<key>/<subfolder>", the build key: build_layout.h),
      * or nothing when the entry is not buildable, neither itself nor as the sidecar of an indexed
      * main file. Throws InvalidArgsException when `path` is not indexed.
      */
@@ -44,7 +44,7 @@ namespace ddb
                const BuildOptions &options = {});
 
     /**
-     * @brief Retry every deferred build (one per "<hash>.pending" marker in the build
+     * @brief Retry every deferred build (one per pending marker, "<key>.<pathId>.pending", in the build
      * directory) that a retry can progress. A build that awaits files (its marker lists
      * missing dependencies) is skipped unless @p force is set: no timer retries it, adding
      * one of those files to the index (add, move, delta) releases it, and it is retried
@@ -65,7 +65,7 @@ namespace ddb
 
     /**
      * @brief True when the database has a deferred build that a retry can progress: a
-     * "<hash>.pending" marker that awaits no file (a transient failure, or a build released
+     * pending marker that awaits no file (a transient failure, or a build released
      * by the add of a file it waited for). A build that only awaits missing files does not
      * count: a host has nothing to retry until one of them is added. getPendingBuildInfo()
      * still lists it (awaitingFiles).
@@ -83,8 +83,12 @@ namespace ddb
      */
     struct PendingBuildInfo
     {
-        /// Entry hash (matches the ".pending" file stem)
+        /// Hash of the entry's content
         std::string hash;
+        /// The build key of the entry (build_layout.h buildKey): the hash, or the hash and the digest of the
+        /// georeference of a model or a splat. The marker is the file "<key>.<pathId>.pending" of the build
+        /// root; a marker of the layout before the build key reports its hash here
+        std::string key;
         /// Entry path resolved from the database ("" if the entry no longer exists)
         std::string path;
         /// Dependency names still missing at the time of the last attempt
@@ -113,7 +117,7 @@ namespace ddb
      */
     std::vector<PendingBuildInfo> getPendingBuildInfo(Database *db);
 
-    /// {"hash", "path", "missingDependencies", "lastAttempt", "retryAfter", "awaitingFiles"}: an element of the
+    /// {"hash", "key", "path", "missingDependencies", "lastAttempt", "retryAfter", "awaitingFiles"}: an element of the
     /// output of DDBGetPendingBuildInfo (tests/contract/schemas/pending-build-info.schema.json)
     void to_json(json &j, const PendingBuildInfo &info);
 
@@ -181,7 +185,8 @@ namespace ddb
      *      file no longer exists on the filesystem (their associated build
      *      artifacts are removed by removeFromIndex).
      *   2. Remove orphaned build artifacts (subdirectories and .pending files
-     *      whose hash no longer corresponds to any entry in the database).
+     *      whose build key, or whose entry path and build key, no longer corresponds to any entry
+     *      in the database).
      *      Subdirectories with an active (live-PID) build lock are skipped.
      *
      * @param db database (already opened)

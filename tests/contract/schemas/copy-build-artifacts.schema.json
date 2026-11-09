@@ -5,6 +5,7 @@
   "type": "object",
   "required": [
     "hash",
+    "key",
     "artifacts",
     "pending"
   ],
@@ -14,6 +15,11 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(-[0-9a-f]{16})?$",
+      "description": "The build key that was copied: the hash, or the hash and the digest of the georeference"
+    },
     "artifacts": {
       "type": "array",
       "items": {
@@ -22,7 +28,7 @@
     },
     "pending": {
       "type": "boolean",
-      "description": "The destination has a pending marker for the hash"
+      "description": "The destination has a pending marker for the build"
     }
   }
 }

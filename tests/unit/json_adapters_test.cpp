@@ -79,13 +79,14 @@ TEST(StacQuery, invalidBboxIsInvalidArgs) {
 TEST(BuildJson, shapesOfTheBuildOutputs) {
     PendingBuildInfo pending;
     pending.hash = "h";
+    pending.key = "h-k";
     pending.path = "a/b.shp";
     pending.missingDependencies = {"a/b.shx"};
     pending.lastAttempt = 1700000000;
     pending.retryAfter = 1700000060;
     pending.awaitingFiles = true;
     EXPECT_EQ(json(pending),
-              json::parse(R"({"hash":"h","path":"a/b.shp","missingDependencies":["a/b.shx"],
+              json::parse(R"({"hash":"h","key":"h-k","path":"a/b.shp","missingDependencies":["a/b.shx"],
         "lastAttempt":1700000000,"retryAfter":1700000060,"awaitingFiles":true})"));
     EXPECT_EQ(json(std::vector<PendingBuildInfo>{}).dump(), "[]");
 

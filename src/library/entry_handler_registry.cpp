@@ -13,10 +13,20 @@
 #include <shared_mutex>
 #include <unordered_map>
 
+#include "build_layout.h"
+#include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "json.h"
 #include "mio.h"
 
 namespace ddb {
+
+std::string EntryHandler::buildKey(const Entry& e) const {
+    if (!buildDependsOnGeoref() || !e.properties.is_object())
+        return ddb::buildKey(e.hash);
+    const auto georef = e.properties.find("georef");
+    return ddb::buildKey(e.hash, georef == e.properties.end() ? nullptr : &*georef);
+}
 
 bool fileExistsAndNonEmpty(const fs::path& p) {
     std::error_code ec;

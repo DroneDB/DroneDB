@@ -27,6 +27,9 @@
 #include "fake_model_tools.h"
 #include "exceptions.h"
 #include "gsplat.h"
+#include "build_layout.h"
+#include "build_manifest.h"
+#include "entry_handler.h"
 #include "local_frame_georef.h"
 #include "buildlod_runner.h"
 #include "gtest/gtest.h"
@@ -1311,7 +1314,7 @@ TEST(gsplat, buildWithoutBuildLodFailsWithoutPending) {
     ASSERT_FALSE(ddb::buildlod::isBuildLodAvailable());
 
     expectMissingToolFailure([&] { ddb::build(db.get(), rel, "", false); }, "build-lod");
-    EXPECT_FALSE(fs::exists(db->buildDirectory() / (e.hash + ".pending")));
+    EXPECT_FALSE(fs::exists(pendingMarkerPath(db->buildDirectory(), e.hash, rel)));
     EXPECT_FALSE(ddb::isBuildPending(db.get()));
     EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
 
@@ -2127,12 +2130,75 @@ TEST(gsplat, aBuildOfAGeoreferencedEntryUsesItsGeoreference) {
     EXPECT_EQ(e.polygon_geom.size(), 0) << "the footprint needs a build";
 
     ddb::build(db.get(), "scene.ply", "", false);
-    const json bounds = json::parse(readText(fs::path(db->buildDirectory()) / e.hash / "gsplat" / GsplatBoundsFileName));
+    // A splat with a georeference builds in the folder of its key: the hash and the digest of the georeference
+    const std::string key = entryHandler(e.type).buildKey(e);
+    EXPECT_EQ(key.size(), 64u + 1 + 16);
+    const json bounds = json::parse(readText(fs::path(db->buildDirectory()) / key / "gsplat" / GsplatBoundsFileName));
     EXPECT_EQ(bounds["up"], (json::array({0.0, 0.0, 1.0})));
     EXPECT_EQ(bounds["upSource"], "georef");
     ASSERT_EQ(bounds["wgs84Footprint"]["coordinates"].size(), 1u);
     ASSERT_EQ(bounds["wgs84Footprint"]["coordinates"][0].size(), 5u);
     EXPECT_NEAR(bounds["wgs84Footprint"]["coordinates"][0][0][1].get<double>(), 46.842651237, 1e-6);
+}
+
+// FR-VWR-17 (D-020): the same splat at the root and in a folder with a georef.json are two builds, in two folders
+// of the build root: the build of the folder with the georeference says so, and the one of the root does not
+TEST(gsplat, theSameSplatInAFolderWithAGeoreferenceHasItsOwnBuild) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path dsFolder = ta.getFolder("");
+    const fs::path root = ta.getPath("train.ply");
+    writeSplatPly(root, 400, 1);
+    fs::create_directories(ta.getPath("geo1"));
+    fs::copy_file(root, ta.getPath("geo1/train.ply"));
+    {
+        std::ofstream sidecar(ta.getPath("geo1/georef.json").string());
+        sidecar << R"({"crs": "EPSG:32615", "offset": [576705, 5188170]})";
+    }
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the build");
+
+    ddb::initIndex(dsFolder.string());
+    auto db = ddb::open(dsFolder.string(), true);
+    ddb::addToIndex(db.get(), {root.string(), ta.getPath("geo1/train.ply").string()});
+    Entry bare, georeferenced;
+    ASSERT_TRUE(loadEntry(db.get(), "train.ply", bare));
+    ASSERT_TRUE(loadEntry(db.get(), "geo1/train.ply", georeferenced));
+    ASSERT_EQ(bare.hash, georeferenced.hash) << "the same file";
+    ASSERT_EQ(bare.type, EntryType::GaussianSplat);
+    EXPECT_FALSE(bare.properties.contains("georef"));
+    ASSERT_TRUE(georeferenced.properties.contains("georef"));
+
+    // The root key is the hash; the other adds the digest of its georeference
+    const std::string bareKey = entryHandler(bare.type).buildKey(bare);
+    const std::string geoKey = entryHandler(georeferenced.type).buildKey(georeferenced);
+    EXPECT_EQ(bareKey, bare.hash);
+    EXPECT_EQ(geoKey.size(), 64u + 1 + 16);
+    EXPECT_EQ(geoKey.substr(0, 65), bare.hash + "-");
+
+    // Building the copy with the georeference does not complete the other, and the reverse
+    ddb::build(db.get(), "geo1/train.ply", "", false);
+    EXPECT_TRUE(ddb::isBuildComplete(db.get(), "geo1/train.ply"));
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), "train.ply")) << "the build of geo1 is not the build of the root";
+    ddb::build(db.get(), "train.ply", "", false);
+    EXPECT_TRUE(ddb::isBuildComplete(db.get(), "train.ply"));
+
+    // Two build folders, each with its own bounds.json: the root one is not georeferenced
+    const fs::path buildRoot = fs::path(db->buildDirectory());
+    ASSERT_TRUE(fs::exists(buildRoot / bareKey / "gsplat" / GsplatBoundsFileName));
+    ASSERT_TRUE(fs::exists(buildRoot / geoKey / "gsplat" / GsplatBoundsFileName));
+    const json rootBounds = json::parse(readText(buildRoot / bareKey / "gsplat" / GsplatBoundsFileName));
+    EXPECT_FALSE(rootBounds.contains("wgs84Footprint"));
+    EXPECT_NE(rootBounds.value("upSource", ""), "georef");
+    const json geoBounds = json::parse(readText(buildRoot / geoKey / "gsplat" / GsplatBoundsFileName));
+    EXPECT_EQ(geoBounds["upSource"], "georef");
+    EXPECT_TRUE(geoBounds.contains("wgs84Footprint"));
+
+    // The manifest of each names its own folder, and a rebuild of the root leaves the other alone
+    const json manifest = ddb::getBuildArtifactsJson(db.get(), {"train.ply", "geo1/train.ply"});
+    EXPECT_EQ(manifest[0]["build"]["key"], bareKey);
+    EXPECT_EQ(manifest[1]["build"]["key"], geoKey);
+    EXPECT_EQ(manifest[1]["build"]["state"], "complete");
+    ddb::build(db.get(), "train.ply", "", true);
+    EXPECT_EQ(json::parse(readText(buildRoot / geoKey / "gsplat" / GsplatBoundsFileName)), geoBounds);
 }
 
 // The thumbnail stands a georeferenced splat on +Z, as bounds.json says, whatever its splats look

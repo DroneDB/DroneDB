@@ -15,6 +15,7 @@
 
 #include "build.h"
 #include "build_internal.h"
+#include "build_layout.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "gtest/gtest.h"
@@ -45,7 +46,7 @@ struct Dataset : IndexFixture {
 
     // The marker of rel is in its released form: due at once, awaiting no file
     bool released(const std::string& rel) {
-        std::ifstream in(db->buildDirectory() / (indexedHash(db.get(), rel) + ".pending"), std::ios::binary);
+        std::ifstream in(db->buildDirectory() / pendingMarkerName(indexedHash(db.get(), rel), rel), std::ios::binary);
         return in.is_open() && std::string(std::istreambuf_iterator<char>(in), {}) == "0\n";
     }
 };

@@ -81,6 +81,10 @@ class GaussianSplatEntryHandler : public EntryHandler {
 
     std::string subfolder() const override { return GsplatBuildSubfolder; }
 
+    // The georeference found next to the file is part of the build (the splat's bounds.json, the
+    // origin of the 3D Tiles): the same file in two folders builds once for each
+    bool buildDependsOnGeoref() const override { return true; }
+
     std::vector<BuildArtifact> artifacts() const override {
         return {BuildArtifact::file("gsplat.lod", artifactPath(GsplatBuildSubfolder, GsplatRadFileName),
                                     GsplatMediaType, GsplatRadFileName),

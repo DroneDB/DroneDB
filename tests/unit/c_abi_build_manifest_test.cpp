@@ -148,7 +148,7 @@ namespace
         Dataset src(TEST_NAME);
         Dataset dst(TEST_NAME, "dst", false);
         src.buildCog();
-        writeFile(src.build / (H_PENDING + ".pending"), "1700000000\npending.shx\n");
+        writeFile(src.build / pendingMarkerName(H_PENDING, "pending.shp"), "1700000000\npending.shx\n");
         const char *s = src.root.c_str();
         const char *d = dst.root.c_str();
         char *out = nullptr;

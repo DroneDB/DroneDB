@@ -929,14 +929,27 @@ DDBErr DDBRescanEx(const char* ddbPath, char** output, const char* types, const 
         const auto db = ddb::open(std::string(ddbPath), true);
         auto outJson = json::array();
 
-        rescanIndex(db.get(), typeFilter, extensionFilter, stopOnError,
-                    [&outJson](const Entry& e, bool success, const std::string& error) {
-                        // A failed entry has its path only
-                        json j = success ? json(e) : json{{"path", e.path}, {"error", error}};
-                        j["success"] = success;
-                        outJson.push_back(j);
-                        return true; // continue processing
-                    });
+        // The key callback of an entry comes just before its result: its build key and whether the
+        // rescan moved it (D-020), so a host rebuilds only the entries whose build is elsewhere now
+        std::string buildKey;
+        bool buildKeyChanged = false;
+        rescanIndex(
+            db.get(), typeFilter, extensionFilter, stopOnError,
+            [&](const Entry& e, bool success, const std::string& error) {
+                // A failed entry has its path only
+                json j = success ? json(e) : json{{"path", e.path}, {"error", error}};
+                j["success"] = success;
+                if (success) {
+                    j["buildKey"] = buildKey;
+                    j["buildKeyChanged"] = buildKeyChanged;
+                }
+                outJson.push_back(j);
+                return true; // continue processing
+            },
+            [&](const Entry&, const std::string& key, bool changed) {
+                buildKey = key;
+                buildKeyChanged = changed;
+            });
         return outJson;
     });
 }

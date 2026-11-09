@@ -20,6 +20,7 @@
 #include "dbops.h"
 #include "entry_handler.h"
 #include "fs.h"
+#include "json_fwd.h"
 #include "statement.h"
 
 namespace ddb {
@@ -35,9 +36,13 @@ using PrefixLookup = std::function<std::vector<std::string>(const std::string&)>
 struct BuildTarget {
     // The entry whose artifacts are built: the entry itself, or the main file a
     // sidecar belongs to (the .shp of a .dbf). Type dispatch, the input path and
-    // the output hash all come from it.
+    // the build key all come from it. Its properties hold the georeference when the type's build
+    // depends on it (EntryHandler::buildDependsOnGeoref).
     Entry entry;
-    // Output subfolder in "<build root>/<entry.hash>/" (handler->subfolder())
+    // The build key of entry (handler->buildKey()): the name of its folder "<build root>/<key>/", and
+    // the stem of its pending marker (build_layout.h)
+    std::string key;
+    // Output subfolder in "<build root>/<key>/" (handler->subfolder())
     std::string subfolder;
     // The registered handler of entry.type: builds it and checks its completeness
     const EntryHandler* handler = nullptr;
@@ -60,12 +65,27 @@ std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e);
 // The indexed paths of db that start with prefix (one range scan of the path index)
 std::vector<std::string> indexedPathsWithPrefix(Database* db, const std::string& prefix);
 
+// The properties of an entry that the build key reads: {"georef": ...} from the text of the georef
+// property as the index holds it (json_extract(properties, '$.georef')), {} when there is none
+json keyProperties(const std::string& georefText);
+
+// The build key of an entry from the index columns `hash`, `type` and json_extract(properties, '$.georef')
+std::string buildKeyOfRow(const std::string& hash, EntryType type, const std::string& georefText);
+
+// Called with the path, the content hash and the build key of an indexed entry
+using IndexedBuildVisitor =
+    std::function<void(const std::string& path, const std::string& hash, const std::string& key)>;
+// Calls visit for every entry of db that has a hash (the files): the build keys the index holds, so a
+// cleanup keeps the folders and the markers they name and removes the others
+void forEachIndexedBuild(Database* db, const IndexedBuildVisitor& visit);
+
 // The build targets of many entries of one index, with two prepared statements reused for
 // every lookup (getBuildStatus, the build manifest): only path, hash and type are read.
 class IndexBuildTargets {
   public:
     explicit IndexBuildTargets(Database* db);
-    // Reads path, hash and type of the entry at path; nothing when there is none
+    // Reads path, hash and type of the entry at path, and the georeference of its properties (the
+    // build key reads it); nothing when there is none
     std::optional<Entry> lookup(const std::string& path);
     // resolveBuildTarget() over this index
     std::optional<BuildTarget> resolve(const Entry& e);
@@ -83,7 +103,7 @@ struct DirectoryName {
     bool directory = false;
 };
 
-// The content of a "<hash>.pending" marker (pending_markers.cpp)
+// The content of a pending marker "<key>.<pathId>.pending" (pending_markers.cpp)
 struct PendingMarker {
     // Unix time of the last attempt; 0 when the first line is not a valid timestamp
     time_t lastAttempt = 0;
@@ -121,9 +141,9 @@ const BuildProbe& filesystemBuildProbe();
 
 // Reads the build state of entries of one index (one connection for a whole batch).
 // A non-buildable entry costs no filesystem query. A buildable one costs:
-//   1 listing of its build root "<build root>/<hash>" (which also tells whether a lock file
+//   1 listing of its build root "<build root>/<key>" (which also tells whether a lock file
 //     exists, and which artifact folders do);
-//   1 read of "<hash>.pending";
+//   1 read of the pending marker of the entry ("<key>.<pathId>.pending");
 //   1 lock probe, only when "<subfolder>.building" exists;
 //   1 query per artifact folder that exists (a listing for file artifacts, the index file of
 //     a directory artifact), a legacy artifact only while the role it stands in for is missing;
@@ -196,7 +216,7 @@ constexpr time_t pendingRetryAfter(time_t lastAttempt) {
                : lastAttempt + PendingRetryBackoffSeconds;
 }
 
-// Replaces "<hash>.pending" with a fresh timestamp and the given dependency
+// Replaces the pending marker with a fresh timestamp and the given dependency
 // lines, through an atomic rename of a sibling. A failed write or rename is
 // logged and returns false; the previous marker is then kept.
 bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines);
@@ -242,10 +262,13 @@ void releasePendingMarkerIfSatisfied(const fs::path& pendingPath, const std::vec
                                      const PendingDependencyLookup& where);
 
 // Releases (releasePendingMarker()) every marker of db that awaits one of the files at filePaths
-// (dataset-relative paths of files just indexed: added, updated or moved there). A dependency
-// matches by file name, case-insensitively, wherever its folder is: markers of older versions
-// hold names relative to the source file's folder, and a name that never matches would leave a
-// build waiting forever, while a false match only costs one retry. Lists the build directory
+// (dataset-relative paths of files just indexed: added, updated or moved there). A marker of an entry
+// is released by the file it awaits: its name is dataset-relative, or relative to the folder of the entry
+// (markers of older versions), compared case-insensitively. The same file name in another folder does
+// not release it: the entry would be retried and find the build of its twin (the same content in
+// another folder, D-020) complete without its own file. A marker of the layout before the build key
+// (the marker of every entry of the content) is released by file name, wherever its folder is: a false match only
+// costs one retry. Lists the build directory
 // once per call and does nothing more when it has no marker. Best effort: it runs after the
 // index change is committed, so failures are logged and never thrown.
 void releasePendingBuildsAwaiting(Database* db, const std::vector<std::string>& filePaths);
@@ -261,14 +284,24 @@ void releasePendingMarkerIfIndexed(Database* db, const fs::path& pendingPath);
 // from cannot be read or to cannot be written; the previous marker at to is then kept.
 void copyPendingMarker(const fs::path& from, const fs::path& to);
 
+// Moves the legacy marker "<build root>/<hash>.pending" (the layout before the build key, one marker for
+// every entry of the content) to the pending marker of each buildable entry of that hash (pendingMarkerPath()),
+// keeping the marker an entry has already, and removes it. Each new marker is in its released form (no
+// dependency, due at once: its names were those of one entry of the content), so the next retry of each
+// entry checks its own files on disk. A marker that cannot be moved is kept for the next call.
+// Never throws: failures are logged. Nothing happens when there is no legacy marker of that hash.
+void migrateLegacyPendingMarker(Database* db, const fs::path& buildRoot, const std::string& hash);
+// migrateLegacyPendingMarker() of every legacy marker of the build root
+void migrateLegacyPendingMarkers(Database* db, const fs::path& buildRoot);
+
 // Reads the marker at pendingPath without consuming it; nothing when it cannot be opened (no
 // marker). A malformed timestamp reads as 0 (the build is due), as buildPending() treats it.
 std::optional<PendingMarker> readPendingMarker(const fs::path& pendingPath);
 
 // The sibling written by replacePendingMarker() before the atomic rename is
-// "<hash>.pending.tmp-<rand16>" (pendingMarkerTempInfix()). A crash between write
+// "<marker>.tmp-<rand16>" (pendingMarkerTempInfix()). A crash between write
 // and rename leaves it behind; cleanupBuild removes such leftovers once they are old.
-// True for "<64 hex>.pending.tmp-<non-empty suffix>".
+// True for "<name of a marker without its extension>.pending.tmp-<non-empty suffix>".
 bool isPendingMarkerTempName(const std::string& name);
 
 // A pending marker temp file younger than this may belong to a live

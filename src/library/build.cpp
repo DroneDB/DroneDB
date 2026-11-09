@@ -20,6 +20,7 @@
 #include "dbops.h"
 #include "entry_handler.h"
 #include "exceptions.h"
+#include "json.h"
 #include "mio.h"
 
 namespace ddb {
@@ -98,6 +99,35 @@ static const EntryHandler* buildingHandler(const Entry& e) {
     return handler.isBuildable(e) ? &handler : nullptr;
 }
 
+json keyProperties(const std::string& georefText) {
+    json properties = json::object();
+    if (!georefText.empty()) {
+        auto georef = json::parse(georefText, nullptr, false);
+        if (!georef.is_discarded() && georef.is_object())
+            properties["georef"] = std::move(georef);
+    }
+    return properties;
+}
+
+std::string buildKeyOfRow(const std::string& hash, EntryType type, const std::string& georefText) {
+    Entry e;
+    e.hash = hash;
+    e.type = type;
+    e.properties = keyProperties(georefText);
+    return entryHandler(type).buildKey(e);
+}
+
+// The target of a build of entry by handler. The key reads the georeference of the index when the
+// type's build depends on it and entry does not carry its properties (a summary).
+static BuildTarget makeBuildTarget(Entry entry, const EntryHandler& handler, bool viaDependency,
+                                   const EntryLookup& lookup) {
+    if (handler.buildDependsOnGeoref() && !entry.properties.is_object())
+        if (const auto indexed = lookup(entry.path))
+            entry.properties = indexed->properties;
+    std::string key = handler.buildKey(entry);
+    return BuildTarget{std::move(entry), std::move(key), handler.subfolder(), &handler, viaDependency};
+}
+
 // Special case: some files are not buildable by themselves but trigger the
 // (forced) rebuild of their main file, e.g. the .dbf of a shapefile or the .prj
 // of a drawing (SidecarRule). A sidecar is buildable only while its main file is
@@ -113,7 +143,7 @@ static std::optional<BuildTarget> resolveDependencyTarget(const Entry& e, const 
         if (!mainEntry)
             continue;
         if (const EntryHandler* handler = buildingHandler(*mainEntry))
-            return BuildTarget{*mainEntry, handler->subfolder(), handler, true};
+            return makeBuildTarget(*mainEntry, *handler, true, lookup);
     }
     return std::nullopt;
 }
@@ -121,7 +151,7 @@ static std::optional<BuildTarget> resolveDependencyTarget(const Entry& e, const 
 std::optional<BuildTarget> resolveBuildTarget(const Entry& e, const EntryLookup& lookup,
                                               const PrefixLookup& siblings) {
     if (const EntryHandler* handler = buildingHandler(e))
-        return BuildTarget{e, handler->subfolder(), handler, false};
+        return makeBuildTarget(e, *handler, false, lookup);
 
     return resolveDependencyTarget(e, lookup, siblings);
 }
@@ -151,7 +181,7 @@ bool isBuildable(Database* db, const std::string& path) {
 // isBuildComplete() for a resolved target. For dependencies, completeness is
 // defined by the main file's artifacts.
 static bool isTargetBuildComplete(const fs::path& buildDirectory, const BuildTarget& target) {
-    return target.handler->isComplete(buildDirectory / target.entry.hash);
+    return target.handler->isComplete(buildDirectory / io::fromUtf8(target.key));
 }
 
 bool isBuildComplete(Database* db, const std::string& path) {
@@ -164,8 +194,8 @@ bool isBuildComplete(Database* db, const std::string& path) {
 }
 
 IndexBuildTargets::IndexBuildTargets(Database* db)
-    // Only the columns the build rules read
-    : byPath_(db->query("SELECT path, hash, type FROM entries WHERE path = ?")),
+    // Only the columns the build rules read: the georeference is the one property of the build key
+    : byPath_(db->query("SELECT path, hash, type, json_extract(properties, '$.georef') FROM entries WHERE path = ?")),
       byPrefix_(db->query(PathsWithPrefixQuery)) {}
 
 std::optional<Entry> IndexBuildTargets::lookup(const std::string& path) {
@@ -176,6 +206,8 @@ std::optional<Entry> IndexBuildTargets::lookup(const std::string& path) {
         found->path = byPath_->getText(0);
         found->hash = byPath_->getText(1);
         found->type = static_cast<EntryType>(byPath_->getInt(2));
+        // The properties the build key reads (an object, also when there is no georeference)
+        found->properties = keyProperties(byPath_->getText(3));
     }
     byPath_->reset();
     return found;
@@ -185,6 +217,17 @@ std::optional<BuildTarget> IndexBuildTargets::resolve(const Entry& e) {
     return resolveBuildTarget(
         e, [this](const std::string& p) { return lookup(p); },
         [this](const std::string& prefix) { return fetchPathsWithPrefix(*byPrefix_, prefix); });
+}
+
+void forEachIndexedBuild(Database* db, const IndexedBuildVisitor& visit) {
+    const auto q = db->query(
+        "SELECT path, hash, type, json_extract(properties, '$.georef') FROM entries "
+        "WHERE hash IS NOT NULL AND hash <> ''");
+    while (q->fetch()) {
+        const std::string hash = q->getText(1);
+        visit(q->getText(0), hash,
+              buildKeyOfRow(hash, static_cast<EntryType>(q->getInt(2)), q->getText(3)));
+    }
 }
 
 std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::string>& paths) {
@@ -223,7 +266,7 @@ bool isBuildActive(Database* db, const std::string& path) {
 
     // Construct the output folder path
     std::string outPath = io::toUtf8(db->buildDirectory());
-    fs::path baseOutputPath = io::fromUtf8(outPath) / target->entry.hash;
+    fs::path baseOutputPath = io::fromUtf8(outPath) / io::fromUtf8(target->key);
     std::string outputFolder = io::toUtf8(baseOutputPath / target->subfolder);
     std::string lockFile = buildLockPath(outputFolder);
 

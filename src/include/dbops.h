@@ -24,6 +24,9 @@ namespace ddb
     /// updated (its row was re-parsed), with the path
     typedef std::function<void(bool deleted, const std::string &path)> SyncCallback;
     typedef std::function<bool(const Entry &e, bool success, const std::string &error)> RescanCallback;
+    /// Told, for each entry a rescan re-read, the build key it has now (build_layout.h buildKey) and whether
+    /// that key is not the one of the build it had before (D-020): its build must be made again
+    typedef std::function<void(const Entry &e, const std::string &buildKey, bool buildKeyChanged)> RescanKeyCallback;
 
     // Options for addToIndexEx / DDBAddWithOptions.
     struct AddOptions {
@@ -164,7 +167,8 @@ namespace ddb
     // an InvalidArgsException.
     void writeEntries(std::ostream &out, const std::vector<Entry> &entries, OutputFormat format,
                       const EntryJsonDecorator &decorate = nullptr);
-    void checkDeleteBuild(Database *db, const std::string &hash);
+    /// Removes the build folder "<build root>/<key>" (the build key of an entry, see build_layout.h)
+    void checkDeleteBuild(Database *db, const std::string &key);
     void checkDeleteMeta(Database *db, const std::string &path);
 
     void doUpdate(Statement *updateQ, const Entry &e);
@@ -240,6 +244,14 @@ namespace ddb
      *                     - true: Continue rescanning.
      *                     - false: Cancel the operation immediately.
      *                     If callback is nullptr, no per-entry notification is performed.
+     * @param keyCallback  Optional, called with the entry just before callback when the entry was re-read:
+     *                     its build key, and whether that key changed. The key before the rescan is the
+     *                     key the index row had (its hash, and its georeference for a type whose build
+     *                     depends on it), or the hash, the name of the folders before the build key, when
+     *                     there is no folder of that key but one of the hash (so the first rescan after the
+     *                     upgrade reports the built models and splats that have a georeference, and nothing
+     *                     else, as changed; an entry with no build at all is not reported again). The rescan also moves the pending markers of the layout before the
+     *                     build key to the markers of their entries (once the index is committed).
      *
      * Exceptions:
      *   - Throws AppException if stopOnError is true and an error occurs.
@@ -249,7 +261,7 @@ namespace ddb
      */
     void rescanIndex(Database *db, const std::vector<EntryType> &types,
                      const std::vector<std::string> &extensions, bool stopOnError = true,
-                     RescanCallback callback = nullptr);
+                     RescanCallback callback = nullptr, RescanKeyCallback keyCallback = nullptr);
     void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
     void moveEntry(Database *db, const std::string &source, const std::string &dest);
     /** Exact lookup of one entry (without its metadata); nothing when `path` is not indexed. */

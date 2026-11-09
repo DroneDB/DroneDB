@@ -84,7 +84,7 @@ struct ManifestFixture : IndexFixture {
         writeFile(build / H_ROADS / "mvt" / "0" / "0" / "0.pbf", "x");
         writeFile(build / H_CAD / "vec" / "source.gpkg", "x");
         writeFile(build / H_CAD / "vec" / "local.json", "{}");
-        writeFile(build / (H_PENDING + ".pending"), "1700000000\nsub/pending.shx\nsub/pending.dbf\n");
+        writeFile(build / pendingMarkerName(H_PENDING, "pending.shp"), "1700000000\nsub/pending.shx\nsub/pending.dbf\n");
         fs::create_directories(build / H_BUSY);
         writeFile(build / H_STALE / "cog" / "cog.tif", "x");
         writeFile(build / H_STALE / "cog.building", "12345");  // no live holder
@@ -346,7 +346,7 @@ TEST(BuildManifest, Json) {
     EXPECT_EQ(cog["awaitingFiles"], false);
 
     EXPECT_TRUE(out[2]["hash"].is_null());
-    EXPECT_EQ(out[2]["build"], json::parse(R"({"buildable": false, "source": null, "hash": null, "root": null,
+    EXPECT_EQ(out[2]["build"], json::parse(R"({"buildable": false, "source": null, "hash": null, "key": null, "root": null,
         "state": "none", "missingDependencies": [], "awaitingFiles": false, "lastAttempt": null,
         "retryAfter": null, "artifacts": []})"));
 
@@ -371,7 +371,7 @@ TEST(BuildManifest, AwaitingFilesFollowsThePendingMarker) {
     EXPECT_TRUE(awaiting());
     EXPECT_EQ(awaiting(), infoAwaiting());
 
-    ASSERT_TRUE(releasePendingMarker(fx.build / (H_PENDING + ".pending")));
+    ASSERT_TRUE(releasePendingMarker(fx.build / pendingMarkerName(H_PENDING, "pending.shp")));
     const json released = getBuildArtifactsJson(fx.db.get(), {"pending.shp"})[0]["build"];
     EXPECT_EQ(released["state"], "pending") << "a released build is still deferred, due at once";
     EXPECT_FALSE(awaiting());
@@ -650,7 +650,7 @@ TEST(BuildManifest, CopyBuildArtifacts) {
     const json pending = copyBuildArtifacts(fx.source.db.get(), fx.destination.db.get(), H_PENDING);
     EXPECT_EQ(pending["pending"], true);
     EXPECT_TRUE(pending["artifacts"].empty());
-    const auto marker = readPendingMarker(fx.destinationBuild / (H_PENDING + ".pending"));
+    const auto marker = readPendingMarker(fx.destinationBuild / pendingMarkerName(H_PENDING, "pending.shp"));
     ASSERT_TRUE(marker.has_value());
     EXPECT_EQ(marker->lastAttempt, 1700000000);
     EXPECT_EQ(marker->missingDependencies, (std::vector<std::string>{"sub/pending.shx", "sub/pending.dbf"}));
@@ -676,7 +676,7 @@ TEST(BuildManifest, CopiedPendingMarkerIsReleasedWhenTheDestinationIndexesADepen
 
     // Nothing of that name: the copy keeps the marker as it is
     copyBuildArtifacts(fx.source.db.get(), fx.destination.db.get(), H_PENDING);
-    auto marker = readPendingMarker(fx.destinationBuild / (H_PENDING + ".pending"));
+    auto marker = readPendingMarker(fx.destinationBuild / pendingMarkerName(H_PENDING, "pending.shp"));
     ASSERT_TRUE(marker.has_value());
     EXPECT_TRUE(marker->awaitsFiles());
     EXPECT_EQ(marker->lastAttempt, 1700000000);
@@ -684,7 +684,7 @@ TEST(BuildManifest, CopiedPendingMarkerIsReleasedWhenTheDestinationIndexesADepen
     // The transfer put the .dbf in another folder, under another case ("sub/pending.dbf" awaited)
     insertEntry(fx.destination.db.get(), "moved/Pending.DBF", std::string(64, 'b'), EntryType::Generic);
     copyBuildArtifacts(fx.source.db.get(), fx.destination.db.get(), H_PENDING);
-    marker = readPendingMarker(fx.destinationBuild / (H_PENDING + ".pending"));
+    marker = readPendingMarker(fx.destinationBuild / pendingMarkerName(H_PENDING, "pending.shp"));
     ASSERT_TRUE(marker.has_value());
     EXPECT_FALSE(marker->awaitsFiles());
     EXPECT_EQ(marker->lastAttempt, 0);

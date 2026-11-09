@@ -10,6 +10,7 @@ namespace ddb {
 
 void to_json(json& j, const PendingBuildInfo& info) {
     j = json{{"hash", info.hash},
+             {"key", info.key},
              {"path", info.path},
              {"missingDependencies", info.missingDependencies},
              {"lastAttempt", info.lastAttempt},
