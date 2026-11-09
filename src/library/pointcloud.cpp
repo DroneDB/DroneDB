@@ -30,6 +30,7 @@
 #include "mio.h"
 #include "parallel.h"
 #include "ply.h"
+#include "raster_artefacts.h"
 #include "untwine_runner.h"
 
 namespace ddb {
@@ -777,12 +778,24 @@ static std::vector<std::string> lasInputs(const std::vector<std::string>& filena
     return inputFiles;
 }
 
-void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir, const BuildOptions& options) {
-    fs::path dest = io::fromUtf8(outdir);
+// The private folder in the output folder that a COPC is built in
+static constexpr const char* kCopcStagingPrefix = ".copc-stage-";
+
+void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir, const BuildOptions& options,
+               bool overwrite) {
+    const fs::path dest = io::fromUtf8(outdir);
+    const fs::path outPath = dest / CopcFileName;
+    // Before anything is read or written: the COPC replaces only cloud.copc.laz in dest
+    io::assureReplaceable(outPath, overwrite, io::fromUtf8(filenames));
     io::assureFolderExists(dest);
 
-    fs::path tmpDir = dest / "tmp";
+    // The folder of the output is the caller's (a "tmp" in it is somebody's): the conversions
+    // and the build go to a private folder made in it, removed with whatever is left in it, and
+    // the COPC is moved to its name once it is whole
+    const io::ScopedTempDir staging = raster::makePrivateFolder(dest, kCopcStagingPrefix, raster::PrivateFolderWriter::Host);
+    const fs::path tmpDir = staging.path() / "tmp";
     io::assureFolderExists(tmpDir);
+    const fs::path produced = staging.path() / CopcFileName;
 
     // Minimum epsilon for extent validation (in the point cloud's native units)
     // This prevents degenerate output for zero-extent or near-zero-extent inputs.
@@ -808,23 +821,16 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
                                    "). Point cloud must have spatial extent for COPC generation.");
     }
 
-    const fs::path outPath = dest / CopcFileName;
-    io::assureIsRemoved(outPath);
-
-    // Legacy EPT cleanup: if a previous EPT build is in this folder, remove it. The
-    // build pipeline already does this on its side, but we are defensive here too.
-    io::assureIsRemoved(dest / LegacyEptFileName);
-    io::assureIsRemoved(dest / LegacyEptDataFolder);
-    io::assureIsRemoved(dest / LegacyEptHierarchyFolder);
-
     CopcBackend backend = untwine::resolveBackend(CopcBackend::Auto);
 
     if (backend == CopcBackend::Untwine) {
         // Dedicated temp dir to keep parallel builds isolated.
         fs::path untwineTemp = tmpDir / "untwine";
-        const auto result = untwine::runUntwineResult(inputFiles, outPath, untwineTemp);
-        if (result.succeeded && fs::exists(outPath)) {
-            io::assureIsRemoved(tmpDir);
+        const auto result = untwine::runUntwineResult(inputFiles, produced, untwineTemp);
+        if (result.succeeded && fs::exists(produced)) {
+            // The output may have appeared while the COPC was built: replaced only when asked
+            io::assureReplaceable(outPath, overwrite);
+            raster::publishArtefact(produced, outPath);
             return;
         }
         // Idle timeout/identifiable ENOSPC abort this primary attempt and preserve
@@ -833,10 +839,12 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
         // Auto fallback: log a warning and try PDAL for ordinary failures.
         LOGD << "Untwine COPC build failed (" << result.error << "), falling back to PDAL writers.copc";
         // Make sure no half-written output is left behind before the fallback runs.
-        io::assureIsRemoved(outPath);
+        io::assureIsRemoved(produced);
     }
 
-    buildCopcPdal(inputFiles, outPath, tmpDir, options);
+    buildCopcPdal(inputFiles, produced, tmpDir, options);
+    io::assureReplaceable(outPath, overwrite);
+    raster::publishArtefact(produced, outPath);
 }
 
 void to_json(json& j, const PointCloudInfo& info) {

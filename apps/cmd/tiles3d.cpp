@@ -29,8 +29,8 @@ namespace cmd
     ("lon", "Longitude of the model origin (WGS84). With --lat, forces a georeferenced tileset", cxxopts::value<double>())
     ("alt", "Altitude of the model origin in meters (used with --lat/--lon)", cxxopts::value<double>()->default_value("0"))
     ("local", "Force a non-georeferenced (local) tileset, skipping sidecar auto-detection", cxxopts::value<bool>()->default_value("false"))
-    ("overwrite", "Overwrite the output directory if it exists", cxxopts::value<bool>()->default_value("false"))
     ("force-defaults", "Skip face-count heuristic and use default Obj2Tiles parameters (divisions=3, lods=3, octree=true) for testing", cxxopts::value<bool>()->default_value("false"));
+    cmd::addOverwriteOption(opts);
         // clang-format on
         opts.parse_positional({"input", "output"});
     }
@@ -56,7 +56,7 @@ namespace cmd
         else
             output = ddb::io::toUtf8(ddb::io::fromUtf8(input).parent_path() / "3dtiles");
 
-        const bool overwrite = opts["overwrite"].as<bool>();
+        const bool overwrite = cmd::getOverwriteOption(opts);
         const bool forceLocal = opts["local"].as<bool>();
         const bool forceDefaults = opts["force-defaults"].as<bool>();
 

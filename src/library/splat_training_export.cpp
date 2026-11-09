@@ -1112,22 +1112,16 @@ namespace ddb
             return *georef;
         }
 
-        // Whether p is folder or lies inside it, links resolved
-        bool isAtOrInside(const fs::path &p, const fs::path &folder)
-        {
-            return io::isSamePath(p, folder) || io::Path(folder).isParentOf(p);
-        }
-
         // Refuses an output folder where the export could replace a file it did not make: the
         // images it links or resizes and georef.json replace a file of the same name, and a
         // georef.json becomes the georeference of every model and splat beside it. So the folder
         // is new or empty and apart from the project (neither the project, in it nor holding it).
         void assureUsableOutFolder(const fs::path &odmProjectFolder, const fs::path &outFolder)
         {
-            if (isAtOrInside(outFolder, odmProjectFolder))
+            if (io::isAtOrInside(outFolder, odmProjectFolder))
                 throw InvalidArgsException("The training data cannot be written into the ODM project folder " +
                                            io::toUtf8(odmProjectFolder) + " or a folder in it: choose a new folder elsewhere");
-            if (isAtOrInside(odmProjectFolder, outFolder))
+            if (io::isAtOrInside(odmProjectFolder, outFolder))
                 throw InvalidArgsException("The training data cannot be written into " + io::toUtf8(outFolder) +
                                            ", which holds the ODM project: choose a new folder elsewhere");
 

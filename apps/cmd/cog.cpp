@@ -19,6 +19,7 @@ namespace cmd
     cmd::addOutputOption(opts, "Output Cloud Optimized GeoTIFF");
     opts.add_options()
     ("i,input", "Input georeferenced raster (GeoTIFF, JPEG 2000, ...) to process", cxxopts::value<std::string>());
+    cmd::addOverwriteOption(opts);
 
         // clang-format on
         opts.parse_positional({"output", "input"});
@@ -39,7 +40,7 @@ namespace cmd
         auto input = opts["input"].as<std::string>();
         auto output = opts["output"].as<std::string>();
 
-        ddb::buildCog(input, output);
+        ddb::buildCog(input, output, {}, cmd::getOverwriteOption(opts));
         return EXIT_SUCCESS;
     }
 

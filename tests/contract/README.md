@@ -514,3 +514,10 @@ Registry has to adopt first.
   the search region has no data, the search window is too small or no pile is found (`No
   stockpile detected at this location`), and `DDBDetectAllStockpiles` for a raster without valid
   elevation (no pile found is an empty list, as before). The reason is empty. No fixture changed.
+
+* 2026-11-08: 2.1.0 (ABI 2.1): `capabilities` has `abi.minor` 1 and lists the new exports
+  `DDBAlignRasterEx`, `DDBMaskBordersEx` and `DDBMergeMultispectralEx` (the old exports with an
+  options struct whose `overwrite` replaces an output that exists); `DDBMaskBordersEx` is in
+  `cancellable` too. Additive: no other member and no other fixture changed. The old
+  `DDBAlignRaster`, `DDBMaskBorders` and `DDBMergeMultispectral` now refuse an output that
+  exists (`DDBERR_EXCEPTION`).

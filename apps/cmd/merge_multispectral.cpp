@@ -21,6 +21,7 @@ namespace cmd
     opts.add_options()
     ("validate", "Only validate inputs, don't merge")
     ("i,input", "Input single-band raster files", cxxopts::value<std::vector<std::string>>());
+    cmd::addOverwriteOption(opts);
 
         // clang-format on
         opts.parse_positional({"input"});
@@ -84,7 +85,7 @@ namespace cmd
         }
 
         auto output = opts["output"].as<std::string>();
-        ddb::mergeMultispectral(inputs, output);
+        ddb::mergeMultispectral(inputs, output, cmd::getOverwriteOption(opts));
         std::cout << output << std::endl;
         return EXIT_SUCCESS;
     }

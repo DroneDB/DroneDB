@@ -27,7 +27,11 @@ namespace ddb {
 // (raster::publishArtefact). Throws what IRasterHelper::buildCog throws (a full device is a
 // RetryableBuildException, a process that prints nothing for the idle time one with the reason
 // IdleTimeout).
-void buildCog(const std::string& input, const std::string& outputCog, const BuildOptions& options = {});
+// An output that is the input is refused (InvalidArgsException). An output that exists is
+// replaced when `overwrite` is true (the build handlers and the other internal callers), and
+// otherwise refused before anything is built (OutputExistsException, io::assureReplaceable).
+void buildCog(const std::string& input, const std::string& outputCog, const BuildOptions& options = {},
+              bool overwrite = true);
 // The same build, written as `produced` in a private folder the caller made for it
 // (raster::makePrivateFolder) and left there for the caller to publish, with its statistics
 // (statsSidecarOf) next to it. Throws GDALException when what the helper wrote does not open as

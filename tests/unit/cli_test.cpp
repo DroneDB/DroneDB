@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <string>
@@ -28,6 +29,8 @@
 #include "fake_http_client.h"
 #include "fake_model_tools.h"
 #include "gtest/gtest.h"
+#include "obj2tiles_runner.h"
+#include "raster_test_utils.h"
 #include "stringutil.h"
 #include "tagmanager.h"
 #include "test.h"
@@ -169,7 +172,7 @@ TEST(CliRegistry, everyCommandHelpRunsThroughTheHandler) {
 
 TEST(CliOptions, theSharedOptionsReadTheSameInEveryCommand) {
     const auto &registry = CommandRegistry::builtin();
-    int workingDir = 0, insecure = 0, remote = 0, format = 0, output = 0;
+    int workingDir = 0, insecure = 0, remote = 0, format = 0, output = 0, overwrite = 0;
     for (const auto &name : registry.names()) {
         std::ostringstream help;
         registry.create(name)->printHelp(help);
@@ -195,6 +198,10 @@ TEST(CliOptions, theSharedOptionsReadTheSameInEveryCommand) {
         }
         if (text.find("--output") != std::string::npos)
             output++;
+        if (text.find("--overwrite") != std::string::npos) {
+            overwrite++;
+            EXPECT_NE(text.find("Replace the output if it already exists"), std::string::npos) << name << ": " << text;
+        }
     }
     // The commands that declare them
     EXPECT_EQ(workingDir, 14);
@@ -202,6 +209,8 @@ TEST(CliOptions, theSharedOptionsReadTheSameInEveryCommand) {
     EXPECT_EQ(remote, 2);
     EXPECT_EQ(format, 7);
     EXPECT_EQ(output, 15);
+    // cog, align, merge-multispectral, mask, geoproj, bm3d, gsplat, copc, tile, tiles3d, thumbs (D-028)
+    EXPECT_EQ(overwrite, 11);
 }
 
 TEST(CliOptions, theFormatHelperNamesTheFormatsOfTheCommand) {
@@ -533,6 +542,332 @@ TEST(CliCommands, contourReachesItsWorkInsteadOfFailingToParseItsDefaults) {
     EXPECT_EQ(outcome.code, EXIT_FAILURE);
     EXPECT_EQ(outcome.err.find("failed to parse"), std::string::npos) << outcome.err;
     EXPECT_EQ(outcome.err.find("Usage:"), std::string::npos) << "not a usage error: " << outcome.err;
+}
+
+// ------------------------------------------------------------------------ outputs (D-028)
+//
+// Every command that writes data files refuses an output that exists unless --overwrite, with
+// one line that names the option, and an output that is one of its inputs even with it. The
+// inputs of most refusals need not be what they claim: the check comes before any is read.
+
+std::string readBytes(const std::filesystem::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+std::filesystem::path writeBytes(const std::filesystem::path &path, const std::string &content) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary) << content;
+    return path;
+}
+
+Outcome runCommand(const std::string &name, std::vector<std::string> args) {
+    auto command = CommandRegistry::builtin().create(name);
+    if (!command)
+        throw std::logic_error("no command " + name);
+    return execute(*command, std::move(args));
+}
+
+void expectRefusedAsExisting(const Outcome &outcome, const std::string &label) {
+    EXPECT_EQ(outcome.code, EXIT_FAILURE) << label << ": " << outcome.err;
+    EXPECT_NE(outcome.err.find("add --overwrite to replace it"), std::string::npos) << label << ": " << outcome.err;
+    EXPECT_EQ(outcome.err.find("Usage:"), std::string::npos) << label << ": one message, no usage";
+    EXPECT_EQ(std::count(outcome.err.begin(), outcome.err.end(), '\n'), 1) << label << ": " << outcome.err;
+}
+
+void expectRefusedAsTheInput(const Outcome &outcome, const std::string &label) {
+    EXPECT_EQ(outcome.code, EXIT_FAILURE) << label << ": " << outcome.err;
+    EXPECT_NE(outcome.err.find("is the input file"), std::string::npos) << label << ": " << outcome.err;
+}
+
+// A small raster in Web Mercator: a square of data in a black border
+std::filesystem::path smallRaster(const std::filesystem::path &path, double value, int bands = 3) {
+    testutils::GeoRasterSpec spec;
+    spec.width = spec.height = 64;
+    spec.bands = bands;
+    spec.value = [value](int band, int x, int y) {
+        return x >= 8 && x < 56 && y >= 8 && y < 56 ? value + band * 7 + (x + y) % 5 : 0.0;
+    };
+    return testutils::createGeoRaster(path, spec);
+}
+
+// The cookbook said "ddb cog input.tif output.tif" (the order is output, input): with both
+// present it replaced input.tif with the COG of output.tif
+TEST(CliOutputSafety, cogNeverReplacesAnExistingOutputOrItsInputWithoutOverwrite) {
+    TestArea ta("cli_cog_output", true);
+    const auto a = smallRaster(ta.getPath("a.tif"), 100).string();
+    const auto b = smallRaster(ta.getPath("b.tif"), 200).string();
+    const auto aBytes = readBytes(a), bBytes = readBytes(b);
+
+    expectRefusedAsExisting(runCommand("cog", {a, b}), "cog a.tif b.tif");
+    EXPECT_EQ(readBytes(a), aBytes);
+    EXPECT_EQ(readBytes(b), bBytes);
+
+    for (const auto &args : std::vector<std::vector<std::string>>{
+             {"-i", a, "-o", a}, {"--overwrite", "-i", a, "-o", a}, {"--overwrite", a, a}}) {
+        expectRefusedAsTheInput(runCommand("cog", args), "the input as the output");
+        EXPECT_EQ(readBytes(a), aBytes);
+    }
+
+    const auto replaced = runCommand("cog", {"--overwrite", a, b});
+    EXPECT_EQ(replaced.code, EXIT_SUCCESS) << replaced.err;
+    EXPECT_NE(readBytes(a), aBytes) << "--overwrite writes the COG of b.tif to a.tif";
+    EXPECT_EQ(readBytes(b), bBytes);
+
+    const auto out = ta.getPath("out.tif");
+    const auto fresh = runCommand("cog", {"-i", b, "-o", out.string()});
+    EXPECT_EQ(fresh.code, EXIT_SUCCESS) << fresh.err;
+    EXPECT_TRUE(std::filesystem::exists(out));
+}
+
+TEST(CliOutputSafety, alignRefusesAnExistingOutputAndBothOfItsInputs) {
+    TestArea ta("cli_align_output", true);
+    const auto source = writeBytes(ta.getPath("source.tif"), "source").string();
+    const auto reference = writeBytes(ta.getPath("reference.tif"), "reference").string();
+    const auto output = writeBytes(ta.getPath("aligned.tif"), "keep").string();
+
+    expectRefusedAsExisting(runCommand("align", {"-i", source, "-r", reference, "-o", output}), "align");
+    for (const auto &input : {source, reference})
+        expectRefusedAsTheInput(runCommand("align", {"--overwrite", "-i", source, "-r", reference, "-o", input}),
+                                "align -o " + input);
+
+    // With --overwrite the existing output is no reason to refuse (these files are no rasters)
+    const auto passed = runCommand("align", {"--overwrite", "-i", source, "-r", reference, "-o", output});
+    EXPECT_EQ(passed.code, EXIT_FAILURE);
+    EXPECT_EQ(passed.err.find("already exists"), std::string::npos) << passed.err;
+
+    EXPECT_EQ(readBytes(source), "source");
+    EXPECT_EQ(readBytes(reference), "reference");
+    EXPECT_EQ(readBytes(output), "keep");
+}
+
+TEST(CliOutputSafety, mergeMultispectralRefusesAnExistingOutputAndEachOfItsBands) {
+    TestArea ta("cli_merge_output", true);
+    std::vector<std::string> bands;
+    for (int i = 0; i < 3; i++)
+        bands.push_back(smallRaster(ta.getPath("band" + std::to_string(i) + ".tif"), 40.0 + 30 * i, 1).string());
+    const auto lastBand = readBytes(bands.back());
+    const auto output = writeBytes(ta.getPath("merged.tif"), "keep").string();
+    auto args = [&](std::vector<std::string> before) {
+        before.insert(before.end(), bands.begin(), bands.end());
+        return before;
+    };
+
+    expectRefusedAsExisting(runCommand("merge-multispectral", args({"-o", output})), "merge");
+    EXPECT_EQ(readBytes(output), "keep");
+
+    expectRefusedAsTheInput(runCommand("merge-multispectral", args({"--overwrite", "-o", bands.back()})),
+                            "merge onto a band");
+    EXPECT_EQ(readBytes(bands.back()), lastBand);
+
+    const auto written = runCommand("merge-multispectral", args({"--overwrite", "-o", output}));
+    EXPECT_EQ(written.code, EXIT_SUCCESS) << written.err;
+    EXPECT_NE(readBytes(output), "keep");
+}
+
+TEST(CliOutputSafety, maskRefusesAnExistingOutputAndItsInput) {
+    TestArea ta("cli_mask_output", true);
+    const auto input = smallRaster(ta.getPath("ortho.tif"), 128).string();
+    const auto inputBytes = readBytes(input);
+    const auto output = writeBytes(ta.getPath("ortho_masked.tif"), "keep").string();
+
+    // The default output, <input>_masked.tif, and the one given
+    expectRefusedAsExisting(runCommand("mask", {input}), "mask");
+    expectRefusedAsExisting(runCommand("mask", {input, "-o", output}), "mask -o");
+    EXPECT_EQ(readBytes(output), "keep");
+
+    expectRefusedAsTheInput(runCommand("mask", {"--overwrite", input, "-o", input}), "mask onto its input");
+    EXPECT_EQ(readBytes(input), inputBytes);
+
+    const auto written = runCommand("mask", {"--overwrite", input});
+    EXPECT_EQ(written.code, EXIT_SUCCESS) << written.err;
+    EXPECT_NE(readBytes(output), "keep");
+}
+
+// The cookbook form (-o after the images) printed the usage: cxxopts gave the first positional to
+// the output, so no image was left
+TEST(CliOutputSafety, geoprojTakesItsOutputFirstOrFromOAndChecksEveryProjectedFile) {
+    TestArea ta("cli_geoproj_output", true);
+    const auto a = writeBytes(ta.getPath("images/a.JPG"), "not a photo").string();
+    const auto b = writeBytes(ta.getPath("images/b.JPG"), "not a photo").string();
+    const auto out = ta.getFolder("projected").string();
+    const auto projectedA = writeBytes(ta.getPath("projected/a.tif"), "keep");
+
+    for (const auto &args : std::vector<std::vector<std::string>>{
+             {out + "/", a}, {a, "-o", out + "/"}, {"-o", out, a}, {out, "-i", a}}) {
+        expectRefusedAsExisting(runCommand("geoproj", args), "geoproj " + args.front());
+        EXPECT_EQ(readBytes(projectedA), "keep");
+    }
+
+    // Several images: nothing is written when one of the files exists
+    expectRefusedAsExisting(runCommand("geoproj", {out, a, b}), "geoproj two images");
+    EXPECT_FALSE(std::filesystem::exists(ta.getPath("projected/b.tif")));
+
+    // One image to a file
+    const auto file = writeBytes(ta.getPath("one.tif"), "keep");
+    expectRefusedAsExisting(runCommand("geoproj", {file.string(), a}), "geoproj file");
+    EXPECT_EQ(readBytes(file), "keep");
+
+    // The output is the image
+    expectRefusedAsTheInput(runCommand("geoproj", {"--overwrite", a, a}), "geoproj onto its image");
+    EXPECT_EQ(readBytes(a), "not a photo");
+
+    // Two images with one name
+    writeBytes(ta.getPath("x/IMG.JPG"), "1");
+    writeBytes(ta.getPath("y/IMG.JPG"), "2");
+    const auto twice = runCommand("geoproj", {"--overwrite", ta.getPath("both").string() + "/",
+                                              ta.getPath("x/IMG.JPG").string(), ta.getPath("y/IMG.JPG").string()});
+    EXPECT_EQ(twice.code, EXIT_FAILURE);
+    EXPECT_NE(twice.err.find("would both be written to"), std::string::npos) << twice.err;
+    EXPECT_FALSE(std::filesystem::exists(ta.getPath("both")));
+
+    // A missing folder named with a trailing separator is made (the photo is skipped: no GeoImage)
+    const auto made = runCommand("geoproj", {ta.getPath("made").string() + "/", a});
+    EXPECT_EQ(made.code, EXIT_SUCCESS) << made.err;
+    EXPECT_TRUE(std::filesystem::is_directory(ta.getPath("made")));
+}
+
+TEST(CliOutputSafety, bm3dRefusesAnExistingOutputAndItsInput) {
+    TestArea ta("cli_bm3d_output", true);
+    const auto model = writeBytes(ta.getPath("m.obj"), "v 0 0 0\n").string();
+    const auto output = writeBytes(ta.getPath("m.bm3d"), "keep").string();
+
+    expectRefusedAsExisting(runCommand("bm3d", {model}), "bm3d (default output)");
+    expectRefusedAsExisting(runCommand("bm3d", {model, output}), "bm3d");
+    expectRefusedAsTheInput(runCommand("bm3d", {"--overwrite", model, model}), "bm3d onto its input");
+    EXPECT_EQ(readBytes(output), "keep");
+    EXPECT_EQ(readBytes(model), "v 0 0 0\n");
+}
+
+TEST(CliOutputSafety, gsplatReplacesAnExistingSpzOnlyWithOverwrite) {
+    TestArea ta("cli_gsplat_output", true);
+    const auto splat = writeBytes(ta.getPath("scene.splat"), std::string(64, '\1')).string();
+    const auto output = writeBytes(ta.getPath("scene.spz"), "keep").string();
+
+    expectRefusedAsExisting(runCommand("gsplat", {splat}), "gsplat (default output)");
+    expectRefusedAsExisting(runCommand("gsplat", {splat, output}), "gsplat");
+    EXPECT_EQ(readBytes(output), "keep");
+
+    const auto written = runCommand("gsplat", {"--overwrite", splat, output});
+    EXPECT_EQ(written.code, EXIT_SUCCESS) << written.err;
+    EXPECT_NE(readBytes(output), "keep");
+}
+
+// ddb copc built in <output>/tmp and removed it (a tmp/ of the user's), and removed the COPC
+// and legacy EPT files of the folder before it read its inputs (which could be one of them)
+TEST(CliOutputSafety, copcTouchesNothingButItsOutput) {
+    TestArea ta("cli_copc_output", true);
+    EnvVarGuard backend("DDB_COPC_BACKEND", "pdal"), forcePdal("DDB_USE_PDAL_COPC");
+    unsetEnv("DDB_USE_PDAL_COPC");
+    const auto project = ta.getFolder("project");
+    std::string points;
+    for (int i = 0; i <= 10; i++)
+        points += std::to_string(i) + " " + std::to_string((i * 7) % 11) + " " + std::to_string(i % 3) + "\n";
+    const auto cloud = writeBytes(project / "cloud.xyz", points).string();
+    const auto mine = writeBytes(project / "tmp" / "mine.txt", "mine");
+    const auto legacy = writeBytes(project / "ept.json", "{}");
+
+    const auto built = runCommand("copc", {project.string(), cloud});
+    ASSERT_EQ(built.code, EXIT_SUCCESS) << built.err;
+    const auto copc = project / "cloud.copc.laz";
+    ASSERT_TRUE(std::filesystem::exists(copc));
+    EXPECT_EQ(readBytes(mine), "mine") << "the tmp/ folder of the user is left alone";
+    EXPECT_EQ(readBytes(cloud), points);
+    EXPECT_TRUE(std::filesystem::exists(legacy)) << "only the build handler removes legacy EPT files";
+    for (const auto &entry : std::filesystem::directory_iterator(project))
+        EXPECT_NE(entry.path().filename().string().rfind(".copc-stage-", 0), 0u) << "the staging folder is gone";
+
+    const auto copcBytes = readBytes(copc);
+    expectRefusedAsExisting(runCommand("copc", {project.string(), cloud}), "copc again");
+    expectRefusedAsTheInput(runCommand("copc", {"--overwrite", project.string(), copc.string()}), "copc of its output");
+    EXPECT_EQ(readBytes(copc), copcBytes);
+
+    const auto again = runCommand("copc", {"--overwrite", project.string(), cloud});
+    EXPECT_EQ(again.code, EXIT_SUCCESS) << again.err;
+    EXPECT_TRUE(std::filesystem::exists(copc));
+    EXPECT_EQ(readBytes(mine), "mine");
+}
+
+TEST(CliOutputSafety, tileChecksEveryTileBeforeItWritesOne) {
+    TestArea ta("cli_tile_output", true);
+    const auto raster = smallRaster(ta.getPath("ortho.tif"), 128).string();
+    const auto out = ta.getPath("tiles").string();
+    const std::vector<std::string> args = {"-z", "14-15", raster, out};
+
+    const auto first = runCommand("tile", args);
+    ASSERT_EQ(first.code, EXIT_SUCCESS) << first.err;
+    std::vector<std::filesystem::path> tiles;
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(out))
+        if (entry.is_regular_file())
+            tiles.push_back(entry.path());
+    ASSERT_EQ(tiles.size(), 2u);
+
+    // One tile is there, the other is not: nothing is written
+    writeBytes(tiles[0], "keep");
+    std::filesystem::remove(tiles[1]);
+    expectRefusedAsExisting(runCommand("tile", args), "tile again");
+    EXPECT_EQ(readBytes(tiles[0]), "keep");
+    EXPECT_FALSE(std::filesystem::exists(tiles[1]));
+
+    std::vector<std::string> replace = args;
+    replace.insert(replace.begin(), "--overwrite");
+    const auto replaced = runCommand("tile", replace);
+    EXPECT_EQ(replaced.code, EXIT_SUCCESS) << replaced.err;
+    EXPECT_NE(readBytes(tiles[0]), "keep");
+    EXPECT_TRUE(std::filesystem::exists(tiles[1]));
+}
+
+TEST(CliOutputSafety, tiles3dNeverReplacesTheFolderOfItsModel) {
+    if (ddb::obj2tiles::findObj2TilesBinary().empty())
+        GTEST_SKIP() << "Obj2Tiles is not installed: the command stops before it looks at its output";
+    TestArea ta("cli_tiles3d_output", true);
+    const auto models = ta.getFolder("models");
+    const auto model = writeBytes(models / "m.obj", "v 0 0 0\n").string();
+    const auto tileset = writeBytes(models / "3dtiles" / "tileset.json", "keep");
+
+    const auto existing = runCommand("3dtiles", {model});
+    expectRefusedAsExisting(existing, "tiles3d (default output)");
+    EXPECT_NE(existing.err.find("is not empty"), std::string::npos) << existing.err;
+    EXPECT_EQ(readBytes(tileset), "keep");
+
+    const auto holder = runCommand("3dtiles", {"--overwrite", model, "-o", models.string()});
+    EXPECT_EQ(holder.code, EXIT_FAILURE);
+    EXPECT_NE(holder.err.find("holds the input"), std::string::npos) << holder.err;
+    EXPECT_EQ(readBytes(model), "v 0 0 0\n");
+}
+
+TEST(CliOutputSafety, thumbsChecksEveryThumbnailBeforeItWritesOne) {
+    TestArea ta("cli_thumbs_output", true);
+    const auto a = writeBytes(ta.getPath("a.jpg"), "not a picture").string();
+    const auto b = writeBytes(ta.getPath("b.jpg"), "not a picture").string();
+    const auto out = ta.getFolder("thumbs");
+    const auto thumbA = writeBytes(out / "a.webp", "keep");
+
+    expectRefusedAsExisting(runCommand("thumbs", {a, b, "-o", out.string()}), "thumbs of two");
+    EXPECT_EQ(readBytes(thumbA), "keep");
+    EXPECT_FALSE(std::filesystem::exists(out / "b.webp"));
+
+    // Two files with one name
+    const auto x = writeBytes(ta.getPath("x/IMG.jpg"), "1").string();
+    const auto y = writeBytes(ta.getPath("y/IMG.jpg"), "2").string();
+    const auto twice = runCommand("thumbs", {"--overwrite", x, y, "-o", ta.getPath("both").string()});
+    EXPECT_EQ(twice.code, EXIT_FAILURE);
+    EXPECT_NE(twice.err.find("would both be written to"), std::string::npos) << twice.err;
+    EXPECT_FALSE(std::filesystem::exists(ta.getPath("both")));
+
+    // The thumbnail is the input
+    const auto webp = writeBytes(ta.getPath("picture.webp"), "picture").string();
+    expectRefusedAsTheInput(runCommand("thumbs", {"--overwrite", webp, "-o", webp}), "thumbs onto its input");
+    EXPECT_EQ(readBytes(webp), "picture");
+
+    // One raster to one file
+    const auto raster = smallRaster(ta.getPath("ortho.tif"), 128).string();
+    const auto thumb = writeBytes(ta.getPath("ortho.webp"), "keep");
+    expectRefusedAsExisting(runCommand("thumbs", {raster, "-o", thumb.string()}), "thumbs of one");
+    EXPECT_EQ(readBytes(thumb), "keep");
+    const auto written = runCommand("thumbs", {"--overwrite", raster, "-o", thumb.string()});
+    EXPECT_EQ(written.code, EXIT_SUCCESS) << written.err;
+    EXPECT_EQ(readBytes(thumb).rfind("RIFF", 0), 0u) << "a WebP replaced it";
 }
 
 // ------------------------------------------------------------------------ offline

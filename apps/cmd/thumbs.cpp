@@ -23,6 +23,7 @@ namespace cmd
     opts.add_options()
     ("s,size", "Size of the largest side of the images", cxxopts::value<int>()->default_value("512"))
     ("use-crc", "Use CRC for output filenames", cxxopts::value<bool>());
+    cmd::addOverwriteOption(opts);
         // clang-format on
         opts.parse_positional({"input"});
     }
@@ -44,8 +45,9 @@ namespace cmd
         const auto thumbSize = opts["size"].as<int>();
         const auto useCrc = opts["use-crc"].count();
 
-        ddb::generateThumbs(input, ddb::io::fromUtf8(output), thumbSize, useCrc, [](const auto &thumb)
-                            { std::cout << ddb::io::toUtf8(thumb) << std::endl; });
+        ddb::generateThumbs(
+            input, ddb::io::fromUtf8(output), thumbSize, useCrc,
+            [](const auto &thumb) { std::cout << ddb::io::toUtf8(thumb) << std::endl; }, cmd::getOverwriteOption(opts));
         return EXIT_SUCCESS;
     }
 

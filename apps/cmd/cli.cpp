@@ -40,6 +40,13 @@ namespace cmd
         {
             return usageFailure(command, e.what(), err);
         }
+        catch (const ddb::OutputExistsException &e)
+        {
+            // One line that names the option of the CLI, not the setting of the library
+            err << ddb::OutputExistsException::describe(e.path(), e.isFolder()) << ": add --overwrite to replace it"
+                << std::endl;
+            return EXIT_FAILURE;
+        }
         catch (const ddb::AppException &e)
         {
             err << e.what() << std::endl;

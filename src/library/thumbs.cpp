@@ -24,14 +24,15 @@ void generateThumbs(const std::vector<std::string>& input,
                     const fs::path& output,
                     int thumbSize,
                     bool useCrc,
-                    const std::function<void(const fs::path&)>& onGenerated) {
-    if (input.size() > 1)
-        io::assureFolderExists(output);
+                    const std::function<void(const fs::path&)>& onGenerated,
+                    bool overwrite) {
     const bool outputIsFile = input.size() == 1 && io::Path(output).checkExtension(
                                                        {"jpg", "jpeg", "png", "webp", "json"});
 
     const std::vector<fs::path> filePaths = io::fromUtf8(input);
 
+    // The thumbnail of each file, every one checked before the first is written
+    std::vector<std::pair<fs::path, fs::path>> targets;
     for (auto& fp : filePaths) {
         LOGD << "Parsing entry " << io::toUtf8(fp);
 
@@ -49,12 +50,19 @@ void generateThumbs(const std::vector<std::string>& input,
             } else {
                 outImagePath = output / fs::path(fp).replace_extension(".webp").filename();
             }
-            const fs::path generated = generateThumb(fp, thumbSize, outImagePath, true, nullptr, nullptr);
-            if (onGenerated)
-                onGenerated(generated);
+            targets.emplace_back(fp, outImagePath);
         } else {
             LOGD << "Skipping " << fp;
         }
+    }
+    io::assureReplaceable(targets, overwrite);
+
+    if (input.size() > 1)
+        io::assureFolderExists(output);
+    for (const auto& [fp, outImagePath] : targets) {
+        const fs::path generated = generateThumb(fp, thumbSize, outImagePath, true, nullptr, nullptr);
+        if (onGenerated)
+            onGenerated(generated);
     }
 }
 

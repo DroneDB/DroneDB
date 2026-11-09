@@ -65,14 +65,15 @@ namespace
         EXPECT_EQ(version & 0xFFFFu, static_cast<uint32_t>(DDB_ABI_MINOR));
     }
 
-    // Pinned: 2.0.0 is the first release with the handshake and the C ABI of the one version.
-    // A new minor or major release changes this on purpose, together with the capabilities
-    // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_0)
+    // Pinned: 2.0.0 is the first release with the handshake and the C ABI of the one version;
+    // 2.1 adds DDBAlignRasterEx, DDBMaskBordersEx and DDBMergeMultispectralEx. A new minor or
+    // major release changes this on purpose, together with the capabilities fixture
+    // (tests/contract/fixtures/capabilities.json).
+    TEST(AbiVersion, is2_1)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 0);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x00020000u);
+        EXPECT_EQ(DDB_ABI_MINOR, 1);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x00020001u);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

@@ -38,6 +38,13 @@ namespace cmd
     // -r, --remote: the registry to push to or pull from (default "": the dataset's tag)
     void addRemoteOption(cxxopts::Options &opts);
 
+    // --overwrite: replace an output that exists. The commands that write data files take it
+    // (D-028) and hand it to their library function, which refuses an existing output without it.
+    void addOverwriteOption(cxxopts::Options &opts);
+
+    // Whether the user gave --overwrite
+    bool getOverwriteOption(const cxxopts::ParseResult &opts);
+
 }
 
 #endif // CMD_OPTIONS_H

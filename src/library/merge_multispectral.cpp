@@ -22,6 +22,7 @@
 #include "merge_vrt.h"
 #include "mio.h"
 #include "parallel.h"
+#include "raster_artefacts.h"
 
 namespace ddb {
 
@@ -30,6 +31,9 @@ namespace {
 using merge::SeparateVrt;
 using merge::buildSeparateVrt;
 using merge::openAll;
+
+// The private folder beside the output that a merge writes its raster in
+constexpr const char *kMergeStagingPrefix = ".merge-stage-";
 
 // The creation options of the tiled GTiff that a merge writes (GDALTranslate and GDALWarp
 // alike); numThreads is the GDAL thread option of the merge's CPU tokens
@@ -308,12 +312,14 @@ GDALDatasetUniquePtr translateMerge(GDALDatasetH hVrt, const std::string &output
 }  // namespace
 
 void mergeMultispectral(const std::vector<std::string> &inputPaths,
-                         const std::string &outputPath) {
+                         const std::string &outputPath,
+                         bool overwrite) {
     if (inputPaths.size() < 2) throw InvalidArgsException("At least 2 files required");
 
-    if (fs::exists(io::fromUtf8(outputPath))) {
-        throw AppException("Output file already exists: " + outputPath);
-    }
+    const fs::path target = fs::absolute(io::fromUtf8(outputPath));
+    if (!target.has_filename())
+        throw InvalidArgsException("Not the path of a file for a merged raster: " + outputPath);
+    io::assureReplaceable(io::fromUtf8(outputPath), overwrite, io::fromUtf8(inputPaths));
 
     auto validation = validateMergeMultispectral(inputPaths);
     if (!validation.ok) {
@@ -340,6 +346,13 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     int nBands = GDALGetRasterCount(hVrt);
     bool useJpeg = (dt == GDT_Byte && (nBands == 3 || nBands == 4));
 
+    // The merge and its GPS go to a file of a private folder beside the output, which is removed
+    // with whatever is left in it: an existing output is replaced only by a complete merge
+    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), kMergeStagingPrefix,
+                                                                raster::PrivateFolderWriter::Host);
+    const fs::path producedPath = staging.path() / target.filename();
+    const std::string produced = io::toUtf8(producedPath);
+
     // Warp and compression threads: this one and those the CPU pool allows, held
     // until the output is closed
     const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
@@ -347,7 +360,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     GDALDatasetUniquePtr out;
 
     if (hasGeoTransform) {
-        out = warpMerge(hVrt, outputPath, encoding);
+        out = warpMerge(hVrt, produced, encoding);
     } else {
         LOGD << "No geotransform found, using GDALTranslate for merge";
 
@@ -361,7 +374,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
             merged.close();
 
             SeparateVrt aligned = buildAlignedVrt(inputPaths, *crop);
-            out = translateMerge(aligned.handle(), outputPath, encoding);
+            out = translateMerge(aligned.handle(), produced, encoding);
             aligned.close();
 
             // GPS correction for center shift
@@ -371,7 +384,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
             }
         } else {
             // Standard non-shifted merge path
-            out = translateMerge(merged.handle(), outputPath, encoding);
+            out = translateMerge(merged.handle(), produced, encoding);
         }
     }
 
@@ -388,7 +401,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     // propagates; a file that cannot be written does not fail the merge.
     if (srcGps.present) {
         try {
-            ExifEditor editor(outputPath);
+            ExifEditor editor(produced);
             const auto failures = editor.SetGPS(srcGps.location.latitude, srcGps.location.longitude, srcGps.location.altitude);
             if (failures.empty())
                 LOGD << "GPS coordinates written to merged output: " << outputPath;
@@ -400,6 +413,10 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
             LOGD << "Could not write GPS to " << outputPath << ": " << e.what();
         }
     }
+
+    // The output may have appeared while the bands were merged: it is replaced only when asked
+    io::assureReplaceable(io::fromUtf8(outputPath), overwrite);
+    raster::publishArtefact(producedPath, target);
 
     LOGD << "Merged " << inputPaths.size() << " bands into " << outputPath;
 }

@@ -69,6 +69,34 @@ namespace ddb
     {
         using AppException::AppException;
     };
+    /**
+     * @brief An output that exists, and that the caller did not ask to replace
+     * (io::assureReplaceable).
+     *
+     * The message names the path and the `overwrite` setting of the library. path() and
+     * isFolder() let a caller word the refusal its own way (the CLI names --overwrite).
+     */
+    class OutputExistsException : public AppException
+    {
+    public:
+        explicit OutputExistsException(const std::string &path, bool folder = false) :
+            AppException(describe(path, folder) + ": set overwrite to replace it"), path_(path), folder_(folder) {}
+
+        /** The output as the caller named it (UTF-8) */
+        const std::string &path() const noexcept { return path_; }
+        /** Whether the output is a folder that is replaced whole, and not empty */
+        bool isFolder() const noexcept { return folder_; }
+
+        /** "The output <path> already exists", or "The output folder <path> is not empty" */
+        static std::string describe(const std::string &path, bool folder)
+        {
+            return folder ? "The output folder " + path + " is not empty" : "The output " + path + " already exists";
+        }
+
+    private:
+        std::string path_;
+        bool folder_;
+    };
     // An invalid argument that every C export returns as DDBERR_INVALIDARGS, also the exports
     // of 1.x (whose other invalid arguments stay DDBERR_EXCEPTION): the caller asked for
     // something that cannot exist, and the same call can never succeed

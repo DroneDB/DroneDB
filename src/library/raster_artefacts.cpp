@@ -197,7 +197,8 @@ namespace ddb
             return openWithDrivers(io::toUtf8(path), kRasterDrivers, GDAL_OF_RASTER, access == ArtefactAccess::Update);
         }
 
-        io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix)
+        io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix,
+                                            PrivateFolderWriter writer)
         {
             io::ScopedTempDir folder = io::ScopedTempDir::create(parent, prefix);
             std::error_code ec;
@@ -209,9 +210,13 @@ namespace ddb
             // only below a folder with a low integrity label: the folder of every request gets
             // one (what the helper makes in it inherits it). Without the label the helper fails
             // to write and says so; with the sandbox off it needs none.
+            // The folder of a writer that is not the helper gets none.
             std::string labelError;
-            if (!sandbox::windows::setLowIntegrityLabel(io::toUtf8(folder.path()), &labelError))
+            if (writer == PrivateFolderWriter::Helper &&
+                !sandbox::windows::setLowIntegrityLabel(io::toUtf8(folder.path()), &labelError))
                 LOGW << "Cannot give " << io::toUtf8(folder.path()) << " a low integrity label: " << labelError;
+#else
+            (void)writer;
 #endif
             return folder;
         }

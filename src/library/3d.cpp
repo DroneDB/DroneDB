@@ -22,6 +22,7 @@
 #include "obj2tiles_runner.h"
 #include "plyconv.h"
 #include "randomutil.h"
+#include "raster_artefacts.h"
 #include "stringutil.h"
 
 namespace ddb {
@@ -745,14 +746,11 @@ std::string buildBm3d(const std::string& inputObj,
                              ? io::toUtf8(io::fromUtf8(inputObj).replace_extension(".bm3d"))
                              : outputBm3d;
 
-    // Check if output file already exists (overwrite deletes it, so it must not be the input)
-    io::assureDistinctOutput(io::fromUtf8(inputObj), io::fromUtf8(outFile));
-    if (fs::exists(io::fromUtf8(outFile))) {
-        if (overwrite)
-            io::assureIsRemoved(io::fromUtf8(outFile));
-        else
-            throw AppException("File " + outFile + " already exists (delete it first)");
-    }
+    // An existing output is replaced only when asked, and never when it is the input
+    const fs::path target = fs::absolute(io::fromUtf8(outFile));
+    if (!target.has_filename())
+        throw InvalidArgsException("Not the path of a file for a bm3d model: " + outFile);
+    io::assureReplaceable(io::fromUtf8(outFile), overwrite, {io::fromUtf8(inputObj)});
 
     // Validate dependencies and convert when needed (glTF/GLB, textured PLY).
     // Throws before bm3d runs, so a missing dependency never produces output.
@@ -760,8 +758,16 @@ std::string buildBm3d(const std::string& inputObj,
     const PreparedModel model =
         prepareModelInput(inputObj, ModelConsumer::Bm3d, datasetRoot, tempGuard);
 
-    // Build the bm3d file
-    performBm3dBuild(model.path, outFile, options);
+    // bm3d writes into a private folder beside the output, which is removed with whatever is
+    // left in it: an existing output is replaced only by a complete bm3d file
+    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), ".bm3d-stage-",
+                                                                raster::PrivateFolderWriter::Host);
+    const fs::path produced = staging.path() / target.filename();
+    performBm3dBuild(model.path, io::toUtf8(produced), options);
+
+    // The output may have appeared while bm3d ran: it is replaced only when asked
+    io::assureReplaceable(io::fromUtf8(outFile), overwrite);
+    raster::publishArtefact(produced, target);
 
     return outFile;
 }
@@ -923,8 +929,9 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
 
     recoverTilesSwap(outDir, oldDir);
 
-    if (!options.overwrite && fs::exists(outDir) && !fs::is_empty(outDir))
-        throw AppException("Directory " + io::toUtf8(outDir) + " already exists (delete it first)");
+    // The new tileset replaces the folder whole: never one that holds the model, and one with
+    // files in it only when asked
+    io::assureReplaceableFolder(outDir, options.overwrite, {io::fromUtf8(inputObj)});
 
     // Resolve georeferencing from sidecars next to the ORIGINAL input (before any
     // conversion moves us into a temp directory). An explicit georef argument

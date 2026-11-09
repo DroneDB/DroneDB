@@ -25,6 +25,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <latch>
 #include <map>
 #include <memory>
@@ -220,6 +221,7 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
     const std::string dem = in.dem.string();
     const std::string sourceFolder = in.source.string();
     const std::string masked = in.area.getPath("masked.tif").string();
+    const std::string maskedEx = in.area.getPath("masked-ex.tif").string();
     const std::string polygon =
         R"({"type":"Polygon","coordinates":[[[10.002,44.996],[10.006,44.996],[10.006,44.998],[10.002,44.998],[10.002,44.996]]]})";
     const std::string line =
@@ -369,6 +371,13 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
          }},
         {"DDBMaskBorders",
          [=] { return DDBMaskBorders(raster.c_str(), masked.c_str(), 15, false); }},
+        {"DDBMaskBordersEx",
+         [=] {
+             DDBMaskBordersOptions options{};
+             options.structSize = sizeof(options);
+             options.overwrite = true;
+             return DDBMaskBordersEx(raster.c_str(), maskedEx.c_str(), 15, false, &options);
+         }},
         {"DDBMemoryTile",
          [=] {
              return withBuffer([&](uint8_t** b, int* s) { return DDBMemoryTile(raster.c_str(), 14, 8192, 8191, b, s, 256, false, true, nullptr); });
@@ -743,6 +752,38 @@ TEST_F(CancelToken, canceledMaskBordersLeavesNoOutput) {
     EXPECT_FALSE(fs::exists(output + ".msk"));
     EXPECT_EQ(DDBMaskBorders(in.raster.string().c_str(), output.c_str(), 15, false), DDBERR_NONE)
         << DDBGetLastError();
+}
+
+// The bytes of a file
+std::string fileBytes(const fs::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+// A mask canceled in the middle of its pass, over an output it was asked to replace, leaves
+// that output as it was and no private folder beside it (FR-XC-07)
+TEST_F(CancelToken, aMaskCanceledInTheMiddleKeepsTheOutputItWouldReplace) {
+    Inputs in(TEST_NAME);
+    const fs::path output = in.area.getPath("masked-out.tif");
+    std::ofstream(output, std::ios::binary) << "an output that exists";
+    DDBMaskBordersOptions options{};
+    options.structSize = sizeof(options);
+    options.overwrite = true;
+    {
+        CancelDuring during("Mask source:");
+        during.arm();
+        EXPECT_EQ(DDBMaskBordersEx(in.raster.string().c_str(), output.string().c_str(), 15, false, &options),
+                  DDBERR_CANCELED)
+            << DDBGetLastError();
+        EXPECT_TRUE(during.fired()) << "the mask never logged its source: the test checks nothing";
+    }
+    EXPECT_EQ(fileBytes(output), "an output that exists");
+    for (const auto& entry : fs::directory_iterator(in.area.getFolder()))
+        EXPECT_EQ(entry.path().filename().string().find("-stage-"), std::string::npos) << entry.path();
+
+    // Not canceled, the same call replaces it
+    ASSERT_DDB_OK(DDBMaskBordersEx(in.raster.string().c_str(), output.string().c_str(), 15, false, &options));
+    EXPECT_NE(fileBytes(output), "an output that exists");
 }
 
 // ------------------------------------------------------------------ DDBApplyDelta

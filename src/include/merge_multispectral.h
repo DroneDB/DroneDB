@@ -61,8 +61,18 @@ void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
                                         int thumbSize,
                                         uint8_t **outBuffer, int *outBufferSize);
 
+/**
+ * @brief Merges single-band rasters into one multi-band GeoTIFF at outputPath.
+ *
+ * Before it reads anything: an output that is one of the bands is refused
+ * (InvalidArgsException), and an output that exists unless overwrite (OutputExistsException).
+ * The merge and its GPS position are written in a private folder beside outputPath
+ * (raster::makePrivateFolder) and replace an existing output in one rename once complete: a
+ * failed run leaves the existing output as it was.
+ */
 void mergeMultispectral(const std::vector<std::string> &inputPaths,
-                                 const std::string &outputPath);
+                                 const std::string &outputPath,
+                                 bool overwrite = false);
 
 } // namespace ddb
 

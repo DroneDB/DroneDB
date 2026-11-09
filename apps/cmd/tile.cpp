@@ -27,6 +27,7 @@ namespace cmd
     ("y", "Generate a single tile with the specified coordinate (XYZ, unless --tms is used). Must be used with -x", cxxopts::value<std::string>()->default_value("auto"))
     ("s,size", "Tile size", cxxopts::value<int>()->default_value("256"))
     ("tms", "Generate TMS tiles instead of XYZ", cxxopts::value<bool>());
+    cmd::addOverwriteOption(opts);
         // clang-format on
         opts.parse_positional({"input", "output"});
     }
@@ -65,6 +66,7 @@ namespace cmd
         run.zRange = z;
         run.x = x;
         run.y = y;
+        run.overwrite = cmd::getOverwriteOption(opts);
         ddb::TilerHelper::runTiler(ddb::io::fromUtf8(input), ddb::io::fromUtf8(output), std::cout, run);
         return EXIT_SUCCESS;
     }

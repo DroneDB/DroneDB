@@ -23,6 +23,7 @@ namespace cmd
         ("m,mode",      "similarity (default) | translation",              cxxopts::value<std::string>()->default_value("similarity"))
         ("validate",    "Only validate inputs; do not align")
         ("no-seed",     "Disable phase-correlation seed (slower NCC search)");
+        cmd::addOverwriteOption(opts);
         // clang-format on
     }
 
@@ -59,6 +60,7 @@ namespace cmd
 
         if (opts.count("no-seed"))
             aopts.usePhaseCorrelationSeed = false;
+        aopts.overwrite = cmd::getOverwriteOption(opts);
 
         auto result = ddb::alignRaster(source, reference, output, aopts);
         std::cout << ddb::alignResultToJson(result) << std::endl;

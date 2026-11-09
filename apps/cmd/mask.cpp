@@ -23,6 +23,7 @@ namespace cmd
     ("n,near", "Tolerance in grey levels", cxxopts::value<int>()->default_value("15"))
     ("w,white", "Search for white borders instead of black", cxxopts::value<bool>()->default_value("false"))
     ("c,color", "Custom color r,g,b (e.g. 0,0,0)", cxxopts::value<std::string>()->default_value(""));
+    cmd::addOverwriteOption(opts);
 
         // clang-format on
         opts.parse_positional({"input"});
@@ -56,7 +57,7 @@ namespace cmd
             }
         }
 
-        ddb::maskBorders(input, output, near, white, color);
+        ddb::maskBorders(input, output, near, white, color, cmd::getOverwriteOption(opts));
         std::cout << "Output: " << output << std::endl;
         return EXIT_SUCCESS;
     }

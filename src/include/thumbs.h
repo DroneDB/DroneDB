@@ -26,9 +26,11 @@ namespace ddb
     };
 
     // Writes a thumbnail per file the generators support; onGenerated gets the path of each one
-    // as soon as it is written
+    // as soon as it is written. Every thumbnail is checked before the first is written
+    // (io::assureReplaceable): one that is an input or the target of two inputs is refused, and
+    // one that exists unless overwrite (OutputExistsException).
     void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc,
-                        const std::function<void(const fs::path &)> &onGenerated = {});
+                        const std::function<void(const fs::path &)> &onGenerated = {}, bool overwrite = false);
     bool supportsThumbnails(EntryType type);
     fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int thumbSize);
     fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);

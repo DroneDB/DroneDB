@@ -402,6 +402,29 @@ namespace ddb
             zb = parseZRange(run.zRange);
         }
 
+        // Every tile is known, and checked, before the first is written: none replaces a file
+        // unless the caller asks for it
+        std::vector<TileInfo> planned;
+        for (int z = zb.min; z <= zb.max; z++)
+        {
+            if (run.x != "auto" && run.y != "auto")
+            {
+                // Just one tile
+                planned.emplace_back(std::stoi(run.x), std::stoi(run.y), z);
+            }
+            else
+            {
+                // All tiles
+                const std::vector<TileInfo> tiles = tiler->getTilesForZoomLevel(z);
+                planned.insert(planned.end(), tiles.begin(), tiles.end());
+            }
+        }
+        std::vector<std::pair<fs::path, fs::path>> targets;
+        targets.reserve(planned.size());
+        for (const TileInfo &t : planned)
+            targets.emplace_back(input, io::fromUtf8(tiler->getTilePath(t.tz, t.tx, t.ty, false)));
+        io::assureReplaceable(targets, run.overwrite);
+
         // One tile per line, or one JSON string per member of an array (escaped, separated across
         // zoom levels as well)
         std::optional<JsonArrayWriter> asJson;
@@ -415,23 +438,10 @@ namespace ddb
                 os << tilePath << std::endl;
         };
 
-        for (int z = zb.min; z <= zb.max; z++)
+        for (const TileInfo &t : planned)
         {
-            if (run.x != "auto" && run.y != "auto")
-            {
-                // Just one tile
-                write(tiler->tile(z, std::stoi(run.x), std::stoi(run.y)));
-            }
-            else
-            {
-                // All tiles
-                std::vector<ddb::TileInfo> tiles = tiler->getTilesForZoomLevel(z);
-                for (auto &t : tiles)
-                {
-                    LOGD << "Tiling " << t.tx << " " << t.ty << " " << t.tz;
-                    write(tiler->tile(t));
-                }
-            }
+            LOGD << "Tiling " << t.tx << " " << t.ty << " " << t.tz;
+            write(tiler->tile(t));
         }
 
         if (asJson)

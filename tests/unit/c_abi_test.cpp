@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -772,5 +773,162 @@ namespace
         ASSERT_DDB_OK(DDBAlignRaster(source.c_str(), reference.c_str(), aligned.c_str(), "translation", &out));
         EXPECT_TRUE(json::parse(take(out)).is_object());
         EXPECT_TRUE(fs::exists(aligned));
+    }
+
+    // ------------------------------------------------------------------ outputs that exist (2.1)
+
+    // Expects the call to fail with `code` and a message of its own
+#define EXPECT_DDB_FAILS(code, call)                                   \
+    do                                                                 \
+    {                                                                  \
+        DDBSetLastError("stale");                                      \
+        EXPECT_EQ((call), (code)) << #call;                            \
+        EXPECT_STRNE(DDBGetLastError(), "") << #call;                  \
+        EXPECT_STRNE(DDBGetLastError(), "stale") << #call;             \
+    } while (0)
+
+    // The options of an Ex variant that writes one output: every byte zero but these
+    template <typename Options>
+    Options writeOptions(bool overwrite)
+    {
+        Options options{};
+        options.structSize = sizeof(Options);
+        options.overwrite = overwrite;
+        return options;
+    }
+
+    // Whether a private folder of a writer (".<command>-stage-...") is left in folder
+    bool hasStagingFolder(const fs::path &folder)
+    {
+        for (const auto &entry : fs::directory_iterator(folder))
+            if (entry.path().filename().string().find("-stage-") != std::string::npos)
+                return true;
+        return false;
+    }
+
+    // Over an output that exists: the export of 2.0 refuses it, and so does its Ex variant without
+    // overwrite, both leaving it as it was; options the variant does not know are refused; with
+    // overwrite the variant replaces it, and leaves no private folder behind
+    template <typename Options, typename Old, typename Ex>
+    void expectReplacedOnlyWithOverwrite(const fs::path &output, Old oldCall, Ex exCall)
+    {
+        std::ofstream(output, std::ios::binary) << "an output that exists";
+        const auto original = calculateHash(output);
+
+        EXPECT_DDB_INVALID(oldCall());
+        EXPECT_NE(std::string(DDBGetLastError()).find("already exists"), std::string::npos) << DDBGetLastError();
+        const Options keep = writeOptions<Options>(false);
+        EXPECT_DDB_FAILS(DDBERR_EXCEPTION, exCall(&keep));
+        EXPECT_NE(std::string(DDBGetLastError()).find("already exists"), std::string::npos) << DDBGetLastError();
+
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, exCall(nullptr));
+        Options tooSmall = writeOptions<Options>(true);
+        tooSmall.structSize = 4;
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, exCall(&tooSmall));
+        Options reservedSet = writeOptions<Options>(true);
+        reservedSet.reserved[2] = 1;
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, exCall(&reservedSet));
+        // A struct of a later ABI that sets a field this library does not know
+        struct Later
+        {
+            Options known;
+            uint64_t unknown;
+        } later{};
+        later.known = writeOptions<Options>(true);
+        later.known.structSize = sizeof(Later);
+        later.unknown = 1;
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, exCall(&later.known));
+        EXPECT_EQ(calculateHash(output), original);
+
+        const Options replace = writeOptions<Options>(true);
+        ASSERT_DDB_OK(exCall(&replace));
+        EXPECT_NE(calculateHash(output), original);
+        EXPECT_FALSE(hasStagingFolder(output.parent_path()));
+    }
+
+    TEST_F(CAbi, MaskBordersExReplacesAnExistingOutputOnlyWithOverwrite)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto input = smallRaster(ta.getPath("ortho.tif"));
+        const auto output = ta.getPath("masked.tif");
+        const auto inputText = input.string();
+        const auto outputText = output.string();
+        // A mask of an earlier run that GDAL kept outside the raster: it goes with the raster
+        std::ofstream(output.string() + ".msk", std::ios::binary) << "a stale external mask";
+
+        expectReplacedOnlyWithOverwrite<DDBMaskBordersOptions>(
+            output, [&] { return DDBMaskBorders(inputText.c_str(), outputText.c_str(), 15, false); },
+            [&](const DDBMaskBordersOptions *options)
+            { return DDBMaskBordersEx(inputText.c_str(), outputText.c_str(), 15, false, options); });
+        EXPECT_FALSE(fs::exists(output.string() + ".msk"));
+
+        const auto keep = writeOptions<DDBMaskBordersOptions>(true);
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBMaskBordersEx(nullptr, outputText.c_str(), 15, false, &keep));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBMaskBordersEx(inputText.c_str(), "", 15, false, &keep));
+
+        // The input is never the output, with overwrite too
+        const auto original = calculateHash(input);
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBMaskBordersEx(inputText.c_str(), inputText.c_str(), 15, false, &keep));
+        EXPECT_EQ(calculateHash(input), original);
+    }
+
+    TEST_F(CAbi, MergeMultispectralExReplacesAnExistingOutputOnlyWithOverwrite)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto files = bandFiles(ta, 3);
+        auto paths = cStrings(files);
+        const auto output = ta.getPath("merged.tif");
+        const auto outputText = output.string();
+
+        expectReplacedOnlyWithOverwrite<DDBMergeMultispectralOptions>(
+            output, [&] { return DDBMergeMultispectral(paths.data(), 3, outputText.c_str()); },
+            [&](const DDBMergeMultispectralOptions *options)
+            { return DDBMergeMultispectralEx(paths.data(), 3, outputText.c_str(), options); });
+
+        const auto keep = writeOptions<DDBMergeMultispectralOptions>(true);
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBMergeMultispectralEx(nullptr, 3, outputText.c_str(), &keep));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBMergeMultispectralEx(paths.data(), 1, outputText.c_str(), &keep));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBMergeMultispectralEx(paths.data(), 3, "", &keep));
+
+        // A band is never the output, with overwrite too
+        const auto original = calculateHash(files[1]);
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBMergeMultispectralEx(paths.data(), 3, files[1].c_str(), &keep));
+        EXPECT_EQ(calculateHash(files[1]), original);
+    }
+
+    TEST_F(CAbi, AlignRasterExReplacesAnExistingOutputOnlyWithOverwrite)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto reference = smallRaster(ta.getPath("reference.tif"), 3, 256).string();
+        const auto source = smallRaster(ta.getPath("source.tif"), 3, 256).string();
+        const auto output = ta.getPath("aligned.tif");
+        const auto outputText = output.string();
+        char *out = nullptr;
+
+        expectReplacedOnlyWithOverwrite<DDBAlignRasterOptions>(
+            output,
+            [&] { return DDBAlignRaster(source.c_str(), reference.c_str(), outputText.c_str(), "translation", &out); },
+            [&](const DDBAlignRasterOptions *options)
+            {
+                const DDBErr err = DDBAlignRasterEx(source.c_str(), reference.c_str(), outputText.c_str(), "translation",
+                                                    options, &out);
+                if (err == DDBERR_NONE)
+                    EXPECT_TRUE(json::parse(take(out)).is_object());
+                return err;
+            });
+
+        const auto keep = writeOptions<DDBAlignRasterOptions>(true);
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS,
+                         DDBAlignRasterEx(nullptr, reference.c_str(), outputText.c_str(), nullptr, &keep, &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS,
+                         DDBAlignRasterEx(source.c_str(), reference.c_str(), outputText.c_str(), nullptr, &keep, nullptr));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS,
+                         DDBAlignRasterEx(source.c_str(), reference.c_str(), outputText.c_str(), "nosuchmode", &keep, &out));
+
+        // The source and the reference are never the output, with overwrite too
+        const auto original = calculateHash(reference);
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS,
+                         DDBAlignRasterEx(source.c_str(), reference.c_str(), reference.c_str(), nullptr, &keep, &out));
+        EXPECT_EQ(calculateHash(reference), original);
     }
 }

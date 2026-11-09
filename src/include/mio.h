@@ -185,6 +185,49 @@ namespace ddb
         // reading it.
         void assureDistinctOutput(const fs::path &input, const fs::path &output);
 
+        // ─── Output safety ──────────────────────────────────────────────────────────
+
+        /**
+         * @brief Refuses an output that a writer may not replace, before it writes anything.
+         *
+         * First an output that names one of the inputs (assureDistinctOutput), with or without
+         * overwrite: replacing it would destroy what is read. Then an output that exists (a
+         * file, a folder or a link) unless overwrite. The public function of every command
+         * that writes a file calls it (D-028); internal callers that replace on purpose (the
+         * build handlers, the thumbnail and tile caches) pass overwrite.
+         * @throws InvalidArgsException when output is one of inputs
+         * @throws OutputExistsException when output exists and overwrite is false
+         */
+        void assureReplaceable(const fs::path &output, bool overwrite, const std::vector<fs::path> &inputs = {});
+
+        /**
+         * @brief The same rule for a run that writes several outputs, each from one input
+         * (`{input, output}` pairs): every output is checked before any is written.
+         *
+         * An output that names any of the inputs is refused, and so are two pairs with the same
+         * output (a/IMG.JPG and b/IMG.JPG both written to out/IMG.tif), with or without
+         * overwrite. Then the first output that exists, unless overwrite. Paths are compared by
+         * their weakly canonical absolute forms, without regard to case on Windows and macOS,
+         * and by fs::equivalent for an existing output with several hard links.
+         * @throws InvalidArgsException when an output is an input or two outputs are the same
+         * @throws OutputExistsException when an output exists and overwrite is false
+         */
+        void assureReplaceable(const std::vector<std::pair<fs::path, fs::path>> &targets, bool overwrite);
+
+        /**
+         * @brief The rule for an output folder that a writer replaces whole (3D Tiles).
+         *
+         * An input that is the folder or lies in it is refused, with or without overwrite: the
+         * replaced folder goes with what is in it. Then a folder that exists and is not empty
+         * (or a file at its path) unless overwrite; an empty folder is replaced.
+         * @throws InvalidArgsException when an input is at or inside folder
+         * @throws OutputExistsException (isFolder()) when folder is not empty and overwrite is false
+         */
+        void assureReplaceableFolder(const fs::path &folder, bool overwrite, const std::vector<fs::path> &inputs = {});
+
+        /** Whether p is folder or lies inside it, links resolved */
+        bool isAtOrInside(const fs::path &p, const fs::path &folder);
+
         // The whole content of a file; throws FSException when it cannot be read
         std::vector<uint8_t> readAllBytes(const fs::path &p);
 

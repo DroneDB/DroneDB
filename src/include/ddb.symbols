@@ -16,6 +16,7 @@ DDBAdd
 DDBAddWithHints
 DDBAddWithOptions
 DDBAlignRaster
+DDBAlignRasterEx
 DDBAppendPassword
 DDBApplyDelta
 DDBApplyDeltaEx
@@ -77,10 +78,12 @@ DDBListEntries
 DDBListEntriesEx
 DDBMakeCadPrj
 DDBMaskBorders
+DDBMaskBordersEx
 DDBMemoryTile
 DDBMemoryTileEx
 DDBMemoryTileFmt
 DDBMergeMultispectral
+DDBMergeMultispectralEx
 DDBMetaAdd
 DDBMetaDump
 DDBMetaGet

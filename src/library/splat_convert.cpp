@@ -207,14 +207,14 @@ namespace ddb
                                        " files are converted");
     }
 
-    void convertToSpz(const std::string &input, const std::string &output)
+    void convertToSpz(const std::string &input, const std::string &output, bool overwrite)
     {
         assureConvertibleToSpz(input);
         const SplatFormat fmt = splatFormatOf(io::fromUtf8(input));
 
         // The output replaces what is at its path: the input must not be it ("x.spz" converted
         // to the default "x.spz"), or the conversion would overwrite the file it converts
-        io::assureDistinctOutput(io::fromUtf8(input), io::fromUtf8(output));
+        io::assureReplaceable(io::fromUtf8(output), overwrite, {io::fromUtf8(input)});
 
         const fs::path parentDir = io::fromUtf8(output).parent_path();
         if (!parentDir.empty())

@@ -27,6 +27,7 @@ namespace cmd
     ("training-data", "Write the training data of a Gaussian splat from the outputs of an ODM project (cameras.json, odm_report/shots.geojson, images/, odm_georeferencing/coords.txt and its point cloud) into this folder, which must be new or empty and apart from the project: a COLMAP model (sparse/0), the images (images/) and georef.json, which makes a splat trained from it and put next to it georeferenced", cxxopts::value<std::string>())
     ("max-image-size", "With --training-data: longest side in pixels of the exported images (default: the originals)", cxxopts::value<int>())
     ("max-points", "With --training-data: most points of the sparse model (at most " + std::to_string(ddb::SplatTrainingExportOptions::MaxPointsLimit) + ")", cxxopts::value<size_t>()->default_value(std::to_string(ddb::SplatTrainingExportOptions{}.maxPoints)));
+    cmd::addOverwriteOption(opts);
         // clang-format on
         opts.parse_positional({"input", "output"});
     }
@@ -83,7 +84,7 @@ namespace cmd
 
         // A .spz input with no output path defaults to itself: convertToSpz refuses an output that
         // is its input, with the message that asks for another path
-        ddb::convertToSpz(input, output);
+        ddb::convertToSpz(input, output, cmd::getOverwriteOption(opts));
         std::cout << output << std::endl;
         return EXIT_SUCCESS;
     }

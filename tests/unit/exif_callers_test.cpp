@@ -670,6 +670,79 @@ namespace
         EXPECT_THROW(mergeMultispectral(inputs, io::toUtf8(ta.getPath("merged.tif"))), MetadataHelperException);
     }
 
+    // A reader of the test: every file is an image taken at 46.5 N, 11.25 E, and a write fails as
+    // it does when the helper is gone
+    class PositionedReaderThatCannotWrite : public exif::IMetadataReader
+    {
+      public:
+        exif::ReadResult read(const fs::path &) override
+        {
+            exif::ReadResult result;
+            result.metadata = exif::ImageMetadata(32, 32,
+                                                  {degrees("Exif.GPSInfo.GPSLatitude", 46, 30), text("Exif.GPSInfo.GPSLatitudeRef", "N"),
+                                                   degrees("Exif.GPSInfo.GPSLongitude", 11, 15), text("Exif.GPSInfo.GPSLongitudeRef", "E")},
+                                                  {});
+            return result;
+        }
+        exif::WriteResult write(const fs::path &, const exif::TagAssignments &) override
+        {
+            ++writes;
+            throw MetadataHelperException("metadata-util is not running");
+        }
+
+        std::atomic<size_t> writes{0};
+
+      private:
+        static exif::Tag::Component component(int32_t value)
+        {
+            exif::Tag::Component c;
+            c.integer = value;
+            c.real = static_cast<float>(value);
+            c.rational = {value, 1};
+            c.ok = true;
+            return c;
+        }
+        // "46/1 30/1 0/1"
+        static exif::Tag degrees(const std::string &key, int32_t deg, int32_t min)
+        {
+            return exif::Tag(key, "Rational", 3, std::to_string(deg) + "/1 " + std::to_string(min) + "/1 0/1", false,
+                             {component(deg), component(min), component(0)});
+        }
+        static exif::Tag text(const std::string &key, const std::string &value)
+        {
+            return exif::Tag(key, "Ascii", value.size() + 1, value, false, {component(0)});
+        }
+    };
+
+    // The merge writes its raster, then the position of the first band into it: a merge that
+    // fails at the position, over an output it was asked to replace, leaves that output as it was
+    // and no private folder beside it (FR-XC-07)
+    TEST(ExifMultispectral, aMergeThatFailsAfterItsRasterKeepsTheOutputItWouldReplace)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::vector<std::string> inputs;
+        for (int band = 0; band < 2; ++band)
+        {
+            testutils::GeoRasterSpec spec;
+            spec.width = spec.height = 32;
+            spec.bands = 1;
+            inputs.push_back(io::toUtf8(testutils::createGeoRaster(ta.getPath("band" + std::to_string(band) + ".tif"), spec)));
+        }
+        const fs::path output = ta.getPath("merged.tif");
+        fileWriteAllText(output, "an output that exists");
+        const auto original = calculateHash(output);
+
+        PositionedReaderThatCannotWrite reader;
+        {
+            exif::ScopedMetadataReader scope(reader);
+            EXPECT_THROW(mergeMultispectral(inputs, io::toUtf8(output), true), MetadataHelperException);
+        }
+        EXPECT_GT(reader.writes.load(), 0u) << "the merge stopped before it wrote its raster: the test checks nothing";
+        EXPECT_EQ(calculateHash(output), original);
+        for (const auto &entry : fs::directory_iterator(ta.getFolder()))
+            EXPECT_EQ(entry.path().filename().string().find("-stage-"), std::string::npos) << entry.path();
+    }
+
     // ------------------------------------------------------------------ setexif
 
     // Runs `ddb setexif <args>` and returns the exit code, with what the command wrote to stderr

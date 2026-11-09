@@ -390,11 +390,13 @@ namespace ddb
         }
     } // namespace
 
-    void buildCog(const std::string &input, const std::string &outputCog, const BuildOptions &options)
+    void buildCog(const std::string &input, const std::string &outputCog, const BuildOptions &options,
+                  bool overwrite)
     {
         const fs::path target = fs::absolute(io::fromUtf8(outputCog));
         if (!target.has_filename())
             throw InvalidArgsException("Not the path of a file for a COG: " + outputCog);
+        io::assureReplaceable(io::fromUtf8(outputCog), overwrite, {io::fromUtf8(input)});
 
         // The folder of the output holds other files (programs, the files of a user): the helper
         // writes into a folder of its own in it, which is removed with whatever is left in it
@@ -403,7 +405,9 @@ namespace ddb
         const fs::path produced = staging.path() / target.filename();
         buildCogInPrivateFolder(input, produced, options);
 
-        // The COG first: the statistics count only while they are not older than it
+        // The output may have appeared while the COG was built: it is replaced only when asked.
+        // The COG first: the statistics count only while they are not older than it.
+        io::assureReplaceable(io::fromUtf8(outputCog), overwrite);
         raster::publishArtefact(produced, target);
         publishStatsSidecar(produced, target);
     }

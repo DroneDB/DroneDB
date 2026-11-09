@@ -110,8 +110,10 @@ namespace
             const FileSizeLimit limit(SmallFileLimit);
             EXPECT_THROW(maskBorders(input, output), AppException);
         }
+        // The mask is written beside the output and moved to it once complete
+        EXPECT_FALSE(fs::exists(ta.getPath("out.tif"))) << "a failed mask leaves no output";
+
         // Without the limit the same call writes the mask
-        fs::remove(ta.getPath("out.tif"));
         EXPECT_NO_THROW(maskBorders(input, output));
         EXPECT_TRUE(fs::exists(ta.getPath("out.tif")));
     }

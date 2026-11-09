@@ -32,6 +32,9 @@ struct AlignOptions {
     double    minOverlap             = 0.25;  // their samples with data on each other, over those of the smaller
     double    maxScaleChange         = 0.2;   // |scale - 1| of a similarity
     double    maxRotationDeg         = 15.0;  // |rotation| of a similarity
+    // Replace an output that exists. An output that is the source or the reference is refused
+    // either way (io::assureReplaceable). The CLI and the C ABI set it from their caller.
+    bool      overwrite              = true;
 };
 
 struct AlignValidationResult {
@@ -82,7 +85,9 @@ AlignValidationResult validateAlignRaster(
  *  The output CRS is the one produced by buildCog (Web Mercator).
  *  Similarity falls back to Translation when the source has too few tie points.
  *  Throws AppException, and writes nothing, when either raster has nothing to match or the
- *  solution fails the checks of AlignOptions (the aligned source does not lie on the reference). */
+ *  solution fails the checks of AlignOptions (the aligned source does not lie on the reference).
+ *  Before it reads anything: InvalidArgsException for an output that is the source or the
+ *  reference, OutputExistsException for one that exists unless opts.overwrite. */
 AlignResult alignRaster(
     const std::string &sourcePath,
     const std::string &referencePath,

@@ -43,4 +43,15 @@ namespace cmd
         opts.add_options()("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""));
     }
 
+    void addOverwriteOption(cxxopts::Options &opts)
+    {
+        opts.add_options()("overwrite", "Replace the output if it already exists",
+                           cxxopts::value<bool>()->default_value("false"));
+    }
+
+    bool getOverwriteOption(const cxxopts::ParseResult &opts)
+    {
+        return opts["overwrite"].as<bool>();
+    }
+
 }

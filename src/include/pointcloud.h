@@ -44,8 +44,13 @@ namespace ddb
     // Untwine builds it when it is installed (with its own fixed thread count: options do not
     // bound it); otherwise, or when Untwine fails, PDAL's writers.copc does, on the threads of one
     // build (DDB_BUILD_THREADS, lowered to options.threads).
+    // The build runs in a private folder made in `outdir` (raster::makePrivateFolder), which is
+    // removed with what is left in it; the COPC is moved to `outdir`/cloud.copc.laz once it is
+    // whole (raster::publishArtefact), and nothing else in `outdir` is touched. Before anything
+    // is read: a cloud.copc.laz that is one of the inputs is refused (InvalidArgsException), and
+    // one that exists unless overwrite (OutputExistsException; true for the build handler).
     void buildCopc(const std::vector<std::string> &filenames, const std::string &outdir,
-                   const BuildOptions &options = {});
+                   const BuildOptions &options = {}, bool overwrite = true);
 
     void translateToLas(const std::string &input, const std::string &outputLas);
 

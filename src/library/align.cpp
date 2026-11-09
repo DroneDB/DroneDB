@@ -979,6 +979,9 @@ struct AlignInputs {
     // The folder of this alignment for the rasters it writes and reads back: an artefact place
     // (artefact_cache.h), so reading them needs no copy
     fs::path scratch;
+    // Replace an output that exists (AlignOptions::overwrite): buildCog checks it again right
+    // before it publishes the COG
+    bool overwrite = true;
     bool isDem = false;
     double targetGsd = 0;
     RasterGrid srcGrid, refGrid;
@@ -1046,7 +1049,7 @@ void writeAligned(const AlignInputs &in, const Similarity2D &sim, AlignResult &r
         result.shiftZ = computeZOffset(tmpWarp, in.effectiveReference);
         applyZOffset(tmpWarp, result.shiftZ);
     }
-    buildCog(tmpWarp, in.outputPath);
+    buildCog(tmpWarp, in.outputPath, {}, in.overwrite);
 }
 
 // The centre of the area that both rasters share: the point the reported shift is the shift of
@@ -1223,7 +1226,9 @@ AlignResult alignRaster(const std::string &sourcePath,
     AlignResult result;
     result.mode = (opts.mode == AlignMode::Similarity) ? "similarity" : "translation";
 
-    // 1. Validation
+    // 1. Validation: the output first, before any raster is read
+    io::assureReplaceable(io::fromUtf8(outputPath), opts.overwrite,
+                          {io::fromUtf8(sourcePath), io::fromUtf8(referencePath)});
     auto val = validateAlignRaster(sourcePath, referencePath);
     if (!val.ok) throw AppException("Alignment validation failed: " + val.errors[0]);
 
@@ -1239,7 +1244,8 @@ AlignResult alignRaster(const std::string &sourcePath,
     }
 
     // 3. The overlap of both rasters on one grid, then the estimate
-    const AlignInputs in = loadInputs(sourcePath, referencePath, effectiveRef, outputPath, scratch.path(), val);
+    AlignInputs in = loadInputs(sourcePath, referencePath, effectiveRef, outputPath, scratch.path(), val);
+    in.overwrite = opts.overwrite;
     requireTexture(in);
     if (opts.mode == AlignMode::Translation)
         return alignByTranslation(in, opts, result);

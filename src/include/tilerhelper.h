@@ -51,6 +51,9 @@ namespace ddb
         std::string zRange = "auto";   // "N" or "min-max"
         std::string x = "auto";        // with y: a single tile of each zoom level
         std::string y = "auto";
+        // Replace tiles that exist. Without it the run writes nothing when one of its tiles is
+        // there (OutputExistsException): every tile is checked before the first is written.
+        bool overwrite = false;
     };
 
     class TilerHelper

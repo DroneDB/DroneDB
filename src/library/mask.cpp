@@ -11,6 +11,7 @@
 #include "fs.h"
 #include "mio.h"
 #include "parallel.h"
+#include "raster_artefacts.h"
 #include <cstdint>
 
 namespace ddb
@@ -19,23 +20,24 @@ namespace ddb
     namespace
     {
 
-        // Deletes what a previous run left at the output: the file, and a stale external mask
-        void removeStaleOutput(const std::string &input, const std::string &output)
+        // The private folder beside the output that a mask is written in
+        constexpr const char *kMaskStagingPrefix = ".mask-stage-";
+
+        // The external mask GDAL writes next to a raster when it keeps none inside
+        fs::path externalMaskOf(const fs::path &raster)
         {
-            // The existing output is deleted below, before the input is read
-            io::assureDistinctOutput(io::fromUtf8(input), io::fromUtf8(output));
+            return io::concat(raster, ".msk");
+        }
 
-            if (fs::exists(io::fromUtf8(output))) {
-                LOGD << "Output file " << output << " already exists, deleting it";
-                fs::remove(io::fromUtf8(output));
-            }
-
-            // Clean possible stale external mask from previous runs.
-            const std::string externalMask = output + ".msk";
-            if (fs::exists(io::fromUtf8(externalMask))) {
-                LOGD << "External mask file " << externalMask << " already exists, deleting it";
-                fs::remove(io::fromUtf8(externalMask));
-            }
+        // Moves the external mask GDAL wrote next to `produced` beside `target`. Without one the
+        // mask that is there belongs to the raster that was replaced: it goes.
+        void publishExternalMask(const fs::path &produced, const fs::path &target)
+        {
+            const fs::path mask = externalMaskOf(produced);
+            if (fs::exists(mask))
+                raster::publishArtefact(mask, externalMaskOf(target));
+            else
+                io::assureIsRemoved(externalMaskOf(target));
         }
 
         // The layout of the source that the compression depends on
@@ -166,9 +168,13 @@ namespace ddb
                  const std::string &output,
                  int nearDist,
                  bool white,
-                 const std::string &color)
+                 const std::string &color,
+                 bool overwrite)
     {
-        removeStaleOutput(input, output);
+        const fs::path target = fs::absolute(io::fromUtf8(output));
+        if (!target.has_filename())
+            throw InvalidArgsException("Not the path of a file for a masked raster: " + output);
+        io::assureReplaceable(io::fromUtf8(output), overwrite, {io::fromUtf8(input)});
 
         const auto srcDataset = raster::openInputRaster(input);
         if (!srcDataset)
@@ -210,6 +216,12 @@ namespace ddb
         creation.add(parallel::gdalNumThreads(cpu));
         creation.appendTo(targs);
 
+        // The mask goes to a file of a private folder beside the output, which is removed with
+        // whatever is left in it: an existing output is replaced only by a complete mask
+        const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), kMaskStagingPrefix,
+                                                                    raster::PrivateFolderWriter::Host);
+        const fs::path produced = staging.path() / target.filename();
+
         int bUsageError = FALSE;
 
         cancel::GdalProgress progress;
@@ -226,24 +238,25 @@ namespace ddb
             progress.attach(psOptions.get());
 
             outDataset = adoptDataset(
-                GDALNearblack(output.c_str(), nullptr, hSrcDataset, psOptions.get(), &bUsageError));
+                GDALNearblack(io::toUtf8(produced).c_str(), nullptr, hSrcDataset, psOptions.get(), &bUsageError));
         }
 
         if (bUsageError)
             throw GDALException("GDALNearblack usage error");
 
         if (!outDataset) {
-            // A canceled pass leaves no output
-            if (cancel::isCanceled()) {
-                std::error_code ignored;
-                fs::remove(io::fromUtf8(output), ignored);
-                fs::remove(io::fromUtf8(output + ".msk"), ignored);
-            }
+            // A canceled pass leaves no output: what it wrote goes with the private folder
             cancel::throwIfCanceled();
             throw GDALException("GDALNearblack failed to create output: " + output);
         }
 
         closeOutputOrThrow(std::move(outDataset), output);
+
+        // The output may have appeared while the borders were masked: it is replaced only when
+        // asked. The raster first, then its external mask (or none).
+        io::assureReplaceable(io::fromUtf8(output), overwrite);
+        raster::publishArtefact(produced, target);
+        publishExternalMask(produced, target);
 
         LOGD << "Masked borders: " << input << " -> " << output;
     }

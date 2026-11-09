@@ -19,6 +19,7 @@ namespace cmd
     cmd::addOutputOption(opts, "Output directory where to store the COPC file (cloud.copc.laz)");
     opts.add_options()
     ("i,input", "File(s) to process", cxxopts::value<std::vector<std::string>>());
+    cmd::addOverwriteOption(opts);
 
         // clang-format on
         opts.parse_positional({"output", "input"});
@@ -39,7 +40,7 @@ namespace cmd
         auto input = opts["input"].as<std::vector<std::string>>();
         auto output = opts["output"].as<std::string>();
 
-        ddb::buildCopc(input, output);
+        ddb::buildCopc(input, output, {}, cmd::getOverwriteOption(opts));
         return EXIT_SUCCESS;
     }
 

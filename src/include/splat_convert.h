@@ -13,13 +13,15 @@ namespace ddb
 {
     // Converts a splat source (any format SplatStage::Convert names: .ply | .splat | .spz) into a
     // single .spz file. The output is written whole or not at all (a temporary file renamed onto
-    // it), and it must not be the input (InvalidArgsException). A format that is not converted
+    // it), and it must not be the input (InvalidArgsException). An output that exists is replaced
+    // when overwrite is true (the export cache of a built splat) and refused otherwise, before
+    // anything is read (OutputExistsException). A format that is not converted
     // (.ksplat, .sog) is an InvalidArgsException; any other failure is an AppException.
     //
     // The spherical-harmonics quantization follows the environment variable DDB_GSPLAT_SH_BITS
     // ("5" sets the first band's bits, "5,4" also the others', each in [1,8]; a malformed value
     // is ignored).
-    void convertToSpz(const std::string &input, const std::string &output);
+    void convertToSpz(const std::string &input, const std::string &output, bool overwrite = true);
 
     // convertToSpz() refuses a format that is not converted: this is the same refusal, for a caller
     // that has to know before it takes a lock or reads anything (InvalidArgsException).

@@ -15,6 +15,8 @@
 #include <iterator>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <fcntl.h>
 
@@ -783,12 +785,117 @@ namespace ddb
             return data;
         }
 
-        void assureDistinctOutput(const fs::path &input, const fs::path &output)
+        namespace
         {
-            if (isSamePath(input, output))
+            [[noreturn]] void refuseOutputThatIsTheInput(const fs::path &input, const fs::path &output)
+            {
                 throw InvalidArgsException("The output path " + io::toUtf8(output) +
                                            " is the input file " + io::toUtf8(input) +
                                            ": choose a different output path");
+            }
+
+            // Whether something (a file, a folder, a link, also a dangling one) is at p
+            bool somethingIsAt(const fs::path &p)
+            {
+                std::error_code e;
+                return fs::exists(fs::symlink_status(p, e)) && !e;
+            }
+
+            // The form two paths of the same file share, as isSamePath compares paths that do
+            // not exist: absolute, links and "." / ".." resolved; without regard to case where
+            // the file systems ignore it by default
+            std::string samePathKey(const fs::path &p)
+            {
+                std::error_code e;
+                fs::path abs = fs::absolute(p, e);
+                if (e)
+                    abs = p;
+                const fs::path canonical = fs::weakly_canonical(abs, e);
+                std::string key = toGenericUtf8(e ? abs.lexically_normal() : canonical);
+#if defined(_WIN32) || defined(__APPLE__)
+                key = str::toLowerCopy(key);
+#endif
+                return key;
+            }
+        } // namespace
+
+        void assureDistinctOutput(const fs::path &input, const fs::path &output)
+        {
+            if (isSamePath(input, output))
+                refuseOutputThatIsTheInput(input, output);
+        }
+
+        void assureReplaceable(const fs::path &output, bool overwrite, const std::vector<fs::path> &inputs)
+        {
+            // The input first: replacing it is refused even when replacing is asked for
+            for (const fs::path &input : inputs)
+                assureDistinctOutput(input, output);
+            if (!overwrite && somethingIsAt(output))
+                throw OutputExistsException(toUtf8(output));
+        }
+
+        void assureReplaceable(const std::vector<std::pair<fs::path, fs::path>> &targets, bool overwrite)
+        {
+            // Keys, not isSamePath on every pair: a folder of thousands of images is checked
+            // in one pass. An input is keyed once, however many outputs it has (the tiles of a
+            // raster are all paired with it).
+            std::unordered_map<std::string, size_t> inputKeys;
+            std::unordered_set<fs::path::string_type> keyedInputs;
+            std::vector<fs::path> distinctInputs;
+            for (size_t i = 0; i < targets.size(); i++)
+                if (keyedInputs.insert(targets[i].first.native()).second)
+                {
+                    distinctInputs.push_back(targets[i].first);
+                    inputKeys.emplace(samePathKey(targets[i].first), i);
+                }
+
+            std::unordered_map<std::string, size_t> outputKeys;
+            for (size_t i = 0; i < targets.size(); i++)
+            {
+                const auto &[input, output] = targets[i];
+                const std::string key = samePathKey(output);
+                if (const auto same = inputKeys.find(key); same != inputKeys.end())
+                    refuseOutputThatIsTheInput(targets[same->second].first, output);
+
+                // A hard link to an input has a path of its own
+                std::error_code e;
+                if (somethingIsAt(output) && fs::hard_link_count(output, e) > 1 && !e)
+                    for (const fs::path &other : distinctInputs)
+                        assureDistinctOutput(other, output);
+
+                const auto [first, added] = outputKeys.emplace(key, i);
+                if (!added)
+                    throw InvalidArgsException(toUtf8(targets[first->second].first) + " and " + toUtf8(input) +
+                                               " would both be written to " + toUtf8(output) +
+                                               ": give them different names or write them in separate runs");
+            }
+
+            if (overwrite)
+                return;
+            for (const auto &target : targets)
+                if (somethingIsAt(target.second))
+                    throw OutputExistsException(toUtf8(target.second));
+        }
+
+        bool isAtOrInside(const fs::path &p, const fs::path &folder)
+        {
+            return isSamePath(p, folder) || Path(folder).isParentOf(p);
+        }
+
+        void assureReplaceableFolder(const fs::path &folder, bool overwrite, const std::vector<fs::path> &inputs)
+        {
+            for (const fs::path &input : inputs)
+                if (isAtOrInside(input, folder))
+                    throw InvalidArgsException("The output folder " + toUtf8(folder) + " holds the input " +
+                                               toUtf8(input) +
+                                               ", which replacing the folder would delete: choose another output folder");
+
+            if (overwrite || !somethingIsAt(folder))
+                return;
+            std::error_code e;
+            if (fs::is_directory(folder, e) && fs::is_empty(folder, e) && !e)
+                return;
+            throw OutputExistsException(toUtf8(folder), true);
         }
 
         void rename(const fs::path &from, const fs::path &to)

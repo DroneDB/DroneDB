@@ -20,8 +20,10 @@ namespace ddb
     /** What @ref buildModel3DTiles may be told besides the model and the destination. */
     struct Tiles3DOptions
     {
-        /// When true, an existing non-empty output directory is replaced (only once the new
-        /// tileset is complete); when false, a non-empty one causes an exception.
+        /** When true, an existing non-empty output directory is replaced (only once the new
+         *  tileset is complete); when false, a non-empty one is an OutputExistsException. An
+         *  output directory that holds the model is refused either way
+         *  (io::assureReplaceableFolder). */
         bool overwrite = false;
         /// Explicit georeferencing (overrides auto-detection). The tileset is placed by an ENU origin:
         /// the offset point of a projected georef is converted to WGS84 and used as that origin, so
@@ -47,6 +49,11 @@ namespace ddb
      * OBJ + MTL + texture (convertPlyToObj()) and a GLTF/GLB to OBJ (or to PLY when
      * it has no texture coordinates) in a temporary folder first.
      * @param outputBm3d Output file; when empty, `<input stem>.bm3d` next to @p inputObj.
+     * @param overwrite Replace an output that exists; without it, it is an
+     *                  OutputExistsException. An output that is the input is refused either way
+     *                  (io::assureReplaceable). bm3d writes into a private folder beside the
+     *                  output (raster::makePrivateFolder): an existing output is replaced in one
+     *                  rename once the new file is complete, and a failed build leaves it.
      * @param datasetRoot Root folder of the dataset that contains @p inputObj, or empty
      *                    when unknown. When set, OBJ/MTL/PLY texture references that
      *                    resolve outside it are rejected. It never applies to the

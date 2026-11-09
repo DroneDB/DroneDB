@@ -24,25 +24,31 @@ namespace ddb
     namespace
     {
 
-        // The folder of the projected images when there are several (or the output is a folder)
-        // is created here; true when the images go to a folder
-        bool prepareOutput(const std::vector<std::string> &images, const std::string &output)
+        // Whether the images go to a folder: there are several, or the output is a folder or
+        // is named as one (a trailing separator)
+        bool outputIsFolder(const std::vector<std::string> &images, const std::string &output)
         {
-            bool isDirectory = fs::is_directory(io::fromUtf8(output));
-            bool outputToDir = images.size() > 1 || isDirectory;
-            if (outputToDir)
-            {
-                if (!isDirectory)
-                {
-                    // Bad input?
-                    if (fs::is_regular_file(io::fromUtf8(output)))
-                    {
-                        throw FSException(output + " is a file. (Did you switch the input and output parameters?)");
-                    }
-                    io::createDirectories(io::fromUtf8(output));
-                }
-            }
+            const bool namedAsFolder = !output.empty() && (output.back() == '/' || output.back() == '\\');
+            const bool outputToDir = images.size() > 1 || namedAsFolder || fs::is_directory(io::fromUtf8(output));
+            // Bad input?
+            if (outputToDir && fs::is_regular_file(io::fromUtf8(output)))
+                throw FSException(output + " is a file. (Did you switch the input and output parameters?)");
             return outputToDir;
+        }
+
+        // The file each image is projected to: `output`, or <output>/<image name>.tif
+        std::vector<std::pair<fs::path, fs::path>> projectedFiles(const std::vector<std::string> &images,
+                                                                  const std::string &output, bool outputToDir)
+        {
+            std::vector<std::pair<fs::path, fs::path>> targets;
+            targets.reserve(images.size());
+            for (const std::string &img : images)
+            {
+                const fs::path p = io::fromUtf8(img);
+                targets.emplace_back(p, outputToDir ? io::fromUtf8(output) / p.filename().replace_extension(".tif")
+                                                    : io::fromUtf8(output));
+            }
+            return targets;
         }
 
         // The scale `outsize` ("N" pixels of width, or "N%") stands for an image `width` pixels
@@ -222,13 +228,19 @@ namespace ddb
 
     } // namespace raster
 
-    void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError, const GeoProjectCallback &callback)
+    void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError, const GeoProjectCallback &callback,
+                    bool overwrite)
     {
-        const bool outputToDir = prepareOutput(images, output);
+        const bool outputToDir = outputIsFolder(images, output);
 
-        for (const std::string &img : images)
+        // Every projected file before the first is written, then the folder they go to
+        const auto targets = projectedFiles(images, output, outputToDir);
+        io::assureReplaceable(targets, overwrite);
+        if (outputToDir)
+            io::createDirectories(io::fromUtf8(output));
+
+        for (const auto &[p, target] : targets)
         {
-            fs::path p = io::fromUtf8(img);
             if (!fs::exists(p))
             {
                 throw FSException("Cannot project " + io::toUtf8(p) + " (does not exist)");
@@ -254,15 +266,7 @@ namespace ddb
                 continue;
             }
 
-            std::string outFile;
-            if (outputToDir)
-            {
-                outFile = io::toUtf8(io::fromUtf8(output) / p.filename().replace_extension(".tif"));
-            }
-            else
-            {
-                outFile = output;
-            }
+            const std::string outFile = io::toUtf8(target);
 
             // The position of the picture comes from its EXIF, read here: the helper reads none
             raster::GeoprojectParams params;
@@ -301,6 +305,8 @@ namespace ddb
             if (!raster::openArtefactRaster(produced))
                 throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": " + raster::kGdalUtilName +
                                     " wrote a file that is not a GeoTIFF");
+            // The output may have appeared while it was projected: replaced only when asked
+            io::assureReplaceable(target, overwrite);
             raster::publishArtefact(produced, io::fromUtf8(outFile));
 
             if (callback)

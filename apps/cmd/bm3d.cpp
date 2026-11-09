@@ -18,8 +18,7 @@ void Bm3d::setOptions(cxxopts::Options& opts) {
     .add_options()
     ("i,input", "File to process", cxxopts::value<std::string>());
     cmd::addOutputOption(opts, "bm3d output file");
-    opts.add_options()
-    ("overwrite", "Overwrite output file if it exists", cxxopts::value<bool>()->default_value("false"));
+    cmd::addOverwriteOption(opts);
     // clang-format on
     opts.parse_positional({"input", "output"});
 }
@@ -38,7 +37,7 @@ int Bm3d::run(cxxopts::ParseResult& opts) {
     if (opts.count("output"))
         output = opts["output"].as<std::string>();
 
-    std::cout << ddb::buildBm3d(input, output, opts["overwrite"].as<bool>()) << std::endl;
+    std::cout << ddb::buildBm3d(input, output, cmd::getOverwriteOption(opts)) << std::endl;
     return EXIT_SUCCESS;
 }
 

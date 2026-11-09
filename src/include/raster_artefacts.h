@@ -83,12 +83,25 @@ namespace ddb
         // not a regular file or GDAL cannot open it.
         GDALDatasetUniquePtr reopenWrittenRaster(const fs::path &path, ArtefactAccess access = ArtefactAccess::ReadOnly);
 
+        // Who writes in a private folder (makePrivateFolder)
+        enum class PrivateFolderWriter
+        {
+            // The confined raster helper (gdal-util), at low integrity on Windows
+            Helper,
+            // This process, or a program it runs unconfined (bm3d, untwine, PDAL)
+            Host
+        };
+
         // A new folder in `parent` that only the user of the process can enter, owned by the
         // returned object (removed with it): the place a helper writes its result, so that
-        // nobody else can swap the file between the helper and the host's check. On Windows it
-        // has a low integrity label, so that the confined helper may write in it.
+        // nobody else can swap the file between the helper and the host's check. On Windows a
+        // folder for the Helper has a low integrity label, so that the confined helper may write
+        // in it; what is made in it inherits the label and keeps it when it is moved out. A
+        // folder for the Host has none: a writer that does not run the helper publishes files
+        // that a low integrity process cannot change.
         // @throws FSException
-        io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix);
+        io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix,
+                                            PrivateFolderWriter writer = PrivateFolderWriter::Helper);
 
         // A private folder in artefactsDir(): what the helper writes there is an artefact, and
         // the host checks it with openArtefactRaster before it moves it to its name

@@ -1363,9 +1363,38 @@ extern "C"
     /** Merge single-band rasters into multi-band GeoTIFF
      * @param paths Array of input file paths
      * @param numPaths Number of input file paths
-     * @param outputPath Output GeoTIFF file path
+     * @param outputPath Output GeoTIFF file path. An output that exists is refused (since 2.1;
+     *        DDBMergeMultispectralEx replaces it when asked), and so is one that is an input.
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputPath);
+
+    /** Options for DDBMergeMultispectralEx (new in 2.1). Set structSize to sizeof(DDBMergeMultispectralOptions) and every
+     * other field explicitly. A later version may append fields: a library that does not know them
+     * rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
+    typedef struct {
+        uint32_t structSize; // sizeof(DDBMergeMultispectralOptions)
+        bool overwrite;      // replace an output that exists (true) or refuse it (false)
+        uint8_t reserved[3]; // must be 0: a later version may give them a meaning (DDBERR_INVALIDARGS otherwise)
+    } DDBMergeMultispectralOptions;
+
+    DDB_STATIC_ASSERT(sizeof(DDBMergeMultispectralOptions) == 8, "DDBMergeMultispectralOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBMergeMultispectralOptions, structSize) == 0, "DDBMergeMultispectralOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBMergeMultispectralOptions, overwrite) == 4, "DDBMergeMultispectralOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBMergeMultispectralOptions, reserved) == 5, "DDBMergeMultispectralOptions layout");
+
+    /** DDBMergeMultispectral with options (new in 2.1): an output that exists is replaced when
+     * options->overwrite is true. The merge is written beside outputPath in a private folder and
+     * replaces the existing output in one rename once it is complete: a failed call leaves it as
+     * it was.
+     * @param paths, numPaths, outputPath as DDBMergeMultispectral
+     * @param options see DDBMergeMultispectralOptions
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, fewer
+     *         than 2 paths are given, options is NULL or has a structSize below 8, a non-zero
+     *         reserved byte or unknown non-zero fields, or outputPath is one of the inputs (with or
+     *         without overwrite); DDBERR_EXCEPTION when outputPath exists and overwrite is false,
+     *         and on any other failure */
+    DDB_DLL DDBErr DDBMergeMultispectralEx(const char **paths, int numPaths, const char *outputPath,
+                                           const DDBMergeMultispectralOptions *options);
 
     /** Validate that source and reference rasters are compatible for alignment.
      * @param sourcePath Absolute path to source GeoTIFF
@@ -1381,6 +1410,8 @@ extern "C"
      * @param referencePath Absolute path to reference GeoTIFF
      * @param outputPath Absolute path for the aligned output (COG). Note: the
      *   output is always reprojected to EPSG:3857 regardless of the source CRS.
+     *   An output that exists is refused (since 2.1; DDBAlignRasterEx replaces it when asked),
+     *   and so is one that is the source or the reference.
      * @param mode "similarity" (default) or "translation"
      * @param output Pointer to C-string to receive JSON AlignResult (caller frees with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
@@ -1389,6 +1420,37 @@ extern "C"
                                   const char *outputPath,
                                   const char *mode,
                                   char **output);
+
+    /** Options for DDBAlignRasterEx (new in 2.1). Set structSize to sizeof(DDBAlignRasterOptions) and every
+     * other field explicitly. A later version may append fields: a library that does not know them
+     * rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
+    typedef struct {
+        uint32_t structSize; // sizeof(DDBAlignRasterOptions)
+        bool overwrite;      // replace an output that exists (true) or refuse it (false)
+        uint8_t reserved[3]; // must be 0: a later version may give them a meaning (DDBERR_INVALIDARGS otherwise)
+    } DDBAlignRasterOptions;
+
+    DDB_STATIC_ASSERT(sizeof(DDBAlignRasterOptions) == 8, "DDBAlignRasterOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAlignRasterOptions, structSize) == 0, "DDBAlignRasterOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAlignRasterOptions, overwrite) == 4, "DDBAlignRasterOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAlignRasterOptions, reserved) == 5, "DDBAlignRasterOptions layout");
+
+    /** DDBAlignRaster with options (new in 2.1): an output that exists is replaced when
+     * options->overwrite is true, in one rename once the new COG is complete (a failed call leaves
+     * it as it was).
+     * @param sourcePath, referencePath, outputPath, mode, output as DDBAlignRaster
+     * @param options see DDBAlignRasterOptions
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, mode is
+     *         unknown, options is NULL or has a structSize below 8, a non-zero reserved byte or
+     *         unknown non-zero fields, or outputPath is the source or the reference (with or
+     *         without overwrite); DDBERR_EXCEPTION when outputPath exists and overwrite is false,
+     *         and on any other failure */
+    DDB_DLL DDBErr DDBAlignRasterEx(const char *sourcePath,
+                                    const char *referencePath,
+                                    const char *outputPath,
+                                    const char *mode,
+                                    const DDBAlignRasterOptions *options,
+                                    char **output);
 
     /** Export raster with visualization params applied as GeoTIFF
      * @param inputPath Path to source raster file
@@ -1565,7 +1627,9 @@ extern "C"
      * 4-band 8-bit RGBA orthophotos. Transparency is written as an internal GeoTIFF
      * dataset mask (any pre-existing alpha band in RGBA inputs is overwritten).
      * @param input Path to input GeoTIFF
-     * @param output Path to output GeoTIFF (with internal dataset mask)
+     * @param output Path to output GeoTIFF (with internal dataset mask). An output that exists is
+     *        refused (since 2.1; DDBMaskBordersEx replaces it when asked), and so is one that is
+     *        the input.
      * @param near Tolerance in grey levels (default 15)
      * @param white If true, search for white borders instead of black
      * @return DDBERR_NONE on success, an error otherwise */
@@ -1573,6 +1637,37 @@ extern "C"
                                    const char *output,
                                    int nearDist,
                                    bool white);
+
+    /** Options for DDBMaskBordersEx (new in 2.1). Set structSize to sizeof(DDBMaskBordersOptions) and every
+     * other field explicitly. A later version may append fields: a library that does not know them
+     * rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
+    typedef struct {
+        uint32_t structSize; // sizeof(DDBMaskBordersOptions)
+        bool overwrite;      // replace an output that exists (true) or refuse it (false)
+        uint8_t reserved[3]; // must be 0: a later version may give them a meaning (DDBERR_INVALIDARGS otherwise)
+    } DDBMaskBordersOptions;
+
+    DDB_STATIC_ASSERT(sizeof(DDBMaskBordersOptions) == 8, "DDBMaskBordersOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBMaskBordersOptions, structSize) == 0, "DDBMaskBordersOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBMaskBordersOptions, overwrite) == 4, "DDBMaskBordersOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBMaskBordersOptions, reserved) == 5, "DDBMaskBordersOptions layout");
+
+    /** DDBMaskBorders with options (new in 2.1): an output that exists is replaced when
+     * options->overwrite is true. The mask is written beside output in a private folder and
+     * replaces the existing output (a stale `<output>.msk` goes with it) in one rename once it is
+     * complete: a failed or canceled call leaves it as it was.
+     * @param input, output, nearDist, white as DDBMaskBorders
+     * @param options see DDBMaskBordersOptions
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, options
+     *         is NULL or has a structSize below 8, a non-zero reserved byte or unknown non-zero
+     *         fields, or output is the input (with or without overwrite); DDBERR_CANCELED when
+     *         canceled; DDBERR_EXCEPTION when output exists and overwrite is false, and on any
+     *         other failure */
+    DDB_DLL DDBErr DDBMaskBordersEx(const char *input,
+                                     const char *output,
+                                     int nearDist,
+                                     bool white,
+                                     const DDBMaskBordersOptions *options);
 
     /** Render a region of a georeferenced raster to a compressed image buffer.
      * Output is produced by GDALWarp with optional resampling and reprojection.

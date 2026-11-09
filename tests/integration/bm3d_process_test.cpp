@@ -11,6 +11,7 @@
 // is linked into libddb is the job of the GPL linkage check (scripts/check-gpl-linkage.py).
 
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 
@@ -91,6 +92,48 @@ TEST(Bm3dProcess, aToolThatFailsIsReportedWithItsStatusAndItsLastOutput) {
     EXPECT_NE(message.find("boom: the tool rejected its input"), std::string::npos) << message;
     EXPECT_FALSE(fs::exists(ta.getPath("model.bm3d")));
     bm3d::findBm3dBinary(true);
+}
+
+// The bytes of a file
+std::string fileBytes(const fs::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+// Whether a private folder of a writer (".bm3d-stage-...") is left in folder
+bool hasStagingFolder(const fs::path& folder) {
+    for (const auto& entry : fs::directory_iterator(folder))
+        if (entry.path().filename().string().find("-stage-") != std::string::npos)
+            return true;
+    return false;
+}
+
+// bm3d writes into a private folder beside the output, and the file is replaced once bm3d wrote
+// it: a build that fails, asked to replace a file, leaves that file as it was (FR-XC-07)
+TEST(Bm3dProcess, aFailingBuildKeepsTheFileItWouldReplace) {
+    TestArea ta(TEST_NAME, true);
+    std::ofstream(ta.getPath("model.bm3d"), std::ios::binary) << "an earlier bm3d file";
+    EnvVarGuard mode("DDB_TEST_CHILD_MODE", "fail");
+    const std::string message = buildWithTool(ta, testChildPath());
+    EXPECT_NE(message.find("bm3d exited with code 1"), std::string::npos) << message;
+    EXPECT_EQ(fileBytes(ta.getPath("model.bm3d")), "an earlier bm3d file");
+    EXPECT_FALSE(hasStagingFolder(ta.getFolder()));
+    bm3d::findBm3dBinary(true);
+}
+
+// Without overwrite a file that exists is refused before bm3d runs; with it, it is replaced
+TEST(Bm3dProcess, anExistingFileIsReplacedOnlyWithOverwrite) {
+    TestArea ta(TEST_NAME, true);
+    const std::string model = io::toUtf8(writeModel(ta));
+    const fs::path output = ta.getPath("model.bm3d");
+    std::ofstream(output, std::ios::binary) << "an earlier bm3d file";
+
+    EXPECT_THROW(buildBm3d(model, io::toUtf8(output), false), OutputExistsException);
+    EXPECT_EQ(fileBytes(output), "an earlier bm3d file");
+
+    expectBuilt(buildBm3d(model, io::toUtf8(output), true));
+    EXPECT_NE(fileBytes(output), "an earlier bm3d file");
+    EXPECT_FALSE(hasStagingFolder(ta.getFolder()));
 }
 
 TEST(Bm3dProcess, aToolThatWritesNothingIsAFailure) {

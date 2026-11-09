@@ -1470,6 +1470,17 @@ std::vector<int> previewBandList(const char* previewBands) {
     return bands;
 }
 
+// The options of an export that writes one output (DDBAlignRasterEx, DDBMaskBordersEx,
+// DDBMergeMultispectralEx): structSize, overwrite, reserved bytes that must be zero
+template <typename Options>
+Options requireWriteOptions(const Options* options) {
+    const auto opts = requireOptions(options, sizeof(Options), "options");
+    for (const uint8_t byte : opts.reserved)
+        if (byte != 0)
+            throw InvalidArgsException("options->reserved must be 0");
+    return opts;
+}
+
 }  // namespace
 
 DDBErr DDBGenerateMemoryThumbnailEx(const char* filePath, int size,
@@ -1551,7 +1562,20 @@ DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const char* outpu
             throw InvalidArgsException("At least 2 input paths required");
         requireText(outputPath, "No output path provided");
 
-        ddb::mergeMultispectral(nonNullPaths(paths, numPaths), std::string(outputPath));
+        // An output that exists is refused (D-028)
+        ddb::mergeMultispectral(nonNullPaths(paths, numPaths), std::string(outputPath), false);
+    });
+}
+
+DDBErr DDBMergeMultispectralEx(const char** paths, int numPaths, const char* outputPath,
+                               const DDBMergeMultispectralOptions* options) {
+    return guarded<kNewExportCodes>([&] {
+        if (paths == nullptr || numPaths < 2)
+            throw InvalidArgsException("At least 2 input paths required");
+        requireText(outputPath, "No output path provided");
+        const auto opts = requireWriteOptions(options);
+
+        ddb::mergeMultispectral(nonNullPaths(paths, numPaths), std::string(outputPath), opts.overwrite);
     });
 }
 
@@ -1569,6 +1593,28 @@ DDBErr DDBValidateAlignRaster(const char* sourcePath,
     });
 }
 
+// The alignment of DDBAlignRaster and DDBAlignRasterEx, as JSON
+static std::string alignRasterJson(const char* sourcePath,
+                                   const char* referencePath,
+                                   const char* outputPath,
+                                   const char* mode,
+                                   bool overwrite) {
+    ddb::AlignOptions opts;
+    opts.overwrite = overwrite;
+    if (mode) {
+        std::string modeStr(mode);
+        if (modeStr == "translation")
+            opts.mode = ddb::AlignMode::Translation;
+        else if (!modeStr.empty() && modeStr != "similarity")
+            throw InvalidArgsException("Unknown mode '" + modeStr + "'. Use: similarity | translation");
+    }
+
+    auto r = ddb::alignRaster(std::string(sourcePath),
+                              std::string(referencePath),
+                              std::string(outputPath), opts);
+    return ddb::alignResultToJson(r);
+}
+
 DDBErr DDBAlignRaster(const char* sourcePath,
                       const char* referencePath,
                       const char* outputPath,
@@ -1580,19 +1626,25 @@ DDBErr DDBAlignRaster(const char* sourcePath,
         requireText(outputPath, "outputPath is required");
         requireOutput(output);
 
-        ddb::AlignOptions opts;
-        if (mode) {
-            std::string modeStr(mode);
-            if (modeStr == "translation")
-                opts.mode = ddb::AlignMode::Translation;
-            else if (!modeStr.empty() && modeStr != "similarity")
-                throw InvalidArgsException("Unknown mode '" + modeStr + "'. Use: similarity | translation");
-        }
+        // An output that exists is refused (D-028)
+        return alignRasterJson(sourcePath, referencePath, outputPath, mode, false);
+    });
+}
 
-        auto r = ddb::alignRaster(std::string(sourcePath),
-                                  std::string(referencePath),
-                                  std::string(outputPath), opts);
-        return ddb::alignResultToJson(r);
+DDBErr DDBAlignRasterEx(const char* sourcePath,
+                        const char* referencePath,
+                        const char* outputPath,
+                        const char* mode,
+                        const DDBAlignRasterOptions* options,
+                        char** output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireText(sourcePath, "sourcePath is required");
+        requireText(referencePath, "referencePath is required");
+        requireText(outputPath, "outputPath is required");
+        const auto opts = requireWriteOptions(options);
+        requireOutput(output);
+
+        return alignRasterJson(sourcePath, referencePath, outputPath, mode, opts.overwrite);
     });
 }
 
@@ -1780,7 +1832,19 @@ DDBErr DDBMaskBorders(const char *input, const char *output, int nearDist, bool 
         requireText(input, "No input path provided");
         requireText(output, "No output path provided");
 
-        ddb::maskBorders(std::string(input), std::string(output), nearDist, white);
+        // An output that exists is refused (D-028)
+        ddb::maskBorders(std::string(input), std::string(output), nearDist, white, "", false);
+    });
+}
+
+DDBErr DDBMaskBordersEx(const char *input, const char *output, int nearDist, bool white,
+                        const DDBMaskBordersOptions *options) {
+    return guarded<kNewExportCodes>([&] {
+        requireText(input, "No input path provided");
+        requireText(output, "No output path provided");
+        const auto opts = requireWriteOptions(options);
+
+        ddb::maskBorders(std::string(input), std::string(output), nearDist, white, "", opts.overwrite);
     });
 }
 
