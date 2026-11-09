@@ -454,7 +454,7 @@ namespace
     {
         raster::ThumbnailParams params;
         params.size = 512;
-        params.vis = ThumbVisParams{"false-color", "4,3,2", "NDVI", "RGBNRe", "rdylgn", "0,0.8"};
+        params.vis = ThumbVisParams{"false-color", "4,3,2", "NDVI", "RGBNRe", "rdylgn", "0,0.8", std::nullopt};
 
         const raster::ThumbnailParams back = raster::thumbnailParamsFromJson(json::parse(raster::toJson(params).dump()));
         EXPECT_EQ(back.size, 512);

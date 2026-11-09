@@ -57,9 +57,9 @@ namespace
 
         GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
         std::vector<float> row(static_cast<size_t>(W), value);
-        for (int r = 0; r < H; r++)
-            GDALRasterIO(hBand, GF_Write, 0, r, W, 1,
-                         row.data(), W, 1, GDT_Float32, 0, 0);
+        for (int r = 0; r < H; r++) {
+            EXPECT_EQ(GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0), CE_None);
+        }
         GDALFlushCache(hDs);
         GDALClose(hDs);
     }
@@ -97,8 +97,7 @@ namespace
                     double v = 60.0 + 130.0 * hash01(r, c) + 30.0 * (std::sin(r * 0.06) + std::cos(c * 0.05));
                     row[c] = static_cast<float>(v);
                 }
-                GDALRasterIO(hBand, GF_Write, 0, r, W, 1,
-                             row.data(), W, 1, GDT_Float32, 0, 0);
+                EXPECT_EQ(GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0), CE_None);
             }
         }
         GDALClose(hDs);
@@ -350,8 +349,7 @@ namespace
         std::vector<float> row(static_cast<size_t>(outW));
         int sampledPixels = 0, correctPixels = 0;
         for (int y = margin; y < outH - margin; y++) {
-            GDALRasterIO(hBand, GF_Read, 0, y, outW, 1,
-                         row.data(), outW, 1, GDT_Float32, 0, 0);
+            EXPECT_EQ(GDALRasterIO(hBand, GF_Read, 0, y, outW, 1, row.data(), outW, 1, GDT_Float32, 0, 0), CE_None);
             for (int x = outW * 9 / 16; x < outW - margin; x++) {
                 if (hasNd && std::abs(row[x] - nd) < 1.0f) continue;
                 sampledPixels++;
@@ -415,10 +413,10 @@ namespace
         std::vector<float> buf1(static_cast<size_t>(W) * H);
         std::vector<float> buf2(buf1.size());
         for (int b = 1; b <= nBands; b++) {
-            GDALRasterIO(GDALGetRasterBand(h1, b), GF_Read, 0, 0, W, H,
-                         buf1.data(), W, H, GDT_Float32, 0, 0);
-            GDALRasterIO(GDALGetRasterBand(h2, b), GF_Read, 0, 0, W, H,
-                         buf2.data(), W, H, GDT_Float32, 0, 0);
+            EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(h1, b), GF_Read, 0, 0, W, H, buf1.data(), W, H, GDT_Float32, 0, 0),
+                      CE_None);
+            EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(h2, b), GF_Read, 0, 0, W, H, buf2.data(), W, H, GDT_Float32, 0, 0),
+                      CE_None);
             EXPECT_EQ(buf1, buf2)
                 << "Band " << b << " differs between two identical alignRaster runs"
                 << " (VRT read path non-determinism)";
@@ -461,7 +459,7 @@ namespace
                          + 20.0 * (std::sin(r * 0.06) + std::cos(c * 0.05));
                 row[c] = static_cast<float>(v) + zOffset;
             }
-            GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
+            EXPECT_EQ(GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0), CE_None);
         }
         GDALFlushCache(hDs);
         GDALClose(hDs);
@@ -823,7 +821,8 @@ namespace
                     const double v = 60.0 + 130.0 * hash01(gr + b, gc) + 30.0 * (std::sin(gr * 0.06) + std::cos(gc * 0.05));
                     row[c] = b == 4 ? (c < 12 ? 0 : 255) : static_cast<uint8_t>(std::clamp(v, 0.0, 255.0));
                 }
-                GDALRasterIO(GDALGetRasterBand(hDs, b), GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Byte, 0, 0);
+                EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(hDs, b), GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Byte, 0, 0),
+                          CE_None);
             }
         }
         GDALClose(hDs);
@@ -935,7 +934,9 @@ namespace
                 const double v = 1000.0 + 80.0 * hash01(r, c) + 20.0 * (std::sin(r * 0.06) + std::cos(c * 0.05));
                 row[c] = (integer ? std::round(v) : v + 1.0e-7 * ((r * 31 + c) % 7)) + zOffset;
             }
-            GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float64, 0, 0);
+            EXPECT_EQ(
+                GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float64, 0, 0),
+                CE_None);
         }
         GDALClose(hDs);
     }

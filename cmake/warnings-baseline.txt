@@ -21,7 +21,6 @@ src/library/3d.cpp -Wdangling-else 1
 src/library/align.cpp -Wconversion 2
 src/library/authcredentials.cpp -Wshadow 2
 src/library/authmanager.cpp -Wshadow 1
-src/library/cog.cpp -Wconversion 2
 src/library/contour.cpp -Wdeprecated-declarations 1
 src/library/database.cpp -Wcatch-value= 1
 src/library/entry.cpp -Wshadow 1
@@ -63,7 +62,6 @@ tests/integration/thumbs_test.cpp -Wsign-compare 1
 tests/integration/vector_test.cpp -Wdangling-else 1
 tests/testarea.cpp -Wshadow 1
 tests/testfs.cpp -Wshadow 2
-tests/unit/align_test.cpp -Wunused-result 6
 tests/unit/apply_delta_test.cpp -Wshadow 1
 tests/unit/build_retry_test.cpp -Wdangling-else 1
 tests/unit/contour_test.cpp -Wunused-result 1

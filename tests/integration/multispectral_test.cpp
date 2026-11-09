@@ -1379,7 +1379,9 @@ std::vector<std::string> cameraBands(TestArea &ta, const std::string &prefix, bo
         GDALDatasetH ds = GDALCreate(tifDrv, p.string().c_str(), 20, 20, 1, GDT_UInt16, nullptr);
         EXPECT_NE(ds, nullptr);
         GDALClose(ds);
-        if (gps) EXPECT_TRUE(ExifEditor(p.string()).SetGPS(45.4642, 9.19, 120.5).empty());
+        if (gps) {
+            EXPECT_TRUE(ExifEditor(p.string()).SetGPS(45.4642, 9.19, 120.5).empty());
+        }
         inputs.push_back(p.string());
     }
     return inputs;

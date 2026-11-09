@@ -294,8 +294,9 @@ void describeMergedOutput(GDALDatasetH out, const std::vector<MergedBand> &bands
     }
     if (!xmpPacket.empty()) {
         char *list[2] = {const_cast<char *>(xmpPacket.c_str()), nullptr};
-        if (GDALSetMetadata(out, list, "xml:XMP") != CE_None)
+        if (GDALSetMetadata(out, list, "xml:XMP") != CE_None) {
             LOGD << "Could not write the XMP of the capture to the merged output";
+        }
     }
 }
 
@@ -529,8 +530,8 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
             // GPS correction for center shift
             if (srcGps.present) {
-                const auto camera = readCameraGeometry(inputPaths[0], validation.summary.sourceWidth);
-                correctGpsForCrop(srcGps.location, *crop, camera);
+                const auto geometry = readCameraGeometry(inputPaths[0], validation.summary.sourceWidth);
+                correctGpsForCrop(srcGps.location, *crop, geometry);
             }
         } else {
             // Standard non-shifted merge path
@@ -559,9 +560,10 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
             if (!editor.SetTags(camera.exifTags).empty()) {
                 for (const auto &tag : camera.exifTags) {
                     const auto failures = editor.SetTags({tag});
-                    if (!failures.empty())
+                    if (!failures.empty()) {
                         LOGD << "Could not write " << tag.first << " to " << outputPath << ": "
                              << failures.front().message;
+                    }
                 }
             }
         } catch (const HelperUnavailableException &) {

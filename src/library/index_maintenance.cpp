@@ -539,7 +539,9 @@ namespace ddb
                      << " replaced by a move";
                 fs::remove(to, ec);
                 if (ec)
+                {
                     LOGW << "Cannot remove the pending marker '" << io::toUtf8(to) << "': " << ec.message();
+                }
             }
         }
 

@@ -77,7 +77,8 @@ namespace
         {
             for (int x = 0; x < spec.width; x++)
                 row[static_cast<size_t>(x)] = spec.value(x, y);
-            GDALRasterIO(band, GF_Write, 0, y, spec.width, 1, row.data(), spec.width, 1, GDT_Float64, 0, 0);
+            EXPECT_EQ(GDALRasterIO(band, GF_Write, 0, y, spec.width, 1, row.data(), spec.width, 1, GDT_Float64, 0, 0),
+                      CE_None);
         }
         if (spec.hasScale)
         {
@@ -470,7 +471,7 @@ namespace
         {
             GDALDatasetH hDs = GDALOpen(raster.string().c_str(), GA_Update);
             int levels[2] = {2, 4};
-            GDALBuildOverviews(hDs, "NEAREST", 2, levels, 0, nullptr, nullptr, nullptr);
+            EXPECT_EQ(GDALBuildOverviews(hDs, "NEAREST", 2, levels, 0, nullptr, nullptr, nullptr), CE_None);
             GDALClose(hDs);
         }
 
@@ -1040,18 +1041,22 @@ namespace
                 opaque[i] = x < 20 ? 0 : 255;
                 alphaValues[i] = x < 20 ? 0 : 65535;
             }
-        GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, 0, size, size, values.data(), size, size, GDT_Float32, 0, 0);
+        EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, 0, size, size, values.data(), size, size,
+                               GDT_Float32, 0, 0),
+                  CE_None);
         if (mask == ContourMask::Alpha)
         {
             GDALRasterBandH alpha = GDALGetRasterBand(hDs, 2);
             GDALSetRasterColorInterpretation(alpha, GCI_AlphaBand);
-            GDALRasterIO(alpha, GF_Write, 0, 0, size, size, alphaValues.data(), size, size, GDT_UInt16, 0, 0);
+            EXPECT_EQ(GDALRasterIO(alpha, GF_Write, 0, 0, size, size, alphaValues.data(), size, size, GDT_UInt16, 0, 0),
+                      CE_None);
         }
         else if (mask == ContourMask::DatasetMask)
         {
             GDALCreateDatasetMaskBand(hDs, GMF_PER_DATASET);
-            GDALRasterIO(GDALGetMaskBand(GDALGetRasterBand(hDs, 1)), GF_Write, 0, 0, size, size, opaque.data(), size,
-                         size, GDT_Byte, 0, 0);
+            EXPECT_EQ(GDALRasterIO(GDALGetMaskBand(GDALGetRasterBand(hDs, 1)), GF_Write, 0, 0, size, size,
+                                   opaque.data(), size, size, GDT_Byte, 0, 0),
+                      CE_None);
         }
         GDALFlushCache(hDs);
         GDALClose(hDs);
@@ -1265,7 +1270,7 @@ namespace
         ASSERT_GT(count, 1000u);
         // One range over 0..41000 for all the bands put the mean at about 4 of 255 (607 of 41127); the range of
         // the band, mean + 2.33 standard deviations (about 2300), puts it at about 40
-        EXPECT_GT(sum / count, 20.0);
+        EXPECT_GT(sum / static_cast<double>(count), 20.0);
     }
 
     // ---------------------------------------------------------------- the COG build keeps the band model (D-021)
