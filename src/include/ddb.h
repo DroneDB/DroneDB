@@ -1456,7 +1456,7 @@ extern "C"
     DDB_STATIC_ASSERT(offsetof(DDBAlignRasterOptions, reserved) == 5, "DDBAlignRasterOptions layout");
 
     /** DDBAlignRaster with options (new in 2.1): an output that exists is replaced when
-     * options->overwrite is true, in one rename once the new COG is complete (a failed call leaves
+     * options->overwrite is true, in one rename once the new GeoTIFF is complete (a failed call leaves
      * it as it was).
      * @param sourcePath, referencePath, outputPath, mode, output as DDBAlignRaster
      * @param options see DDBAlignRasterOptions
