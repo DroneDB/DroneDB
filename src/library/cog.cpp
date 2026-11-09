@@ -452,79 +452,16 @@ namespace ddb
         }
         GDALDatasetH hDs = datasetHandle(dataset);
 
-        json statsJson;
-        json bandsJson;
-        int nBands = GDALGetRasterCount(hDs);
-
+        // The statistics of the COG come from the provider, as every other statistic of a raster: exact,
+        // for every band, and it writes the sidecar (next to the COG, which is still in its private folder
+        // and is not an artefact yet)
+        const int nBands = GDALGetRasterCount(hDs);
         for (int i = 1; i <= nBands; i++) {
-            GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
-            double bMin, bMax, bMean, bStdDev;
-
-            if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) != CE_None) {
-                LOGW << "Cannot compute statistics for band " << i;
-                continue;
-            }
-
-            // Approximate percentiles from histogram
-            double p2 = bMin, p98 = bMax;
-            int nBuckets = 256;
-            GUIntBig *histogramRaw = nullptr;
-            double hMin = bMin, hMax = bMax;
-            const CPLErr histErr = GDALGetDefaultHistogramEx(hBand, &hMin, &hMax, &nBuckets,
-                                                             &histogramRaw, FALSE, nullptr, nullptr);
-            const VsiFreePtr<GUIntBig[]> histogram(histogramRaw);
-
-            if (histErr == CE_None && histogram) {
-                GUIntBig totalPixels = 0;
-                for (int b = 0; b < nBuckets; b++) totalPixels += histogram[b];
-
-                GUIntBig target2 = static_cast<GUIntBig>(totalPixels * 0.02);
-                GUIntBig target98 = static_cast<GUIntBig>(totalPixels * 0.98);
-                GUIntBig cumulative = 0;
-                double bucketWidth = (hMax - hMin) / nBuckets;
-
-                for (int b = 0; b < nBuckets; b++) {
-                    cumulative += histogram[b];
-                    if (cumulative >= target2 && p2 == bMin) {
-                        p2 = hMin + b * bucketWidth;
-                    }
-                    if (cumulative >= target98 && p98 == bMax) {
-                        p98 = hMin + b * bucketWidth;
-                        break;
-                    }
-                }
-            }
-
-            bandsJson[std::to_string(i)] = {
-                {"min", bMin}, {"max", bMax}, {"mean", bMean}, {"std", bStdDev},
-                {"p2", p2}, {"p98", p98}
-            };
-        }
-
-        dataset.reset();
-
-        if (!bandsJson.empty()) {
-            auto now = std::chrono::system_clock::now();
-            auto time_t = std::chrono::system_clock::to_time_t(now);
-            std::tm tmBuf;
-#ifdef _WIN32
-            gmtime_s(&tmBuf, &time_t);
-#else
-            gmtime_r(&time_t, &tmBuf);
-#endif
-            std::ostringstream oss;
-            oss << std::put_time(&tmBuf, "%FT%TZ");
-
-            statsJson["bands"] = bandsJson;
-            statsJson["computedAt"] = oss.str();
-
-            const fs::path statsPath = statsSidecarOf(io::fromUtf8(cogPath));
-            std::ofstream out(statsPath);
-            if (out.is_open()) {
-                out << statsJson.dump(2);
-                LOGD << "Wrote stats sidecar: " << io::toUtf8(statsPath);
-            } else {
-                LOGW << "Cannot write stats sidecar: " << io::toUtf8(statsPath);
+            try {
+                RasterStatsProvider::instance().get(cogPath, hDs, i, std::nullopt, true);
+            } catch (const GDALException &e) {
+                cancel::throwIfCanceled();
+                LOGW << "Cannot compute statistics for band " << i << ": " << e.what();
             }
         }
     }

@@ -6,6 +6,7 @@
 
 #include "gdal_inc.h"
 
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -45,6 +46,27 @@ namespace ddb
         GDALDatasetH inputDataset = nullptr;
 
         int rasterCount;
+
+        // The NoData value that replaces the one of the bands during a tile with one (FR-RAS-31): the
+        // tile reads a view of the file that has it (inputDataset), and its statistics are those of
+        // the pixels that view leaves
+        std::optional<double> nodataOverride_;
+
+        // Puts a view of inputDataset with the NoData override in its place while it lives (an
+        // instance is used by one thread at a time); nothing when there is no override
+        class NodataOverrideScope
+        {
+            GDALTiler &tiler_;
+            GDALDatasetUniquePtr view_;
+            GDALDatasetH previous_;
+
+        public:
+            NodataOverrideScope(GDALTiler &tiler, const std::optional<double> &nodata);
+            ~NodataOverrideScope();
+            NodataOverrideScope(const NodataOverrideScope &) = delete;
+            NodataOverrideScope &operator=(const NodataOverrideScope &) = delete;
+        };
+        friend class NodataOverrideScope;
 
         bool hasGeoreference(const GDALDatasetH &dataset);
         bool sameProjection(const OGRSpatialReferenceH &a,

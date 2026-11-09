@@ -255,6 +255,55 @@ TEST(thermal, cApiGetRasterAreaStats) {
     DDBFree(output);
 }
 
+// The pixel exports with options on an R-JPEG (FR-RAS-15, FR-RAS-31, D-022): the value of a pixel in K is the
+// value in degrees Celsius plus 273.15, and the raw value of the pixel as NoData leaves it without a value
+TEST(thermal, cApiPixelExportsTakeTheOptions) {
+    TestArea ta(TEST_NAME);
+    fs::path thermalImg = ta.downloadTestAsset(
+        THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
+    const std::string path = thermalImg.string();
+
+    char *output = nullptr;
+    ASSERT_EQ(DDBGetRasterPointValuePixelEx(path.c_str(), 50, 50, nullptr, &output), DDBERR_NONE) << DDBGetLastError();
+    const json plain = json::parse(std::string(output));
+    DDBFree(output);
+    EXPECT_EQ(plain["unit"], "\xC2\xB0" "C");
+
+    DDBRasterOptions options = {};
+    options.structSize = sizeof(options);
+    options.formula = "KELVIN";
+    ASSERT_EQ(DDBGetRasterPointValuePixelEx(path.c_str(), 50, 50, &options, &output), DDBERR_NONE) << DDBGetLastError();
+    const json kelvin = json::parse(std::string(output));
+    DDBFree(output);
+    EXPECT_EQ(kelvin["unit"], "K");
+    EXPECT_NEAR(kelvin["value"].get<double>(), plain["value"].get<double>() + 273.15, 1e-3);
+
+    ASSERT_EQ(DDBGetRasterAreaStatsPixelEx(path.c_str(), 10, 10, 100, 100, &options, &output), DDBERR_NONE)
+        << DDBGetLastError();
+    const json area = json::parse(std::string(output));
+    DDBFree(output);
+    ASSERT_EQ(DDBGetRasterAreaStats(path.c_str(), 10, 10, 100, 100, &output), DDBERR_NONE);
+    const json areaPlain = json::parse(std::string(output));
+    DDBFree(output);
+    EXPECT_EQ(area["unit"], "K");
+    EXPECT_EQ(area["pixelCount"], areaPlain["pixelCount"]);
+    EXPECT_NEAR(area["mean"].get<double>(), areaPlain["mean"].get<double>() + 273.15, 1e-3);
+
+    // The raw value of the pixel as NoData: the pixel has no value, and the area leaves out every pixel with it
+    options.formula = nullptr;
+    options.flags = DDB_RASTER_OPT_NODATA;
+    options.nodata = plain["rawValue"].get<double>();
+    EXPECT_EQ(DDBGetRasterPointValuePixelEx(path.c_str(), 50, 50, &options, &output), DDBERR_INVALIDARGS);
+    output = nullptr;
+    const DDBErr err = DDBGetRasterAreaStatsPixelEx(path.c_str(), 10, 10, 100, 100, &options, &output);
+    if (err == DDBERR_NONE) {
+        EXPECT_LT(json::parse(std::string(output))["pixelCount"].get<int>(), areaPlain["pixelCount"].get<int>());
+        DDBFree(output);
+    } else {
+        EXPECT_EQ(err, DDBERR_INVALIDARGS); // every pixel of the area had that value
+    }
+}
+
 // ============================================================
 // Non-thermal file should not be detected
 // ============================================================

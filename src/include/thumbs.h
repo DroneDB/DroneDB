@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@ namespace ddb
         std::string bandFilter;  // Band order (e.g. "RGBNRe")
         std::string colormap;    // Colormap ID (e.g. "rdylgn")
         std::string rescale;     // Rescale range "min,max"
+        std::optional<double> nodata; // NoData value that replaces the one of the bands (FR-RAS-31), finite
     };
 
     // Writes a thumbnail per file the generators support; onGenerated gets the path of each one

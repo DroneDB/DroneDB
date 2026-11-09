@@ -311,6 +311,13 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
              return DDBExportRaster2(raster.c_str(), out.c_str(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0,
                                      nullptr, nullptr);
          }},
+        {"DDBExportRaster3",
+         [=] {
+             DDBRasterOptions options{};
+             options.structSize = sizeof(options);
+             return DDBExportRaster3(raster.c_str(), out.c_str(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0,
+                                     nullptr, nullptr, &options);
+         }},
         {"DDBExportSplatSpz",
          [=] {
              return withString([&](char** text) { return DDBExportSplatSpz(dataset.c_str(), "scene.spz", text); });
@@ -327,6 +334,12 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
                  return DDBGenerateContours(dem.c_str(), 5.0, 0, 0.0, NAN, NAN, 0.0, 1, text);
              });
          }},
+        {"DDBGenerateContoursEx",
+         [=] {
+             return withString([&](char** text) {
+                 return DDBGenerateContoursEx(dem.c_str(), 5.0, 0, 0.0, NAN, NAN, 0.0, 1, nullptr, text);
+             });
+         }},
         {"DDBGenerateMemoryThumbnail",
          [=] {
              return withBuffer([&](uint8_t** b, int* s) {
@@ -339,12 +352,31 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
                  return DDBGenerateMemoryThumbnailEx(raster.c_str(), 256, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, b, s);
              });
          }},
+        {"DDBGenerateMemoryThumbnailEx2",
+         [=] {
+             return withBuffer([&](uint8_t** b, int* s) {
+                 return DDBGenerateMemoryThumbnailEx2(raster.c_str(), 256, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                      nullptr, nullptr, b, s);
+             });
+         }},
         {"DDBGenerateThumbnail",
          [=] { return DDBGenerateThumbnail(raster.c_str(), 256, thumb.c_str()); }},
         {"DDBGetRasterAreaStats",
          [=] {
              return withString([&](char** text) {
                  return DDBGetRasterAreaStats(raster.c_str(), 0, 0, 100, 100, text);
+             });
+         }},
+        {"DDBGetRasterAreaStatsEx",
+         [=] {
+             return withString([&](char** text) {
+                 return DDBGetRasterAreaStatsEx(dem.c_str(), 10.003, 44.995, 10.005, 44.997, nullptr, text);
+             });
+         }},
+        {"DDBGetRasterAreaStatsPixelEx",
+         [=] {
+             return withString([&](char** text) {
+                 return DDBGetRasterAreaStatsPixelEx(raster.c_str(), 0, 0, 100, 100, nullptr, text);
              });
          }},
         {"DDBGetRasterMetadata",
@@ -358,16 +390,38 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
              return withString(
                  [&](char** text) { return DDBGetRasterPointValue(raster.c_str(), 10, 10, text); });
          }},
+        {"DDBGetRasterPointValueEx",
+         [=] {
+             return withString([&](char** text) {
+                 return DDBGetRasterPointValueEx(dem.c_str(), 10.004, 44.996, nullptr, text);
+             });
+         }},
+        {"DDBGetRasterPointValuePixelEx",
+         [=] {
+             return withString(
+                 [&](char** text) { return DDBGetRasterPointValuePixelEx(raster.c_str(), 10, 10, nullptr, text); });
+         }},
         {"DDBGetRasterProfile",
          [=] {
              return withString([&](char** text) {
                  return DDBGetRasterProfile(dem.c_str(), line.c_str(), 20, text);
              });
          }},
+        {"DDBGetRasterProfileEx",
+         [=] {
+             return withString([&](char** text) {
+                 return DDBGetRasterProfileEx(dem.c_str(), line.c_str(), 20, nullptr, text);
+             });
+         }},
         {"DDBGetRasterValueInfo",
          [=] {
              return withString(
                  [&](char** text) { return DDBGetRasterValueInfo(raster.c_str(), text); });
+         }},
+        {"DDBGetRasterValueInfoEx",
+         [=] {
+             return withString(
+                 [&](char** text) { return DDBGetRasterValueInfoEx(raster.c_str(), nullptr, text); });
          }},
         {"DDBMaskBorders",
          [=] { return DDBMaskBorders(raster.c_str(), masked.c_str(), 15, false); }},
@@ -387,6 +441,13 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
              return withBuffer([&](uint8_t** b, int* s) {
                  return DDBMemoryTileEx(raster.c_str(), 14, 8192, 8191, 256, false, true, nullptr, nullptr, nullptr, nullptr, nullptr,
                                         nullptr, nullptr, b, s);
+             });
+         }},
+        {"DDBMemoryTileEx2",
+         [=] {
+             return withBuffer([&](uint8_t** b, int* s) {
+                 return DDBMemoryTileEx2(raster.c_str(), 14, 8192, 8191, 256, false, true, nullptr, nullptr, nullptr,
+                                         nullptr, nullptr, nullptr, nullptr, nullptr, b, s);
              });
          }},
         {"DDBMemoryTileFmt",

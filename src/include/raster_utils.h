@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <vector>
 #include <cmath>
+#include <optional>
 #include "gdal_inc.h"
+#include "gdal_raii.h"
 
 namespace ddb {
 
@@ -18,6 +20,43 @@ struct BandNodata {
     bool has = false;
     double value = 0.0;
 };
+
+// Map coordinates of a raster to its pixels: the inverse of its geotransform. THE conversion
+// of the raster values (point, area, value info, profile, stockpile, volume, the pixel of a
+// region query): the Hub and the Registry send map coordinates and never a pixel.
+struct GeoPixelMap {
+    double inv[6] = {0, 1, 0, 0, 0, 1};
+
+    // Throws AppException("Cannot invert geotransform") when the geotransform is singular
+    explicit GeoPixelMap(const double gt[6]);
+
+    // The fractional pixel (column, row) of the map coordinate (x, y): pixel (0, 0) has its
+    // corner at 0.0 and its centre at 0.5
+    void toPixel(double x, double y, double &px, double &py) const {
+        px = inv[0] + inv[1] * x + inv[2] * y;
+        py = inv[3] + inv[4] * x + inv[5] * y;
+    }
+
+    // The pixel that holds the map coordinate (floor: a point left of or above the raster is a
+    // negative pixel, never clamped onto its edge)
+    void toPixelIndex(double x, double y, int &col, int &row) const;
+};
+
+// A value for the JSON of an endpoint, without the noise of the arithmetic or of the precision it was read in:
+// the band samples are read as floats (24 bits, 7 significant digits), and raw * scale + offset in doubles
+// (29.100000000000001 for 291 * 0.1), so 29.1 is what a user expects. Bands of 32 bits or more (UInt32, Int32,
+// Float64) keep 15 digits.
+double tidyValue(double value, GDALDataType type);
+
+// Whether a nodata value cannot be held by the type of the band (65536 for a UInt16 band: no
+// sample can ever match it). Floating-point bands hold every value.
+bool nodataOutOfRange(GDALDataType type, double value);
+
+// A view of the dataset whose bands all have the NoData value `nodata` instead of their own (FR-RAS-31): a
+// VRT over `src` (which must stay open as long as the view does) whose masks follow the new value.
+// What the tiles, thumbnails, exports and formula renders read, so the one override reaches every
+// pixel they decide on. Throws GDALException when GDAL cannot make it.
+GDALDatasetUniquePtr withNodataOverride(GDALDatasetH src, double nodata);
 
 // Reads the geotransform of a dataset into gt. Throws GDALException("Raster has no geotransform:
 // <name>") when the dataset has none (GDAL would hand out its default one). `name` is the raster

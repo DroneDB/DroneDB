@@ -7,6 +7,7 @@
 #include "json.h"
 #include "mathutil.h"
 #include "raster_analysis.h"
+#include "raster_utils.h"
 #include "thermal.h"
 #include "sensorprofile.h"
 #include "exceptions.h"
@@ -134,42 +135,35 @@ ProfilePath buildPath(const DemContext &dem, const OGRLineString &line) {
     return path;
 }
 
-// The value of the raster at a point of the profile: bilinear, in physical units for a thermal
-// raster
+// The value of the raster at a point of the profile: bilinear, in physical values: raw * scale + offset, or
+// the temperature for a thermal raster of raw counts
 class ProfileSampler {
     const DemContext &dem;
-    double invGt[6];
+    const GeoPixelMap pixelMap;
     std::optional<ThermalCalibration> thermal;
 
-    double applyThermal(double v) const {
-        if (!thermal) return v;
-        return rawToTemperature(static_cast<uint16_t>(v), *thermal);
-    }
-
-    bool isNoDataValue(float v) const {
-        return !std::isfinite(v) || isNodata(v, dem.nodata);
+    double toValue(double raw) const {
+        if (!thermal) return dem.toPhysical(raw);
+        return rawToTemperature(static_cast<uint16_t>(raw), *thermal);
     }
 
 public:
     // Throws when the geotransform of the raster cannot be inverted
-    explicit ProfileSampler(const DemContext &raster) : dem(raster) {
-        if (!GDALInvGeoTransform(dem.gt, invGt))
-            throw AppException("Cannot invert geotransform");
-    }
+    explicit ProfileSampler(const DemContext &raster) : dem(raster), pixelMap(raster.gt) {}
 
     // The raster holds raw UInt16 values of a thermal sensor: report them as temperatures
     void calibrate(const ThermalCalibration &cal) {
         if (cal.valid) thermal = cal;
     }
 
-    // Nothing when the point is outside the raster, the read fails or a sample is nodata
+    // Nothing when the point is outside the raster, the read fails or a sample has no value
     std::optional<double> valueAt(double smx, double smy) const {
         const int rasterW = dem.width;
         const int rasterH = dem.height;
 
-        // Map -> pixel (fractional).
+        // Map -> pixel (fractional): the one geo-to-pixel conversion of the raster values
         double px, py;
-        GDALApplyGeoTransform(invGt, smx, smy, &px, &py);
+        pixelMap.toPixel(smx, smy, px, py);
 
         if (px < 0 || py < 0 || px >= rasterW || py >= rasterH)
             return std::nullopt;
@@ -187,11 +181,14 @@ public:
 
         const int blockW = x1 - x0 + 1;
         const int blockH = y1 - y0 + 1;
-        float block[4] = {0.f, 0.f, 0.f, 0.f};
-
-        if (GDALRasterIO(dem.band, GF_Read, x0, y0, blockW, blockH,
-                         block, blockW, blockH, GDT_Float32, 0, 0) != CE_None)
+        std::vector<float> block;
+        try {
+            // NaN where a pixel has no value (NoData, masked, not a number)
+            block = dem.readRaw(x0, y0, blockW, blockH, blockW, blockH);
+        } catch (const AppException &) {
+            cancel::throwIfCanceled();
             return std::nullopt;
+        }
 
         // Unpack (supports 1x1, 1x2, 2x1, 2x2 edge cases).
         const float v00 = block[0];
@@ -200,17 +197,15 @@ public:
         const float v11 = (blockW > 1 && blockH > 1) ? block[blockW + 1]
                           : (blockW > 1 ? v10 : (blockH > 1 ? v01 : v00));
 
-        if (isNoDataValue(v00) || isNoDataValue(v10) ||
-            isNoDataValue(v01) || isNoDataValue(v11))
+        if (std::isnan(v00) || std::isnan(v10) || std::isnan(v01) || std::isnan(v11))
             return std::nullopt;
 
-        // Apply thermal calibration to raw UInt16 values before interpolating
-        // so we operate in physical units (otherwise blending non-linear
-        // Planck values would be wrong at edges).
-        const double c00 = applyThermal(v00);
-        const double c10 = applyThermal(v10);
-        const double c01 = applyThermal(v01);
-        const double c11 = applyThermal(v11);
+        // Convert the raw samples to physical values before interpolating, so we operate in physical
+        // units (blending raw counts of a non-linear Planck conversion would be wrong at edges).
+        const double c00 = toValue(v00);
+        const double c10 = toValue(v10);
+        const double c01 = toValue(v01);
+        const double c11 = toValue(v11);
 
         const double top = c00 + fx * (c10 - c00);
         const double bot = c01 + fx * (c11 - c01);
@@ -292,7 +287,7 @@ json sampleProfile(const OGRLineString &line, const ProfilePath &path, const Pro
 
 std::string getRasterProfileJson(const std::string &filePath,
                                  const std::string &geoJsonLineString,
-                                 int samples) {
+                                 int samples, const RasterValueOptions &options) {
     cancel::throwIfCanceled();
     // Clamp / defaults.
     if (samples < MIN_SAMPLES) samples = DEFAULT_SAMPLES;
@@ -303,14 +298,13 @@ std::string getRasterProfileJson(const std::string &filePath,
     const OGRLineString *line = geom->toLineString();
 
     // --- Open raster and inspect metadata ---
-    const DemContext dem = openDem(filePath);
+    const DemContext dem = openDem(filePath, 1, BandValueOptions{options.nodata});
     ProfileSampler sampler(dem);
 
     GDALRasterBandH hBand = dem.band;
     const GDALDataType dt = GDALGetRasterDataType(hBand);
 
-    const char *unitCStr = GDALGetRasterUnitType(hBand);
-    std::string unit = unitCStr ? unitCStr : "";
+    std::string unit = dem.unit;
 
     const bool isThermal = detectIsThermalProfile(filePath);
     ThermalCalibration cal;

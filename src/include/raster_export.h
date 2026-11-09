@@ -5,6 +5,7 @@
 #define RASTER_EXPORT_H
 
 #include <functional>
+#include <optional>
 #include <string>
 
 
@@ -27,6 +28,9 @@ namespace ddb
         std::string bandFilter;
         std::string colormap;
         std::string rescale;
+        // The NoData value that replaces the one of the bands (FR-RAS-31, finite): the pixels equal to it
+        // are not exported
+        std::optional<double> nodata;
 
         // Window size of a formula export in pixels (clamped to 64..8192 and a multiple of 16);
         // 0 chooses one that keeps the working set around 64 MB

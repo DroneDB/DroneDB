@@ -222,9 +222,10 @@ namespace ddb
         }
 
         // The 8-bit image of a warped render whose bands are not 8-bit: every band but the last
-        // (the alpha band of the warp) stretched from range to 0-255, and the alpha band, or for an
+        // (the alpha band of the warp) stretched from its range to 0-255, and the alpha band, or for an
         // image without alpha (JPEG), white where the alpha is 0
-        GDALDatasetUniquePtr stretchedImage(GDALDatasetH warped, const std::pair<double, double> &range, bool white)
+        GDALDatasetUniquePtr stretchedImage(GDALDatasetH warped, const std::vector<std::pair<double, double>> &ranges,
+                                            bool white)
         {
             const int width = GDALGetRasterXSize(warped), height = GDALGetRasterYSize(warped);
             const int colorBands = GDALGetRasterCount(warped) - 1;
@@ -255,7 +256,10 @@ namespace ddb
             {
                 read(b, values);
                 for (size_t i = 0; i < pixels; i++)
+                {
+                    const auto &range = ranges[std::min(ranges.size() - 1, static_cast<size_t>(b - 1))];
                     bytes[i] = white && alpha[i] <= 0.f ? 255 : stretchToByte(values[i], range.first, range.second);
+                }
                 write(b);
                 GDALSetRasterColorInterpretation(GDALGetRasterBand(hImage, b),
                                                  colorBands < 3 ? GCI_GrayIndex
@@ -359,15 +363,15 @@ namespace ddb
         // map tiles do, its first three data bands (or its first) stretched to 8 bits when they
         // are not. A multispectral or a DEM raster as it is (6 bands, Float32) cannot be encoded.
         std::vector<int> bands = options.bands;
-        std::optional<std::pair<double, double>> stretch;
+        std::vector<std::pair<double, double>> stretch;
         if (!directOutput && bands.empty())
         {
             bands = defaultDisplayBands(hSrc);
             if (GDALGetRasterDataType(GDALGetRasterBand(hSrc, bands[0])) != GDT_Byte)
-                stretch = displayRange(inputPath, hSrc, bands);
+                stretch = defaultStretch(inputPath, hSrc, bands);
         }
         WarpBackground background = WarpBackground::None;
-        if (stretch)
+        if (!stretch.empty())
             background = WarpBackground::Alpha; // the stretch makes JPEG's white from it
         else if (fi.jpegCompositing)
             background = WarpBackground::White;
@@ -397,8 +401,8 @@ namespace ddb
         }
 
         if (!directOutput) {
-            if (stretch)
-                warped = stretchedImage(datasetHandle(warped), *stretch, fi.jpegCompositing);
+            if (!stretch.empty())
+                warped = stretchedImage(datasetHandle(warped), stretch, fi.jpegCompositing);
             encodeDataset(datasetHandle(warped), fi, outBytes, outSize, inputPath);
             return;
         }
@@ -466,19 +470,11 @@ namespace ddb
             }
         }
 
-        // Invert geotransform: pixel <- world
-        double invGt[6];
-        if (!GDALInvGeoTransform(gt, invGt)) {
-            throw GDALException("Cannot invert geotransform");
-        }
-        // Use std::floor (not truncation toward zero) so that points slightly
-        // outside the raster on the negative side map to negative pixel
-        // coordinates and get reported as out-of-bounds, rather than being
-        // silently clamped to the edge pixel.
-        const double pxd = invGt[0] + invGt[1] * dsX + invGt[2] * dsY;
-        const double pyd = invGt[3] + invGt[4] * dsX + invGt[5] * dsY;
-        const int px = static_cast<int>(std::floor(pxd));
-        const int py = static_cast<int>(std::floor(pyd));
+        // The one geo-to-pixel conversion (raster_utils.h): floor, so that points slightly outside
+        // the raster on the negative side map to negative pixel coordinates and get reported as
+        // out-of-bounds, rather than being silently clamped to the edge pixel.
+        int px = 0, py = 0;
+        GeoPixelMap(gt).toPixelIndex(dsX, dsY, px, py);
 
         json out;
         out["lon"] = lon;

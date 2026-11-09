@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "raster_analysis.h"
+
 namespace ddb {
 
 /**
@@ -29,10 +31,13 @@ namespace ddb {
  * @param geoJsonLineString GeoJSON geometry of type LineString in WGS84
  * @param samples Requested number of equispaced samples along the polyline
  *                (clamped to [2, 4096]; <2 falls back to 256)
+ * @param options The NoData override and the formula of the values (raster_analysis.h). The values are
+ *                physical (raw * scale + offset); the line is converted to pixels with the one
+ *                geo-to-pixel helper of the raster (raster_utils.h GeoPixelMap).
  */
 std::string getRasterProfileJson(const std::string &filePath,
                                  const std::string &geoJsonLineString,
-                                 int samples);
+                                 int samples, const RasterValueOptions &options = {});
 
 } // namespace ddb
 

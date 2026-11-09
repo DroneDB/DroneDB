@@ -19,6 +19,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_stats.h"
+#include "raster_utils.h"
 #include "thumbs.h"
 #include "thumb_internal.h"
 #include "vis_render.h"
@@ -313,7 +314,12 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
     const auto src = openUserRaster(io::toUtf8(imagePath));
     if (!src)
         throw raster::RasterOpException(raster::ErrorCode::Unreadable, "Cannot open " + io::toUtf8(imagePath) + " for reading");
-    GDALDatasetH hSrc = datasetHandle(src);
+    // With a NoData override the thumbnail reads a view of the raster that has it: the formula, the mask
+    // and the statistics of the stretch then all see the same pixels as without data
+    GDALDatasetUniquePtr overridden;
+    if (visParams.nodata)
+        overridden = withNodataOverride(datasetHandle(src), *visParams.nodata);
+    GDALDatasetH hSrc = overridden ? datasetHandle(overridden) : datasetHandle(src);
 
     const int width = GDALGetRasterXSize(hSrc);
     const int height = GDALGetRasterYSize(hSrc);
@@ -352,7 +358,8 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
         double globalMin = std::numeric_limits<double>::max();
         double globalMax = std::numeric_limits<double>::lowest();
         for (int b : bands) {
-            const auto [sMin, sMax] = stretchRange(RasterStatsProvider::instance().get(io::toUtf8(imagePath), hSrc, b));
+            const auto [sMin, sMax] =
+                stretchRange(RasterStatsProvider::instance().get(io::toUtf8(imagePath), hSrc, b, visParams.nodata));
             globalMin = std::min(globalMin, sMin);
             globalMax = std::max(globalMax, sMax);
         }

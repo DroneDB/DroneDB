@@ -257,15 +257,9 @@ SearchWindow searchWindow(const DemContext &dem, double lat, double lon, double 
             throw AppException("Cannot project click coordinates into raster CRS");
     }
 
-    double invGt[6];
-    if (!GDALInvGeoTransform(gt, invGt))
-        throw AppException("Cannot invert geotransform");
-
     SearchWindow w;
-    const double centerColD = invGt[0] + invGt[1] * clickX + invGt[2] * clickY;
-    const double centerRowD = invGt[3] + invGt[4] * clickX + invGt[5] * clickY;
-    w.centerCol = static_cast<int>(std::floor(centerColD));
-    w.centerRow = static_cast<int>(std::floor(centerRowD));
+    // The one geo-to-pixel conversion of the raster values (raster_utils.h)
+    GeoPixelMap(gt).toPixelIndex(clickX, clickY, w.centerCol, w.centerRow);
 
     if (w.centerCol < 0 || w.centerCol >= dem.width || w.centerRow < 0 || w.centerRow >= dem.height)
         throw NoRasterDataException("Click point is outside raster bounds");

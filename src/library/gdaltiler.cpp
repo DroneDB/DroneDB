@@ -60,16 +60,18 @@ namespace ddb
     namespace
     {
         // Maps the values of a window (band-sequential, windowPixels per band) to 0-255
-        // over [bMin, bMax] and writes them at their place in the tile image
+        // over the range of each band and writes them at their place in the tile image
         template <typename T>
-        void rescaleInto(const uint8_t *buffer, int bands, const GQResult &g, double bMin, double bMax,
-                         RasterImage &image)
+        void rescaleInto(const uint8_t *buffer, int bands, const GQResult &g,
+                         const std::vector<std::pair<double, double>> &ranges, RasterImage &image)
         {
             const T *src = reinterpret_cast<const T *>(buffer);
             const size_t windowPixels = static_cast<size_t>(g.w.xsize) * g.w.ysize;
 
             for (int b = 0; b < bands; b++)
             {
+                const double bMin = ranges[static_cast<size_t>(b)].first;
+                const double bMax = ranges[static_cast<size_t>(b)].second;
                 uint8_t *dst = image.band(b);
                 for (int row = 0; row < g.w.ysize; row++)
                 {
@@ -186,6 +188,24 @@ namespace ddb
 
     GDALTiler::~GDALTiler() = default;
 
+    GDALTiler::NodataOverrideScope::NodataOverrideScope(GDALTiler &tiler, const std::optional<double> &nodata)
+        : tiler_(tiler), previous_(tiler.inputDataset)
+    {
+        if (!nodata)
+            return;
+        view_ = withNodataOverride(tiler.inputDataset, *nodata);
+        tiler.inputDataset = datasetHandle(view_);
+        tiler.nodataOverride_ = nodata;
+    }
+
+    GDALTiler::NodataOverrideScope::~NodataOverrideScope()
+    {
+        if (!view_)
+            return;
+        tiler_.inputDataset = previous_;
+        tiler_.nodataOverride_.reset();
+    }
+
     bool GDALTiler::tileWindow(int tz, int tx, int ty, GQResult &g)
     {
         BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
@@ -210,7 +230,7 @@ namespace ddb
     BandStatistics GDALTiler::bandStatistics(int band)
     {
         // The statistics of the file, not of the warped VRT
-        return RasterStatsProvider::instance().get(inputPath, datasetHandle(fileDataset), band);
+        return RasterStatsProvider::instance().get(inputPath, datasetHandle(fileDataset), band, nodataOverride_);
     }
 
     void GDALTiler::readBands(const GQResult &g, int bands, RasterImage &image)
@@ -244,31 +264,37 @@ namespace ddb
             throw GDALException("Cannot read input dataset window");
         }
 
-        // One stretch for all bands, from the statistics of the raster file (not of the warped VRT)
-        std::vector<int> shown(static_cast<size_t>(bands));
+        // The stretch comes from the statistics of the raster file (not of the warped VRT), of the pixels the
+        // NoData override leaves (FR-RAS-31: the statistics value info reads, so the default tile and the
+        // stretch value info returns agree). A single band (a DEM, a thermal raster) is stretched over its
+        // minimum to its maximum. A multi-band raster that is not Byte is stretched per band (D-041,
+        // FR-RAS-21): the mean +- 2.33 standard deviations of the band, clamped to its minimum and maximum, so a
+        // 16-bit multispectral ortho is not almost black
+        std::vector<int> statBands(static_cast<size_t>(bands));
         for (int i = 0; i < bands; i++)
-            shown[static_cast<size_t>(i)] = i + 1;
-        const auto [globalMin, globalMax] = displayRange(inputPath, datasetHandle(fileDataset), shown);
+            statBands[static_cast<size_t>(i)] = i + 1;
+        const std::vector<std::pair<double, double>> ranges =
+            defaultStretch(inputPath, datasetHandle(fileDataset), statBands, nodataOverride_);
 
         switch (type)
         {
         case GDT_UInt16:
-            rescaleInto<uint16_t>(buffer.get(), bands, g, globalMin, globalMax, image);
+            rescaleInto<uint16_t>(buffer.get(), bands, g, ranges, image);
             break;
         case GDT_Int16:
-            rescaleInto<int16_t>(buffer.get(), bands, g, globalMin, globalMax, image);
+            rescaleInto<int16_t>(buffer.get(), bands, g, ranges, image);
             break;
         case GDT_UInt32:
-            rescaleInto<uint32_t>(buffer.get(), bands, g, globalMin, globalMax, image);
+            rescaleInto<uint32_t>(buffer.get(), bands, g, ranges, image);
             break;
         case GDT_Int32:
-            rescaleInto<int32_t>(buffer.get(), bands, g, globalMin, globalMax, image);
+            rescaleInto<int32_t>(buffer.get(), bands, g, ranges, image);
             break;
         case GDT_Float32:
-            rescaleInto<float>(buffer.get(), bands, g, globalMin, globalMax, image);
+            rescaleInto<float>(buffer.get(), bands, g, ranges, image);
             break;
         case GDT_Float64:
-            rescaleInto<double>(buffer.get(), bands, g, globalMin, globalMax, image);
+            rescaleInto<double>(buffer.get(), bands, g, ranges, image);
             break;
         default:
             break;
@@ -320,8 +346,11 @@ namespace ddb
                                 uint8_t **outBuffer, int *outBufferSize)
     {
         // If no vis params set, fall through to standard tile
-        if (visParams.preset.empty() && visParams.bands.empty() && visParams.formula.empty())
+        if (visParams.preset.empty() && visParams.bands.empty() && visParams.formula.empty() && !visParams.nodata)
             return tile(tz, tx, ty, format, outBuffer, outBufferSize);
+
+        // A NoData override: the tile reads a view of the raster that has it, for this call only
+        const NodataOverrideScope nodataScope(*this, visParams.nodata);
 
         const int xyzY = tms ? tmsToXYZ(ty, tz) : ty;
         if (!getMinMaxCoordsForZ(tz).contains(tx, xyzY))

@@ -451,9 +451,16 @@ void exportRaster(const RasterExport &request)
     ExportSession session(request.progress);
 
     // Closed on any return or throw
-    auto srcGuard = raster::openInputRaster(request.input);
-    if (!srcGuard)
+    auto source = raster::openInputRaster(request.input);
+    if (!source)
         throw GDALException("Cannot open " + request.input);
+
+    // With a NoData override the export reads a view of the raster that has it (it is closed before the
+    // raster, which it reads)
+    GDALDatasetUniquePtr view;
+    if (request.nodata)
+        view = withNodataOverride(datasetHandle(source), *request.nodata);
+    GDALDatasetUniquePtr &srcGuard = view ? view : source;
 
     if (!request.formula.empty())
         exportFormula(request, session, srcGuard);

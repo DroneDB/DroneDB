@@ -281,6 +281,14 @@ Registry has to adopt first.
 * 2026-10-21: baseline (DroneDB `fixes-and-optimizations` after `7ee39d2`).
 * 2026-10-21: `capabilities` added (2.0.0). Its `symbols` list is
   `src/include/ddb.symbols`, so every new export updates this fixture too.
+* 2026-11-09: `capabilities` lists the raster value exports of 2.1 (U-201: `DDBGetRasterValueInfoEx`,
+  `DDBGetRasterPointValueEx`, `DDBGetRasterAreaStatsEx`, `DDBGetRasterProfileEx`,
+  `DDBGenerateContoursEx`, `DDBGenerateMemoryThumbnailEx2`, `DDBMemoryTileEx2`, `DDBExportRaster3`, and the
+  pixel exports for a raster without a map, an R-JPEG: `DDBGetRasterPointValuePixelEx`,
+  `DDBGetRasterAreaStatsPixelEx`), which take a `DDBRasterOptions` (NoData override, formula, WGS84 window).
+  The point result adds `unit` (of the band, or of the thermal formula). The value info JSON grows
+  (`nodata`, `nodataOverridden`, `nodataInvalid`, `pixelCount`, `validPixelCount`, `windowPixelCount`,
+  `stretch`, `scale`, `offset`); the point result of a map coordinate adds `lon` and `lat`.
 * 2026-10-21: `normalize-path`, `normalize-path-rejected` and `vectors/entry-paths.json` added
   (2.0.0: `DDBNormalizePath`); `capabilities` lists the new export.
 * 2026-10-21: `stac-data-collection`, `stac-data-item-georaster`, `stac-data-item-image` and

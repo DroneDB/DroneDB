@@ -59,6 +59,15 @@ namespace ddb
     /// colours keep their balance. Throws GDALException when it is empty.
     std::pair<double, double> displayRange(const std::string &path, GDALDatasetH ds, const std::vector<int> &bands);
 
+    /// The default stretch of the non-Byte bands of the raster at path (ds, open), one range per band, in
+    /// the raw values of the bands (D-041, FR-RAS-21): a single band (a DEM, a thermal raster) over its
+    /// minimum to its maximum, several bands each over the mean +- 2.33 standard deviations of the band
+    /// (stretchRange), so a 16-bit multispectral ortho is readable. `nodata` is the override of the
+    /// NoData value (FR-RAS-31). Throws GDALException when a band has no pixel with a value.
+    std::vector<std::pair<double, double>> defaultStretch(const std::string &path, GDALDatasetH ds,
+                                                          const std::vector<int> &bands,
+                                                          const std::optional<double> &nodata = std::nullopt);
+
     /// v stretched from [lo, hi] to 0-255, clipped
     inline uint8_t stretchToByte(double v, double lo, double hi)
     {

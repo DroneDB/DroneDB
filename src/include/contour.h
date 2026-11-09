@@ -24,6 +24,7 @@ struct ContourOptions {
     std::optional<double> maxElev;      // Clip levels above this value
     double                simplifyTolerance = 0.0; // Geometry simplification (in raster CRS units, 0 = none)
     int                   bandIndex = 1;          // 1-based raster band index
+    std::optional<double> nodata;       // NoData value that replaces the one of the band (FR-RAS-31)
 };
 
 /**

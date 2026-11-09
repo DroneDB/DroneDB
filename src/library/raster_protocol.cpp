@@ -550,6 +550,8 @@ namespace ddb
                     if (!value.empty())
                         vis[m.name] = value;
                 }
+                if ((*params.vis).nodata)
+                    vis["nodata"] = *(*params.vis).nodata;
                 result["vis"] = vis;
             }
             if (params.thermalTags)
@@ -579,6 +581,12 @@ namespace ddb
                             throw ProtocolError(std::string("'") + m.name + "' is not a string");
                         parsed.*(m.field) = value->get<std::string>();
                     }
+                }
+                if (const json *nodata = member(*vis, "nodata"))
+                {
+                    if (!nodata->is_number() || !std::isfinite(nodata->get<double>()))
+                        throw ProtocolError("'nodata' is not a finite number");
+                    parsed.nodata = nodata->get<double>();
                 }
                 result.vis = parsed;
             }

@@ -129,6 +129,28 @@ namespace ddb
         return {lo, hi};
     }
 
+    std::vector<std::pair<double, double>> defaultStretch(const std::string &path, GDALDatasetH ds,
+                                                          const std::vector<int> &bands,
+                                                          const std::optional<double> &nodata)
+    {
+        std::vector<std::pair<double, double>> ranges;
+        if (bands.size() == 1)
+        {
+            const BandStatistics s = RasterStatsProvider::instance().get(path, ds, bands[0], nodata);
+            double lo = s.min, hi = s.max;
+            // Avoid divide by zero
+            if (lo == hi)
+                hi += 0.1;
+            if (lo == hi)
+                throw GDALException("Cannot scale values due to source min/max being equal");
+            ranges.emplace_back(lo, hi);
+            return ranges;
+        }
+        for (const int b : bands)
+            ranges.push_back(stretchRange(RasterStatsProvider::instance().get(path, ds, b, nodata)));
+        return ranges;
+    }
+
     RasterDataKind rasterDataKind(GDALDatasetH ds)
     {
         RasterDataKind kind;
@@ -246,6 +268,26 @@ namespace ddb
 
         // Transparent and nodata pixels stay out of the formula (of the bands that were read)
         premaskNodata(buffers.ptrs, pixels, plan.bandCount, plan.nodata, NODATA_SENTINEL, datasetMask);
+
+        // The formula reads the physical values of a band: raw * scale + offset (FR-RAS-04). The pixels
+        // with no data were compared with the raw samples above and keep the sentinel
+        for (int b = 0; b < plan.bandCount; b++)
+        {
+            if (buffers.ptrs[b] == nullptr)
+                continue;
+            const GDALRasterBandH hBand = GDALGetRasterBand(ds, b + 1);
+            int hasScale = FALSE, hasOffset = FALSE;
+            const double scale = GDALGetRasterScale(hBand, &hasScale);
+            const double offset = GDALGetRasterOffset(hBand, &hasOffset);
+            if (!((hasScale && scale != 1.0) || (hasOffset && offset != 0.0)))
+                continue;
+            const double m = hasScale ? scale : 1.0;
+            const double c = hasOffset ? offset : 0.0;
+            float *values = buffers.ptrs[b];
+            for (size_t i = 0; i < pixels; i++)
+                if (values[i] != NODATA_SENTINEL)
+                    values[i] = static_cast<float>(values[i] * m + c);
+        }
 
         buffers.result.resize(pixels);
         VegetationEngine::instance().applyFormula(*plan.formula, plan.filter, buffers.ptrs, buffers.result.data(),

@@ -145,7 +145,7 @@ namespace
         // range twice the data's
         const auto cog = TilerHelper::toGeoTIFF(raster);
         std::ofstream(cog.string() + ".stats.json")
-            << R"({"bands":{"1":{"min":0,"max":1000,"mean":500,"std":100,"p2":20,"p98":980}}})";
+            << R"({"version":2,"exact":true,"bands":{"1":{"min":0,"max":1000,"mean":500,"std":100,"valid":262144,"total":262144}}})";
 
         const auto before = RasterStatsProvider::instance().counters();
         int brightest = 0;

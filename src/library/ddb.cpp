@@ -1483,6 +1483,47 @@ std::vector<int> previewBandList(const char* previewBands) {
     return bands;
 }
 
+// The options of the raster value exports and of the Ex2 tiles, thumbnails and exports: NULL is none;
+// unknown flags, a NoData value or a window that is not a finite number are refused
+struct RasterOptionsView {
+    ddb::RasterValueOptions values;
+    std::optional<double> nodata;
+};
+
+RasterOptionsView rasterOptions(const DDBRasterOptions* options) {
+    RasterOptionsView view;
+    if (options == nullptr)
+        return view;
+    const auto opts = requireOptions(options, offsetof(DDBRasterOptions, formula), "options");
+    if ((opts.flags & ~(DDB_RASTER_OPT_NODATA | DDB_RASTER_OPT_BBOX)) != 0)
+        throw InvalidArgsException("options->flags has an unknown bit");
+    if ((opts.flags & DDB_RASTER_OPT_NODATA) != 0) {
+        if (!std::isfinite(opts.nodata))
+            throw InvalidArgsException("options->nodata must be a finite number");
+        view.nodata = opts.nodata;
+        view.values.nodata = opts.nodata;
+    }
+    if ((opts.flags & DDB_RASTER_OPT_BBOX) != 0) {
+        for (const double v : opts.bbox)
+            if (!std::isfinite(v))
+                throw InvalidArgsException("options->bbox must hold finite numbers");
+        view.values.bbox = std::array<double, 4>{opts.bbox[0], opts.bbox[1], opts.bbox[2], opts.bbox[3]};
+    }
+    // The formula is a field a caller of a smaller struct does not have
+    if (opts.structSize >= sizeof(DDBRasterOptions))
+        view.values.formula = optStr(opts.formula);
+    return view;
+}
+
+// The visualization parameters with the NoData override of the options
+ddb::ThumbVisParams visParamsWith(const RasterOptionsView& options, const char* preset, const char* bands,
+                                  const char* formula, const char* bandFilter, const char* colormap,
+                                  const char* rescale) {
+    ddb::ThumbVisParams params = visParams(preset, bands, formula, bandFilter, colormap, rescale);
+    params.nodata = options.nodata;
+    return params;
+}
+
 // The options of an export that writes one output (DDBAlignRasterEx, DDBMaskBordersEx,
 // DDBMergeMultispectralEx): structSize, overwrite, reserved bytes that must be zero
 template <typename Options>
@@ -1538,6 +1579,58 @@ DDBErr DDBMemoryTileEx(const char* inputPath,
         auto request = tileRequest(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, nullptr);
         request.source.pathHash = optStr(inputPathHash) + vizKey;
         request.visParams = visParams(preset, bands, formula, bandFilter, colormap, rescale);
+        request.outBuffer = buffer;
+        request.outBufferSize = bufferSize;
+        ddb::TilerHelper::getTile(request);
+    });
+}
+
+DDBErr DDBGenerateMemoryThumbnailEx2(const char* filePath, int size,
+                                     const char* preset, const char* bands,
+                                     const char* formula, const char* bandFilter,
+                                     const char* colormap, const char* rescale,
+                                     const DDBRasterOptions* options,
+                                     uint8_t** outBuffer, int* outBufferSize) {
+    return guardedBuffer<kNewExportCodes>(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(filePath, "No file path provided");
+        if (size < 0)
+            throw InvalidArgsException("Invalid size parameter");
+        requireBufferOutput(outBuffer, outBufferSize);
+        const RasterOptionsView raster = rasterOptions(options);
+
+        ddb::generateImageThumbEx(pathArg(filePath), size, "", buffer, bufferSize,
+                                  visParamsWith(raster, preset, bands, formula, bandFilter, colormap, rescale));
+    });
+}
+
+DDBErr DDBMemoryTileEx2(const char* inputPath,
+                        int tz, int tx, int ty,
+                        int tileSize, bool tms,
+                        bool forceRecreate, const char* inputPathHash,
+                        const char* preset, const char* bands,
+                        const char* formula, const char* bandFilter,
+                        const char* colormap, const char* rescale,
+                        const DDBRasterOptions* options,
+                        uint8_t** outBuffer, int* outBufferSize) {
+    return guardedBuffer<kNewExportCodes>(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(inputPath, "No input path provided");
+        requireBufferOutput(outBuffer, outBufferSize);
+        requireTileArgs(tz, tx, ty, tileSize);
+        const RasterOptionsView raster = rasterOptions(options);
+
+        // Build vizKey from params for cache differentiation
+        std::string vizKey;
+        if (preset) vizKey += std::string("p:") + preset;
+        if (bands) vizKey += std::string(",b:") + bands;
+        if (formula) vizKey += std::string(",f:") + formula;
+        if (bandFilter) vizKey += std::string(",bf:") + bandFilter;
+        if (colormap) vizKey += std::string(",cm:") + colormap;
+        if (rescale) vizKey += std::string(",rs:") + rescale;
+        if (raster.nodata) vizKey += ",nd:" + std::to_string(*raster.nodata);
+
+        auto request = tileRequest(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, nullptr);
+        request.source.pathHash = optStr(inputPathHash) + vizKey;
+        request.visParams = visParamsWith(raster, preset, bands, formula, bandFilter, colormap, rescale);
         request.outBuffer = buffer;
         request.outBufferSize = bufferSize;
         ddb::TilerHelper::getTile(request);
@@ -1670,7 +1763,8 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
                             const char* formula, const char* bandFilter,
                             const char* colormap, const char* rescale,
                             int tileSize,
-                            DDBProgressCallback progress, void* progressUserData) {
+                            DDBProgressCallback progress, void* progressUserData,
+                            const std::optional<double>& nodata = std::nullopt) {
     requireText(inputPath, "No input path provided");
     requireText(outputPath, "No output path provided");
 
@@ -1684,6 +1778,7 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
     request.colormap = optStr(colormap);
     request.rescale = optStr(rescale);
     request.tileSize = tileSize;
+    request.nodata = nodata;
     if (progress != nullptr) {
         request.progress = [progress, progressUserData](double fraction, const char* phase) {
             return progress(fraction, phase, progressUserData) != 0;
@@ -1717,6 +1812,20 @@ DDBErr DDBExportRaster2(const char* inputPath, const char* outputPath,
     });
 }
 
+
+DDBErr DDBExportRaster3(const char* inputPath, const char* outputPath,
+                        const char* preset, const char* bands,
+                        const char* formula, const char* bandFilter,
+                        const char* colormap, const char* rescale,
+                        int tileSize,
+                        DDBProgressCallback progress, void* progressUserData,
+                        const DDBRasterOptions* options) {
+    return guarded<kNewExportCodes>([&] {
+        const RasterOptionsView raster = rasterOptions(options);
+        exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter, colormap, rescale,
+                         tileSize, progress, progressUserData, raster.nodata);
+    });
+}
 
 DDBErr DDBGetRasterValueInfo(const char *filePath, char **output) {
     return guardedOutput(output, [&] {
@@ -1759,6 +1868,86 @@ DDBErr DDBGetRasterProfile(const char *filePath, const char *geoJsonLineString,
                                                         std::string(geoJsonLineString),
                                                         samples);
         return jsonStr;
+    });
+}
+
+DDBErr DDBGetRasterValueInfoEx(const char *filePath, const DDBRasterOptions *options, char **output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireOutput(output);
+        return ddb::getRasterValueInfoJson(std::string(filePath), rasterOptions(options).values);
+    });
+}
+
+DDBErr DDBGetRasterPointValueEx(const char *filePath, double lon, double lat, const DDBRasterOptions *options,
+                                char **output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireOutput(output);
+        if (!std::isfinite(lon) || !std::isfinite(lat))
+            throw InvalidArgsException("The point must be finite numbers");
+        return ddb::getRasterPointAtJson(std::string(filePath), lon, lat, rasterOptions(options).values);
+    });
+}
+
+DDBErr DDBGetRasterAreaStatsEx(const char *filePath, double minLon, double minLat, double maxLon, double maxLat,
+                               const DDBRasterOptions *options, char **output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireOutput(output);
+        if (!std::isfinite(minLon) || !std::isfinite(minLat) || !std::isfinite(maxLon) || !std::isfinite(maxLat))
+            throw InvalidArgsException("The rectangle must be finite numbers");
+        return ddb::getRasterAreaStatsBoxJson(std::string(filePath), minLon, minLat, maxLon, maxLat,
+                                              rasterOptions(options).values);
+    });
+}
+
+DDBErr DDBGetRasterPointValuePixelEx(const char *filePath, int x, int y, const DDBRasterOptions *options,
+                                     char **output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireOutput(output);
+        return ddb::getRasterPointJson(std::string(filePath), x, y, rasterOptions(options).values);
+    });
+}
+
+DDBErr DDBGetRasterAreaStatsPixelEx(const char *filePath, int x0, int y0, int x1, int y1,
+                                    const DDBRasterOptions *options, char **output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireOutput(output);
+        return ddb::getRasterAreaStatsJson(std::string(filePath), x0, y0, x1, y1, rasterOptions(options).values);
+    });
+}
+
+DDBErr DDBGetRasterProfileEx(const char *filePath, const char *geoJsonLineString, int samples,
+                             const DDBRasterOptions *options, char **output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireText(geoJsonLineString, "No GeoJSON LineString provided");
+        requireOutput(output);
+        return ddb::getRasterProfileJson(std::string(filePath), std::string(geoJsonLineString), samples,
+                                         rasterOptions(options).values);
+    });
+}
+
+DDBErr DDBGenerateContoursEx(const char *rasterPath, double interval, int count, double baseOffset,
+                             double minElev, double maxElev, double simplifyTolerance, int bandIndex,
+                             const DDBRasterOptions *options, char **output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireText(rasterPath, "No raster path provided");
+        requireOutput(output);
+
+        ContourOptions opts;
+        if (interval > 0.0) opts.interval = interval;
+        if (count > 0) opts.count = count;
+        opts.baseOffset = baseOffset;
+        if (std::isfinite(minElev)) opts.minElev = minElev;
+        if (std::isfinite(maxElev)) opts.maxElev = maxElev;
+        opts.simplifyTolerance = std::max(0.0, simplifyTolerance);
+        opts.bandIndex = (bandIndex > 0) ? bandIndex : 1;
+        opts.nodata = rasterOptions(options).nodata;
+        return ddb::generateContoursJson(std::string(rasterPath), opts);
     });
 }
 

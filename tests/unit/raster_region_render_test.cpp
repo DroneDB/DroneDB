@@ -85,10 +85,11 @@ namespace
         TestArea ta(TEST_NAME, true);
         const fs::path raster = multispectral(ta.getPath("multispectral.tif"));
 
-        // The range the tiles stretch the first three bands over
+        // The range the tiles stretch each of the first three bands over: its own (D-041, FR-RAS-21)
         const auto ds = adoptDataset(GDALOpen(raster.string().c_str(), GA_ReadOnly));
         ASSERT_TRUE(ds);
-        const auto [lo, hi] = displayRange(raster.string(), datasetHandle(ds), {1, 2, 3});
+        const auto ranges = defaultStretch(raster.string(), datasetHandle(ds), {1, 2, 3});
+        ASSERT_EQ(ranges.size(), 3u);
 
         const auto png = render(raster, "image/png");
         ASSERT_EQ(png.bands.size(), 4u) << "RGB + alpha";
@@ -96,7 +97,7 @@ namespace
         for (int q = 0; q < 4; q++)
         {
             for (int b = 1; b <= 3; b++)
-                EXPECT_NEAR(at(png, b - 1, centreX(q), centreY(q)), stretchToByte(reflectance(b, q), lo, hi), 1)
+                EXPECT_NEAR(at(png, b - 1, centreX(q), centreY(q)), stretchToByte(reflectance(b, q), ranges[b - 1].first, ranges[b - 1].second), 1)
                     << "band " << b << ", quadrant " << q;
             EXPECT_EQ(at(png, 3, centreX(q), centreY(q)), 255) << "quadrant " << q;
         }
@@ -107,7 +108,7 @@ namespace
         ASSERT_EQ(jpeg.bands.size(), 3u);
         for (int q = 0; q < 4; q++)
             for (int b = 1; b <= 3; b++)
-                EXPECT_NEAR(at(jpeg, b - 1, centreX(q), centreY(q)), stretchToByte(reflectance(b, q), lo, hi), 6)
+                EXPECT_NEAR(at(jpeg, b - 1, centreX(q), centreY(q)), stretchToByte(reflectance(b, q), ranges[b - 1].first, ranges[b - 1].second), 6)
                     << "band " << b << ", quadrant " << q;
         for (int b = 0; b < 3; b++)
             EXPECT_GE(at(jpeg, b, 2, 2), 245) << "band " << b + 1;

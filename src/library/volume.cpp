@@ -94,16 +94,10 @@ Window polygonWindow(const DemContext &dem, const OGRGeometry &geom) {
     OGREnvelope env;
     geom.getEnvelope(&env);
 
-    double invGt[6];
-    if (!GDALInvGeoTransform(dem.gt, invGt))
-        throw AppException("Cannot invert geotransform");
-
     // Map the four envelope corners to pixel space to stay correct even
     // for rasters with negative pixel heights.
-    auto toPx = [&](double mx, double my, double &px, double &py) {
-        px = invGt[0] + invGt[1] * mx + invGt[2] * my;
-        py = invGt[3] + invGt[4] * mx + invGt[5] * my;
-    };
+    const GeoPixelMap pixelMap(dem.gt);
+    auto toPx = [&](double mx, double my, double &px, double &py) { pixelMap.toPixel(mx, my, px, py); };
     double px1, py1, px2, py2, px3, py3, px4, py4;
     toPx(env.MinX, env.MinY, px1, py1);
     toPx(env.MaxX, env.MinY, px2, py2);

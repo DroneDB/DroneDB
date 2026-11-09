@@ -18,6 +18,7 @@
 #include "gdal_open_policy.h"
 #include "hash.h"
 #include "logger.h"
+#include "process_config.h"
 #include "randomutil.h"
 #include "timeutil.h"
 #include "userprofile.h"
@@ -161,7 +162,10 @@ namespace ddb
             if (const auto relative = buildRelativePath(resolved); relative && isReadableBuildOutput(*relative))
                 return true;
 
-            const fs::path folder = fs::weakly_canonical(artefactsDir(), ec);
+            // The place of the artefacts folder, not created: the question is asked where the cache may
+            // not be written (a confined helper worker computing statistics), and a folder that does not
+            // exist holds no artefact
+            const fs::path folder = fs::weakly_canonical(ProcessConfig::get().cacheDir() / "artefacts", ec);
             return !ec && isInside(resolved, folder);
         }
 
