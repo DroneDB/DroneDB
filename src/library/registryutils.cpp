@@ -137,6 +137,31 @@ namespace ddb
         return res;
     }
 
+    TagComponents RegistryUtils::parseShareTarget(const std::string &tag, bool useInsecureRegistry)
+    {
+        auto t = tag;
+        str::trim(t);
+        str::toLower(t);
+
+        // The server part: what follows the scheme, without the trailing slashes
+        const auto separator = t.find("://");
+        const bool hasScheme = separator != std::string::npos;
+        std::string host = hasScheme ? t.substr(separator + 3) : t;
+        const bool endsWithDoubleSlash = host.ends_with("//");
+        while (!host.empty() && host.back() == '/')
+            host.pop_back();
+
+        // "<server>//", or a URL with no path: a server only. "server/org/" and "org/ds//" have
+        // a path, and are tags.
+        if (host.find('/') != std::string::npos || (!endsWithDoubleSlash && !hasScheme))
+            return parseTag(tag, useInsecureRegistry);
+
+        TagComponents res;
+        // "//" alone is the default Registry; "http://" alone has no host, which normalizeUrl refuses
+        res.registryUrl = normalizeUrl(hasScheme ? t.substr(0, separator + 3) + host : host, useInsecureRegistry);
+        return res;
+    }
+
     std::string RegistryUtils::errorMessage(const std::string &body)
     {
         const json j = json::parse(body, nullptr, false);

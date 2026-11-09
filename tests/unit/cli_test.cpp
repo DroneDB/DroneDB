@@ -23,6 +23,9 @@
 #include "cmd/include/pull.h"
 #include "cmd/include/push.h"
 #include "cmd/include/rescan.h"
+#include "cmd/include/share.h"
+#include "constants.h"
+#include "dbops.h"
 #include "entry_filters.h"
 #include "entry_types.h"
 #include "exceptions.h"
@@ -895,6 +898,8 @@ struct OfflineDataset {
         : dataset(name), net(dataset.ta.getPath("auth.json")) {
         ddb::TagManager(dataset.db.get()).setTag(std::string(Url) + "/org/ds");
         dataset.db->close();
+        // Whatever the host: no request gets an answer
+        net.http.on("GET", "/sys/version", fake::transportFailure());
         net.http.on("POST", "/users/authenticate", fake::transportFailure());
         std::filesystem::current_path(dataset.root);
     }
@@ -904,7 +909,8 @@ struct OfflineDataset {
 };
 
 // A refused connection or an unresolvable host during the login was an AuthException, so the
-// operation asked for a password it could not use: ddb push offline prompted, then failed
+// operation asked for a password it could not use: ddb push offline prompted, then failed. With
+// nothing saved, the server is probed before anybody is asked.
 TEST(CliCommands, pushAndPullOfflineFailWithTheTransportErrorAndDoNotPrompt) {
     for (const bool saved : {true, false}) {
         OfflineDataset f(saved ? "cli_offline_saved" : "cli_offline_unsaved");
@@ -921,10 +927,144 @@ TEST(CliCommands, pushAndPullOfflineFailWithTheTransportErrorAndDoNotPrompt) {
             EXPECT_TRUE(outcome.out.empty()) << outcome.out;
             EXPECT_NE(outcome.err.find("could not connect to https://registry.test: Connection refused"), std::string::npos)
                 << outcome.err;
-            // Nothing saved: the one login needs the credentials once. Saved: nobody is asked.
-            EXPECT_EQ(f.credentials.asked, saved ? 0 : 1);
+            EXPECT_EQ(f.credentials.asked, 0);
         }
     }
+}
+
+// The steps of FR-DEV-07: nothing listens on :5999. Each command fails at once with the connect
+// error, and nobody is asked for a user name
+TEST(CliCommands, pushPullAndShareToAnUnreachableRegistryFailWithoutAPrompt) {
+    OfflineDataset f("cli_offline_5999");
+    writeFile(f.dataset.root / "f.txt", "a file");
+
+    const auto expectConnectError = [&f](cmd::Command &command, std::vector<std::string> args, const char *what) {
+        f.credentials.asked = 0;
+        const auto calls = f.net.http.calls.size();
+        const auto outcome = execute(command, std::move(args));
+        EXPECT_EQ(outcome.code, EXIT_FAILURE) << what;
+        EXPECT_NE(outcome.err.find("could not connect to http://localhost:5999"), std::string::npos)
+            << what << ": " << outcome.err;
+        EXPECT_EQ(outcome.out.find("Username"), std::string::npos) << what << ": " << outcome.out;
+        EXPECT_EQ(f.credentials.asked, 0) << what;
+        // One probe, not tried again
+        ASSERT_EQ(f.net.http.calls.size(), calls + 1) << what;
+        EXPECT_EQ(f.net.http.calls.back().request.url, "http://localhost:5999/sys/version") << what;
+        EXPECT_TRUE(f.net.sleeps.empty()) << what;
+    };
+
+    cmd::Push push(f.services());
+    expectConnectError(push, {"-r", "http://localhost:5999"}, "push");
+    cmd::Pull pull(f.services());
+    expectConnectError(pull, {"-r", "http://localhost:5999"}, "pull");
+    cmd::Share share(f.services());
+    // (names have at least 2 characters: "o/d" is refused as a tag before any request)
+    expectConnectError(share, {"-q", "f.txt", "-t", "http://localhost:5999/myorg/myds"}, "share -t");
+    cmd::Share shareToServer(f.services());
+    expectConnectError(shareToServer, {"-q", "f.txt", "-s", "http://localhost:5999"}, "share -s");
+}
+
+// ------------------------------------------------------------------------ share
+
+// A folder with a file to share, as the current folder, and a Registry that takes the share
+struct ShareArea {
+    TestArea ta;
+    fake::Network net;
+    CountingCredentials credentials;
+    std::filesystem::path previous = std::filesystem::current_path();
+
+    explicit ShareArea(const std::string &name) : ta(name, true), net(ta.getPath("auth.json")) {
+        writeFile(ta.getFolder("files") / "f.txt", "a file");
+        net.http.on("GET", "/sys/version", fake::jsonReply({{"version", "3.0.0"}}));
+        net.acceptLogin();
+        net.http.on("POST", "/share/init", fake::jsonReply({{"token", "share-token"}}));
+        net.http.on("MULTIPART", "/share/upload/share-token", fake::jsonReply({{"hash", "h"}}));
+        net.http.on("POST", "/share/commit/share-token", fake::jsonReply({{"url", "/r/share-token"}}));
+        std::filesystem::current_path(ta.getFolder("files"));
+    }
+    ~ShareArea() { std::filesystem::current_path(previous); }
+
+    cmd::RegistryServices services() { return {&credentials, net.deps()}; }
+};
+
+// AC-009: `ddb share f -s <server>` and the default `ddb share f` failed on their own tag
+// ("<server>//": "organization is empty"). Both make a dataset with a random name in the
+// personal organization (an init without a tag) and print its URL.
+TEST(CliShare, aServerOnlySharesIntoANewDatasetAndPrintsItsUrl) {
+    const std::vector<std::pair<std::vector<std::string>, std::string>> cases = {
+        {{"-q", "f.txt", "-s", "http://localhost:5200"}, "http://localhost:5200"},
+        {{"-q", "f.txt", "-s", "localhost:5200"}, "https://localhost:5200"},
+        {{"-q", "f.txt"}, "https://" DEFAULT_REGISTRY},
+    };
+    for (const auto &[args, server] : cases) {
+        ShareArea f("cli_share_server_only");
+        cmd::Share share(f.services());
+
+        const auto outcome = execute(share, args);
+
+        EXPECT_EQ(outcome.code, EXIT_SUCCESS) << server << ": " << outcome.err;
+        EXPECT_EQ(outcome.out, server + "/r/share-token\n") << server;
+        EXPECT_TRUE(outcome.err.empty()) << outcome.err;
+        const auto init = f.net.http.callsTo("POST", "/share/init");
+        ASSERT_EQ(init.size(), 1u) << server;
+        EXPECT_EQ(init[0].request.url, server + "/share/init");
+        EXPECT_EQ(init[0].field("tag"), "") << server;
+        EXPECT_EQ(f.credentials.asked, 1) << server;
+        EXPECT_TRUE(f.net.http.unexpected.empty()) << server;
+    }
+}
+
+// ------------------------------------------------------------------------ pull conflicts
+
+// A dataset and its Registry that both have a both.txt of their own, and no sync yet
+struct ConflictingPull {
+    static constexpr const char *Url = "https://registry.test";
+
+    IndexFixture remote;
+    IndexFixture local;
+    fake::Network net;
+    CountingCredentials credentials;
+    std::filesystem::path previous = std::filesystem::current_path();
+
+    explicit ConflictingPull(const std::string &name)
+        : remote(name, "remote", true), local(name, "local", false), net(local.ta.getPath("auth.json")) {
+        writeFile(remote.root / "both.txt", "theirs");
+        ddb::addToIndex(remote.db.get(), {(remote.root / "both.txt").string()});
+        const auto remoteStamp = remote.db->getStamp();
+        remote.db->close();
+
+        writeFile(local.root / "both.txt", "ours");
+        ddb::addToIndex(local.db.get(), {(local.root / "both.txt").string()});
+        ddb::TagManager(local.db.get()).setTag(std::string(Url) + "/org/ds");
+        local.db->close();
+
+        net.credentials.saveCredentials(Url, AuthCredentials("alice", "pw"));
+        net.acceptLogin();
+        net.http.on("GET", "/orgs/org/ds/ds/stamp", fake::jsonReply(remoteStamp));
+        net.http.on("DOWNLOAD", "/orgs/org/ds/ds/download?path=both.txt", fake::reply(200, "theirs"));
+        std::filesystem::current_path(local.root);
+    }
+    ~ConflictingPull() { std::filesystem::current_path(previous); }
+
+    cmd::RegistryServices services() { return {&credentials, net.deps()}; }
+};
+
+// D-036: a pull that stopped on conflicts said "Pull completed" and exited 0
+TEST(CliPull, conflictsStopThePullWithExitCode1UntilKeepOursOrKeepTheirs) {
+    ConflictingPull f("cli_pull_conflicts");
+
+    cmd::Pull pull(f.services());
+    const auto stopped = execute(pull, {});
+    EXPECT_EQ(stopped.code, EXIT_FAILURE);
+    EXPECT_NE(stopped.out.find("C\tboth.txt"), std::string::npos) << stopped.out;
+    EXPECT_EQ(stopped.out.find("Pull completed"), std::string::npos) << stopped.out;
+    EXPECT_EQ(stopped.err, "Pull stopped: 1 conflict. Use --keep-theirs or --keep-ours.\n");
+
+    cmd::Pull keepOurs(f.services());
+    const auto completed = execute(keepOurs, {"--keep-ours"});
+    EXPECT_EQ(completed.code, EXIT_SUCCESS) << completed.err;
+    EXPECT_NE(completed.out.find("Pull completed"), std::string::npos) << completed.out;
+    EXPECT_EQ(readBytes(f.local.root / "both.txt"), "ours");
 }
 
 }  // namespace

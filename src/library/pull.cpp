@@ -118,6 +118,12 @@ void pullDataset(RegistryClient& client, const std::string& path, const MergeStr
     io::assureIsRemoved(tempDdbFolder);
     io::assureIsRemoved(tempNewFolder);
 
+    // Not completed: the conflicts wait for --keep-theirs or --keep-ours (an error, exit code 1)
+    if (!conflicts.empty())
+        throw ConflictException("Pull stopped: " + std::to_string(conflicts.size()) +
+                                (conflicts.size() == 1 ? " conflict" : " conflicts") +
+                                ". Use --keep-theirs or --keep-ours.");
+
     // Inform user if nothing was needed
     if (delta.empty()) {
         out << "Everything up-to-date" << std::endl;

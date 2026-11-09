@@ -58,7 +58,7 @@ void pushDataset(RegistryClient& client, const std::string& path, std::ostream& 
     for (const auto& file : pir.neededFiles) {
         const auto fullPath = basePath / io::fromUtf8(file);
 
-        out << "Transfering '" << file << "'" << std::endl;
+        out << "Transferring '" << file << "'" << std::endl;
 
         // Foreach of the needed files call POST endpoint
         pushManager.upload(io::toGenericUtf8(fullPath), file, pir.token);

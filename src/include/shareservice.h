@@ -28,7 +28,10 @@ namespace ddb
     struct ShareRequest
     {
         std::vector<std::string> input{};  // the files (directories are skipped), already expanded
-        std::string tag{};                 // the Registry, organization and dataset: <host>/<org>/<ds>
+        std::string tag{};                 // the Registry, organization and dataset: <host>/<org>/<ds>;
+                                           // or a server only, "<host>//" or "http(s)://<host>" (a new
+                                           // dataset with a random name in the user's personal
+                                           // organization), see RegistryUtils::parseShareTarget
         std::string password{};            // of the share ("" = none)
         std::string cwd{};                 // the folder the paths of input are relative to
         ShareCallback callback{};          // progress, optional

@@ -169,6 +169,55 @@ namespace
             EXPECT_THROW(RegistryUtils::parseTag(tag), InvalidArgsException) << tag;
     }
 
+    // `ddb share -s <server>` makes "<server>//", and the default tag is "hub.dronedb.app//":
+    // parseTag read both as an organization (or a dataset) that is empty
+    TEST(parseShareTarget, AServerOnlyHasNoOrganizationAndNoDataset)
+    {
+        const auto expectServerOnly = [](const std::string &tag, const std::string &url) {
+            const auto s = RegistryUtils::parseShareTarget(tag);
+            EXPECT_EQ(s.registryUrl, url) << tag;
+            EXPECT_TRUE(s.organization.empty()) << tag;
+            EXPECT_TRUE(s.dataset.empty()) << tag;
+            EXPECT_EQ(s.tagWithoutUrl(), "") << tag; // the Registry: the personal organization
+        };
+        expectServerOnly("http://localhost:5200//", "http://localhost:5200");
+        expectServerOnly("hub.dronedb.app//", "https://hub.dronedb.app");
+        expectServerOnly(DEFAULT_REGISTRY "//", "https://" DEFAULT_REGISTRY);
+        expectServerOnly("//", "https://" DEFAULT_REGISTRY);
+        expectServerOnly("localhost:5200//", "https://localhost:5200"); // no scheme: https, as normalizeUrl
+        expectServerOnly("http://localhost:5200/", "http://localhost:5200");
+        expectServerOnly("http://localhost:5200", "http://localhost:5200");
+        expectServerOnly(" HTTP://LocalHost:5200/// ", "http://localhost:5200");
+
+        const auto insecure = RegistryUtils::parseShareTarget("localhost:5200//", true);
+        EXPECT_EQ(insecure.registryUrl, "http://localhost:5200");
+    }
+
+    TEST(parseShareTarget, ATagIsReadAsParseTagReadsIt)
+    {
+        auto s = RegistryUtils::parseShareTarget("http://localhost:5200/myorg/myds");
+        EXPECT_EQ(s.registryUrl, "http://localhost:5200");
+        EXPECT_EQ(s.tagWithoutUrl(), "myorg/myds");
+
+        s = RegistryUtils::parseShareTarget("myorg/myds");
+        EXPECT_EQ(s.registryUrl, "https://" DEFAULT_REGISTRY);
+        EXPECT_EQ(s.tagWithoutUrl(), "myorg/myds");
+
+        // A path is a tag, not a server, and keeps the errors of parseTag
+        for (const char *tag : {"myorg", "localhost:5200", "http://localhost:5200/myorg/", "ftp://host//", "http:////",
+                                "myorg/"})
+            EXPECT_THROW(RegistryUtils::parseShareTarget(tag), InvalidArgsException) << tag;
+    }
+
+    // Push, pull and clone need a dataset: a server only is not a tag for them (clone would
+    // write into the current folder)
+    TEST(parseTag, AServerOnlyIsStillRefused)
+    {
+        for (const char *tag : {"http://localhost:5200//", "hub.dronedb.app//", "//", "http://localhost:5200",
+                                "http://localhost:5200/"})
+            EXPECT_THROW(RegistryUtils::parseTag(tag), InvalidArgsException) << tag;
+    }
+
     TEST(normalizeUrl, OneSpellingForTheClientAndTheTag)
     {
         EXPECT_EQ(RegistryUtils::normalizeUrl(""), "https://" DEFAULT_REGISTRY);

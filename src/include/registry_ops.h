@@ -20,7 +20,9 @@
 namespace ddb {
 
 // Pulls the dataset at `path` from the Registry of its tag, applying the changes with
-// `mergeStrategy`. Throws IndexException when the dataset has no tag.
+// `mergeStrategy`. Throws IndexException when the dataset has no tag, and ConflictException
+// ("Pull stopped: ...") when conflicts remain with MergeStrategy::DontMerge: the conflicts are
+// listed on `out`, the changes without conflicts are applied, and the pull is not recorded.
 void pullDataset(RegistryClient &client, const std::string &path, MergeStrategy mergeStrategy,
                  std::ostream &out);
 

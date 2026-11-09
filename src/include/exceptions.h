@@ -179,6 +179,17 @@ namespace ddb
     {
         using RegistryException::RegistryException;
     };
+    /**
+     * @brief A pull that stopped on conflicts: files changed both in the dataset and in the
+     * Registry since the last sync.
+     *
+     * The pull is not recorded; it ends with --keep-theirs or --keep-ours. Like every other
+     * error, it is an exit code of 1 for the CLI.
+     */
+    class ConflictException : public AppException
+    {
+        using AppException::AppException;
+    };
     class BuildDepMissingException : public AppException
     {
     public:

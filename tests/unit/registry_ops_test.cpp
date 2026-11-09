@@ -83,6 +83,17 @@ namespace
         explicit RegistryFixture(const std::string &name) : ta(name, true), net(ta.getPath("auth.json"))
         {
             net.http.on("POST", "/users/authenticate", jsonReply({{"token", "tok-1"}, {"expires", net.now + 3600}}));
+            // The probe of a login without saved credentials (RegistryClient::expectReachable)
+            net.http.on("GET", "/sys/version", jsonReply({{"version", "3.0.0"}}));
+        }
+
+        // The requests sent, as "METHOD /path"
+        std::vector<std::string> sent() const
+        {
+            std::vector<std::string> sequence;
+            for (const auto &c : net.http.calls)
+                sequence.push_back(c.method + " " + c.path.substr(std::string(Url).size()));
+            return sequence;
         }
 
         // Logs in as alice: the client of the tests below
@@ -117,7 +128,75 @@ namespace
         f.run(provider, [&](RegistryClient &c) { EXPECT_EQ(c.getAuthToken(), "tok-1"); });
         EXPECT_EQ(provider.asked, 0);
         EXPECT_EQ(f.runs, 1);
-        EXPECT_EQ(f.net.http.callsTo("POST", "/users/authenticate").size(), 1u);
+        EXPECT_EQ(f.sent(), std::vector<std::string>{"POST /users/authenticate"}); // no probe: nobody is asked
+    }
+
+    // Nothing saved: the server is asked first whether it answers, then the user
+    TEST(WithAuthenticatedRegistry, WithoutSavedCredentialsTheRegistryIsProbedBeforeTheProviderIsAsked)
+    {
+        AuthFixture f(TEST_NAME);
+        ScriptedCredentials provider({AuthCredentials("alice", "pw")});
+        f.run(provider, [](RegistryClient &) {});
+        EXPECT_EQ(f.sent(), (std::vector<std::string>{"GET /sys/version", "POST /users/authenticate"}));
+        const auto probe = f.net.http.callsTo("GET", "/sys/version").at(0);
+        EXPECT_TRUE(probe.request.headers.empty()); // no token
+        EXPECT_GT(probe.request.limits.connect, std::chrono::milliseconds(0));
+
+        // Any answer is an answer: a Registry without the route still answers
+        AuthFixture g(TEST_NAME + std::string("-404"));
+        g.net.http.on("GET", "/sys/version", problem(404, "Not Found"));
+        ScriptedCredentials typed({AuthCredentials("alice", "pw")});
+        g.run(typed, [](RegistryClient &) {});
+        EXPECT_EQ(typed.asked, 1);
+        EXPECT_EQ(g.runs, 1);
+    }
+
+    // A Registry that does not answer fails at once, with the transport error: no question, no
+    // retry, no wait. Whatever the reason (refused, unresolvable, a connect timeout, a failed TLS
+    // handshake), the probe got no answer: "could not connect"
+    TEST(WithAuthenticatedRegistry, AnUnreachableRegistryWithoutSavedCredentialsFailsBeforeAnyQuestion)
+    {
+        const std::vector<std::pair<HttpTransportError, std::string>> failures = {
+            {HttpTransportError::CouldNotConnect, "Connection refused"},
+            {HttpTransportError::CouldNotConnect, "Could not resolve host: registry.test"},
+            {HttpTransportError::Other, "Connection timed out after 10001 milliseconds"},
+            {HttpTransportError::Other, "SSL peer certificate or SSH remote key was not OK"},
+        };
+        for (size_t i = 0; i < failures.size(); i++)
+        {
+            const auto &[kind, reason] = failures[i];
+            AuthFixture f(TEST_NAME + std::to_string(i));
+            f.net.http.on("GET", "/sys/version", transportFailure(kind, reason));
+            ScriptedCredentials provider({AuthCredentials("alice", "pw")});
+            try
+            {
+                f.run(provider, [](RegistryClient &) {});
+                FAIL() << "the operation ran against an unreachable registry";
+            }
+            catch (const AuthException &e)
+            {
+                FAIL() << "an unreachable registry is not a refusal: " << e.what();
+            }
+            catch (const RegistryException &e)
+            {
+                EXPECT_EQ(std::string(e.what()), "could not connect to https://registry.test: " + reason);
+            }
+            EXPECT_EQ(provider.asked, 0) << reason;
+            EXPECT_EQ(f.runs, 0) << reason;
+            EXPECT_EQ(f.sent(), std::vector<std::string>{"GET /sys/version"}) << reason;
+            EXPECT_TRUE(f.net.sleeps.empty()) << reason;
+        }
+    }
+
+    // clone: the first request is the operation itself, which reaches the server anyway
+    TEST(WithAuthenticatedRegistry, AnonymousFirstIsNotProbed)
+    {
+        AuthFixture f(TEST_NAME);
+        ScriptedCredentials provider;
+        AuthenticationOptions options;
+        options.tryAnonymousFirst = true;
+        f.run(provider, [](RegistryClient &) {}, options);
+        EXPECT_TRUE(f.net.http.calls.empty());
     }
 
     TEST(WithAuthenticatedRegistry, WithoutSavedCredentialsTheProviderIsAskedOnceAndTheyAreSaved)
@@ -224,7 +303,8 @@ namespace
         EXPECT_EQ(f.runs, 0);
         EXPECT_EQ(f.net.http.callsTo("POST", "/users/authenticate").size(), 3u); // one login, tried three times
 
-        // Nothing saved: the one login needs the credentials once, and a second question is not asked
+        // Nothing saved, and the server answered the probe but not the login: the one login needs
+        // the credentials once, and a second question is not asked
         AuthFixture g(TEST_NAME + std::string("-unsaved"));
         g.net.http.on("POST", "/users/authenticate", transportFailure(HttpTransportError::Other, "Operation timed out"));
         ScriptedCredentials typed({AuthCredentials("alice", "pw")});
@@ -232,6 +312,7 @@ namespace
         EXPECT_EQ(typed.asked, 1);
     }
 
+    // Only the probe reaches the server: no login, no operation
     TEST(WithAuthenticatedRegistry, AProviderThatCannotAskStopsTheOperationBeforeAnyRequest)
     {
         AuthFixture f(TEST_NAME);
@@ -240,7 +321,7 @@ namespace
         EXPECT_THROW(f.run(provider, [](RegistryClient &) {}), AuthException);
         EXPECT_EQ(provider.asked, 1);
         EXPECT_EQ(f.runs, 0);
-        EXPECT_TRUE(f.net.http.calls.empty());
+        EXPECT_EQ(f.sent(), std::vector<std::string>{"GET /sys/version"});
     }
 
     TEST(WithAuthenticatedRegistry, EmptyCredentialsFromTheProviderAreNotSent)
@@ -256,7 +337,7 @@ namespace
         {
             EXPECT_STREQ(e.what(), "Cannot authenticate with https://registry.test: no credentials were given");
         }
-        EXPECT_TRUE(f.net.http.calls.empty());
+        EXPECT_EQ(f.sent(), std::vector<std::string>{"GET /sys/version"}); // the probe, no login
     }
 
     // A public dataset is read without a login; the credentials come when the server says 401
@@ -375,7 +456,7 @@ namespace
 
         EXPECT_EQ(f.net.http.callsTo("POST", "/push/commit").at(0).field("token"), "push-token");
 
-        EXPECT_EQ(out.str(), "Pushing to 'https://registry.test/org/ds'\nTransfering 'a.txt'\nTransfering 'sub/b.txt'\nPush completed\n");
+        EXPECT_EQ(out.str(), "Pushing to 'https://registry.test/org/ds'\nTransferring 'a.txt'\nTransferring 'sub/b.txt'\nPush completed\n");
         EXPECT_EQ(f.lastChecksum(), f.datasetChecksum()); // the push is recorded
     }
 
@@ -662,12 +743,39 @@ namespace
         auto client = f.loggedIn();
         std::ostringstream out;
 
-        pullDataset(client, f.local.root.string(), MergeStrategy::DontMerge, out);
+        // Stopped, not completed: an error (exit code 1 in the CLI)
+        try
+        {
+            pullDataset(client, f.local.root.string(), MergeStrategy::DontMerge, out);
+            FAIL() << "a pull with conflicts completed";
+        }
+        catch (const ConflictException &e)
+        {
+            EXPECT_STREQ(e.what(), "Pull stopped: 1 conflict. Use --keep-theirs or --keep-ours.");
+        }
 
         EXPECT_EQ(slurp(f.local.root / "both.txt"), "ours");
         EXPECT_NE(out.str().find("C\tboth.txt"), std::string::npos) << out.str();
+        EXPECT_EQ(out.str().find("Pull completed"), std::string::npos) << out.str();
         auto db = ddb::open(f.local.root.string(), false);
         EXPECT_NE(SyncManager(db.get()).getLastStamp(Url)["checksum"], f.remoteStamp["checksum"]); // not recorded: conflicts
+        EXPECT_FALSE(fs::exists(db->ddbDirectory() / "tmp" / "pull_cache" / "org-ds")); // cleaned up all the same
+    }
+
+    // The conflicts settled: --keep-ours completes the pull and records it
+    TEST(Pull, KeepOursCompletesAPullWithConflicts)
+    {
+        PullFixture f(TEST_NAME, {{"both.txt", "theirs"}}, {{"both.txt", "ours"}}, true, false);
+        f.net.http.on("DOWNLOAD", "/orgs/org/ds/ds/download?path=both.txt", reply(200, "theirs"));
+        auto client = f.loggedIn();
+        std::ostringstream out;
+
+        pullDataset(client, f.local.root.string(), MergeStrategy::KeepOurs, out);
+
+        EXPECT_EQ(slurp(f.local.root / "both.txt"), "ours");
+        EXPECT_NE(out.str().find("Pull completed"), std::string::npos) << out.str();
+        auto db = ddb::open(f.local.root.string(), false);
+        EXPECT_EQ(SyncManager(db.get()).getLastStamp(Url)["checksum"], f.remoteStamp["checksum"]);
     }
 
     TEST(Pull, SameFilesOnBothSidesAreNotAConflict)
@@ -954,7 +1062,7 @@ namespace
         EXPECT_EQ(provider.asked, 0);
     }
 
-    // The non-interactive case: nothing is asked, and nothing reaches the server
+    // The non-interactive case: nothing is asked, and only the probe reaches the server
     TEST(ShareService, AProviderThatCannotAskStopsTheShareBeforeAnyRequest)
     {
         ShareFixture f(TEST_NAME);
@@ -963,7 +1071,49 @@ namespace
         ShareService service(f.net.deps());
         EXPECT_THROW(service.share(shareOf({io::toUtf8(f.folder / "a.txt")}, "registry.test/org/ds", io::toUtf8(f.folder)), provider),
                      AuthException);
-        EXPECT_TRUE(f.net.http.calls.empty());
+        EXPECT_EQ(f.sent(), std::vector<std::string>{"GET /sys/version"});
+    }
+
+    // `ddb share -s <server>` and the default tag: a server only, and a dataset with a random name
+    // in the personal organization (the init has no tag)
+    TEST(ShareService, AServerOnlySharesIntoANewDatasetOfThePersonalOrganization)
+    {
+        for (const std::string tag : {"registry.test//", "https://registry.test//", "https://registry.test",
+                                      "https://registry.test/", "REGISTRY.test:443//"})
+        {
+            ShareFixture f(TEST_NAME);
+            ScriptedCredentials provider({AuthCredentials("alice", "pw")});
+            ShareService service(f.net.deps());
+
+            const auto url = service.share(shareOf({io::toUtf8(f.folder / "a.txt")}, tag, io::toUtf8(f.folder)), provider);
+
+            EXPECT_EQ(url, "https://registry.test/r/share-token") << tag;
+            EXPECT_EQ(provider.askedFor, std::vector<std::string>{Url}) << tag;
+            const auto init = f.net.http.callsTo("POST", "/share/init");
+            ASSERT_EQ(init.size(), 1u) << tag;
+            EXPECT_EQ(init[0].field("tag"), "") << tag;
+            EXPECT_TRUE(f.net.http.unexpected.empty()) << tag;
+        }
+    }
+
+    // A Registry that does not answer: the transport error, before anybody is asked
+    TEST(ShareService, AnUnreachableRegistryFailsBeforeTheProviderIsAsked)
+    {
+        ShareFixture f(TEST_NAME);
+        f.net.http.on("GET", "/sys/version", transportFailure());
+        ScriptedCredentials provider({AuthCredentials("alice", "pw")});
+        ShareService service(f.net.deps());
+        try
+        {
+            service.share(shareOf({io::toUtf8(f.folder / "a.txt")}, "registry.test/org/ds", io::toUtf8(f.folder)), provider);
+            FAIL() << "shared to an unreachable registry";
+        }
+        catch (const RegistryException &e)
+        {
+            EXPECT_STREQ(e.what(), "could not connect to https://registry.test: Connection refused");
+        }
+        EXPECT_EQ(provider.asked, 0);
+        EXPECT_EQ(f.sent(), std::vector<std::string>{"GET /sys/version"});
     }
 
     // The token was revoked: the Registry answers 401 to the upload. The credentials are asked

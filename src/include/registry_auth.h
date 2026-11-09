@@ -38,7 +38,10 @@ struct AuthenticationOptions {
  * Runs `fn` with a client of the Registry at `url` that is logged in. The one place that decides
  * how:
  *  1. the credentials saved for the Registry (`ddb login`, an earlier run) are used; without
- *     them the provider is asked (or, with tryAnonymousFirst, nothing is);
+ *     them the provider is asked (or, with tryAnonymousFirst, nothing is). Before the provider
+ *     is asked, the server is probed (RegistryClient::expectReachable): a Registry that does
+ *     not answer fails at once with a RegistryException ("could not connect to <url>: ..."),
+ *     and nobody is asked for a password;
  *  2. when the login is refused, or `fn` ends with an AuthException (the server answered 401),
  *     the provider is asked once and `fn` runs again, with a new login.
  * A second refusal propagates. The credentials that worked are saved by the login itself. `fn`

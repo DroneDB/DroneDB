@@ -34,6 +34,11 @@ void withAuthenticatedRegistry(const std::string &url, bool sslVerify, Credentia
 
     // First attempt: what is saved; else what the provider gives, else (clone) no login at all
     const bool anonymous = saved.empty() && options.tryAnonymousFirst;
+
+    // Nobody is asked for a password of a Registry that does not answer
+    if (saved.empty() && !anonymous)
+        client.expectReachable();
+
     const AuthCredentials first = anonymous ? AuthCredentials() : (saved.empty() ? askProvider(provider, client) : saved);
 
     try {

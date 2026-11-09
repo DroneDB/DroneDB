@@ -156,6 +156,18 @@ bool RegistryClient::logout() {
     return credentialStore().deleteCredentials(url);
 }
 
+void RegistryClient::expectReachable() const {
+    HttpRequest req = request("/sys/version");
+    // A host that drops the connection fails like one that refuses it, not after minutes
+    req.limits.connect = std::chrono::seconds(10);
+    const HttpResponse res = http().get(req);
+    // Refused, unresolvable, timed out or a failed TLS handshake: the probe got no answer, and
+    // whatever the reason the server cannot be reached
+    if (res.hasTransportError())
+        throw RegistryException("could not connect to " + this->url + ": " +
+                                (res.transportMessage.empty() ? "unknown error" : res.transportMessage));
+}
+
 // -- Authenticated requests --------------------------------------------------------------------
 
 HttpResponse RegistryClient::get(const std::string &path, AuthScheme scheme) {

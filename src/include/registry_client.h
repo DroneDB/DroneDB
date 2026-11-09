@@ -90,6 +90,14 @@ public:
     AuthCredentials savedCredentials() const;
     // Deletes the saved credentials; false when there were none
     bool logout();
+    /**
+     * Checks that the Registry answers, before anybody is asked for credentials: one GET of
+     * /sys/version, without a token, never tried again (a server that is down fails at once).
+     * Any HTTP response is an answer, whatever its status. Throws RegistryException "could not
+     * connect to <url>: <reason>" when the request got none, whatever the transport error
+     * (refused, unresolvable host, timeout, TLS failure).
+     */
+    void expectReachable() const;
     // Tests read the token and its expiry to check what a login, a failed login and a refresh leave
     std::string getAuthToken() const { return authToken; }
     std::time_t getTokenExpiration() const { return tokenExpiration; }

@@ -112,7 +112,9 @@ namespace cmd
         {
             try
             {
-                ddb::RegistryClient reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify, registryDeps());
+                // The Registry of the tag, also of a server only ("<server>//")
+                ddb::RegistryClient reg(ddb::RegistryUtils::parseShareTarget(tag).registryUrl, sslVerify,
+                                        registryDeps());
                 reg.login(envUser, envPass);
             }
             catch (const ddb::AppException &e)

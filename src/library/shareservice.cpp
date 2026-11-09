@@ -157,8 +157,9 @@ namespace ddb
         if (filePaths.empty())
             throw InvalidArgsException("No files to share");
 
-        // Parse tag to find registry URL
-        const TagComponents tc = RegistryUtils::parseTag(tag);
+        // The Registry, and the dataset: none for a server only ("<server>//"), which shares
+        // into a new dataset of the user's personal organization
+        const TagComponents tc = RegistryUtils::parseShareTarget(tag);
 
         // Before anything reaches the server: a share that cannot be laid out is not started
         io::Path wd = shareRoot(input, cwd);

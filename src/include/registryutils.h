@@ -35,6 +35,22 @@ namespace ddb
                                         bool keepPath = false);
 
         static TagComponents parseTag(const std::string &tag, bool useInsecureRegistry = false);
+
+        /**
+         * The target of a share: a tag as parseTag reads it, or a server only.
+         *
+         * A server only is "<server>//" (the form of `ddb share -s <server>`, and the default
+         * tag "hub.dronedb.app//"; "//" alone is the default Registry) or a URL with a scheme
+         * and no path ("http://host:5200", "http://host:5200/"). It gives registryUrl =
+         * normalizeUrl(server) and an empty organization and dataset, so tagWithoutUrl() is ""
+         * and the Registry makes a dataset with a random name in the personal organization of
+         * the user. Anything else goes through parseTag, with its errors.
+         *
+         * Only the share takes a server only: for push, pull and clone parseTag refuses it, a
+         * tag without a dataset.
+         */
+        static TagComponents parseShareTarget(const std::string &tag, bool useInsecureRegistry = false);
+
         static RegistryClient createFromTag(const std::string &tag, bool useInsecureRegistry = false, bool sslVerify = true, const RegistryDeps &deps = {});
 
         /// The message of a Registry error body, or "" when it has none (not JSON, no known

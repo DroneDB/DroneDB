@@ -165,6 +165,19 @@ namespace
         EXPECT_EQ(profile->getAuthFile(), UserProfile::defaultProfileDir() / "auth.json");
     }
 
+    // FR-DEV-11: DDB_HOME is the folder that holds the profile, not the profile: the saved
+    // credentials, templates and cache are in $DDB_HOME/.ddb
+    TEST(UserProfile, DdbHomeHoldsTheProfileInItsDotDdbFolder)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path home = ta.getFolder("x");
+        EnvVarGuard ddbHome("DDB_HOME", io::toUtf8(home));
+
+        bool fromDdbHome = false;
+        EXPECT_EQ(UserProfile::defaultProfileDir(&fromDdbHome), home / ".ddb");
+        EXPECT_TRUE(fromDdbHome);
+    }
+
     // ---- The CPU token pool -------------------------------------------------------------
 
     TEST(CpuPool, TokensAreBoundedAndGivenBack)
