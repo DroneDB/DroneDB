@@ -425,7 +425,8 @@ namespace ddb
         params.threads = static_cast<int>(cpu.threads());
 
         std::atomic<int> lastPct{0};
-        const raster::ProgressCallback logProgress = [&lastPct](double fraction) {
+        const raster::ProgressCallback logProgress = [&lastPct, &options](double fraction) {
+            options.reportProgress(fraction, cogPhaseOfFraction(fraction));
             const int pct = static_cast<int>(fraction * 100.0);
             int prev = lastPct.load();
             if (pct / 5 != prev / 5 && lastPct.compare_exchange_strong(prev, pct)) {

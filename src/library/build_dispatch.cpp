@@ -25,6 +25,7 @@
 #include "index_sql.h"
 #include "mio.h"
 #include "process_config.h"
+#include "stringutil.h"
 #include "raster_cache.h"
 
 namespace ddb {
@@ -135,7 +136,10 @@ class BuildAttempt {
                                        io::fromUtf8(tempFolder_),
                                        force_,
                                        options_};
+            // A COG build reports its phases (cog.cpp); the other kinds are done when they are: -1 until then
+            options_.reportProgress(-1.0, str::toLowerCopy(handler_.name()));
             handler_.build(context);
+            options_.reportProgress(1.0, "publishing");
 
             publish();
             // Only now, with the new output in place: a failed build keeps the old one
@@ -345,25 +349,42 @@ void buildAll(Database* db, const std::string& outputPath, bool force, const Bui
 
     // List all entries of the buildable types in DB
     const std::vector<EntryType> types = buildableEntryTypes();
-    if (types.empty())
+    if (types.empty()) {
+        options.reportProgress(1.0);
         return;
+    }
+    // The progress of the call is the fraction of the entries done plus the fraction of the one in the build
+    size_t total = 0;
+    if (options.progress) {
+        auto countQ = db->query("SELECT COUNT(*) FROM entries e WHERE e.type IN " + inListSql(types.size()));
+        bindEntryTypes(*countQ, 1, types);
+        if (countQ->fetch())
+            total = static_cast<size_t>(countQ->getInt64(0));
+    }
+
     auto q = db->query(selectEntries(EntryColumns::Properties) + " WHERE e.type IN " + inListSql(types.size()));
     bindEntryTypes(*q, 1, types);
 
+    size_t done = 0;
     while (q->fetch()) {
         Entry e;
         readEntry(*q, EntryColumns::Properties, e);
 
         // Call build on each of them; a canceled call stops before the next one
         cancel::throwIfCanceled();
+        const double begin = total > 0 ? static_cast<double>(done) / static_cast<double>(total) : 0.0;
+        const double end = total > 0 ? static_cast<double>(done + 1) / static_cast<double>(total) : 1.0;
         try {
-            buildInternal(db, e, outPath, force, options);
+            buildInternal(db, e, outPath, force, options.forSlice(begin, end));
         } catch (const CanceledException&) {
             throw;
         } catch (const AppException& err) {
             LOGD << "Cannot build " << e.path << ": " << err.what();
         }
+        done++;
+        options.reportProgress(end);
     }
+    options.reportProgress(1.0);
 }
 
 void build(Database* db, const std::string& path, const std::string& outputPath, bool force,
@@ -375,6 +396,7 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
         throw InvalidArgsException(path + " is not a valid path in the database.");
 
     buildInternal(db, *e, outputPath, force, options);
+    options.reportProgress(1.0);
 }
 
 }  // namespace ddb

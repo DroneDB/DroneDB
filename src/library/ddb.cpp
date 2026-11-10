@@ -993,6 +993,71 @@ BuildOptions buildOptionsArg(const char* optionsJson) {
 
 }  // namespace
 
+namespace {
+
+// The build of DDBBuildEx and DDBBuildEx2. Throws what the build throws (mapped to a DDBErr by guarded()
+// in the callers).
+void buildImpl(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly,
+               const char* optionsJson, const BuildProgressCallback& progress = {}) {
+    requireText(ddbPath, "No ddb path provided");
+    BuildOptions options = buildOptionsArg(optionsJson);
+    options.progress = progress;
+
+    // dest and source can be null (optional parameters); dest is a folder of the
+    // filesystem, source an entry path
+    const auto destPath = optStr(dest);
+    const auto path = optEntryPathArg(source, "source path");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+
+    if (path.empty()) {
+        if (pendingOnly)
+            buildPending(ddb.get(), destPath, force, options);
+        else
+            buildAll(ddb.get(), destPath, force, options);
+    } else {
+        // An entry that is not in the index is DDBERR_NOTFOUND in the exports added in 2.0 (DDBBuildEx keeps
+        // returning DDBERR_EXCEPTION for it, with the same message)
+        if (!getEntry(ddb.get(), path))
+            throw EntryNotFoundException(path + " is not a valid path in the database.");
+        build(ddb.get(), path, destPath, force, options);
+    }
+}
+
+// The progress of one build for a C callback. The fractions it gives never go down (the unknown one, -1,
+// only until the first known one: later it repeats the last), the calls are one at a time, and a non-zero
+// return cancels the work of the call through its own cancel token, so every checkpoint of the build
+// (GDAL's, the tools', the loop over the entries) stops it with DDBERR_CANCELED, as for DDBCancel. Make it on
+// the thread of the call, inside guarded(): it is the token of that thread while it lives.
+class CBuildProgress {
+  public:
+    CBuildProgress(DDBProgressCallback callback, void* userData) : callback_(callback), userData_(userData) {}
+
+    BuildProgressCallback function() {
+        return [this](double fraction, std::string_view phase) { report(fraction, phase); };
+    }
+
+  private:
+    void report(double fraction, std::string_view phase) noexcept {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (fraction >= 0.0) {
+            fraction = std::min(fraction, 1.0);
+            last_ = std::max(last_, fraction);
+        }
+        const std::string text(phase);
+        if (callback_(last_, text.empty() ? nullptr : text.c_str(), userData_) != 0)
+            call_.cancel("Build canceled by the progress callback");
+    }
+
+    const DDBProgressCallback callback_;
+    void* const userData_;
+    std::mutex mutex_;
+    double last_ = -1.0;
+    cancel::CallToken call_;
+};
+
+}  // namespace
+
 DDBErr DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly) {
     return DDBBuildEx(ddbPath, source, dest, force, pendingOnly, nullptr);
 }
@@ -1003,25 +1068,18 @@ DDBErr DDBBuildEx(const char* ddbPath, const char* source, const char* dest, boo
     // like the other arguments of DDBBuild
     constexpr auto kBuildCodes =
         kFrozenCodes | codeBit(DDBERR_BUILDDEPMISSING) | codeBit(DDBERR_BUILDINPROGRESS);
-    return guarded<kBuildCodes>([&] {
-        requireText(ddbPath, "No ddb path provided");
-        const BuildOptions options = buildOptionsArg(optionsJson);
+    return guarded<kBuildCodes>([&] { buildImpl(ddbPath, source, dest, force, pendingOnly, optionsJson); });
+}
 
-        // dest and source can be null (optional parameters); dest is a folder of the
-        // filesystem, source an entry path
-        const auto destPath = optStr(dest);
-        const auto path = optEntryPathArg(source, "source path");
-
-        const auto ddb = ddb::open(std::string(ddbPath), true);
-
-        if (path.empty()) {
-            if (pendingOnly)
-                buildPending(ddb.get(), destPath, force, options);
-            else
-                buildAll(ddb.get(), destPath, force, options);
-        } else {
-            build(ddb.get(), path, destPath, force, options);
+DDBErr DDBBuildEx2(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly,
+                   const char* optionsJson, DDBProgressCallback progress, void* progressUserData) {
+    return guarded<kNewExportCodes>([&] {
+        if (progress == nullptr) {
+            buildImpl(ddbPath, source, dest, force, pendingOnly, optionsJson);
+            return;
         }
+        CBuildProgress session(progress, progressUserData);
+        buildImpl(ddbPath, source, dest, force, pendingOnly, optionsJson, session.function());
     });
 }
 

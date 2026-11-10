@@ -17,6 +17,14 @@ bool isOptimizedCog(const std::string& inputPath);
 // The same check on a dataset that is open already
 bool isOptimizedCogDataset(GDALDatasetH hDataset);
 
+// The phase of a COG build that has done `fraction` (0 to 1) of its work: "warping" (the raster is
+// reprojected to the tile grid), "overviews" (the pyramid is made) and "compressing" (the tiles are
+// encoded and written). The fractions are those of GDAL's COG driver, whose work is in pixel units: the
+// warp one unit per pixel and band, the overviews a third of that, the final write 4/3 of it, so the
+// phases end at 3/8 and 1/2 of the work for a raster that needs a warp (a raster that is on the grid of
+// the tiles already has no warp: its overviews end at 1/5 and are reported as warping).
+const char* cogPhaseOfFraction(double fraction);
+
 }
 
 #endif  // COG_UTILS_H

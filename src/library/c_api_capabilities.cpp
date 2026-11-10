@@ -46,12 +46,13 @@ constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
 // The exports whose work checks the caller's cancel token while it runs: their
 // steps check cancel::throwIfCanceled() or run through a checkpoint (GDAL progress, raster
 // reads, forEachIndex items, SQLite statements, external tools). Sorted, so the capabilities
-// list is stable. DDBExportRaster2 also stops when its progress callback asks to.
+// list is stable. DDBExportRaster2, DDBExportSplatTrainingData and DDBBuildEx2 also stop when their progress callback asks to.
 constexpr std::string_view kCancellable[] = {
     "DDBApplyDelta",
     "DDBApplyDeltaEx",
     "DDBBuild",
     "DDBBuildEx",
+    "DDBBuildEx2",
     "DDBCalculateVolume",
     "DDBComputeDeltaLocals",
     "DDBDetectAllStockpiles",

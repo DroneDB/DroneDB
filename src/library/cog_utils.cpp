@@ -19,6 +19,13 @@ namespace ddb
         return isOptimizedCogDataset(datasetHandle(dataset));
     }
 
+    const char* cogPhaseOfFraction(double fraction)
+    {
+        if (fraction < 3.0 / 8.0) return "warping";
+        if (fraction < 0.5) return "overviews";
+        return "compressing";
+    }
+
     bool isOptimizedCogDataset(GDALDatasetH hDataset)
     {
         bool isOptimized = false;

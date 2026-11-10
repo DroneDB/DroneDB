@@ -62,6 +62,16 @@ BuildOptions BuildOptions::withThreads(int64_t threads) {
     return options;
 }
 
+BuildOptions BuildOptions::forSlice(double begin, double end) const {
+    BuildOptions slice = *this;
+    if (progress) {
+        slice.progress = [outer = progress, begin, end](double fraction, std::string_view phase) {
+            outer(fraction < 0.0 ? begin : begin + std::min(fraction, 1.0) * (end - begin), phase);
+        };
+    }
+    return slice;
+}
+
 BuildResourceBudget BuildResourceBudget::fromConfig(const BuildOptions& options) {
     BuildResourceBudget budget{};
     budget.cacheBytes = static_cast<int64_t>(positiveOption("DDB_COG_CACHE_MB", DefaultCacheMb)) * MiB;

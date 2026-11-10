@@ -5,11 +5,18 @@
 #define BUILD_BUDGET_H
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 
 
 namespace ddb {
+
+// Receives how far a build is: the fraction of its work done from 0 to 1, or -1 when that is not known,
+// and the phase it is in (a short token, empty when it has none). Called from any thread of the build, and
+// possibly at the same time (the C API serializes them); it must not throw.
+using BuildProgressCallback = std::function<void(double fraction, std::string_view phase)>;
 
 // What a caller asks of one build, besides what to build. Passed by value down the build path
 // (DDBBuildEx, ddb build, ddb::build / buildAll / buildPending, BuildContext, the builders): no
@@ -23,6 +30,22 @@ struct BuildOptions {
     // Nothing: each tool as without a cap. Untwine (point clouds) and build-lod (splats) have no
     // thread option: the cap does not bound them.
     std::optional<int> threads;
+
+    // Where the build reports its progress (DDBBuildEx2); empty: nowhere. A build of several entries
+    // (buildAll, buildPending) reports the fraction of the entries done plus the fraction of the one it builds
+    // (forSlice); a build of one entry the phases of that entry: a COG build "warping", "overviews" and
+    // "compressing", any other build the type of the entry (-1 until it is done).
+    BuildProgressCallback progress;
+
+    // Reports to progress when there is one
+    void reportProgress(double fraction, std::string_view phase = {}) const {
+        if (progress)
+            progress(fraction, phase);
+    }
+
+    // These options for one part of a larger build: what it reports (0 to 1) is mapped into [begin, end] of the
+    // fraction of the whole (an unknown fraction is begin)
+    BuildOptions forSlice(double begin, double end) const;
 
     // The options of a build capped to `threads` threads; throws InvalidArgsException unless
     // 1 <= threads <= MaxThreads

@@ -132,8 +132,8 @@ extern "C"
      *   "errorReasons" every reason DDBGetLastErrorReason() returns, sorted
      *   "cancellable"  the exports whose work checks a cancel token (DDBSetThreadCancelToken)
      *                  while it runs, and stops with DDBERR_CANCELED when it is canceled;
-     *                  DDBExportRaster2 and DDBExportSplatTrainingData also stop when their
-     *                  DDBProgressCallback asks to
+     *                  DDBExportRaster2, DDBExportSplatTrainingData and DDBBuildEx2 (new in 2.3) also
+     *                  stop when their DDBProgressCallback asks to
      *   "symbols"      every exported DDB* function, sorted (ddb.symbols)
      * Fields are only ever added. The string is built once and owned by the library: it stays
      * valid for the life of the process and is the same pointer on every call and every thread;
@@ -260,13 +260,13 @@ extern "C"
      * progress of warps, translations, statistics and raster reads, SQLite statements, and
      * external tools (killed). DDBGetCapabilities() lists as "cancellable" the exports whose
      * work checks a token while it runs; any export may return DDBERR_CANCELED when a token is
-     * set and canceled, and no export returns it without one (but DDBExportRaster2 and
-     * DDBExportSplatTrainingData, through their progress callback). DDBShutdown stops the work of every thread the same way, with
+     * set and canceled, and no export returns it without one (but DDBExportRaster2,
+     * DDBExportSplatTrainingData and DDBBuildEx2, through their progress callback). DDBShutdown stops the work of every thread the same way, with
      * DDBERR_SHUTDOWN.
      * The cancellable exports are the render, tile and thumbnail paths, the exports of rasters
      * (export, mask, statistics and metadata, point and area values, profile, volume, stockpiles,
      * contours), the training data of a splat (DDBExportSplatTrainingData) and its .spz
-     * export (DDBExportSplatSpz), DDBBuild,
+     * export (DDBExportSplatSpz), DDBBuild, DDBBuildEx, DDBBuildEx2 (new in 2.3),
      * DDBComputeDeltaLocals and DDBApplyDelta(Ex). A canceled call leaves
      * no half result: a raster output file is deleted, and DDBApplyDelta changes the dataset
      * whole or not at all (see there). */
@@ -818,6 +818,37 @@ extern "C"
      *         (see DDBGetLastError). The build is canceled like DDBBuild. */
     DDB_DLL DDBErr DDBBuildEx(const char *ddbPath, const char *source, const char *dest, bool force,
                               bool pendingOnly, const char *optionsJson);
+
+    /** Build with options and progress (new in 2.3): DDBBuildEx, and the progress of the build is reported to
+     * a callback, which can cancel it.
+     * @param ddbPath, source, dest, force, pendingOnly, optionsJson as for DDBBuildEx
+     * @param progress optional progress callback (may be NULL: then this is DDBBuildEx): the fraction of the work
+     *        done and the phase it is in; a non-zero return cancels the build (DDBERR_CANCELED, as DDBCancel does:
+     *        the work stops at its next checkpoint, a raster build kills its helper). Calls are one at a time, on
+     *        the calling thread or one of its workers.
+     *          fraction  from 0 to 1, or -1 while the build has done nothing it can measure: the values never
+     *                    go down, and once one is known a later report repeats the last one instead of -1.
+     *                    A build of one entry reports that entry; a build of several (source NULL or "", all
+     *                    the entries, or the pending ones) reports the fraction of the entries done plus the
+     *                    fraction of the one it builds. The last call of a build that ends without an error is
+     *                    1.
+     *          phase     what the build is doing, NULL when it has no name for it: for a raster (COG) build
+     *                    "warping" (the raster is reprojected to the tile grid), "overviews" (the pyramid)
+     *                    and "compressing" (the tiles are encoded and written), in that order, with the
+     *                    fractions of the work of GDAL's COG driver (a raster that is on the grid already
+     *                    has no warp: its first part is reported as "warping" all the same); for another
+     *                    kind of entry the type of the entry in lower case ("pointcloud", "model", "vector",
+     *                    "gaussiansplat", "tiles3d") with fraction -1 until it is built; "publishing" when
+     *                    a build has made its output and moves it into place.
+     *        A raster build reports at most once per percent.
+     * @param progressUserData opaque pointer forwarded to the progress callback
+     * @return as DDBBuildEx, with the codes of the exports added in 2.0 (DDBERR_INVALIDARGS for a refused
+     *         option, DDBERR_RETRYABLE, DDBERR_NOTFOUND), and DDBERR_CANCELED when the callback cancels or
+     *         the cancel token is canceled (DDBBuildEx2 is in "cancellable" of DDBGetCapabilities). A build
+     *         that is canceled keeps the pending state it had: a pending build stays pending. */
+    DDB_DLL DDBErr DDBBuildEx2(const char *ddbPath, const char *source, const char *dest, bool force,
+                               bool pendingOnly, const char *optionsJson, DDBProgressCallback progress,
+                               void *progressUserData);
 
     /** Cleanup a dataset:
      *   1. Remove from the database all (non-directory) entries whose underlying
