@@ -64,9 +64,10 @@ bool isThermalImage(const std::string &filePath, std::optional<bool> thermalTags
 bool isThermalImageFromExif(const std::string &make, const std::string &model);
 
 // Whether a picture is one of a thermal camera, as the scan of an entry marks it (sensorCategory "thermal", FR-RAS-13):
-// a DJI picture only when it carries the raw thermal image of the camera (hasDjiRawThermal), whatever its model, since
-// the wide and zoom pictures of a thermal drone (M30T, M3T, M2EA, H20N, H20T, H30T) have the model of the thermal one;
-// any other camera by its make and model (isThermalImageFromExif)
+// a DJI picture only when it carries the raw thermal image of the camera (hasDjiRawThermal, or the RawData record of the
+// FFF data of the FLIR cores DJI sold: Zenmuse XT, XT R, XT2), whatever its model, since the wide and zoom pictures of
+// a thermal drone (M30T, M3T, M2EA, H20N, H20T, H30T) have the model of the thermal one; any other camera by its make
+// and model (isThermalImageFromExif)
 bool isThermalPicture(const std::string &make, const std::string &model, const std::string &filePath);
 
 // The calibration of a FLIR file: the CameraInfo record of the FFF data of its FLIR APP1 segments (no tag reader is
@@ -75,7 +76,8 @@ bool isThermalPicture(const std::string &make, const std::string &model, const s
 ThermalCalibration extractThermalCalibration(const std::string &filePath);
 
 // R-JPEG raw data extraction. An R-JPEG is a JPEG that carries the raw sensor counts of a thermal camera: FLIR (the
-// RawData record of the FFF data of its FLIR APP1 segments, when the counts are not a PNG image) or DJI (the APP3
+// RawData record of the FFF data of its FLIR APP1 segments: int16u, or a 16-bit PNG image, in the byte order of the
+// record, at the size of the raw image, which may be portrait and differ from the picture's) or DJI (the APP3
 // segments). The raw data of a file that is not an R-JPEG are the UInt16 band of
 // a raster GDAL reads (a thermal GeoTIFF); the 8-bit colour bands of an R-JPEG are a preview, never raw data.
 RawThermalData extractRawThermalData(const std::string &filePath);
@@ -90,7 +92,11 @@ RawThermalData extractRJpegRawThermal(const std::string &filePath);
 bool hasDjiRawThermal(const std::string &filePath);
 
 // Temperature conversion (Planck, FLIR): degrees Celsius, NaN for a raw count the calibration cannot convert (no
-// temperature: the pixel has no value)
+// temperature: the pixel has no value). The measurement parameters of the calibration are applied as the FLIR software
+// applies them (Thermimage's raw2temp): the emissivity with the reflected apparent temperature, the transmission of the
+// atmosphere (object distance, atmospheric temperature, relative humidity and the five coefficients) and the IR window
+// (transmission and temperature). A parameter the file does not say leaves its term out: with the Planck constants
+// alone, T = B / ln(R1 / (R2 (raw + O)) + F) - 273.15.
 double rawToTemperature(uint16_t raw, const ThermalCalibration &cal);
 std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal);
 

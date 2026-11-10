@@ -332,27 +332,25 @@ TEST(thermal, cApiPixelExportsTakeTheOptions) {
 // The DJI thermal SDK samples (U-603: FR-RAS-13, FR-RAS-14, FR-RAS-15)
 // ============================================================
 
-// The DJI_0001_R.JPG of the SDK: M2EA (Mavic 2 Enterprise Advanced), H20T and H20N, 640 x 512. The H20T is
-// test_data/thermal/DJI_0001_R.JPG and must be there: its tests fail when it cannot be had. M2EA and H20N are to be added to
-// test_data as thermal/M2EA/DJI_0001_R.JPG and thermal/H20N/DJI_0001_R.JPG: until then their tests are skipped, and fail
-// when DDB_REQUIRE_DJI_SDK_SAMPLES is set (a CI that has them). The raw counts of a DJI R-JPEG need DJI's own
-// conversion, which DroneDB does not have: the raster API reports them as raw counts without a unit. The expected raw
-// counts are read here by GDAL from the DJI_RAW_THERMAL_IMAGE subdataset of the JPEG driver, not by the code under test;
-// the literals are those of gdalinfo -stats of that subdataset.
+// The DJI_0001_R.JPG of the SDK: M2EA (Mavic 2 Enterprise Advanced), H20T and H20N, 640 x 512, in test_data as
+// thermal/M2EA/DJI_0001_R.JPG, thermal/DJI_0001_R.JPG and thermal/H20N/DJI_0001_R.JPG: their tests fail when they cannot
+// be had, as for any asset. The raw counts of a DJI R-JPEG need DJI's own conversion, which DroneDB does not have: the
+// raster API reports them as raw counts without a unit. The expected raw counts are read here by GDAL from the
+// DJI_RAW_THERMAL_IMAGE subdataset of the JPEG driver, not by the code under test; the literals are those of
+// gdalinfo -stats of that subdataset.
 struct DjiSample {
     const char *camera;
     const char *model;
     const char *asset;      // path under test_data
-    bool inTestData;        // in the test_data commit of tests/test-data.sha
     int rawMin, rawMax;     // raw counts, the extremes of the image (gdalinfo -stats)
     int rawAtCentre;        // the pixel (320, 256)
     int previewAtCentre;    // the byte of the colour preview there, which the raster API used to report as degrees
 };
 
 const DjiSample DJI_SAMPLES[] = {
-    {"M2EA", "MAVIC2-ENTERPRISE-ADVANCED", "thermal/M2EA/DJI_0001_R.JPG", false, 17228, 20036, 18384, 31},
-    {"H20T", "ZH20T", "thermal/DJI_0001_R.JPG", true, 13537, 20670, 15908, 147},
-    {"H20N", "ZH20N", "thermal/H20N/DJI_0001_R.JPG", false, 17836, 19568, 18764, 140},
+    {"M2EA", "MAVIC2-ENTERPRISE-ADVANCED", "thermal/M2EA/DJI_0001_R.JPG", 17228, 20036, 18384, 31},
+    {"H20T", "ZH20T", "thermal/DJI_0001_R.JPG", 13537, 20670, 15908, 147},
+    {"H20N", "ZH20N", "thermal/H20N/DJI_0001_R.JPG", 17836, 19568, 18764, 140},
 };
 
 // The name of a sample in the messages of gtest
@@ -360,24 +358,10 @@ void PrintTo(const DjiSample &sample, std::ostream *os) {
     *os << sample.camera;
 }
 
-// The sample copied in the area. One in test_data must be had (a failure otherwise, as for any asset). One that is not
-// there yet is read from the download cache when it is there (DDB_TEST_CACHE_DIR), is downloaded when
-// DDB_REQUIRE_DJI_SDK_SAMPLES is set (a failure if it cannot be), and is a skip otherwise (no download attempt that is
-// known to fail)
-#define DJI_SAMPLE_OR_SKIP(name, ta, sample)                                                                        \
-    fs::path name;                                                                                                  \
-    {                                                                                                               \
-        const std::string url = testDataUrl((sample).asset);                                                        \
-        const bool required = (sample).inTestData || std::getenv("DDB_REQUIRE_DJI_SDK_SAMPLES") != nullptr;          \
-        if (!required && !fs::exists(TestFS::cachedAssetPath(url)))                                                 \
-            GTEST_SKIP() << (sample).asset << " is not in test_data yet (DJI thermal SDK sample; set "              \
-                         << "DDB_REQUIRE_DJI_SDK_SAMPLES to make this a failure)";                                  \
-        try {                                                                                                       \
-            name = (ta).downloadTestAsset(url, std::string((sample).camera) + "_DJI_0001_R.JPG");                   \
-        } catch (const std::exception &e) {                                                                         \
-            FAIL() << (sample).asset << " (DJI thermal SDK sample) could not be had: " << e.what();                 \
-        }                                                                                                           \
-    }
+// The sample copied in the area (a failure when it cannot be had, as for any asset)
+fs::path djiSample(TestArea &ta, const DjiSample &sample) {
+    return ta.downloadTestAsset(testDataUrl(sample.asset), std::string(sample.camera) + "_DJI_0001_R.JPG");
+}
 
 // The raw thermal image of a DJI R-JPEG as GDAL reads it (the DJI_RAW_THERMAL_IMAGE subdataset of its JPEG driver):
 // the counts, row by row, and the extremes, the pixel of the hottest count
@@ -419,7 +403,7 @@ INSTANTIATE_TEST_SUITE_P(thermal, DjiThermalSdkSample, ::testing::ValuesIn(DJI_S
 TEST_P(DjiThermalSdkSample, isThermalWithRawCountsAndNoCalibration) {
     const DjiSample &sample = GetParam();
     TestArea ta(TEST_NAME);
-    DJI_SAMPLE_OR_SKIP(img, ta, sample);
+    const fs::path img = djiSample(ta, sample);
     const GdalRawThermal gdal = gdalRawThermal(img);
     ASSERT_EQ(gdal.width, 640);
     ASSERT_EQ(gdal.height, 512);
@@ -452,7 +436,7 @@ TEST_P(DjiThermalSdkSample, isThermalWithRawCountsAndNoCalibration) {
 TEST_P(DjiThermalSdkSample, theRasterApiReportsRawCountsWithoutAUnit) {
     const DjiSample &sample = GetParam();
     TestArea ta(TEST_NAME);
-    DJI_SAMPLE_OR_SKIP(img, ta, sample);
+    const fs::path img = djiSample(ta, sample);
     const std::string path = img.string();
     const GdalRawThermal gdal = gdalRawThermal(img);
     ASSERT_EQ(gdal.counts.size(), static_cast<size_t>(640) * 512);
@@ -502,7 +486,7 @@ TEST_P(DjiThermalSdkSample, theRasterApiReportsRawCountsWithoutAUnit) {
 TEST_P(DjiThermalSdkSample, theThumbnailColoursTheRawCounts) {
     const DjiSample &sample = GetParam();
     TestArea ta(TEST_NAME);
-    DJI_SAMPLE_OR_SKIP(img, ta, sample);
+    const fs::path img = djiSample(ta, sample);
     const GdalRawThermal gdal = gdalRawThermal(img);
     ASSERT_EQ(gdal.counts.size(), static_cast<size_t>(640) * 512);
 
@@ -523,6 +507,194 @@ TEST_P(DjiThermalSdkSample, theThumbnailColoursTheRawCounts) {
         EXPECT_NEAR(image.bands[1][hot], 0, 16);
         EXPECT_NEAR(image.bands[2][hot], 0, 16);
     }
+}
+
+// ============================================================
+// Real FLIR R-JPEGs (U-603: FR-RAS-13, FR-RAS-14, FR-RAS-15)
+// ============================================================
+
+// Published FLIR R-JPEGs, in test_data/thermal/FLIR (sources and licences in its ATTRIBUTION.md): the raw image is the
+// RawData record of the FFF data of their FLIR APP1 segments, int16u or a PNG image, little-endian, at its own size
+// (portrait for the FLIR ONE), and the calibration their CameraInfo record. The expected values do not come from the
+// code under test: the sizes, raw counts and constants are those ExifTool reads; the temperatures those of the FLIR
+// measurement equations (Thermimage's raw2temp, the emissivity, reflected temperature, atmosphere and window of the
+// record) computed by an independent parser, which gives Thermimage's published temperatures for SampleJPG.jpg (its
+// IR_2412.jpg) and the camera scales flyr publishes for its thermograms within 0.21 C. The extremes are those of the
+// whole raw image, the point is its centre (width / 2, height / 2).
+struct FlirSample {
+    const char *camera;
+    const char *asset;           // path under test_data
+    int width, height;           // the raw image
+    double planckR1, planckB, planckO, planckR2;
+    double emissivity;
+    double tMin, tMax;           // degrees Celsius
+    int rawAtCentre;
+    double tAtCentre;
+};
+
+const FlirSample FLIR_SAMPLES[] = {
+    // FLIR SC660: int16u (Thermimage's IR_2412.jpg)
+    {"SC660", "thermal/FLIR/SC660/SampleJPG.jpg", 640, 480, 21106.76953125, 1501.0, -7340, 0.01254526, 0.95,
+     22.74, 35.25, 18426, 25.64},
+    // FLIR AX8: a PNG image
+    {"AX8", "thermal/FLIR/AX8/ax8.jpg", 80, 60, 16951.796875, 1435.09997559, -7142, 0.01429487, 0.95, 24.36, 25.47,
+     16868, 25.42},
+    // FLIR ONE: PNG images in portrait, 240 x 320 and 120 x 160, in pictures of another size
+    {"FLIRONE_240x320", "thermal/FLIR/ONE/flir_example.jpg", 240, 320, 17837.53125, 1450.40002441, -1143, 0.01233278,
+     0.95, 25.95, 62.32, 13319, 30.50},
+    {"FLIRONE_120x160", "thermal/FLIR/ONE/SampleFLIRONE.jpg", 120, 160, 18471.78710938, 1460.90002441, -3579,
+     0.01333238, 0.95, 14.32, 30.34, 13303, 21.08},
+    // DJI Zenmuse XT2: the Planck constants of the drone cores (R2 = 1, a positive O), an outdoor scene below 0 C
+    {"XT2", "thermal/FLIR/XT2/DJI_0087_R.JPG", 640, 512, 419061.0, 1428.0, 182, 1.0, 0.95, -21.21, 4.52, 1921, -5.15},
+    // DJI Zenmuse XT R: an emissivity of 0.70, 20 m of atmosphere at 32 C
+    {"ZenmuseXTR", "thermal/FLIR/ZenmuseXTR/zenmuse_xtr.jpg", 640, 512, 17096.453125, 1428.0, -370, 0.0480848, 0.70,
+     15.93, 59.73, 3355, 25.80},
+};
+
+void PrintTo(const FlirSample &sample, std::ostream *os) {
+    *os << sample.camera;
+}
+
+fs::path flirSample(TestArea &ta, const FlirSample &sample) {
+    return ta.downloadTestAsset(testDataUrl(sample.asset), fs::path(sample.asset).filename().string());
+}
+
+class FlirRJpegSample : public ::testing::TestWithParam<FlirSample> {};
+
+INSTANTIATE_TEST_SUITE_P(thermal, FlirRJpegSample, ::testing::ValuesIn(FLIR_SAMPLES),
+                         [](const ::testing::TestParamInfo<FlirSample> &sample) { return std::string(sample.param.camera); });
+
+// The raw image, the calibration and the temperatures of the library
+TEST_P(FlirRJpegSample, readsTheRawImageAndTheCalibrationOfItsRecords) {
+    const FlirSample &sample = GetParam();
+    TestArea ta(TEST_NAME);
+    const fs::path img = flirSample(ta, sample);
+
+    EXPECT_TRUE(isThermalImage(img.string()));
+    EXPECT_FALSE(hasDjiRawThermal(img.string()));
+
+    const RawThermalData raw = extractRawThermalData(img.string());
+    ASSERT_TRUE(raw.valid);
+    EXPECT_EQ(raw.width, sample.width);
+    EXPECT_EQ(raw.height, sample.height);
+    ASSERT_EQ(raw.data.size(), static_cast<size_t>(sample.width) * sample.height);
+    EXPECT_EQ(raw.data[static_cast<size_t>(sample.height / 2) * sample.width + sample.width / 2], sample.rawAtCentre);
+
+    const ThermalCalibration cal = extractThermalCalibration(img.string());
+    ASSERT_TRUE(cal.valid);
+    EXPECT_NEAR(cal.planckR1, sample.planckR1, 1e-3);
+    EXPECT_NEAR(cal.planckB, sample.planckB, 1e-5);
+    EXPECT_EQ(cal.planckO, sample.planckO);
+    EXPECT_NEAR(cal.planckR2, sample.planckR2, 1e-7);
+    ASSERT_TRUE(cal.emissivity.has_value());
+    EXPECT_NEAR(*cal.emissivity, sample.emissivity, 1e-6);
+
+    const auto rjpeg = readRJpegThermal(img.string());
+    ASSERT_TRUE(rjpeg.has_value());
+    EXPECT_FALSE(rjpeg->dji);
+    ASSERT_TRUE(rjpeg->hasTemperatures());
+    const auto [lo, hi] = std::minmax_element(rjpeg->grid.temperatures.begin(), rjpeg->grid.temperatures.end());
+    EXPECT_NEAR(*lo, sample.tMin, 0.05);
+    EXPECT_NEAR(*hi, sample.tMax, 0.05);
+
+    // The scan marks the picture as a thermal one, the FLIR cores DJI sold (make "DJI") included
+    Entry entry;
+    parseEntry(img, ta.getFolder(), entry, false);
+    EXPECT_EQ(entry.properties.value("sensorCategory", ""), "thermal");
+}
+
+// The raster API: the size of the raw image, temperatures in degrees Celsius, the calibration of the record
+TEST_P(FlirRJpegSample, theRasterApiGivesTheTemperaturesOfTheRawImage) {
+    const FlirSample &sample = GetParam();
+    TestArea ta(TEST_NAME);
+    const std::string path = flirSample(ta, sample).string();
+
+    char *output = nullptr;
+    ASSERT_EQ(DDBGetRasterValueInfo(path.c_str(), &output), DDBERR_NONE) << DDBGetLastError();
+    const json info = json::parse(std::string(output));
+    DDBFree(output);
+    EXPECT_EQ(info["width"], sample.width);
+    EXPECT_EQ(info["height"], sample.height);
+    EXPECT_TRUE(info["isThermal"].get<bool>());
+    EXPECT_FALSE(info["isDirectValue"].get<bool>());
+    EXPECT_EQ(info["unit"], "\xC2\xB0" "C");
+    EXPECT_NEAR(info["valueMin"].get<double>(), sample.tMin, 0.05);
+    EXPECT_NEAR(info["valueMax"].get<double>(), sample.tMax, 0.05);
+    ASSERT_TRUE(info.contains("calibration"));
+    EXPECT_NEAR(info["calibration"]["planckR2"].get<double>(), sample.planckR2, 1e-7);
+    EXPECT_EQ(info["calibration"]["planckO"].get<double>(), sample.planckO);
+    EXPECT_NEAR(info["calibration"]["emissivity"].get<double>(), sample.emissivity, 1e-6);
+
+    ASSERT_EQ(DDBGetRasterPointValue(path.c_str(), sample.width / 2, sample.height / 2, &output), DDBERR_NONE)
+        << DDBGetLastError();
+    const json point = json::parse(std::string(output));
+    DDBFree(output);
+    EXPECT_EQ(point["rawValue"].get<int>(), sample.rawAtCentre);
+    EXPECT_NEAR(point["value"].get<double>(), sample.tAtCentre, 0.05);
+    EXPECT_EQ(point["unit"], "\xC2\xB0" "C");
+
+    // A pixel outside the raw image (the picture is larger than a portrait raw image) has no value
+    output = nullptr;
+    EXPECT_EQ(DDBGetRasterPointValue(path.c_str(), sample.width, sample.height / 2, &output), DDBERR_INVALIDARGS);
+}
+
+// Thermimage's README gives the temperatures of the first column of its IR_2412.jpg (SampleJPG.jpg): the raw counts
+// 18090, 18074, 18064, 18061, 18081 are 23.7, 23.6, 23.6, 23.6, 23.7 C (rounded to 0.1 C)
+TEST(thermal, theFlirSc660SampleHasThermimagesPublishedTemperatures) {
+    TestArea ta(TEST_NAME);
+    const std::string path = flirSample(ta, FLIR_SAMPLES[0]).string();
+    const int raw[] = {18090, 18074, 18064, 18061, 18081};
+    const double celsius[] = {23.7, 23.6, 23.6, 23.6, 23.7};
+    for (int y = 0; y < 5; y++) {
+        SCOPED_TRACE(y);
+        char *output = nullptr;
+        ASSERT_EQ(DDBGetRasterPointValue(path.c_str(), 0, y, &output), DDBERR_NONE) << DDBGetLastError();
+        const json point = json::parse(std::string(output));
+        DDBFree(output);
+        EXPECT_EQ(point["rawValue"].get<int>(), raw[y]);
+        EXPECT_NEAR(point["value"].get<double>(), celsius[y], 0.05);
+    }
+}
+
+// The camera scale of the XT2 picture of the Karlsruhe dataset, which its authors publish as -8 to +13 C: the
+// temperatures of the raw counts RawValueMedian -/+ RawValueRange / 2 of its CameraInfo record (2259 and 895), as flyr
+// computes it, -8.02 and 13.00 C. The Planck constants of the drone cores (R2 = 1, O = 182) give them
+TEST(thermal, theFlirXt2SampleHasThePublishedCameraScale) {
+    TestArea ta(TEST_NAME);
+    const std::string path = flirSample(ta, FLIR_SAMPLES[4]).string();
+    const ThermalCalibration cal = extractThermalCalibration(path);
+    ASSERT_TRUE(cal.valid);
+    EXPECT_EQ(cal.planckR2, 1.0);
+    EXPECT_EQ(cal.planckO, 182.0);
+    // 2259 - 447.5 and 2259 + 447.5: between two counts, the mean of their temperatures
+    const double low = (rawToTemperature(1811, cal) + rawToTemperature(1812, cal)) / 2;
+    const double high = (rawToTemperature(2706, cal) + rawToTemperature(2707, cal)) / 2;
+    EXPECT_NEAR(low, -8.02, 0.02);
+    EXPECT_NEAR(high, 13.00, 0.02);
+}
+
+// The thumbnail of a FLIR ONE picture with a colormap colours the temperatures of its raw image, in portrait, 120 x 160:
+// the hottest pixel has the last colour of the map ("rainbow" ends at 200, 0, 0)
+TEST(thermal, theThumbnailOfAFlirOnePictureColoursItsPortraitRawImage) {
+    TestArea ta(TEST_NAME);
+    const FlirSample &sample = FLIR_SAMPLES[3];
+    const fs::path img = flirSample(ta, sample);
+    const RawThermalData raw = extractRawThermalData(img.string());
+    ASSERT_TRUE(raw.valid);
+    const size_t hot = static_cast<size_t>(std::max_element(raw.data.begin(), raw.data.end()) - raw.data.begin());
+
+    uint8_t *buffer = nullptr;
+    int size = 0;
+    ASSERT_EQ(DDBGenerateMemoryThumbnailEx(img.string().c_str(), sample.height, nullptr, nullptr, "CELSIUS", nullptr,
+                                           "rainbow", nullptr, &buffer, &size),
+              DDBERR_NONE) << DDBGetLastError();
+    const auto image = testutils::decodeImage(std::vector<uint8_t>(buffer, buffer + size));
+    DDBVSIFree(buffer);
+    ASSERT_EQ(image.width, sample.width);
+    ASSERT_EQ(image.height, sample.height);
+    EXPECT_NEAR(image.bands[0][hot], 200, 16);
+    EXPECT_NEAR(image.bands[1][hot], 0, 16);
+    EXPECT_NEAR(image.bands[2][hot], 0, 16);
 }
 
 // ============================================================

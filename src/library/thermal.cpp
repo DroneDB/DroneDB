@@ -20,11 +20,13 @@
 #include <gdal_priv.h>
 #include <cpl_conv.h>
 #include <ogr_spatialref.h>
+#include <zlib.h>
 
 #include <fstream>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <algorithm>
@@ -87,12 +89,16 @@ bool isDjiMake(const std::string &make) {
     return makeLower.find("dji") != std::string::npos;
 }
 
+// Whether the JPEG has the FFF data of a FLIR camera with a RawData record (defined with the FFF reader below)
+bool hasFlirRawData(const std::string &filePath);
+
 } // anonymous namespace
 
 bool isThermalPicture(const std::string &make, const std::string &model, const std::string &filePath) {
     // The wide and zoom pictures of a DJI thermal drone have the model of its thermal camera: only the raw thermal image
-    // in the file tells the thermal picture
-    if (isDjiMake(make)) return hasDjiRawThermal(filePath);
+    // in the file tells the thermal picture. The FLIR cores DJI sold (Zenmuse XT, XT R, XT2) write "DJI" as the make
+    // and "FLIR" or "XT2" as the model: their raw thermal image is the RawData record of their FFF data
+    if (isDjiMake(make)) return hasDjiRawThermal(filePath) || hasFlirRawData(filePath);
     return isThermalImageFromExif(make, model);
 }
 
@@ -410,24 +416,155 @@ std::optional<FlirFff> readFlirFff(const std::string &filePath) {
     return result;
 }
 
+bool hasFlirRawData(const std::string &filePath) {
+    const auto fff = readFlirFff(filePath);
+    return fff && fff->records.rawData;
+}
+
+// The most pixels a raw thermal image is read with: the sensors are at most 1280 x 1024, and a bad record must not make
+// a large allocation (the bound of the DJI segments)
+constexpr size_t kMaxRawThermalPixels = static_cast<size_t>(10000) * 10000;
+
+uint32_t bigEndian32(const uint8_t *p) {
+    return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
+}
+
+// The PNG image of a RawData record (the format of the FLIR handheld cameras: E4 to E8, i3 to i7, the ONE, T420,
+// T630sc...): the raw counts, width x height int16u. Only what FLIR writes is read: a greyscale image of 16 bits, not
+// interlaced, of the size of the record, whose chunks have their CRC; anything else is nothing (no raw data). The
+// samples are taken in the byte order of the record, not in the big-endian order of the PNG format: the cameras whose
+// records are little-endian write them byte-swapped (as ExifTool and Thermimage read them), the old ThermaCAM ones
+// (P20, S65, E45, E65, EX320), whose records are big-endian, in the order of the format. Decoded here with zlib: the
+// host never opens the data of a user with GDAL (gdal_open_policy.h), and this is read on the host.
+std::optional<std::vector<uint16_t>> decodeFlirPng(const uint8_t *png, size_t size, int width, int height,
+                                                   bool bigEndian) {
+    static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    if (size < 8 || std::memcmp(png, signature, 8) != 0) return std::nullopt;
+
+    const size_t rowBytes = static_cast<size_t>(width) * 2;
+    std::vector<uint8_t> idat;
+    bool header = false;
+    bool ended = false;
+    for (size_t pos = 8; pos + 12 <= size;) {
+        const size_t length = bigEndian32(png + pos);
+        if (length > size - pos - 12) return std::nullopt;
+        const uint8_t *type = png + pos + 4;
+        const uint8_t *data = png + pos + 8;
+        const uint32_t crc = static_cast<uint32_t>(crc32(0L, type, static_cast<uInt>(length + 4)));
+        if (crc != bigEndian32(data + length)) {
+            LOGD << "The PNG raw thermal image has a chunk with a wrong CRC";
+            return std::nullopt;
+        }
+
+        if (std::memcmp(type, "IHDR", 4) == 0) {
+            if (header || length != 13) return std::nullopt;
+            const uint32_t w = bigEndian32(data);
+            const uint32_t h = bigEndian32(data + 4);
+            // bit depth, colour type, compression, filter, interlace
+            if (w != static_cast<uint32_t>(width) || h != static_cast<uint32_t>(height) || data[8] != 16 ||
+                data[9] != 0 || data[10] != 0 || data[11] != 0 || data[12] != 0) {
+                LOGD << "The PNG raw thermal image is not a 16-bit greyscale image of " << width << " x " << height
+                     << " (" << w << " x " << h << ", depth " << int(data[8]) << ", colour type " << int(data[9])
+                     << ", interlace " << int(data[12]) << ")";
+                return std::nullopt;
+            }
+            header = true;
+        } else if (std::memcmp(type, "IDAT", 4) == 0) {
+            if (!header) return std::nullopt;
+            idat.insert(idat.end(), data, data + length);
+        } else if (std::memcmp(type, "IEND", 4) == 0) {
+            ended = true;
+            break;
+        } else if (!(type[0] & 0x20)) {
+            // Another critical chunk (a palette): not the image of raw counts
+            return std::nullopt;
+        }
+        pos += length + 12;
+    }
+    if (!header || !ended || idat.empty()) return std::nullopt;
+
+    // The rows, each with its filter byte: exactly height * (1 + width * 2) bytes
+    std::vector<uint8_t> rows(static_cast<size_t>(height) * (rowBytes + 1));
+    z_stream stream{};
+    if (inflateInit(&stream) != Z_OK) return std::nullopt;
+    stream.next_in = idat.data();
+    stream.avail_in = static_cast<uInt>(idat.size());
+    stream.next_out = rows.data();
+    stream.avail_out = static_cast<uInt>(rows.size());
+    const int status = inflate(&stream, Z_FINISH);
+    const bool whole = status == Z_STREAM_END && stream.avail_out == 0;
+    inflateEnd(&stream);
+    if (!whole) {
+        LOGD << "The PNG raw thermal image does not inflate to its rows (zlib status " << status << ")";
+        return std::nullopt;
+    }
+
+    // The filters of the rows (PNG 9.2), 2 bytes a pixel
+    constexpr size_t bpp = 2;
+    std::vector<uint8_t> previous(rowBytes, 0);
+    std::vector<uint16_t> counts(static_cast<size_t>(width) * height);
+    for (int y = 0; y < height; y++) {
+        uint8_t *row = rows.data() + static_cast<size_t>(y) * (rowBytes + 1);
+        const uint8_t filter = row[0];
+        uint8_t *line = row + 1;
+        for (size_t i = 0; i < rowBytes; i++) {
+            const int left = i >= bpp ? line[i - bpp] : 0;
+            const int up = previous[i];
+            const int upLeft = i >= bpp ? previous[i - bpp] : 0;
+            int predictor = 0;
+            switch (filter) {
+            case 0: break;
+            case 1: predictor = left; break;
+            case 2: predictor = up; break;
+            case 3: predictor = (left + up) / 2; break;
+            case 4: {
+                const int p = left + up - upLeft;
+                const int pa = std::abs(p - left), pb = std::abs(p - up), pc = std::abs(p - upLeft);
+                predictor = (pa <= pb && pa <= pc) ? left : (pb <= pc ? up : upLeft);
+                break;
+            }
+            default: return std::nullopt;
+            }
+            line[i] = static_cast<uint8_t>(line[i] + predictor);
+        }
+        std::memcpy(previous.data(), line, rowBytes);
+        uint16_t *out = counts.data() + static_cast<size_t>(y) * width;
+        for (int x = 0; x < width; x++) {
+            const uint8_t b0 = line[x * 2], b1 = line[x * 2 + 1];
+            out[x] = bigEndian ? static_cast<uint16_t>((b0 << 8) | b1) : static_cast<uint16_t>(b0 | (b1 << 8));
+        }
+    }
+    return counts;
+}
+
 // The raw thermal image of the RawData record: its width (int16u at 0x02) and height (int16u at 0x04), and the raw
-// counts from 0x20 on, int16u in the byte order of the record. Nothing when the counts are in a PNG image (the format
-// of the FLIR handheld cameras): decoding it needs GDAL, which only the raster helper opens user data with, so its
-// raw counts are not read (the picture is its colour preview).
+// counts from 0x20 on: int16u in the byte order of the record, or a PNG image (decodeFlirPng). The size is the one of
+// the raw image, not of the picture: a portrait image (240 x 320, 120 x 160) stays one.
 std::optional<RawThermalData> fffRawThermal(const std::vector<uint8_t> &fff, const FffRecord &record) {
     if (record.length < 0x20) return std::nullopt;
     const int width = get16(fff, record.offset + 0x02, record.bigEndian);
     const int height = get16(fff, record.offset + 0x04, record.bigEndian);
     if (width <= 0 || height <= 0) return std::nullopt;
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+    if (pixelCount > kMaxRawThermalPixels) return std::nullopt;
 
     const size_t start = record.offset + 0x20;
     const uint8_t pngSignature[] = {0x89, 'P', 'N', 'G'};
     if (record.length >= 0x24 && std::memcmp(&fff[start], pngSignature, 4) == 0) {
-        LOGD << "The FLIR raw thermal image is a PNG image, which is not decoded here";
-        return std::nullopt;
+        auto counts = decodeFlirPng(&fff[start], record.length - 0x20, width, height, record.bigEndian);
+        if (!counts) {
+            LOGD << "The PNG raw thermal image of the FLIR RawData record cannot be read";
+            return std::nullopt;
+        }
+        RawThermalData raw;
+        raw.data = std::move(*counts);
+        raw.width = width;
+        raw.height = height;
+        raw.valid = true;
+        return raw;
     }
 
-    const size_t pixelCount = static_cast<size_t>(width) * height;
     if (record.length - 0x20 < pixelCount * 2) return std::nullopt;
 
     RawThermalData raw;
@@ -788,13 +925,84 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
 
 // ---- Planck formula ----
 
-double rawToTemperature(uint16_t raw, const ThermalCalibration &cal) {
-    // T = B / ln(R1 / (R2 * (raw + O)) + F) - 273.15
-    // A raw count outside the range of the calibration has no temperature (NaN: no value), not 0 degrees Celsius
-    constexpr double noTemperature = std::numeric_limits<double>::quiet_NaN();
-    const double rawD = static_cast<double>(raw);
-    const double denom = cal.planckR2 * (rawD + cal.planckO);
+namespace {
 
+// The object signal of a raw count: what the camera would count for the object alone, seen with an emissivity of 1
+// through no atmosphere and no window. The equations of the FLIR measurement (as Thermimage's raw2temp and ExifTool's
+// documentation of the FLIR tags give them, the formula of the FLIR software): the count is the object's signal through
+// the atmosphere (transmission tau, the distance split in two halves, one each side of the window) and the IR window
+// (transmission IRT), plus the emission of the atmosphere and of the window and the reflection of the surroundings on
+// the object (emissivity E, reflected apparent temperature):
+//   obj = raw / (E tau IRT tau) - (1 - tau) / (E tau) atm - (1 - tau) / (E tau IRT tau) atm
+//         - (1 - IRT) / (E tau IRT) window - (1 - E) / E reflected
+// where atm, window and reflected are the counts of a black body at the atmospheric, window and reflected temperatures
+// (the inverse of the Planck formula, planckCount). A term whose parameters the file does not say is left out (as for a
+// camera set to them): the emissivity without the reflected temperature, the atmosphere without the distance, the
+// atmospheric temperature, the humidity or one of its five coefficients, the window without its temperature. So the
+// counts of a calibration with the Planck constants alone are the object's (obj = raw). obj = raw * gain - offset.
+struct ObjectSignal {
+    double gain = 1.0;
+    double offset = 0.0;
+};
+
+// The count of a black body at t degrees Celsius: R1 / (R2 (exp(B / T) - F)) - O
+double planckCount(double celsius, const ThermalCalibration &cal) {
+    return cal.planckR1 / (cal.planckR2 * (std::exp(cal.planckB / (celsius + 273.15)) - cal.planckF)) - cal.planckO;
+}
+
+ObjectSignal objectSignal(const ThermalCalibration &cal) {
+    // The emissivity, with the reflected temperature it needs
+    double e = 1.0;
+    double reflected = 0.0;
+    if (cal.emissivity && cal.reflectedApparentTemperature && *cal.emissivity > 0.0 && *cal.emissivity <= 1.0) {
+        e = *cal.emissivity;
+        reflected = planckCount(*cal.reflectedApparentTemperature, cal);
+    }
+
+    // The transmission of the atmosphere over half the object distance (the water vapour of the humidity at the
+    // atmospheric temperature, two absorption bands mixed by X)
+    double tau = 1.0;
+    double atmosphere = 0.0;
+    if (cal.objectDistance && cal.atmosphericTemperature && cal.relativeHumidity && cal.atmosphericTransAlpha1 &&
+        cal.atmosphericTransAlpha2 && cal.atmosphericTransBeta1 && cal.atmosphericTransBeta2 && cal.atmosphericTransX &&
+        *cal.objectDistance >= 0.0 && *cal.relativeHumidity >= 0.0) {
+        const double t = *cal.atmosphericTemperature;
+        const double h2o = *cal.relativeHumidity * std::exp(1.5587 + 0.06939 * t - 0.00027816 * t * t + 0.00000068455 * t * t * t);
+        const double path = std::sqrt(*cal.objectDistance / 2.0);
+        const double x = *cal.atmosphericTransX;
+        const double transmission =
+            x * std::exp(-path * (*cal.atmosphericTransAlpha1 + *cal.atmosphericTransBeta1 * std::sqrt(h2o))) +
+            (1.0 - x) * std::exp(-path * (*cal.atmosphericTransAlpha2 + *cal.atmosphericTransBeta2 * std::sqrt(h2o)));
+        if (std::isfinite(transmission) && transmission > 0.0) {
+            tau = transmission;
+            atmosphere = planckCount(t, cal);
+        }
+    }
+
+    // The IR window, with its temperature
+    double irt = 1.0;
+    double window = 0.0;
+    if (cal.irWindowTransmission && cal.irWindowTemperature && *cal.irWindowTransmission > 0.0 &&
+        *cal.irWindowTransmission <= 1.0) {
+        irt = *cal.irWindowTransmission;
+        window = planckCount(*cal.irWindowTemperature, cal);
+    }
+
+    // A term that is 0 is left out, so that a black body that cannot be counted (its Planck count not finite) matters
+    // only when its factor does
+    const auto term = [](double factor, double count) { return factor == 0.0 ? 0.0 : factor * count; };
+    ObjectSignal signal;
+    signal.gain = 1.0 / (e * tau * irt * tau);
+    signal.offset = term((1.0 - tau) / (e * tau), atmosphere) + term((1.0 - tau) / (e * tau * irt * tau), atmosphere) +
+                    term((1.0 - irt) / (e * tau * irt), window) + term((1.0 - e) / e, reflected);
+    return signal;
+}
+
+// The temperature of the object signal: T = B / ln(R1 / (R2 (obj + O)) + F) - 273.15. A signal outside the range of
+// the calibration has no temperature (NaN: no value), not 0 degrees Celsius
+double objectTemperature(double obj, const ThermalCalibration &cal) {
+    constexpr double noTemperature = std::numeric_limits<double>::quiet_NaN();
+    const double denom = cal.planckR2 * (obj + cal.planckO);
     if (!(std::abs(denom) >= 1e-30)) return noTemperature;
 
     const double arg = cal.planckR1 / denom + cal.planckF;
@@ -805,14 +1013,18 @@ double rawToTemperature(uint16_t raw, const ThermalCalibration &cal) {
     return tempK - 273.15;
 }
 
+} // anonymous namespace
+
+double rawToTemperature(uint16_t raw, const ThermalCalibration &cal) {
+    const ObjectSignal signal = objectSignal(cal);
+    return objectTemperature(static_cast<double>(raw) * signal.gain - signal.offset, cal);
+}
+
 std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal) {
-    size_t pixelCount = raw.data.size();
-    std::vector<float> temps(pixelCount);
-
-    for (size_t i = 0; i < pixelCount; i++) {
-        temps[i] = static_cast<float>(rawToTemperature(raw.data[i], cal));
-    }
-
+    const ObjectSignal signal = objectSignal(cal);
+    std::vector<float> temps(raw.data.size());
+    for (size_t i = 0; i < raw.data.size(); i++)
+        temps[i] = static_cast<float>(objectTemperature(static_cast<double>(raw.data[i]) * signal.gain - signal.offset, cal));
     return temps;
 }
 

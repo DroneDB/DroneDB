@@ -627,12 +627,14 @@ namespace
 
     // A FLIR R-JPEG keeps its Planck constants and its raw image in the FFF data of its FLIR APP1 segments, not in its
     // XMP: the CameraInfo record (type 0x20) and the RawData record (type 1), as ExifTool documents them
-    // (Image::ExifTool::FLIR). No real FLIR picture is in the test data: these pictures are written here with the layout
-    // of a FLIR camera (a big-endian FFF header, little-endian records). The constants of their CameraInfo record are
-    // those of a FLIR Vue Pro R (R1 16528.178, B 1427.5, F 1, O -1307, R2 0.012874875); stored as floats, they are
-    // R1 16528.177734375 and R2 0.012874875217676163. The expected temperatures are literals of the Planck formula
-    // T = B / ln(R1 / (R2 * (raw + O)) + F) - 273.15 computed outside the code with those floats: 15104 -> 41.0155 C,
-    // 15124 -> 41.1146 C, 15204 -> 41.5103 C, 15224 -> 41.6090 C, 16204 -> 46.3498 C, 22344 -> 72.6997 C.
+    // (Image::ExifTool::FLIR). These pictures are written here with the layout of a FLIR camera (a big-endian FFF header,
+    // little-endian records), for the byte orders and segmentations real files do not all show; the real FLIR pictures of
+    // test_data/thermal/FLIR are read by the integration tests (thermal_test.cpp). The constants of their CameraInfo
+    // record are those of a FLIR Vue Pro R (R1 16528.178, B 1427.5, F 1, O -1307, R2 0.012874875); stored as floats, they
+    // are R1 16528.177734375 and R2 0.012874875217676163. The expected temperatures are literals of the FLIR measurement
+    // equations (Thermimage's raw2temp: emissivity 0.95, reflected 20 C, 3 m of atmosphere at 22 C and 50 % humidity, no
+    // window) computed outside the code with those floats: 15104 -> 42.3079 C, 15124 -> 42.4127 C, 15204 -> 42.8312 C,
+    // 15224 -> 42.9356 C, 16204 -> 47.9446 C, 22344 -> 75.6626 C.
 
     struct FffSpec
     {
@@ -852,8 +854,8 @@ namespace
         EXPECT_EQ(info["height"], kHeight);
         EXPECT_EQ(info["unit"], kCelsius);
         EXPECT_TRUE(info["isThermal"].get<bool>());
-        EXPECT_NEAR(info["valueMin"].get<double>(), 41.0155, 0.01);
-        EXPECT_NEAR(info["valueMax"].get<double>(), 72.6997, 0.01);
+        EXPECT_NEAR(info["valueMin"].get<double>(), 42.3079, 0.01);
+        EXPECT_NEAR(info["valueMax"].get<double>(), 75.6626, 0.01);
         ASSERT_TRUE(info.contains("calibration"));
         const json &calibration = info["calibration"];
         EXPECT_NEAR(calibration["planckR1"].get<double>(), 16528.1777, 1e-3);
@@ -863,12 +865,12 @@ namespace
         EXPECT_NEAR(calibration["atmosphericTransX"].get<double>(), 1.9, 1e-6);
 
         const json point = pointOf(path, 10, 5);
-        EXPECT_NEAR(point["value"].get<double>(), 46.3498, 0.01);
+        EXPECT_NEAR(point["value"].get<double>(), 47.9446, 0.01);
         EXPECT_EQ(point["rawValue"], 16204);
         EXPECT_EQ(point["unit"], kCelsius);
         const json kelvin = pointOf(path, 63, 47, "KELVIN");
         EXPECT_EQ(kelvin["unit"], "K");
-        EXPECT_NEAR(kelvin["value"].get<double>(), 345.8497, 0.01);
+        EXPECT_NEAR(kelvin["value"].get<double>(), 348.8126, 0.01);
 
         char *output = nullptr;
         ASSERT_EQ(DDBGetRasterAreaStatsPixelEx(path.string().c_str(), 0, 0, 1, 1, nullptr, &output), DDBERR_NONE)
@@ -877,16 +879,17 @@ namespace
         DDBFree(output);
         // 15104, 15204, 15124, 15224
         EXPECT_EQ(area["pixelCount"], 4);
-        EXPECT_NEAR(area["min"].get<double>(), 41.0155, 0.01);
-        EXPECT_NEAR(area["max"].get<double>(), 41.6090, 0.01);
-        EXPECT_NEAR(area["mean"].get<double>(), 41.3124, 0.01);
+        EXPECT_NEAR(area["min"].get<double>(), 42.3079, 0.01);
+        EXPECT_NEAR(area["max"].get<double>(), 42.9356, 0.01);
+        EXPECT_NEAR(area["mean"].get<double>(), 42.6218, 0.01);
     }
 
-    TEST(RJpegThermal, aFlirRawImageInAPngImageIsNotTakenForRawCounts)
+    TEST(RJpegThermal, aFlirRawImageInAPngImageThatCannotBeDecodedIsNotTakenForRawCounts)
     {
         TestArea ta(TEST_NAME);
-        // The raw image of the RawData record is a PNG image, which is not decoded: no raw count is read from the bytes
-        // of the record (nor from those of the APP1 segments), and the picture is its colour preview
+        // The raw image of the RawData record starts as a PNG image and is not one (the signature, then raw counts): no
+        // raw count is read from the bytes of the record (nor from those of the APP1 segments), and the picture is its
+        // colour preview. The PNG images of real cameras are read by the integration tests (thermal_test.cpp)
         FffSpec spec;
         spec.pngRaw = true;
         const auto path = writeFlirFffPicture(ta.getPath("FLIR_0011.JPG"), spec);
