@@ -10,6 +10,8 @@
 #include "logger.h"
 #include "mio.h"
 #include "fileversion.h"
+#include "vegetation.h"
+#include "stringutil.h"
 
 #include <fstream>
 #include <algorithm>
@@ -211,12 +213,60 @@ std::vector<std::string> collectMatchingMetadata(GDALDatasetH hDataset, int band
     return gdalmeta::collectMetadata(hDataset, options);
 }
 
+// The symbol (R, G, B, N, e for the red edge) of a band by its name, 0 for a band no formula reads
+char bandSymbolOf(std::string name) {
+    str::toLower(name);
+    if (name.find("red edge") != std::string::npos || name.find("rededge") != std::string::npos) return 'e';
+    if (name.starts_with("red")) return 'R';
+    if (name.starts_with("green")) return 'G';
+    if (name.starts_with("blue")) return 'B';
+    if (name.starts_with("nir")) return 'N';
+    return 0;
+}
+
+// The presets of a generic profile (its bands are placeholders until GDAL's band descriptions replace them) built from
+// the bands the raster has (FR-RAS-18): a colour composite takes the bands its channels name, by their names, and is
+// left out when one is missing (no True Color without a Blue band, none that maps NIR to red); an index preset is left
+// out when a band its formula reads is missing
+std::vector<RenderPreset> presetsOfBands(const std::vector<RenderPreset> &presets, const std::vector<BandInfo> &bands) {
+    std::map<char, int> indexOf; // the first band of each symbol, 1-based
+    for (const auto &bi : bands) {
+        const char symbol = bandSymbolOf(bi.name);
+        if (symbol != 0 && indexOf.find(symbol) == indexOf.end()) indexOf[symbol] = bi.index;
+    }
+    // The channels (red, green, blue) of the composites of the profiles
+    static const std::map<std::string, std::string> composites = {{"true-color", "RGB"}, {"false-color-ir", "NRG"}};
+
+    std::vector<RenderPreset> result;
+    for (const auto &p : presets) {
+        RenderPreset built = p;
+        if (p.type == "index") {
+            const VegetationFormula *formula = VegetationEngine::instance().getFormula(p.formula);
+            if (formula != nullptr) {
+                const auto symbols = VegetationEngine::requiredSymbols(*formula);
+                const bool complete = std::all_of(symbols.begin(), symbols.end(),
+                                                  [&](char c) { return indexOf.find(c) != indexOf.end(); });
+                if (!complete) continue;
+            }
+        } else if (const auto composite = composites.find(p.id); composite != composites.end()) {
+            const std::string &channels = composite->second;
+            const bool complete = std::all_of(channels.begin(), channels.end(),
+                                              [&](char c) { return indexOf.find(c) != indexOf.end(); });
+            if (!complete) continue;
+            built.bandMapping = BandMapping{indexOf[channels[0]], indexOf[channels[1]], indexOf[channels[2]]};
+        }
+        result.push_back(built);
+    }
+    return result;
+}
+
 // The detection result of a matched profile: its identity, bands and presets, and the default
 // preset
 void describeMatch(SensorDetectionResult &result, const SensorProfile &profile, GDALDatasetH hDataset,
                    int bandCount) {
     result.detected = true;
     result.sensorId = profile.id;
+    result.sensorName = profile.name;
     result.sensorCategory = profile.sensorCategory;
     result.bands = profile.bands;
     result.presets = profile.presets;
@@ -237,10 +287,12 @@ void describeMatch(SensorDetectionResult &result, const SensorProfile &profile, 
                 bi.name = d;
             }
         }
+        // Its presets map the bands the raster has, not those the profile assumed
+        result.presets = presetsOfBands(profile.presets, result.bands);
     }
 
     // Find default preset
-    for (const auto &p : profile.presets) {
+    for (const auto &p : result.presets) {
         if (p.isDefault) {
             result.defaultBandMapping = p.bandMapping;
             result.defaultPresetId = p.id;
@@ -248,8 +300,8 @@ void describeMatch(SensorDetectionResult &result, const SensorProfile &profile, 
         }
     }
     // If no default marked, use the first bands-type preset
-    if (result.defaultPresetId.empty() && !profile.presets.empty()) {
-        for (const auto &p : profile.presets) {
+    if (result.defaultPresetId.empty() && !result.presets.empty()) {
+        for (const auto &p : result.presets) {
             if (p.type == "bands" || p.type.empty()) {
                 result.defaultBandMapping = p.bandMapping;
                 result.defaultPresetId = p.id;
@@ -453,6 +505,8 @@ std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPat
 
     if (det.detected) {
         result["detectedSensor"] = det.sensorId;
+        // The profile's name next to its id (new in 2.3); absent for bands no profile matched
+        if (!det.sensorName.empty()) result["detectedSensorName"] = det.sensorName;
 
         json bandsArr = json::array();
         for (const auto &bi : det.bands) {

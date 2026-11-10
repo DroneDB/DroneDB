@@ -65,6 +65,7 @@ struct SensorProfile {
 struct SensorDetectionResult {
     bool detected = false;
     std::string sensorId;
+    std::string sensorName; // the profile's name next to its id ("Generic 4-Band (BGRN)")
     std::string sensorCategory;
     BandMapping defaultBandMapping;
     std::vector<BandInfo> bands;

@@ -648,7 +648,8 @@ namespace
         const auto &engine = VegetationEngine::instance();
         EXPECT_EQ(engine.autoDetectFilter(io::toUtf8(labelled), false).id, "T");
         EXPECT_EQ(engine.autoDetectFilter(io::toUtf8(unlabelled), true).id, "T");
-        EXPECT_EQ(engine.autoDetectFilter(io::toUtf8(unlabelled), false).id, "RGB");
+        // Not thermal and of one band: no red, green and blue to map, so an empty filter (FR-RAS-19)
+        EXPECT_EQ(engine.autoDetectFilter(io::toUtf8(unlabelled), false).id, "");
     }
 
     // The real program, recording the thumbnail params the host sends it

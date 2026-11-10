@@ -103,7 +103,9 @@
           "id",
           "name",
           "expr",
-          "help"
+          "help",
+          "requiredBands",
+          "category"
         ],
         "additionalProperties": false,
         "properties": {
@@ -118,6 +120,22 @@
           },
           "help": {
             "type": "string"
+          },
+          "requiredBands": {
+            "description": "the names of the bands the formula reads (new in 2.3)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "category": {
+            "description": "the kind of raster the formula is for (new in 2.3)",
+            "enum": [
+              "rgb",
+              "multispectral",
+              "thermal"
+            ]
           },
           "range": {
             "type": "array",

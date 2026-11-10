@@ -551,3 +551,14 @@ Registry has to adopt first.
   `DDBRasterOptions` of U-201 (above; all ten are in `cancellable` too) and the build key members of U-210
   (`key`, `buildKey`, `buildKeyChanged`). Additive: no export was removed or changed its signature. A host
   that reads `key` or calls one of the new exports checks `DDBGetAbiVersion()` for 2.2 or later.
+
+* 2026-11-10: the raster panels (U-415, additive, new in 2.3). Each item of the `algorithms` of
+  `DDBGetRasterMetadata` carries `requiredBands` (the names of the bands the formula reads, for example
+  `["Red", "NIR"]`) and `category` (`rgb`, `multispectral` or `thermal`), next to `disabledReason`, whose text
+  is unchanged. `DDBGetRasterInfo` adds `detectedSensorName`, the name of the sensor profile next to its id
+  (absent when no profile matched). For a raster of a generic profile (`generic-4band`) the
+  `availablePresets` are built from the bands the raster has: a True Color or Color Infrared preset maps the
+  bands by their names and is left out when a band is missing, an index preset is left out when a band its
+  formula reads is missing. A raster of fewer than three data bands that is not thermal has no band filter, so
+  every formula that needs bands is listed disabled with "Requires bands: ...". `raster-metadata.schema.json`
+  and `raster-info.schema.json` changed; the two `raster-metadata` fixtures changed, `raster-info` did not.
