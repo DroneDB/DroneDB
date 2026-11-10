@@ -27,6 +27,7 @@
 #include "geo.h"
 #include "hash.h"
 #include "logger.h"
+#include "build_layout.h"
 #include "mio.h"
 #include "parallel.h"
 #include "ply.h"
@@ -778,9 +779,6 @@ static std::vector<std::string> lasInputs(const std::vector<std::string>& filena
     return inputFiles;
 }
 
-// The private folder in the output folder that a COPC is built in
-static constexpr const char* kCopcStagingPrefix = ".copc-stage-";
-
 void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir, const BuildOptions& options,
                bool overwrite) {
     const fs::path dest = io::fromUtf8(outdir);
@@ -792,7 +790,7 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     // The folder of the output is the caller's (a "tmp" in it is somebody's): the conversions
     // and the build go to a private folder made in it, removed with whatever is left in it, and
     // the COPC is moved to its name once it is whole
-    const io::ScopedTempDir staging = raster::makePrivateFolder(dest, kCopcStagingPrefix, raster::PrivateFolderWriter::Host);
+    const io::ScopedTempDir staging = raster::makePrivateFolder(dest, CopcStagingPrefix, raster::PrivateFolderWriter::Host);
     const fs::path tmpDir = staging.path() / "tmp";
     io::assureFolderExists(tmpDir);
     const fs::path produced = staging.path() / CopcFileName;

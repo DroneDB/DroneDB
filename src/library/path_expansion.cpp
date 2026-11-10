@@ -89,6 +89,12 @@ namespace ddb
                 continue;
             }
 
+            if (hasStagingSegment(io::Path(p).relativeTo(rootDirectory).get()))
+            {
+                reject(p, "The name is a staging folder of ddb, left by an operation that did not finish: it is not indexed");
+                continue;
+            }
+
             const bool isDirectory = fs::is_directory(p);
             if (!isDirectory && !fs::exists(p))
                 throw FSException("Path does not exist: " + io::toUtf8(p));
@@ -166,7 +172,7 @@ namespace ddb
         for (const auto &pathUtf8 : paths)
         {
             fs::path p = io::fromUtf8(pathUtf8);
-            if (isReservedSegment(p.filename()))
+            if (isReservedSegment(p.filename()) || hasStagingSegment(p))
                 continue;
 
             try
@@ -285,7 +291,7 @@ namespace ddb
         size_t totalMatches = 0;
 
         const auto pushUnique = [&](const fs::path &p) {
-            if (containsDdbSegment(p))
+            if (containsDdbSegment(p) || hasStagingSegment(p))
                 return;
             std::string abs = io::toUtf8(fs::absolute(p));
             if (seen.insert(abs).second)
@@ -304,7 +310,7 @@ namespace ddb
                 size_t patternMatches = 0;
                 for (auto &m : matches)
                 {
-                    if (containsDdbSegment(m))
+                    if (containsDdbSegment(m) || hasStagingSegment(m))
                         continue;
                     pushUnique(m);
                     ++patternMatches;

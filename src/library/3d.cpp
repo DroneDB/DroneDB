@@ -760,7 +760,7 @@ std::string buildBm3d(const std::string& inputObj,
 
     // bm3d writes into a private folder beside the output, which is removed with whatever is
     // left in it: an existing output is replaced only by a complete bm3d file
-    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), ".bm3d-stage-",
+    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), Bm3dStagingPrefix,
                                                                 raster::PrivateFolderWriter::Host);
     const fs::path produced = staging.path() / target.filename();
     performBm3dBuild(model.path, io::toUtf8(produced), options);

@@ -23,6 +23,7 @@
 #include "mathutil.h"
 #include "merge_crop.h"
 #include "merge_vrt.h"
+#include "build_layout.h"
 #include "mio.h"
 #include "parallel.h"
 #include "raster_artefacts.h"
@@ -34,9 +35,6 @@ namespace {
 using merge::SeparateVrt;
 using merge::buildSeparateVrt;
 using merge::openAll;
-
-// The private folder beside the output that a merge writes its raster in
-constexpr const char *kMergeStagingPrefix = ".merge-stage-";
 
 // The creation options of the tiled GTiff that a merge writes (GDALTranslate and GDALWarp
 // alike); numThreads is the GDAL thread option of the merge's CPU tokens
@@ -498,7 +496,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
     // The merge and its GPS go to a file of a private folder beside the output, which is removed
     // with whatever is left in it: an existing output is replaced only by a complete merge
-    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), kMergeStagingPrefix,
+    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), MergeStagingPrefix,
                                                                 raster::PrivateFolderWriter::Host);
     const fs::path producedPath = staging.path() / target.filename();
     const std::string produced = io::toUtf8(producedPath);

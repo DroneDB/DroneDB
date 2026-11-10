@@ -13,6 +13,7 @@
 #include "logger.h"
 #include "json.h"
 #include "fs.h"          // fs::absolute - used by applyWarp() for VRT path resolution
+#include "build_layout.h"
 #include "mio.h"
 
 #include <algorithm>
@@ -1093,9 +1094,6 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
     return in;
 }
 
-// The private folder beside the output that the aligned raster is staged in
-constexpr const char *kAlignStagingPrefix = ".align-stage-";
-
 // Writes the uncompressed warp `produced` to `staged` compressed without loss: DEFLATE with the
 // predictor of its data type
 void compressAligned(const fs::path &produced, const fs::path &staged) {
@@ -1137,7 +1135,7 @@ void writeAligned(const AlignInputs &in, const Similarity2D &sim, AlignResult &r
     // The staging folder beside the output, in which this process writes the file that is published
     // (the scratch folder is one of the artefacts of the cache, which may be on another device and
     // is not the place of a file of the user's)
-    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), kAlignStagingPrefix,
+    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), AlignStagingPrefix,
                                                                 raster::PrivateFolderWriter::Host);
     const fs::path staged = staging.path() / target.filename();
     compressAligned(produced, staged);

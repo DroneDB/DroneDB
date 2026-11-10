@@ -4,6 +4,7 @@
 #ifndef BUILD_LAYOUT_H
 #define BUILD_LAYOUT_H
 
+#include <array>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -54,6 +55,20 @@ constexpr const char* TrashFolderTag = "trash-";
 // "<hash>/.vec-stage-<rand>" and "<hash>/.vec-backup-<rand16>": vector publish scratch.
 constexpr const char* VectorStagingPrefix = ".vec-stage-";
 constexpr const char* VectorBackupPrefix = ".vec-backup-";
+
+// The private folders that align, mask, merge, the COG and COPC builds and bm3d make beside
+// their output (raster::makePrivateFolder, "<prefix><StagingSuffixLength random letters and
+// digits>"): the output folder can be a dataset folder, and a crash leaves them there. The one
+// list of those prefixes: the creators use these names and the walk of a dataset skips what
+// they generate (isStagingFolderName).
+constexpr const char* AlignStagingPrefix = ".align-stage-";
+constexpr const char* MaskStagingPrefix = ".mask-stage-";
+constexpr const char* MergeStagingPrefix = ".merge-stage-";
+constexpr const char* Bm3dStagingPrefix = ".bm3d-stage-";
+constexpr const char* CogStagingPrefix = ".cog-stage-";
+constexpr const char* CopcStagingPrefix = ".copc-stage-";
+// Characters of the random suffix of a private folder (io::ScopedTempDir::create)
+constexpr size_t StagingSuffixLength = 16;
 
 // ---- Output subfolders (one per artifact family) -------------------------------------------
 
@@ -144,6 +159,35 @@ inline std::string tiles3DBackupFolderName() {
 // "3dtiles-temp-trash-": the prefix of the 3D Tiles leftovers moved aside by a cleanup
 inline std::string tiles3DTrashPrefix() {
     return std::string(Tiles3DBuildSubfolder) + TempFolderInfix + TrashFolderTag;
+}
+
+// The prefixes of the staging folders that ddb makes in the folder of an output
+inline std::array<const char*, 6> stagingPrefixes() {
+    return {AlignStagingPrefix, MaskStagingPrefix, MergeStagingPrefix,
+            Bm3dStagingPrefix,  CogStagingPrefix,  CopcStagingPrefix};
+}
+
+// True for the name of a staging folder ddb generated: one of stagingPrefixes() followed by
+// exactly StagingSuffixLength letters and digits. A folder of the user that only starts with
+// one of them (".merge-notes", ".merge-stage-old") is not one.
+inline bool isStagingFolderName(std::string_view name) {
+    for (const char* prefix : stagingPrefixes()) {
+        const std::string_view p = prefix;
+        if (name.size() != p.size() + StagingSuffixLength || name.substr(0, p.size()) != p)
+            continue;
+        const std::string_view suffix = name.substr(p.size());
+        bool generated = true;
+        for (const char c : suffix) {
+            const bool alnum = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+            if (!alnum) {
+                generated = false;
+                break;
+            }
+        }
+        if (generated)
+            return true;
+    }
+    return false;
 }
 
 // Build artifact names are content hashes (SHA-256 hex, 64 characters). Callers check a

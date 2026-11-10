@@ -13,6 +13,7 @@
 #include "raster_helper.h"
 #include "raster_ops.h"
 #include "logger.h"
+#include "build_layout.h"
 #include "mio.h"
 #include "raster_artefacts.h"
 #include "raster_stats.h"
@@ -375,9 +376,6 @@ namespace ddb
 
     namespace
     {
-        // The private folder beside the output that the helper writes a COG and its statistics in
-        constexpr const char *kCogStagingPrefix = ".cog-stage-";
-
         // Moves the statistics the helper wrote next to `produced` beside `target`. Without them
         // the sidecar that is there describes the COG that was replaced: it goes.
         void publishStatsSidecar(const fs::path &produced, const fs::path &target)
@@ -401,7 +399,7 @@ namespace ddb
         // The folder of the output holds other files (programs, the files of a user): the helper
         // writes into a folder of its own in it, which is removed with whatever is left in it
         const io::ScopedTempDir staging =
-            raster::makePrivateFolder(target.parent_path(), kCogStagingPrefix);
+            raster::makePrivateFolder(target.parent_path(), CogStagingPrefix);
         const fs::path produced = staging.path() / target.filename();
         buildCogInPrivateFolder(input, produced, options);
 

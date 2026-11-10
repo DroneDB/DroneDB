@@ -9,6 +9,7 @@
 #include <windows.h> // DWORD, GetFileAttributesW
 #endif
 
+#include "build_layout.h"
 #include "entry_path.h"
 #include "exceptions.h"
 #include "mio.h"
@@ -36,6 +37,14 @@ namespace ddb
         return std::none_of(name.begin(), name.end(), isEntryPathSeparator);
     }
 
+    bool hasStagingSegment(const fs::path &path)
+    {
+        // A name is decided by its shape alone: the generated suffix of 16 random characters
+        // is not one a person gives to a file
+        return std::any_of(path.begin(), path.end(),
+                           [](const fs::path &part) { return isStagingFolderName(io::toUtf8(part)); });
+    }
+
     void walkDataset(const fs::path &folder, const WalkOptions &options,
                      const std::function<void(const fs::directory_entry &entry)> &visit)
     {
@@ -46,7 +55,7 @@ namespace ddb
             {
                 const fs::path &path = i->path();
 
-                if (isReservedSegment(path.filename()) || isHiddenOrSystem(path))
+                if (isReservedSegment(path.filename()) || isHiddenOrSystem(path) || isStagingFolderName(io::toUtf8(path.filename())))
                 {
                     i.disable_recursion_pending();
                     continue;

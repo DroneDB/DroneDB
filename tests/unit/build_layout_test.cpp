@@ -9,6 +9,7 @@
 #include "build_layout.h"
 #include "gtest/gtest.h"
 #include "json.h"
+#include "randomutil.h"
 
 #include <string>
 
@@ -25,6 +26,33 @@ TEST(buildLayout, MarkerAndScratchNamesArePinned) {
     EXPECT_STREQ(TrashFolderTag, "trash-");
     EXPECT_STREQ(VectorStagingPrefix, ".vec-stage-");
     EXPECT_STREQ(VectorBackupPrefix, ".vec-backup-");
+}
+
+TEST(buildLayout, StagingFolderNamesArePinned) {
+    EXPECT_STREQ(AlignStagingPrefix, ".align-stage-");
+    EXPECT_STREQ(MaskStagingPrefix, ".mask-stage-");
+    EXPECT_STREQ(MergeStagingPrefix, ".merge-stage-");
+    EXPECT_STREQ(Bm3dStagingPrefix, ".bm3d-stage-");
+    EXPECT_STREQ(CogStagingPrefix, ".cog-stage-");
+    EXPECT_STREQ(CopcStagingPrefix, ".copc-stage-");
+    EXPECT_EQ(StagingSuffixLength, 16u);
+    EXPECT_EQ(stagingPrefixes().size(), 6u);
+}
+
+TEST(buildLayout, AStagingFolderNameIsAPrefixAndExactlyTheGeneratedSuffix) {
+    for (const char* prefix : stagingPrefixes()) {
+        EXPECT_TRUE(isStagingFolderName(std::string(prefix) + "aZ09aZ09aZ09aZ09")) << prefix;
+        EXPECT_TRUE(isStagingFolderName(std::string(prefix) + randomString(16))) << prefix;
+        EXPECT_FALSE(isStagingFolderName(prefix)) << prefix;
+        EXPECT_FALSE(isStagingFolderName(std::string(prefix) + "aZ09aZ09aZ09aZ0")) << "15 characters";
+        EXPECT_FALSE(isStagingFolderName(std::string(prefix) + "aZ09aZ09aZ09aZ09a")) << "17 characters";
+        EXPECT_FALSE(isStagingFolderName(std::string(prefix) + "aZ09aZ09aZ09aZ-9")) << "not a letter or digit";
+        EXPECT_FALSE(isStagingFolderName(std::string(prefix) + "aZ09aZ09aZ09aZ 9")) << "a space";
+        EXPECT_FALSE(isStagingFolderName("x" + std::string(prefix) + "aZ09aZ09aZ09aZ09")) << "not at the start";
+    }
+    EXPECT_FALSE(isStagingFolderName(".merge-notes"));
+    EXPECT_FALSE(isStagingFolderName(".vec-stage-aZ09aZ09aZ09aZ09")) << "vector scratch is made under .ddb";
+    EXPECT_FALSE(isStagingFolderName(""));
 }
 
 TEST(buildLayout, SubfolderNamesArePinned) {

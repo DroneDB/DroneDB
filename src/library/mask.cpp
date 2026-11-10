@@ -9,6 +9,7 @@
 #include "logger.h"
 #include "exceptions.h"
 #include "fs.h"
+#include "build_layout.h"
 #include "mio.h"
 #include "parallel.h"
 #include "raster_artefacts.h"
@@ -19,9 +20,6 @@ namespace ddb
 
     namespace
     {
-
-        // The private folder beside the output that a mask is written in
-        constexpr const char *kMaskStagingPrefix = ".mask-stage-";
 
         // The external mask GDAL writes next to a raster when it keeps none inside
         fs::path externalMaskOf(const fs::path &raster)
@@ -218,7 +216,7 @@ namespace ddb
 
         // The mask goes to a file of a private folder beside the output, which is removed with
         // whatever is left in it: an existing output is replaced only by a complete mask
-        const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), kMaskStagingPrefix,
+        const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), MaskStagingPrefix,
                                                                     raster::PrivateFolderWriter::Host);
         const fs::path produced = staging.path() / target.filename();
 

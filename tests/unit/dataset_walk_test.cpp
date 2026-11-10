@@ -14,10 +14,12 @@
 #include <unistd.h> // geteuid
 #endif
 
+#include "build_layout.h"
 #include "dataset_walk.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "mio.h"
+#include "raster_artefacts.h"
 #include "status.h"
 #include "test.h"
 #include "testarea.h"
@@ -143,6 +145,87 @@ namespace
     void addTree(IndexFixture &f)
     {
         addToIndex(f.db.get(), expandGlobPatterns({f.root.string()}));
+    }
+
+    // The staging folders that ddb makes beside an output and a crash leaves behind are not part of
+    // the dataset: each one is made the way the operations make it (raster::makePrivateFolder)
+    TEST(DatasetWalk, SkipsEveryStagingFolderThatDdbGeneratesAndKeepsTheFoldersOfTheUser)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto root = ta.getFolder("tree");
+        writeFile(root / "a.txt", "a");
+        writeFile(root / "sub" / "b.txt", "b");
+
+        std::vector<io::ScopedTempDir> staging;
+        for (const char *prefix : stagingPrefixes())
+        {
+            staging.push_back(raster::makePrivateFolder(root, prefix));
+            writeFile(staging.back().path() / "half.tif", "partial");
+            staging.push_back(raster::makePrivateFolder(root / "sub", prefix));
+            writeFile(staging.back().path() / "deep" / "half.tif", "partial");
+        }
+
+        // What a person names: it starts like a staging folder, without the generated suffix
+        writeFile(root / ".merge-notes" / "n.txt", "n");
+        writeFile(root / ".merge-stage-old" / "o.txt", "o");
+        writeFile(root / ".align-stage-" / "e.txt", "e");
+        writeFile(root / ".cog-stage-0123456789abcdefg" / "t.txt", "t");
+        writeFile(root / ".mask-stage-0123456789abcde_" / "u.txt", "u");
+        writeFile(root / "sub" / ".copc-stage-x" / "c.txt", "c");
+        writeFile(root / ".hidden" / "h.txt", "h");
+
+        const std::set<std::string> expected{
+            "a.txt", "sub", "sub/b.txt", "sub/.copc-stage-x", "sub/.copc-stage-x/c.txt", ".merge-notes",
+            ".merge-notes/n.txt", ".merge-stage-old", ".merge-stage-old/o.txt", ".align-stage-",
+            ".align-stage-/e.txt", ".cog-stage-0123456789abcdefg", ".cog-stage-0123456789abcdefg/t.txt",
+            ".mask-stage-0123456789abcde_", ".mask-stage-0123456789abcde_/u.txt", ".hidden", ".hidden/h.txt"};
+        EXPECT_EQ(walked(root), expected);
+
+        EXPECT_EQ(relativeNames(root, getPathList({root.string()}, true, 0)), expected);
+        EXPECT_EQ(relativeNames(root, getIndexPathList(root, {root.string()}, true)), expected);
+
+        std::vector<fs::path> globbed;
+        for (const auto &p : expandGlobPatterns({root.string()}))
+            globbed.push_back(io::fromUtf8(p));
+        auto globbedNames = relativeNames(root, globbed);
+        globbedNames.erase("");
+        EXPECT_EQ(globbedNames, expected);
+    }
+
+    TEST(DatasetWalk, AStagingFolderNamedOnTheCommandLineIsNotIndexed)
+    {
+        IndexFixture f(TEST_NAME);
+        writeFile(f.root / "a.txt", "a");
+        const auto staging = raster::makePrivateFolder(f.root, AlignStagingPrefix);
+        writeFile(staging.path() / "half.tif", "partial");
+
+        const auto list = expandIndexPaths(f.root, {staging.path().string()}, true);
+        EXPECT_TRUE(list.paths.empty());
+        ASSERT_EQ(list.rejected.size(), 1u);
+
+        EXPECT_TRUE(getPathList({staging.path().string()}, true, 0).empty());
+        EXPECT_THROW(expandGlobPatterns({staging.path().string()}), FSException);
+
+        const auto globbed = expandGlobPatterns({(f.root / "**" / "*").string()});
+        for (const auto &p : globbed)
+            EXPECT_EQ(p.find("-stage-"), std::string::npos) << p;
+    }
+
+    TEST(DatasetWalk, AnAddOfTheDatasetAfterACrashIndexesNoStagingFolder)
+    {
+        IndexFixture f(TEST_NAME);
+        writeFile(f.root / "a.txt", "a");
+        const auto staging = raster::makePrivateFolder(f.root, MergeStagingPrefix);
+        writeFile(staging.path() / "half.tif", "partial");
+        writeFile(f.root / ".merge-notes" / "n.txt", "n");
+
+        addTree(f);
+
+        EXPECT_TRUE(getEntry(f.db.get(), "a.txt").has_value());
+        EXPECT_TRUE(getEntry(f.db.get(), ".merge-notes/n.txt").has_value());
+        EXPECT_FALSE(getEntry(f.db.get(), io::toUtf8(staging.path().filename()) + "/half.tif").has_value());
+        EXPECT_FALSE(getEntry(f.db.get(), io::toUtf8(staging.path().filename())).has_value());
+        EXPECT_TRUE(notIndexed(f.db.get()).empty());
     }
 
     TEST(StatusParity, ADatasetAddedWholeHasNothingNotIndexed)

@@ -26,6 +26,9 @@ namespace ddb
      * Calls visit for every file and folder below `folder` (never for the folder itself), in
      * the directory iterator's order. Not listed, and not entered:
      *  - ".ddb" folders (isReservedSegment);
+     *  - the staging folders that ddb makes beside an output (isStagingFolderName, build_layout.h:
+     *    ".align-stage-<16 characters>" and the like), which a crash leaves behind; a folder of the
+     *    user that only starts like one (".merge-notes") is listed;
      *  - hidden and system files and folders (Windows attributes; isHiddenOrSystem);
      *  - folders the process cannot read (skipped, not an error).
      * A filesystem error aborts the walk with an FSException. The entries are not filtered by
@@ -34,6 +37,10 @@ namespace ddb
      */
     void walkDataset(const fs::path &folder, const WalkOptions &options,
                      const std::function<void(const fs::directory_entry &entry)> &visit);
+
+    /// True when a component of `path` is a staging folder ddb generated: explicit paths and glob
+    /// matches, which go around the walk, are skipped by it
+    bool hasStagingSegment(const fs::path &path);
 
     /// True for a Windows hidden or system file or folder (Thumbs.db, desktop.ini, $RECYCLE.BIN);
     /// always false elsewhere, where "hidden" is only a naming convention that datasets use
