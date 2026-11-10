@@ -101,6 +101,42 @@ const ThermalReadCounters &thermalReadCountersForTesting() {
     return readCounters;
 }
 
+// ---- The pixel buffers of the thermal grids (test seam) ----
+
+namespace {
+
+thread_local ThermalGridBufferCounters gridBuffers;
+thread_local std::optional<std::size_t> areaValuesLimitOverride;
+
+} // anonymous namespace
+
+ThermalGridBufferCounters &thermalGridBuffersForTesting() {
+    return gridBuffers;
+}
+
+ThermalGridBufferBytes::~ThermalGridBufferBytes() {
+    gridBuffers.heldBytes -= bytes_;
+}
+
+void ThermalGridBufferBytes::set(std::uint64_t bytes) {
+    gridBuffers.heldBytes = gridBuffers.heldBytes - bytes_ + bytes;
+    bytes_ = bytes;
+    gridBuffers.peakBytes = std::max(gridBuffers.peakBytes, gridBuffers.heldBytes);
+}
+
+std::size_t areaValuesInMemoryLimit() {
+    return areaValuesLimitOverride.value_or(kMaxAreaValuesInMemory);
+}
+
+ScopedAreaValuesInMemoryLimitForTesting::ScopedAreaValuesInMemoryLimitForTesting(std::size_t limit)
+    : previous_(areaValuesLimitOverride) {
+    areaValuesLimitOverride = limit;
+}
+
+ScopedAreaValuesInMemoryLimitForTesting::~ScopedAreaValuesInMemoryLimitForTesting() {
+    areaValuesLimitOverride = previous_;
+}
+
 // ---- JPEG marker walk ----
 
 namespace {
@@ -887,7 +923,11 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
         GDALDataType dt = GDALGetRasterDataType(hBand);
         size_t pixelCount = static_cast<size_t>(w) * h;
 
-        if (dt == GDT_UInt16) {
+        if (dt == GDT_UInt16 && pixelCount > kMaxRawThermalPixels) {
+            // Not read whole: a request must not allocate gigabytes for the counts of a large raster, which are read a
+            // window at a time (ThermalBandReader)
+            LOGD << "The " << w << " x " << h << " raw counts of " << filePath << " are not read whole";
+        } else if (dt == GDT_UInt16) {
             // Direct raw radiometric data (e.g., thermal GeoTIFF)
             result.data.resize(pixelCount);
             if (GDALRasterIO(hBand, GF_Read, 0, 0, w, h,
@@ -1079,11 +1119,20 @@ double rawToTemperature(uint16_t raw, const ThermalCalibration &cal) {
     return objectTemperature(static_cast<double>(raw) * signal.gain - signal.offset, cal);
 }
 
-std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal) {
+namespace {
+
+// The temperatures of count raw counts, as rawToTemperatureMap gives them (the one conversion of a grid of counts)
+void rawCountsToTemperatures(const uint16_t *raw, size_t count, const ThermalCalibration &cal, float *temps) {
     const ObjectSignal signal = objectSignal(cal);
+    for (size_t i = 0; i < count; i++)
+        temps[i] = static_cast<float>(objectTemperature(static_cast<double>(raw[i]) * signal.gain - signal.offset, cal));
+}
+
+} // anonymous namespace
+
+std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal) {
     std::vector<float> temps(raw.data.size());
-    for (size_t i = 0; i < raw.data.size(); i++)
-        temps[i] = static_cast<float>(objectTemperature(static_cast<double>(raw.data[i]) * signal.gain - signal.offset, cal));
+    rawCountsToTemperatures(raw.data.data(), raw.data.size(), cal, temps.data());
     return temps;
 }
 
@@ -1332,102 +1381,88 @@ bool isThermalImage(const std::string &filePath, std::optional<bool> thermalTags
     return contentSaysThermal(filePath, [&parser] { return parser.get(); });
 }
 
-// ---- Helper: read temperature data from file (R-JPEG or GeoTIFF) ----
-// (TemperatureData struct is declared in thermal.h so raster_analysis.cpp can use it.)
+// ---- The first band of a thermal raster GDAL reads, a window at a time ----
 
-TemperatureData readTemperatureData(const std::string &filePath) {
-    TemperatureData td;
+struct ThermalBandReader::Impl {
+    std::string path;
+    GDALDatasetUniquePtr dataset;
+    GDALRasterBandH band = nullptr;
+    int width = 0;
+    int height = 0;
+    int blockHeight = 1;
+    bool hasGeoTransform = false;
+    double geoTransform[6] = {};
+    std::string projection;
+    bool rawCounts = false;
+    ThermalCalibration calibration; // of the raw counts, when valid
+};
 
-    // Try as GeoTIFF first (direct temperature or GDAL-readable)
-    if (const auto dataset = raster::openInputRaster(filePath)) {
-        GDALDatasetH hDs = datasetHandle(dataset);
-        int nBands = GDALGetRasterCount(hDs);
-        td.width = GDALGetRasterXSize(hDs);
-        td.height = GDALGetRasterYSize(hDs);
+ThermalBandReader::ThermalBandReader(std::unique_ptr<Impl> state) : impl(std::move(state)) {}
 
-        td.hasGeoTransform = (GDALGetGeoTransform(hDs, td.geoTransform) == CE_None);
-        const char* proj = GDALGetProjectionRef(hDs);
-        if (proj) td.projection = proj;
+ThermalBandReader::~ThermalBandReader() = default;
 
-        if (nBands >= 1) {
-            GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-            GDALDataType dt = GDALGetRasterDataType(hBand);
+std::unique_ptr<ThermalBandReader> ThermalBandReader::open(const std::string &filePath) {
+    auto impl = std::make_unique<Impl>();
+    impl->path = filePath;
+    impl->dataset = raster::openInputRaster(filePath);
+    if (!impl->dataset) return nullptr;
+    GDALDatasetH hDs = datasetHandle(impl->dataset);
+    if (GDALGetRasterCount(hDs) < 1) return nullptr;
+    impl->band = GDALGetRasterBand(hDs, 1);
+    if (impl->band == nullptr) return nullptr;
+    const GDALDataType dt = GDALGetRasterDataType(impl->band);
+    if (dt != GDT_Float32 && dt != GDT_Float64 && dt != GDT_UInt16) return nullptr;
 
-            size_t pixCount = static_cast<size_t>(td.width) * td.height;
-            td.temperatures.resize(pixCount);
+    impl->width = GDALGetRasterXSize(hDs);
+    impl->height = GDALGetRasterYSize(hDs);
+    int blockWidth = 0;
+    int blockHeight = 0;
+    GDALGetBlockSize(impl->band, &blockWidth, &blockHeight);
+    impl->blockHeight = std::max(1, blockHeight);
+    impl->hasGeoTransform = (GDALGetGeoTransform(hDs, impl->geoTransform) == CE_None);
+    const char *proj = GDALGetProjectionRef(hDs);
+    if (proj) impl->projection = proj;
 
-            if (dt == GDT_Float32 || dt == GDT_Float64) {
-                // Direct temperature values
-                if (GDALRasterIO(hBand, GF_Read, 0, 0, td.width, td.height,
-                                 td.temperatures.data(), td.width, td.height,
-                                 GDT_Float32, 0, 0) == CE_None) {
-                    return td;
-                }
-            } else if (dt == GDT_UInt16) {
-                // Raw values needing Planck conversion
-                std::vector<uint16_t> rawData(pixCount);
-                if (GDALRasterIO(hBand, GF_Read, 0, 0, td.width, td.height,
-                                 rawData.data(), td.width, td.height,
-                                 GDT_UInt16, 0, 0) == CE_None) {
-                    ThermalCalibration cal = extractThermalCalibration(filePath);
-                    RawThermalData raw;
-                    raw.data = std::move(rawData);
-                    raw.width = td.width;
-                    raw.height = td.height;
-                    raw.valid = true;
-                    if (cal.valid) {
-                        td.temperatures = rawToTemperatureMap(raw, cal);
-                    } else {
-                        LOGD << "No valid thermal calibration for " << filePath
-                             << ", returning raw UInt16 values as float";
-                        td.temperatures.resize(pixCount);
-                        for (size_t p = 0; p < pixCount; p++) {
-                            td.temperatures[p] = static_cast<float>(raw.data[p]);
-                        }
-                    }
-                    return td;
-                }
-            }
+    if (dt == GDT_UInt16) {
+        // Raw values needing Planck conversion
+        impl->rawCounts = true;
+        impl->calibration = extractThermalCalibration(filePath);
+        if (!impl->calibration.valid) {
+            LOGD << "No valid thermal calibration for " << filePath << ", returning raw UInt16 values as float";
         }
     }
+    return std::unique_ptr<ThermalBandReader>(new ThermalBandReader(std::move(impl)));
+}
 
-    // Not a raster of temperatures (an 8-bit picture, a band that could not be read): nothing was read
-    td.temperatures.clear();
+const std::string &ThermalBandReader::path() const { return impl->path; }
+int ThermalBandReader::width() const { return impl->width; }
+int ThermalBandReader::height() const { return impl->height; }
+int ThermalBandReader::blockHeight() const { return impl->blockHeight; }
+bool ThermalBandReader::hasGeoTransform() const { return impl->hasGeoTransform; }
+const double *ThermalBandReader::geoTransform() const { return impl->geoTransform; }
+const std::string &ThermalBandReader::projection() const { return impl->projection; }
+bool ThermalBandReader::hasRawCounts() const { return impl->rawCounts; }
 
-    // Try R-JPEG extraction
-    if (auto rjpeg = readRJpegThermal(filePath)) {
-        if (rjpeg->grid.temperatures.empty()) {
-            // The raw counts of the camera have no calibration: they are not temperatures (FR-RAS-14)
-            LOGD << "No valid thermal calibration for " << filePath << ", the R-JPEG has no temperatures";
-            td.width = rjpeg->raw.width;
-            td.height = rjpeg->raw.height;
-        } else {
-            td = std::move(rjpeg->grid);
-        }
-        return td;
+bool ThermalBandReader::read(int x, int y, int w, int h, std::vector<float> &temperatures,
+                             std::vector<uint16_t> &rawCounts) const {
+    const size_t pixels = static_cast<size_t>(w) * static_cast<size_t>(h);
+    gridBuffers.largestWindowPixels = std::max<std::uint64_t>(gridBuffers.largestWindowPixels, pixels);
+    temperatures.resize(pixels);
+    if (!impl->rawCounts) {
+        // Direct temperature values
+        rawCounts.clear();
+        return GDALRasterIO(impl->band, GF_Read, x, y, w, h, temperatures.data(), w, h, GDT_Float32, 0, 0) == CE_None;
     }
 
-    // Raw UInt16 data of a raster that GDAL could not read as one band (nothing else holds raw data)
-    RawThermalData raw = extractRawThermalData(filePath);
-    if (raw.valid) {
-        ThermalCalibration cal = extractThermalCalibration(filePath);
-        if (cal.valid) {
-            td.temperatures = rawToTemperatureMap(raw, cal);
-        } else {
-            LOGD << "No valid thermal calibration for " << filePath
-                 << ", returning raw values as float";
-            size_t pixCount = raw.data.size();
-            td.temperatures.resize(pixCount);
-            for (size_t p = 0; p < pixCount; p++) {
-                td.temperatures[p] = static_cast<float>(raw.data[p]);
-            }
-        }
-        td.width = raw.width;
-        td.height = raw.height;
-        return td;
+    rawCounts.resize(pixels);
+    if (GDALRasterIO(impl->band, GF_Read, x, y, w, h, rawCounts.data(), w, h, GDT_UInt16, 0, 0) != CE_None)
+        return false;
+    if (impl->calibration.valid) {
+        rawCountsToTemperatures(rawCounts.data(), pixels, impl->calibration, temperatures.data());
+    } else {
+        for (size_t p = 0; p < pixels; p++) temperatures[p] = static_cast<float>(rawCounts[p]);
     }
-
-    return td;
+    return true;
 }
 
 std::optional<std::vector<float>> djiRawToTemperatureMap(const RawThermalData &raw, const std::string &filePath) {

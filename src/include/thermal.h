@@ -4,6 +4,7 @@
 #ifndef THERMAL_H
 #define THERMAL_H
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -94,7 +95,9 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath);
 // RawData record of the FFF data of its FLIR APP1 segments: int16u, or a 16-bit PNG image, in the byte order of the
 // record, at the size of the raw image, which may be portrait and differ from the picture's) or DJI (the APP3
 // segments). The raw data of a file that is not an R-JPEG are the UInt16 band of
-// a raster GDAL reads (a thermal GeoTIFF); the 8-bit colour bands of an R-JPEG are a preview, never raw data.
+// a raster GDAL reads (a thermal GeoTIFF) of at most kMaxRawThermalPixels pixels, read whole: a larger raster has no raw
+// data here (its counts are read a window at a time, ThermalBandReader); the 8-bit colour bands of an R-JPEG are a
+// preview, never raw data.
 RawThermalData extractRawThermalData(const std::string &filePath);
 
 // The raw thermal data of an R-JPEG alone (FLIR or DJI), nothing for any other file: GDAL is not used
@@ -138,7 +141,41 @@ struct TemperatureData {
     std::string projection;
 };
 
-TemperatureData readTemperatureData(const std::string &filePath);
+// The first band of a thermal raster GDAL reads, read a window at a time, so that what a request holds does not grow
+// with the raster (a 30000 x 30000 thermal GeoTIFF read whole took some 9 GB): the point reads its pixel, the area and
+// the value info stream their pixels (raster_analysis.cpp). The band holds temperatures (Float32 or Float64, read as
+// Float32) or raw counts (UInt16): with the Planck constants of the file (extractThermalCalibration) the counts are
+// turned into degrees Celsius as rawToTemperatureMap turns them, else they are taken as they are. Any other band is not
+// read.
+class ThermalBandReader {
+public:
+    // The reader of the first band of the raster; nothing when GDAL cannot open it, it has no band, or its first band
+    // is neither Float32, Float64 nor UInt16
+    static std::unique_ptr<ThermalBandReader> open(const std::string &filePath);
+    ~ThermalBandReader();
+    ThermalBandReader(const ThermalBandReader &) = delete;
+    ThermalBandReader &operator=(const ThermalBandReader &) = delete;
+
+    const std::string &path() const;
+    int width() const;
+    int height() const;
+    // The height of a block of the band (the rows a read is best aligned on)
+    int blockHeight() const;
+    bool hasGeoTransform() const;
+    const double *geoTransform() const;
+    const std::string &projection() const;
+    // Whether the band holds raw counts (UInt16)
+    bool hasRawCounts() const;
+
+    // The temperatures of the w x h window at (x, y), row by row, and its raw counts when the band has them (empty
+    // otherwise); false when GDAL cannot read it
+    bool read(int x, int y, int w, int h, std::vector<float> &temperatures, std::vector<uint16_t> &rawCounts) const;
+
+private:
+    struct Impl;
+    explicit ThermalBandReader(std::unique_ptr<Impl> state);
+    std::unique_ptr<Impl> impl;
+};
 
 // The temperatures of an R-JPEG, as the raster API reads them (FR-RAS-14): the raw counts of the camera, and their
 // temperatures when they can be told. Nothing for a file that is not an R-JPEG. grid.temperatures (degrees Celsius, one

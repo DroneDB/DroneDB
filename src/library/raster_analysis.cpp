@@ -7,6 +7,7 @@
 #include "raster_utils.h"
 #include "json.h"
 #include "thermal.h"
+#include "thermal_internal.h"
 #include "sensorprofile.h"
 #include "exceptions.h"
 #include "artefact_cache.h"
@@ -24,7 +25,9 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -217,13 +220,22 @@ std::vector<float> readAreaValues(const DemContext &dem, const std::optional<The
     return values;
 }
 
-// The statistics of the values (which must not be empty; sorted here), as the area endpoint
-// answers them
-std::string areaStatsJson(std::vector<float> values, const AreaBounds &b, const std::string &unit,
-                          bool isThermal, GDALDataType type = GDT_Float32) {
+// The statistics of the values of an area, as the area endpoint answers them
+struct AreaStatistics {
+    float min = 0;
+    float max = 0;
+    double mean = 0;
+    double stddev = 0;
+    float median = 0;
+    uint64_t count = 0;
+};
+
+// The statistics of the values (which must not be empty; sorted here)
+AreaStatistics statisticsOfValues(std::vector<float> values) {
     std::sort(values.begin(), values.end());
-    const float vMin = values.front();
-    const float vMax = values.back();
+    AreaStatistics stats;
+    stats.min = values.front();
+    stats.max = values.back();
 
     double sum = 0;
     for (float v : values) sum += v;
@@ -234,29 +246,166 @@ std::string areaStatsJson(std::vector<float> values, const AreaBounds &b, const 
         double diff = v - mean;
         sqSum += diff * diff;
     }
-    const double stddev = std::sqrt(sqSum / values.size());
+    stats.mean = mean;
+    stats.stddev = std::sqrt(sqSum / values.size());
 
-    float median;
     const size_t n = values.size();
     if (n % 2 == 0) {
-        median = (values[n / 2 - 1] + values[n / 2]) / 2.0f;
+        stats.median = (values[n / 2 - 1] + values[n / 2]) / 2.0f;
     } else {
-        median = values[n / 2];
+        stats.median = values[n / 2];
     }
+    stats.count = n;
+    return stats;
+}
 
+std::string areaStatsJson(const AreaStatistics &stats, const AreaBounds &b, const std::string &unit, bool isThermal,
+                          GDALDataType type = GDT_Float32) {
     json result;
-    result["min"] = tidyValue(vMin, type);
-    result["max"] = tidyValue(vMax, type);
-    result["mean"] = tidyValue(mean, type);
-    result["stddev"] = tidyValue(stddev, type);
-    result["median"] = tidyValue(median, type);
-    result["pixelCount"] = static_cast<int>(values.size());
+    result["min"] = tidyValue(stats.min, type);
+    result["max"] = tidyValue(stats.max, type);
+    result["mean"] = tidyValue(stats.mean, type);
+    result["stddev"] = tidyValue(stats.stddev, type);
+    result["median"] = tidyValue(stats.median, type);
+    result["pixelCount"] = static_cast<int64_t>(stats.count);
     result["bounds"] = {
         {"x0", b.x0}, {"y0", b.y0}, {"x1", b.x1}, {"y1", b.y1}
     };
     result["unit"] = unit;
     result["isThermal"] = isThermal;
     return result.dump();
+}
+
+// The statistics of the values (which must not be empty; sorted here), as the area endpoint
+// answers them
+std::string areaStatsJson(std::vector<float> values, const AreaBounds &b, const std::string &unit,
+                          bool isThermal, GDALDataType type = GDT_Float32) {
+    return areaStatsJson(statisticsOfValues(std::move(values)), b, unit, isThermal, type);
+}
+
+// A sum of doubles with the error of its additions carried along (Neumaier): within an ulp or so of the exact sum,
+// whatever the number and the order of the terms
+class CompensatedSum {
+public:
+    void add(double v) {
+        const double t = sum_ + v;
+        if (std::fabs(sum_) >= std::fabs(v))
+            compensation_ += (sum_ - t) + v;
+        else
+            compensation_ += (v - t) + sum_;
+        sum_ = t;
+    }
+    double value() const { return sum_ + compensation_; }
+
+private:
+    double sum_ = 0;
+    double compensation_ = 0;
+};
+
+// The float of a key and the key of a float: the keys are in the order of the floats (-0 before +0, no NaN here)
+uint32_t orderedKey(float v) {
+    uint32_t u;
+    std::memcpy(&u, &v, sizeof(u));
+    return (u & 0x80000000u) != 0 ? ~u : (u | 0x80000000u);
+}
+
+float floatOfOrderedKey(uint32_t key) {
+    const uint32_t u = (key & 0x80000000u) != 0 ? (key & 0x7FFFFFFFu) : ~key;
+    float v;
+    std::memcpy(&v, &u, sizeof(v));
+    return v;
+}
+
+// The bin of the histogram where the value of rank r (from 0) is, and its rank in that bin
+std::pair<size_t, uint64_t> binOfRank(const std::vector<uint64_t> &histogram, uint64_t rank) {
+    for (size_t bin = 0; bin < histogram.size(); bin++) {
+        if (rank < histogram[bin]) return {bin, rank};
+        rank -= histogram[bin];
+    }
+    // The second pass read other values than the first
+    throw AppException("Cannot read raster data: the values of the area changed while they were read");
+}
+
+// The statistics of the values of an area (thermal_internal.h: at most kMaxThermalGridBufferBytes of buffers): visit(add)
+// calls add(v) for each value of the area that has one, the same values in the same order each time it is called.
+// Up to areaValuesInMemoryLimit() values they are kept and sorted (statisticsOfValues, the statistics of every area
+// before); with more, the values are read twice and the median is selected from the histograms of their keys. No value
+// is a NoRasterDataException
+template <class Visit>
+AreaStatistics areaStatistics(uint64_t areaPixels, Visit &&visit) {
+    const size_t limit = areaValuesInMemoryLimit();
+    std::vector<float> values;
+    values.reserve(static_cast<size_t>(std::min<uint64_t>(areaPixels, limit)));
+    ThermalGridBufferBytes valuesBytes;
+    valuesBytes.set(values.capacity() * sizeof(float));
+
+    // Past the limit: the count, the range, the sum and the histogram of the upper 16 bits of the keys
+    AreaStatistics stats;
+    CompensatedSum sum;
+    std::vector<uint64_t> upper;
+    ThermalGridBufferBytes upperBytes;
+    const auto count = [&](float v) {
+        if (stats.count == 0 || v < stats.min) stats.min = v;
+        if (stats.count == 0 || v > stats.max) stats.max = v;
+        stats.count++;
+        sum.add(v);
+        upper[orderedKey(v) >> 16]++;
+    };
+    visit([&](float v) {
+        if (upper.empty()) {
+            if (values.size() < limit) {
+                values.push_back(v);
+                return;
+            }
+            upper.assign(kAreaHistogramBins, 0);
+            upperBytes.set(upper.capacity() * sizeof(uint64_t));
+            for (const float kept : values) count(kept);
+            std::vector<float>().swap(values);
+            valuesBytes.set(0);
+        }
+        count(v);
+    });
+    if (upper.empty()) return statisticsOfValues(requireAreaValues(std::move(values)));
+
+    // The middle ranks, in the bins of the upper bits
+    const uint64_t n = stats.count;
+    const std::pair<size_t, uint64_t> lowPlace = binOfRank(upper, n % 2 == 0 ? n / 2 - 1 : n / 2);
+    const std::pair<size_t, uint64_t> highPlace = binOfRank(upper, n / 2);
+    const size_t lowBin = lowPlace.first;
+    const size_t highBin = highPlace.first;
+    std::vector<uint64_t>().swap(upper);
+    upperBytes.set(0);
+
+    // The second pass: the squared deviations, and the lower bits of the keys in the bins of the middle ranks
+    stats.mean = sum.value() / static_cast<double>(n);
+    CompensatedSum sqSum;
+    std::vector<uint64_t> lowerOfLow(kAreaHistogramBins, 0);
+    std::vector<uint64_t> lowerOfHigh(highBin != lowBin ? kAreaHistogramBins : 0, 0);
+    ThermalGridBufferBytes lowerBytes;
+    lowerBytes.set((lowerOfLow.capacity() + lowerOfHigh.capacity()) * sizeof(uint64_t));
+    visit([&](float v) {
+        const double diff = v - stats.mean;
+        sqSum.add(diff * diff);
+        const uint32_t key = orderedKey(v);
+        if ((key >> 16) == lowBin)
+            lowerOfLow[key & 0xFFFFu]++;
+        else if ((key >> 16) == highBin)
+            lowerOfHigh[key & 0xFFFFu]++;
+    });
+    stats.stddev = std::sqrt(sqSum.value() / static_cast<double>(n));
+
+    const auto valueOf = [](size_t bin, const std::vector<uint64_t> &lower, uint64_t rank) {
+        return floatOfOrderedKey(static_cast<uint32_t>(bin << 16 | binOfRank(lower, rank).first));
+    };
+    const float low = valueOf(lowBin, lowerOfLow, lowPlace.second);
+    const float high = highBin != lowBin ? valueOf(highBin, lowerOfHigh, highPlace.second)
+                                         : valueOf(lowBin, lowerOfLow, highPlace.second);
+    if (n % 2 == 0) {
+        stats.median = (low + high) / 2.0f;
+    } else {
+        stats.median = high;
+    }
+    return stats;
 }
 
 // The thermal calibration of a raster as the value info reports it: the Planck constants, and only the measurement
@@ -330,24 +479,128 @@ float thermalGridRawSample(const TemperatureData &td, const RawThermalData &raw,
     return td.temperatures[i];
 }
 
-// Whether the pixel i of a thermal grid has a value: a temperature a sensor can see, and a raw sample that is
-// not the NoData value of the options (FR-RAS-31)
-bool thermalGridHasValue(const TemperatureData &td, const RawThermalData &raw, size_t i,
-                         const RasterValueOptions &options) {
-    const float t = td.temperatures[i];
-    if (!(std::isfinite(t) && t > -273.15f && t < 1000.0f)) return false;
-    return !options.nodata || !isNodata(thermalGridRawSample(td, raw, i), BandNodata{true, *options.nodata});
+// Whether a pixel of a thermal grid has a value: a temperature a sensor can see, and a raw sample that is not the
+// NoData value of the options (FR-RAS-31)
+bool thermalPixelHasValue(float temperature, float rawSample, const RasterValueOptions &options) {
+    if (!(std::isfinite(temperature) && temperature > -273.15f && temperature < 1000.0f)) return false;
+    return !options.nodata || !isNodata(rawSample, BandNodata{true, *options.nodata});
 }
 
-// The point of a thermal image that GDAL does not read (an R-JPEG): its temperatures and raw data
+// A grid of temperatures in memory (an R-JPEG: at most kMaxRawThermalPixels)
+class MemoryThermalGrid {
+public:
+    MemoryThermalGrid(const TemperatureData &td, const RawThermalData &raw) : td_(td), raw_(raw) {}
+    int width() const { return td_.width; }
+    int height() const { return td_.height; }
+
+    // f(temperature, raw sample) for each pixel of the rectangle (inclusive, inside the grid), row by row
+    template <class F>
+    void forEachPixel(const AreaBounds &b, F &&f) const {
+        for (int row = b.y0; row <= b.y1; row++) {
+            for (int col = b.x0; col <= b.x1; col++) {
+                const size_t i = static_cast<size_t>(row) * td_.width + col;
+                f(td_.temperatures[i], thermalGridRawSample(td_, raw_, i));
+            }
+        }
+    }
+
+private:
+    const TemperatureData &td_;
+    const RawThermalData &raw_;
+};
+
+// The first band of a thermal raster GDAL reads, kThermalGridWindowPixels at a time (thermal_internal.h)
+class BandThermalGrid {
+public:
+    explicit BandThermalGrid(const ThermalBandReader &band) : band_(band) {}
+    int width() const { return band_.width(); }
+    int height() const { return band_.height(); }
+
+    // f(temperature, raw sample) for each pixel of the rectangle (inclusive, inside the raster), row by row: the rows
+    // that fit in a window (whole blocks of rows when they do), or a part of a row
+    template <class F>
+    void forEachPixel(const AreaBounds &b, F &&f) const {
+        if (b.x1 < b.x0 || b.y1 < b.y0) return;
+        const int64_t areaWidth = static_cast<int64_t>(b.x1) - b.x0 + 1;
+        const int64_t cols = std::min(areaWidth, kThermalGridWindowPixels);
+        int64_t rows = std::max<int64_t>(1, kThermalGridWindowPixels / areaWidth);
+        if (rows >= band_.blockHeight()) rows -= rows % band_.blockHeight();
+
+        std::vector<float> temperatures;
+        std::vector<uint16_t> rawCounts;
+        ThermalGridBufferBytes bytes;
+        for (int64_t y = b.y0; y <= b.y1; y += rows) {
+            const int h = static_cast<int>(std::min<int64_t>(rows, b.y1 - y + 1));
+            for (int64_t x = b.x0; x <= b.x1; x += cols) {
+                const int w = static_cast<int>(std::min<int64_t>(cols, b.x1 - x + 1));
+                cancel::throwIfCanceled();
+                if (!band_.read(static_cast<int>(x), static_cast<int>(y), w, h, temperatures, rawCounts))
+                    throw AppException("Cannot read raster data from " + band_.path());
+                bytes.set(temperatures.capacity() * sizeof(float) + rawCounts.capacity() * sizeof(uint16_t));
+                const size_t pixels = static_cast<size_t>(w) * static_cast<size_t>(h);
+                for (size_t i = 0; i < pixels; i++)
+                    f(temperatures[i], rawCounts.empty() ? temperatures[i] : static_cast<float>(rawCounts[i]));
+            }
+        }
+    }
+
+private:
+    const ThermalBandReader &band_;
+};
+
+// The pixels of the rectangle (inclusive)
+uint64_t areaPixels(const AreaBounds &b) {
+    return static_cast<uint64_t>(static_cast<int64_t>(b.x1) - b.x0 + 1) *
+           static_cast<uint64_t>(static_cast<int64_t>(b.y1) - b.y0 + 1);
+}
+
+// The point (x, y) of a thermal grid: its temperature (degrees Celsius), the raw sample the NoData value of the options
+// is compared with, and the raw value reported (its raw count, else its temperature)
+std::string thermalPointJson(int x, int y, float value, float rawSample, json rawValue, bool hasGeoTransform,
+                             const double *geoTransform, const std::string &projection,
+                             const RasterValueOptions &options) {
+    // The temperatures of the grid are in degrees Celsius
+    const ValueFormula vf = valueFormulaOf("\xC2\xB0\x43", options.formula);
+    if (options.nodata && isNodata(rawSample, BandNodata{true, *options.nodata}))
+        throw NoRasterDataException("No valid data at the point: the pixel (" + std::to_string(x) + ", " +
+                                    std::to_string(y) + ") has no value");
+
+    json result;
+    result["value"] = tidyValue(vf.apply(value), GDT_Float32);
+    result["unit"] = vf.unit;
+    result["x"] = x;
+    result["y"] = y;
+    result["isThermal"] = true;
+    result["rawValue"] = std::move(rawValue);
+
+    setGeoPosition(result, hasGeoTransform, geoTransform, projection, x, y);
+    return result.dump();
+}
+
+// The statistics of the rectangle (x0, y0)-(x1, y1) of a thermal grid (MemoryThermalGrid, BandThermalGrid): of its
+// temperatures, in the unit of the thermal formula of the options
+template <class Grid>
+std::string thermalAreaStatsJson(const Grid &grid, int x0, int y0, int x1, int y1, const RasterValueOptions &options) {
+    const ValueFormula vf = valueFormulaOf("\xC2\xB0\x43", options.formula);
+    const AreaBounds bounds = AreaBounds::within(x0, y0, x1, y1, grid.width(), grid.height());
+    const AreaStatistics stats = areaStatistics(areaPixels(bounds), [&](auto &&add) {
+        grid.forEachPixel(bounds, [&](float temperature, float rawSample) {
+            if (thermalPixelHasValue(temperature, rawSample, options))
+                add(static_cast<float>(vf.apply(temperature)));
+        });
+    });
+    return areaStatsJson(stats, bounds, vf.unit, true);
+}
+
+// The point of a thermal raster GDAL reads, when the band model cannot read it: its first band (ThermalBandReader)
 std::string thermalImagePointJson(const std::string &filePath, int x, int y, const RasterValueOptions &options) {
     // A bad formula is refused before the image is read
     valueFormulaOf("\xC2\xB0\x43", options.formula);
-    const TemperatureData td = readTemperatureData(filePath);
-    if (td.temperatures.empty()) {
+    const auto band = ThermalBandReader::open(filePath);
+    if (!band) {
         throw AppException("Cannot read raster data from " + filePath);
     }
-    return thermalGridPointJson(td, extractRawThermalData(filePath), x, y, options);
+    return thermalBandPointJson(*band, x, y, options);
 }
 
 } // anonymous namespace
@@ -366,47 +619,40 @@ std::optional<ThermalCalibration> bandRawCalibration(const DemContext &dem, bool
 std::string thermalGridPointJson(const TemperatureData &td, const RawThermalData &raw, int x, int y,
                                  const RasterValueOptions &options) {
     // The temperatures of the grid are in degrees Celsius
-    const ValueFormula vf = valueFormulaOf("\xC2\xB0\x43", options.formula);
+    valueFormulaOf("\xC2\xB0\x43", options.formula);
     requirePixelInRaster(x, y, td.width, td.height);
 
     const size_t idx = static_cast<size_t>(y) * td.width + x;
-    if (options.nodata && isNodata(thermalGridRawSample(td, raw, idx), BandNodata{true, *options.nodata}))
-        throw NoRasterDataException("No valid data at the point: the pixel (" + std::to_string(x) + ", " +
-                                    std::to_string(y) + ") has no value");
     const float value = td.temperatures[idx];
-
-    json result;
-    result["value"] = tidyValue(vf.apply(value), GDT_Float32);
-    result["unit"] = vf.unit;
-    result["x"] = x;
-    result["y"] = y;
-    result["isThermal"] = true;
-    if (raw.valid && idx < raw.data.size()) {
-        result["rawValue"] = raw.data[idx];
-    } else {
-        result["rawValue"] = value;
-    }
-
-    setGeoPosition(result, td.hasGeoTransform, td.geoTransform, td.projection, x, y);
-    return result.dump();
+    json rawValue = raw.valid && idx < raw.data.size() ? json(raw.data[idx]) : json(value);
+    return thermalPointJson(x, y, value, thermalGridRawSample(td, raw, idx), std::move(rawValue), td.hasGeoTransform,
+                            td.geoTransform, td.projection, options);
 }
 
 std::string thermalGridAreaStatsJson(const TemperatureData &td, const RawThermalData &raw, int x0, int y0, int x1,
                                      int y1, const RasterValueOptions &options) {
-    const ValueFormula vf = valueFormulaOf("\xC2\xB0\x43", options.formula);
-    const AreaBounds bounds = AreaBounds::within(x0, y0, x1, y1, td.width, td.height);
+    return thermalAreaStatsJson(MemoryThermalGrid(td, raw), x0, y0, x1, y1, options);
+}
 
-    std::vector<float> values;
-    values.reserve(static_cast<size_t>(bounds.x1 - bounds.x0 + 1) * (bounds.y1 - bounds.y0 + 1));
-    for (int row = bounds.y0; row <= bounds.y1; row++) {
-        for (int col = bounds.x0; col <= bounds.x1; col++) {
-            const size_t i = static_cast<size_t>(row) * td.width + col;
-            if (thermalGridHasValue(td, raw, i, options))
-                values.push_back(static_cast<float>(vf.apply(td.temperatures[i])));
-        }
-    }
+std::string thermalBandPointJson(const ThermalBandReader &band, int x, int y, const RasterValueOptions &options) {
+    // The temperatures of the band are in degrees Celsius
+    valueFormulaOf("\xC2\xB0\x43", options.formula);
+    requirePixelInRaster(x, y, band.width(), band.height());
 
-    return areaStatsJson(requireAreaValues(std::move(values)), bounds, vf.unit, true);
+    std::vector<float> temperatures;
+    std::vector<uint16_t> rawCounts;
+    if (!band.read(x, y, 1, 1, temperatures, rawCounts))
+        throw AppException("Cannot read raster data from " + band.path());
+    const float value = temperatures[0];
+    const float rawSample = rawCounts.empty() ? value : static_cast<float>(rawCounts[0]);
+    json rawValue = rawCounts.empty() ? json(value) : json(rawCounts[0]);
+    return thermalPointJson(x, y, value, rawSample, std::move(rawValue), band.hasGeoTransform(), band.geoTransform(),
+                            band.projection(), options);
+}
+
+std::string thermalBandAreaStatsJson(const ThermalBandReader &band, int x0, int y0, int x1, int y1,
+                                     const RasterValueOptions &options) {
+    return thermalAreaStatsJson(BandThermalGrid(band), x0, y0, x1, y1, options);
 }
 
 namespace {
@@ -494,15 +740,15 @@ std::string rawGridAreaStatsJson(const RJpegThermal &rjpeg, int x0, int y0, int 
     uncalibratedValueFormula(options.formula, rawGridValues(rjpeg));
     const AreaBounds bounds = AreaBounds::within(x0, y0, x1, y1, raw.width, raw.height);
 
-    std::vector<float> values;
-    values.reserve(static_cast<size_t>(bounds.x1 - bounds.x0 + 1) * (bounds.y1 - bounds.y0 + 1));
-    for (int row = bounds.y0; row <= bounds.y1; row++) {
-        for (int col = bounds.x0; col <= bounds.x1; col++) {
-            const size_t i = static_cast<size_t>(row) * raw.width + col;
-            if (rawGridHasValue(raw, i, options)) values.push_back(static_cast<float>(raw.data[i]));
+    const AreaStatistics stats = areaStatistics(areaPixels(bounds), [&](auto &&add) {
+        for (int row = bounds.y0; row <= bounds.y1; row++) {
+            for (int col = bounds.x0; col <= bounds.x1; col++) {
+                const size_t i = static_cast<size_t>(row) * raw.width + col;
+                if (rawGridHasValue(raw, i, options)) add(static_cast<float>(raw.data[i]));
+            }
         }
-    }
-    return areaStatsJson(requireAreaValues(std::move(values)), bounds, "", true, GDT_UInt16);
+    });
+    return areaStatsJson(stats, bounds, "", true, GDT_UInt16);
 }
 
 } // anonymous namespace
@@ -616,29 +862,30 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
 
 namespace {
 
-// The value info of a grid of temperatures (degrees Celsius): the range, the calibration and the stretch, in the unit
-// of the thermal formula of the options when it has one (D-022). raw are the raw counts of the camera, when the
-// caller needs them for the NoData value of the options (FR-RAS-31).
-std::string thermalGridValueInfoJson(const TemperatureData &td, const RawThermalData &raw, const ThermalCalibration &cal,
-                                     bool isDirect, const std::string &sensorId, const RasterValueOptions &options) {
+// The value info of a grid of temperatures (degrees Celsius: MemoryThermalGrid, BandThermalGrid, read pixel by pixel):
+// the range, the calibration and the stretch, in the unit of the thermal formula of the options when it has one
+// (D-022). The raw samples of the grid are its raw counts when it has them, for the NoData value of the options
+// (FR-RAS-31).
+template <class Grid>
+std::string thermalGridValueInfoJson(const Grid &grid, const ThermalCalibration &cal, bool isDirect,
+                                     const std::string &sensorId, const RasterValueOptions &options) {
     // The temperatures of the grid are in degrees Celsius; a thermal formula gives them in its unit (D-022)
     const ValueFormula unit = valueFormulaOf("\xC2\xB0\x43", isThermalFormulaId(options.formula) ? options.formula : "");
     float vMin = std::numeric_limits<float>::max();
     float vMax = std::numeric_limits<float>::lowest();
     uint64_t validCount = 0;
-    for (size_t i = 0; i < td.temperatures.size(); i++) {
-        if (!thermalGridHasValue(td, raw, i, options)) continue;
-        const float t = td.temperatures[i];
+    grid.forEachPixel(AreaBounds{0, 0, grid.width() - 1, grid.height() - 1}, [&](float t, float rawSample) {
+        if (!thermalPixelHasValue(t, rawSample, options)) return;
         vMin = std::min(vMin, t);
         vMax = std::max(vMax, t);
         validCount++;
-    }
+    });
     if (validCount == 0)
         throw NoRasterDataException("Cannot compute statistics: no pixel of the image has a value");
 
     json result;
-    result["width"] = td.width;
-    result["height"] = td.height;
+    result["width"] = grid.width();
+    result["height"] = grid.height();
     result["bandCount"] = 1;
     result["dataType"] = dataTypeName(GDT_Unknown);
     result["valueMin"] = unit.apply(vMin);
@@ -651,7 +898,7 @@ std::string thermalGridValueInfoJson(const TemperatureData &td, const RawThermal
     result["nodata"] = options.nodata ? json(*options.nodata) : json(nullptr);
     result["nodataOverridden"] = options.nodata.has_value();
     result["nodataInvalid"] = false;
-    result["pixelCount"] = static_cast<uint64_t>(td.width) * static_cast<uint64_t>(td.height);
+    result["pixelCount"] = static_cast<uint64_t>(grid.width()) * static_cast<uint64_t>(grid.height());
     result["validPixelCount"] = validCount;
     result["stretch"] = json::array({stretchEntry(unit.apply(vMin), unit.apply(vMax > vMin ? vMax : vMin + 1.0))});
     return result.dump();
@@ -674,7 +921,8 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
     if (isThermal) {
         if (const auto rjpeg = readRJpegThermal(filePath)) {
             if (!rjpeg->hasTemperatures()) return rawGridValueInfoJson(rjpeg->raw, sensorId, options);
-            return thermalGridValueInfoJson(rjpeg->grid, rjpeg->raw, rjpeg->calibration, false, sensorId, options);
+            return thermalGridValueInfoJson(MemoryThermalGrid(rjpeg->grid, rjpeg->raw), rjpeg->calibration, false,
+                                            sensorId, options);
         }
     }
 
@@ -752,14 +1000,12 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
         result = json::object();
     }
 
-    // Fallback for small R-JPEG thermal images not fully handled by GDAL stats.
+    // Fallback for a thermal raster whose statistics GDAL cannot give (no pixel with a value by the band model): the
+    // temperatures of its first band, read a window at a time (a raw sample equal to the NoData value of the options has
+    // no value, FR-RAS-31)
     if (!hasStats && isThermal) {
-        TemperatureData td = readTemperatureData(filePath);
-        if (!td.temperatures.empty()) {
-            // A raw sample equal to the NoData value of the options has no value (FR-RAS-31)
-            const RawThermalData raw = options.nodata ? extractRawThermalData(filePath) : RawThermalData();
-            return thermalGridValueInfoJson(td, raw, cal, isDirect, sensorId, options);
-        }
+        if (const auto band = ThermalBandReader::open(filePath))
+            return thermalGridValueInfoJson(BandThermalGrid(*band), cal, isDirect, sensorId, options);
     }
 
     if (!hasStats) {
@@ -809,7 +1055,7 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y, const 
         LOGD << "getRasterPointJson: " << e.what();
     }
 
-    // Fallback: R-JPEG (small thermal images).
+    // Fallback: the first band of a thermal raster, its pixel alone (thermalImagePointJson)
     if (!isThermal) {
         throw AppException("Cannot read raster data from " + filePath);
     }
@@ -877,19 +1123,18 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
         LOGD << "getRasterAreaStatsJson: " << e.what();
     }
 
-    // Fallback: R-JPEG thermal only.
+    // Fallback: thermal rasters only
     if (!isThermal) {
         throw AppException("Cannot read raster data from " + filePath);
     }
 
-    // A bad formula is refused before the image is read
+    // A bad formula is refused before the image is read; the area of its first band is read a window at a time
     valueFormulaOf("\xC2\xB0\x43", options.formula);
-    const TemperatureData td = readTemperatureData(filePath);
-    if (td.temperatures.empty()) {
+    const auto band = ThermalBandReader::open(filePath);
+    if (!band) {
         throw AppException("Cannot read raster data from " + filePath);
     }
-    const RawThermalData raw = options.nodata ? extractRawThermalData(filePath) : RawThermalData();
-    return thermalGridAreaStatsJson(td, raw, x0, y0, x1, y1, options);
+    return thermalBandAreaStatsJson(*band, x0, y0, x1, y1, options);
 }
 
 std::string getRasterAreaStatsBoxJson(const std::string &filePath, double minLon, double minLat, double maxLon,

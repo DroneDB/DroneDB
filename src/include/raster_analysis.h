@@ -120,6 +120,17 @@ std::string thermalGridAreaStatsJson(const TemperatureData &td, const RawThermal
                                      int y1, const RasterValueOptions &options = {});
 
 /**
+ * The same of the first band of a thermal raster GDAL reads (ThermalBandReader: its temperatures, and its raw counts
+ * when it is UInt16), as the point and the area statistics read a thermal raster the band model cannot read: the point
+ * reads its pixel alone, the area its pixels a window at a time, so that what they hold does not grow with the raster
+ * (thermal_internal.h kMaxThermalGridBufferBytes). The JSON is that of thermalGridPointJson and thermalGridAreaStatsJson
+ * on the grid of the band read whole.
+ */
+std::string thermalBandPointJson(const ThermalBandReader &band, int x, int y, const RasterValueOptions &options = {});
+std::string thermalBandAreaStatsJson(const ThermalBandReader &band, int x0, int y0, int x1, int y1,
+                                     const RasterValueOptions &options = {});
+
+/**
  * Statistics over a WGS84 rectangle: the pixels whose centre is inside it (the same schema; "bounds" are the
  * pixels of the file that the rectangle covers).
  */
