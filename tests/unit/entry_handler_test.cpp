@@ -534,4 +534,36 @@ TEST(entryHandler, SidecarMainsLookupOrder) {
     EXPECT_EQ(findSidecarMains(fx.db.get(), "x.dbf"), std::vector<std::string>{});  // root folder
 }
 
+// A DWG that this installation cannot convert (no dwg2dxf) is indexed with the stable code of its
+// warning, so a client says "DWG is not supported on this server" and not "the file is corrupted"
+// (new in 2.3).
+TEST(entryHandler, DwgWithoutConverterHasTheWarningCode) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+    // A DWG is told by its version magic (cad::dwgVersion): the converter is looked for next
+    std::string header = "AC1024";
+    header.append(64, '\0');
+    fileWriteAllText(root / "plan.dwg", header);
+
+    EnvVarGuard noConverter("DDB_DWG2DXF_PATH", ta.getPath("missing/dwg2dxf").string());
+    Entry dwg;
+    parseEntry(root / "plan.dwg", root, dwg, false);
+    noConverter.restore();
+
+    EXPECT_EQ(dwg.type, EntryType::Vector);
+    EXPECT_EQ(dwg.properties.value("warningCode", ""), "dwg-converter-missing") << dwg.properties.dump();
+    EXPECT_NE(dwg.properties.value("warning", "").find("dwg2dxf"), std::string::npos) << dwg.properties.dump();
+}
+
+// A later warning replaces the code of an earlier one
+TEST(entryHandler, AWarningWithoutCodeRemovesTheCodeOfTheOneItReplaces) {
+    Entry entry;
+    setEntryWarning(entry, "vector parse failed: no converter", warning_code::DwgConverterMissing);
+    EXPECT_EQ(entry.properties.value("warningCode", ""), "dwg-converter-missing");
+
+    setEntryWarning(entry, "footprint unavailable: no CRS");
+    EXPECT_EQ(entry.properties.value("warning", ""), "footprint unavailable: no CRS");
+    EXPECT_FALSE(entry.properties.contains("warningCode"));
+}
+
 }  // namespace

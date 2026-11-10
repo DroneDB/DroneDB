@@ -148,8 +148,8 @@ namespace ddb
 
             const fs::path bin = binary.empty() ? findDwg2DxfBinary() : binary;
             if (!tools::isExecutableFile(bin))
-                throw AppException(std::string("DWG support needs dwg2dxf (LibreDWG); set ") +
-                                   kConverterEnv + " or install dwg2dxf next to ddb");
+                throw DwgConverterMissingException(std::string("DWG support needs dwg2dxf (LibreDWG); set ") +
+                                                   kConverterEnv + " or install dwg2dxf next to ddb");
 
             process::Options opts;
             opts.idleTimeout = kIdleTimeout;

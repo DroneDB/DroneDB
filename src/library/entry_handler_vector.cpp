@@ -69,6 +69,12 @@ void parseVectorMetadata(const fs::path &path, Entry &entry, FingerprintContext 
     {
         throw;
     }
+    catch (const cad::DwgConverterMissingException &e)
+    {
+        // Not a damaged file: this installation cannot read a DWG. The code lets a client say so
+        LOGD << "Vector parse warning: " << e.what();
+        setEntryWarning(entry, std::string("vector parse failed: ") + e.what(), warning_code::DwgConverterMissing);
+    }
     catch (const std::exception &e)
     {
         if (raster::classify(e) == raster::ErrorCode::NoSpace)

@@ -181,9 +181,13 @@ namespace ddb
         geom.addPoint(ul.longitude, ul.latitude, groundHeight);
     }
 
-    void setEntryWarning(Entry &entry, const std::string &message)
+    void setEntryWarning(Entry &entry, const std::string &message, const std::string &code)
     {
         entry.properties["warning"] = message;
+        if (code.empty())
+            entry.properties.erase("warningCode");
+        else
+            entry.properties["warningCode"] = code;
     }
 
     void to_json(json &j, const Entry &e)

@@ -173,9 +173,18 @@ namespace ddb
     void to_json(json &j, const Entry &e);
     void from_json(const json &j, Entry &e);
 
+    /// The `warningCode` values (new in 2.3): the stable tag of a warning that a client words for its
+    /// users, whatever the free text of `warning` says.
+    namespace warning_code {
+    /// A DWG drawing on an installation without the dwg2dxf converter (LibreDWG)
+    inline constexpr const char *DwgConverterMissing = "dwg-converter-missing";
+    } // namespace warning_code
+
     /// Records why a part of the metadata of an entry is missing, in its `warning` property (one
-    /// string; a later warning replaces an earlier one)
-    void setEntryWarning(Entry &entry, const std::string &message);
+    /// string; a later warning replaces an earlier one). `code`, when given, is the stable tag of the
+    /// reason, in the `warningCode` property (new in 2.3); a warning without a code removes the code
+    /// of the one it replaces.
+    void setEntryWarning(Entry &entry, const std::string &message, const std::string &code = "");
 
     /** Parse an entry
      * @param path path to file
