@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "exceptions.h"
 #include "fs.h"
 #include "gdal_inc.h"
 #include "mio.h"
@@ -36,8 +37,17 @@ namespace ddb
         // valid DWG file") when the file does not start with a DWG version magic.
         std::string dwgVersion(const fs::path &dwg);
 
+        // A DWG cannot be converted because the converter (dwg2dxf) is not installed: the
+        // entry of the drawing is indexed with the warning code "dwg-converter-missing".
+        class DwgConverterMissingException : public AppException
+        {
+          public:
+            using AppException::AppException;
+        };
+
         // Converts a DWG into a DXF. Implementations throw AppException with a
-        // message a user can act on; outDxf exists only on success.
+        // message a user can act on (DwgConverterMissingException when there is no
+        // converter); outDxf exists only on success.
         class ICadConverter
         {
           public:

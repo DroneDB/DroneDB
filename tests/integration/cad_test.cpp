@@ -740,6 +740,7 @@ namespace
         EXPECT_EQ(e.type, EntryType::Vector);
         EXPECT_TRUE(e.polygon_geom.empty());
         EXPECT_NE(e.properties.value("warning", "").find("dwg2dxf"), std::string::npos) << e.properties.dump();
+        EXPECT_EQ(e.properties.value("warningCode", ""), "dwg-converter-missing") << e.properties.dump();
     }
 
     TEST_F(CadIndex, DwgIndexedLocalAndWithPrj)
