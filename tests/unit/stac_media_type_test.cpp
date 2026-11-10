@@ -15,9 +15,22 @@ namespace
     // plain .laz is no longer COPC
     TEST(stacMediaType, theCopcArtifactIsCopc)
     {
-        EXPECT_EQ(stacMediaType("copc/cloud.copc.laz"), "application/vnd.laszip+copc");
-        EXPECT_EQ(stacMediaType("5d41402abc4b/copc/cloud.copc.laz"), "application/vnd.laszip+copc");
-        EXPECT_EQ(stacMediaType("5d41402abc4b/COPC/Cloud.COPC.laz"), "application/vnd.laszip+copc");
+        EXPECT_EQ(stacArtifactMediaType("copc/cloud.copc.laz"), "application/vnd.laszip+copc");
+        EXPECT_EQ(stacArtifactMediaType("5d41402abc4b/copc/cloud.copc.laz"), "application/vnd.laszip+copc");
+        EXPECT_EQ(stacArtifactMediaType("5d41402abc4b/COPC/Cloud.COPC.laz"), "application/vnd.laszip+copc");
+    }
+
+    // The declared types are those of the files of a build folder only: the entries of a user, whatever
+    // their folder is called, have the type of their extension
+    TEST(stacMediaType, aUserFileInAFolderNamedLikeAnArtifactHasTheTypeOfItsExtension)
+    {
+        EXPECT_EQ(stacMediaType("ortho/cog/cog.tif"), "image/tiff");
+        EXPECT_EQ(stacMediaType("x/copc/cloud.copc.laz"), "application/vnd.laszip");
+        EXPECT_EQ(stacMediaType("copc/cloud.copc.laz"), "application/vnd.laszip");
+        EXPECT_EQ(stacMediaType("cog/cog.tif"), "image/tiff");
+        // The same paths in a build folder are the artifacts
+        EXPECT_EQ(stacArtifactMediaType("ortho/cog/cog.tif"), "image/tiff; application=geotiff; profile=cloud-optimized");
+        EXPECT_EQ(stacArtifactMediaType("x/copc/cloud.copc.laz"), "application/vnd.laszip+copc");
     }
 
     TEST(stacMediaType, aPlainLazIsLaszipNotCopc)
@@ -29,6 +42,8 @@ namespace
         // A file named like the COPC artifact, but not in its place in a build folder
         EXPECT_EQ(stacMediaType("cloud.copc.laz"), "application/vnd.laszip");
         EXPECT_EQ(stacMediaType("elsewhere/cloud.copc.laz"), "application/vnd.laszip");
+        EXPECT_EQ(stacArtifactMediaType("cloud.copc.laz"), "application/vnd.laszip");
+        EXPECT_EQ(stacArtifactMediaType("tile.laz"), "application/vnd.laszip");
     }
 
     TEST(stacMediaType, theBuildFilesOfOtherTypesHaveTheirDeclaredTypes)
@@ -37,7 +52,9 @@ namespace
         EXPECT_EQ(stacMediaType("scene.bm3d"), "application/vnd.dronedb.bm3d");
         EXPECT_EQ(stacMediaType("vec/source.gpkg"), "application/geopackage+sqlite3");
         EXPECT_EQ(stacMediaType("survey.gpkg"), "application/geopackage+sqlite3");
-        EXPECT_EQ(stacMediaType("cog/cog.tif"), "image/tiff; application=geotiff; profile=cloud-optimized");
+        EXPECT_EQ(stacArtifactMediaType("cog/cog.tif"), "image/tiff; application=geotiff; profile=cloud-optimized");
+        EXPECT_EQ(stacArtifactMediaType("vec/source.gpkg"), "application/geopackage+sqlite3");
+        EXPECT_EQ(stacArtifactMediaType("model/model.bm3d"), "application/vnd.dronedb.bm3d");
     }
 
     // Plain files keep the media type of their extension
@@ -60,7 +77,7 @@ namespace
             for (const auto &a : handler->artifacts())
             {
                 if (a.kind != ArtifactKind::File) continue;
-                EXPECT_EQ(stacMediaType(a.path), a.mediaType) << a.role << " " << a.path;
+                EXPECT_EQ(stacArtifactMediaType(a.path), a.mediaType) << a.role << " " << a.path;
                 checked++;
             }
         EXPECT_GE(checked, 8);

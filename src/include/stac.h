@@ -17,12 +17,17 @@ namespace ddb
                       const std::string &id = "",
                       const std::string &stacCatalogRoot = "");
 
-    // The media type of the data asset of the file at `path` in a STAC Item: a build artifact (path
-    // "copc/cloud.copc.laz" in the build folder of an entry) has the type its entry handler declares for it, a
-    // .bm3d and a .gpkg file the one of their build artifact, any other file the one of its extension
-    // ("application/octet-stream" when unknown). A plain .laz, such as an EPT tile, is application/vnd.laszip: only
-    // the COPC file of a build is application/vnd.laszip+copc.
+    // The media type of the data asset of a file of a user in a STAC Item, from its extension
+    // ("application/octet-stream" when unknown), wherever it is: a .bm3d and a .gpkg file have the type of their
+    // build artifact role. A plain .laz, such as an EPT tile, is application/vnd.laszip, and a file of a user at
+    // "ortho/cog/cog.tif" or "x/copc/cloud.copc.laz" is image/tiff and application/vnd.laszip: it is not a build file.
     std::string stacMediaType(const std::string &path);
+
+    // The media type of a file of a build folder: the artifact (the file at "copc/cloud.copc.laz", "cog/cog.tif",
+    // "vec/source.gpkg", "model/model.bm3d", ... alone or at the end of a longer path) has the type its entry
+    // handler declares for it (BuildArtifact::mediaType); any other file the one stacMediaType gives. Only for the
+    // paths of the build folder: the assets of the entries of a dataset use stacMediaType.
+    std::string stacArtifactMediaType(const std::string &path);
 
     // The filters and the page of a STAC ItemCollection
     struct StacItemQuery

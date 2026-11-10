@@ -585,6 +585,24 @@ namespace
         EXPECT_EQ(j["assets"]["ortho.jp2"]["type"], "image/jp2");
     }
 
+    // The files of a user keep the type of their extension, whatever the folders they are in are called: the
+    // declared types of the build artifacts are for the files of a build folder
+    TEST(StacMediaType, theAssetOfAUserFileInAFolderNamedLikeAnArtifactIsTheTypeOfItsExtension)
+    {
+        TestArea ta(TEST_NAME, true);
+        fs::create_directories(ta.getFolder() / "ortho" / "cog");
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 32;
+        testutils::createGeoRaster(ta.getFolder() / "ortho" / "cog" / "cog.tif", spec);
+        ddb::initIndex(ta.getFolder().string());
+        auto db = ddb::open(ta.getFolder().string(), true);
+        ddb::addToIndex(db.get(), {(ta.getFolder() / "ortho" / "cog" / "cog.tif").string()});
+
+        auto j = generateStac(ta.getFolder().string(), "ortho/cog/cog.tif");
+        ASSERT_TRUE(j["assets"].contains("ortho/cog/cog.tif")) << j.dump();
+        EXPECT_EQ(j["assets"]["ortho/cog/cog.tif"]["type"], "image/tiff");
+    }
+
     // AC-017 (FR-SHR-03): a dataset with an orthophoto in UTM 15N and vectors in the same UTM zone has
     // a collection extent in degrees, whatever the vectors say about their coordinate system
     TEST(StacExtent, aUtmDatasetHasADegreesExtentWhateverItsVectorsSay)

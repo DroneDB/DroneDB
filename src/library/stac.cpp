@@ -69,7 +69,7 @@ namespace ddb
     // The media type an entry handler declares (BuildArtifact::mediaType) for `path`: the artifact whose path in
     // the build folder it is ("copc/cloud.copc.laz", alone or at the end of a longer path), or, with a role, the
     // artifact of that role. Empty when no handler declares one. The declarations are the one source of the media
-    // types of build files (FR-DEV-15); the extension table of stacMediaType is for plain files.
+    // types of build files (FR-DEV-15); the extension table of stacMediaType is for the files of a user.
     static std::string declaredArtifactMediaType(const std::string &path, const char *role = nullptr)
     {
         const std::string lowerPath = str::toLowerCopy(io::toGenericUtf8(io::fromUtf8(path)));
@@ -90,13 +90,10 @@ namespace ddb
         return "";
     }
 
-    // Get MIME type for STAC assets: a build artifact (copc/cloud.copc.laz) has the type its entry handler
-    // declares for it (application/vnd.laszip+copc), any other file the one of its extension (a plain .laz, such
-    // as an EPT tile, is application/vnd.laszip)
+    // Get MIME type for the STAC assets of the files of a user: the one of the extension (a plain .laz, such as
+    // an EPT tile, is application/vnd.laszip, and a file of a user at ortho/cog/cog.tif is image/tiff)
     std::string stacMediaType(const std::string &path)
     {
-        if (const auto declared = declaredArtifactMediaType(path); !declared.empty()) return declared;
-
         // With the dot, as the table below spells its extensions
         const auto ext = "." + io::lowerExtension(io::fromUtf8(path));
 
@@ -187,6 +184,14 @@ namespace ddb
         if (ext == ".7z") return "application/x-7z-compressed";
 
         return "application/octet-stream";
+    }
+
+    // The media type of a file of a build folder: the type its entry handler declares for the artifact
+    // (copc/cloud.copc.laz is application/vnd.laszip+copc), else the one of its extension
+    std::string stacArtifactMediaType(const std::string &path)
+    {
+        if (const auto declared = declaredArtifactMediaType(path); !declared.empty()) return declared;
+        return stacMediaType(path);
     }
 
     // Try to extract EPSG code from a WKT projection string
