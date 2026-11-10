@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <tuple>
 #include "json_fwd.h"
+#include "thermal.h"
 
 namespace ddb {
 
@@ -88,8 +89,8 @@ public:
                                          const RasterDataKind &data);
 
     // Why a render (planFormula: thumbnails, tiles, exports, statistics) refuses a formula, ""
-    // when it computes it: unavailableReason, but for the thermal passthroughs (CELSIUS,
-    // KELVIN), which read the first band of the raster whatever the filter maps (a DEM, a
+    // when it computes it: unavailableReason, but for the thermal formulas (CELSIUS,
+    // KELVIN, FAHRENHEIT), which read the first band of the raster whatever the filter maps (a DEM, a
     // thermal ortho without a sensor profile), a band the filter does not map is no refusal:
     // only the data rule applies to them
     static std::string renderRefusal(const VegetationFormula &formula, const BandFilter &filter,
@@ -121,12 +122,15 @@ public:
     // outData: output float buffer
     // pixelCount: number of pixels
     // nodata: nodata value to check/set
+    // bandUnit: the unit of the first band, which the thermal formulas (CELSIUS, KELVIN, FAHRENHEIT) convert to
+    //           their own (D-022): KELVIN over a band in K gives it as it is, CELSIUS subtracts 273.15
     void applyFormula(const VegetationFormula &formula,
                       const BandFilter &filter,
                       const std::vector<float*> &bandData,
                       float *outData,
                       size_t pixelCount,
-                      float nodata) const;
+                      float nodata,
+                      TemperatureUnit bandUnit = TemperatureUnit::Celsius) const;
 
     // Apply colormap to formula output
     // values: input float array (formula result)

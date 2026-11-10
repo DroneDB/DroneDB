@@ -36,6 +36,11 @@ namespace ddb
     /// Parses a "min,max" rescale range. Throws InvalidArgsException when malformed.
     std::pair<float, float> parseRescaleRange(const std::string &rescale);
 
+    /// The rescale string "min,max" given in the unit `from`, as a rescale string in the unit `to` (D-022): the
+    /// range of a thermal formula that a client set in another unit keeps its temperatures. Throws
+    /// InvalidArgsException for a rescale that is not "min,max" of numbers.
+    std::string convertRescale(const std::string &rescale, TemperatureUnit from, TemperatureUnit to);
+
     /// Bands to show as R, G, B for visParams: the explicit "bands" list (each checked
     /// against 1..maxBand), the preset's mapping, or the default mapping of the detected
     /// sensor. Empty when nothing selects bands (show the first bands).
@@ -90,6 +95,9 @@ namespace ddb
         const Colormap *colormap = nullptr; // null when the plan was made without one
         RasterBandNodata nodata;            // per band, and the alpha band or the dataset mask
         int bandCount = 0;
+        /// The unit of the first band (its unit type; degrees Celsius when it names none): what a thermal
+        /// formula (CELSIUS, KELVIN, FAHRENHEIT) converts from (D-022)
+        TemperatureUnit bandUnit = TemperatureUnit::Celsius;
     };
 
     /// Resolves formulaId, the band filter (bandFilter, "" = detected from the sensor profile of
@@ -97,7 +105,7 @@ namespace ddb
     /// colormap (colormapId, "" = "rdylgn"). Throws InvalidArgsException for an unknown colormap,
     /// and RefusedArgumentException (DDBERR_INVALIDARGS in every C export) for an unknown formula,
     /// for a formula whose bands the filter does not map ("Requires bands: RN" for NDVI over an
-    /// RGB raster; not CELSIUS and KELVIN, which read the first band), and for a formula that
+    /// RGB raster; not the thermal formulas, which read the first band), and for a formula that
     /// needs reflectance over a raster whose data is not floating point (SAVI, OSAVI, EVI over
     /// UInt16): the rule of VegetationEngine::renderRefusal. Every render of a formula plans it
     /// here, so none can skip the rule.
@@ -119,7 +127,7 @@ namespace ddb
         /// Only the bands the formula reads (and the alpha band or the dataset mask, which say "no
         /// data here" for every band) decide. A pixel whose only gap is in a band the formula does
         /// not read is computed, and the bands the formula does not read are not even read. The rule of the
-        /// vegetation-index map layer. Not for the thermal passthroughs (CELSIUS, KELVIN), which read
+        /// vegetation-index map layer. Not for the thermal formulas (CELSIUS, KELVIN, FAHRENHEIT), which read
         /// band 0 whatever the band filter says.
         BandsRead
     };

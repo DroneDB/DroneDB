@@ -551,3 +551,11 @@ Registry has to adopt first.
   `DDBRasterOptions` of U-201 (above; all ten are in `cancellable` too) and the build key members of U-210
   (`key`, `buildKey`, `buildKeyChanged`). Additive: no export was removed or changed its signature. A host
   that reads `key` or calls one of the new exports checks `DDBGetAbiVersion()` for 2.2 or later.
+
+* 2026-11-10: new in 2.3 (U-202: FR-RAS-03, FR-RAS-06, D-022): the algorithm list of the raster metadata has the
+  thermal formula `FAHRENHEIT` (after `CELSIUS` and `KELVIN`), and the `expr` of `CELSIUS` and `KELVIN` says that the
+  band unit (K, degrees Celsius or Fahrenheit) is converted to theirs. `DDBRasterOptions` grows a field,
+  `rescaleUnit` (a smaller `structSize` of 2.2 still works). The thermal formulas convert from the unit of the band:
+  value info (`valueMin`, `valueMax`, `unit`, `stretch`), point, area, profile and contours give their values in the
+  unit of the formula, and the thermal formulas of a tile, a thumbnail and an export too. No export is added or
+  changed.
