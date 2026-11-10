@@ -439,6 +439,13 @@ std::optional<RawThermalData> fffRawThermal(const std::vector<uint8_t> &fff, con
     return raw;
 }
 
+// The relative humidity as a fraction: a camera writes it as a fraction or as a percentage, which is over 2 (as ExifTool
+// reads it). The same rule for the CameraInfo record and the FLIR XMP, so that one camera says one humidity
+static std::optional<double> humidityFraction(std::optional<double> humidity) {
+    if (humidity && *humidity > 2) *humidity /= 100.0;
+    return humidity;
+}
+
 // The calibration of the CameraInfo record: the Planck constants (PlanckR1, PlanckB and PlanckF, floats at 0x58,
 // 0x5c and 0x60; PlanckO, int32s at 0x308; PlanckR2, float at 0x30c), valid only when the five are there and are
 // those of a camera (R1, B and R2 positive), and the measurement parameters: Emissivity (0x20), ObjectDistance (0x24,
@@ -466,8 +473,7 @@ ThermalCalibration fffCameraInfoCalibration(const std::vector<uint8_t> &fff, con
     cal.atmosphericTemperature = celsius(0x2c);
     cal.irWindowTemperature = celsius(0x30);
     cal.irWindowTransmission = number(0x34);
-    cal.relativeHumidity = number(0x3c);
-    if (cal.relativeHumidity && *cal.relativeHumidity > 2) *cal.relativeHumidity /= 100.0;
+    cal.relativeHumidity = humidityFraction(number(0x3c));
     cal.atmosphericTransAlpha1 = number(0x70);
     cal.atmosphericTransAlpha2 = number(0x74);
     cal.atmosphericTransBeta1 = number(0x78);
@@ -742,7 +748,7 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
         cal.objectDistance = xmpNumber({"Xmp.FLIR.ObjectDistance", "Xmp.FLIR.SubjectDistance"});
         cal.reflectedApparentTemperature = xmpNumber({"Xmp.FLIR.ReflectedApparentTemperature"});
         cal.atmosphericTemperature = xmpNumber({"Xmp.FLIR.AtmosphericTemperature"});
-        cal.relativeHumidity = xmpNumber({"Xmp.FLIR.RelativeHumidity"});
+        cal.relativeHumidity = humidityFraction(xmpNumber({"Xmp.FLIR.RelativeHumidity"}));
         cal.irWindowTemperature = xmpNumber({"Xmp.FLIR.IRWindowTemperature"});
         cal.irWindowTransmission = xmpNumber({"Xmp.FLIR.IRWindowTransmission"});
 

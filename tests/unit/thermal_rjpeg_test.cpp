@@ -574,6 +574,30 @@ namespace
         EXPECT_NEAR(area["mean"].get<double>(), 6.0817, 0.01);
     }
 
+    // The relative humidity of the FLIR XMP is a fraction, as the one of the CameraInfo record: a percentage (over 2)
+    // is divided by 100, so that one camera says one humidity whichever of the two the calibration comes from
+    TEST(RJpegThermal, theRelativeHumidityOfTheFlirXmpIsAFractionAsTheOneOfTheCameraInfoRecord)
+    {
+        TestArea ta(TEST_NAME);
+        int n = 0;
+        for (const std::string humidity : {"50", "0.5"})
+        {
+            SCOPED_TRACE(humidity);
+            auto tags = kFlirCalibration;
+            tags.emplace_back("RelativeHumidity", humidity);
+            const auto path = writeFlirPicture(ta.getPath("FLIR_RH_" + std::to_string(n++) + ".JPG"), tags);
+
+            const ThermalCalibration cal = extractThermalCalibration(path.string());
+            ASSERT_TRUE(cal.valid);
+            ASSERT_TRUE(cal.relativeHumidity.has_value());
+            EXPECT_NEAR(*cal.relativeHumidity, 0.5, 1e-9);
+
+            const json info = valueInfoOf(path);
+            ASSERT_TRUE(info.contains("calibration"));
+            EXPECT_NEAR(info["calibration"]["relativeHumidity"].get<double>(), 0.5, 1e-9);
+        }
+    }
+
     TEST(RJpegThermal, aFlirRJpegWithoutThePlanckConstantsHasRawCountsWithoutAUnit)
     {
         TestArea ta(TEST_NAME);
