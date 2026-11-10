@@ -461,8 +461,10 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
     }
 
     // One band with a colormap and no formula (FR-RAS-01): the picture the colormap makes of the band, as the map
-    // tiles and the export draw it
-    if (const auto style = planVisBandStyle(io::toUtf8(imagePath), hSrc, visParams, bandCount)) {
+    // tiles and the export draw it, stretched as the other thumbnails over the statistics of a bounded read (D-041:
+    // the exact ones when they are known, else a sample of a large raster)
+    if (const auto style =
+            planVisBandStyle(io::toUtf8(imagePath), hSrc, visParams, bandCount, StretchSource::Bounded)) {
         const RasterWindow window{0, 0, width, height, targetWidth, targetHeight};
         return rgbaImage(renderBandStyleRgba(hSrc, *style, window), targetWidth, targetHeight);
     }

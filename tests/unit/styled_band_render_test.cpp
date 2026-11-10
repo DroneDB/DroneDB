@@ -11,7 +11,10 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstdint>
+#include <iomanip>
+#include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -21,11 +24,16 @@
 #include "fs.h"
 #include "gdal_inc.h"
 #include "gtest/gtest.h"
+#include "raster_artefacts.h"
+#include "raster_ops.h"
+#include "raster_stats.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
+#include "user_open_child.h"
 #include "tiler.h"
 #include "vegetation.h"
+#include "vis_render.h"
 
 namespace {
 
@@ -341,6 +349,115 @@ TEST_F(StyledBandRender, theThumbnailOfADemWithAColormapIsTheColouredPictureOfTh
         EXPECT_NEAR(grey.at(0, x, y), grey.at(1, x, y), 3) << x << "," << y;
         EXPECT_NEAR(grey.at(1, x, y), grey.at(2, x, y), 3) << x << "," << y;
     }
+}
+
+// A raster larger than the budget of the stretch of a thumbnail (D-041): 2304 x 2304 Float32 pixels in blocks of
+// 64 x 64 (36 x 36 blocks), each pixel the column plus the row of its block, but for block (0, 0), which holds 10000.
+// The sample of a thumbnail reads the middle block of every 2 x 2 cell of blocks, so never block (0, 0): its range is
+// 2 to 70, while the exact range is 1 to 10000.
+constexpr int kLargeSize = 2304;
+constexpr double kOutlier = 10000.0;
+
+void makeLargeBlockRaster(const fs::path& path) {
+    char** opts = CSLSetNameValue(nullptr, "TILED", "YES");
+    opts = CSLSetNameValue(opts, "BLOCKXSIZE", "64");
+    opts = CSLSetNameValue(opts, "BLOCKYSIZE", "64");
+    GDALDatasetH ds =
+        GDALCreate(GDALGetDriverByName("GTiff"), path.string().c_str(), kLargeSize, kLargeSize, 1, GDT_Float32, opts);
+    CSLDestroy(opts);
+    ASSERT_NE(ds, nullptr);
+    std::vector<float> row(kLargeSize);
+    for (int y = 0; y < kLargeSize; y++) {
+        for (int x = 0; x < kLargeSize; x++)
+            row[static_cast<size_t>(x)] = x < 64 && y < 64 ? static_cast<float>(kOutlier)
+                                                           : static_cast<float>(x / 64 + y / 64);
+        ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, y, kLargeSize, 1, row.data(), kLargeSize, 1,
+                               GDT_Float32, 0, 0),
+                  CE_None);
+    }
+    GDALClose(ds);
+}
+
+// The thumbnail of the band with viridis, as the raster helper renders it
+RasterImage styledThumbnail(const fs::path& raster, const std::string& rescale) {
+    ThumbVisParams vis;
+    vis.colormap = "viridis";
+    vis.rescale = rescale;
+    return raster::renderThumbnail(raster, {256, vis});
+}
+
+std::string rescaleOf(double lo, double hi) {
+    std::ostringstream os;
+    os << std::setprecision(17) << lo << "," << hi;
+    return os.str();
+}
+
+void expectSameImage(const RasterImage& a, const RasterImage& b) {
+    ASSERT_EQ(a.width, b.width);
+    ASSERT_EQ(a.height, b.height);
+    EXPECT_TRUE(a.color == b.color);
+    EXPECT_TRUE(a.alpha == b.alpha);
+}
+
+// The thumbnail of one band with a colormap takes its default stretch as every thumbnail does (D-041): from a bounded
+// sample of a large raster whose exact statistics are not known, never kept in the statistics sidecar, and from its
+// exact statistics once they are known. The tile keeps the exact statistics.
+// The thumbnail is rendered in this process as the raster helper renders it, so the test is the helper (its
+// statistics are those of this process)
+USER_OPEN_TEST_F(StyledBandRender, theThumbnailOfALargeBandWithAColormapIsStretchedOverTheSampleOfTheThumbnails) {
+    // Under the artefacts folder: a file libddb wrote, whose exact statistics go to its sidecar
+    fs::create_directories(raster::artefactsDir());
+    const fs::path raster = raster::artefactsDir() / (TEST_NAME + "-large.tif");
+    const fs::path sidecar = statsSidecarOf(raster);
+    fs::remove(raster);
+    fs::remove(sidecar);
+    makeLargeBlockRaster(raster);
+    ASSERT_FALSE(HasFatalFailure());
+
+    auto& provider = RasterStatsProvider::instance();
+    provider.clear();
+    const auto before = provider.counters();
+    const RasterImage sampled = styledThumbnail(raster, "");
+    const auto afterThumbnail = provider.counters();
+
+    // One bounded read of the band, no exact pass, nothing in the sidecar
+    EXPECT_EQ(afterThumbnail.sampled - before.sampled, 1u);
+    EXPECT_EQ(afterThumbnail.computed, before.computed);
+    EXPECT_EQ(afterThumbnail.fromSidecar, before.fromSidecar);
+    EXPECT_FALSE(fs::exists(sidecar));
+
+    // The thumbnail is the picture of the band over the range of the sample, 2 to 70
+    GDALDatasetH ds = GDALOpen(raster.string().c_str(), GA_ReadOnly);
+    ASSERT_NE(ds, nullptr);
+    const BandStatistics sample = provider.getStretchStatistics(raster.string(), ds, {1})[0];
+    EXPECT_TRUE(sample.sampled);
+    EXPECT_EQ(sample.min, 2.0);
+    EXPECT_EQ(sample.max, 70.0);
+    expectSameImage(sampled, styledThumbnail(raster, rescaleOf(sample.min, sample.max)));
+
+    // The tile (and the export) paint the band over its exact statistics, 1 to 10000, which it computes
+    const BandStylePlan tilePlan = planBandStyle(raster.string(), ds, 1, "viridis", "", std::nullopt);
+    EXPECT_EQ(tilePlan.range.first, 1.0f);
+    EXPECT_EQ(tilePlan.range.second, static_cast<float>(kOutlier));
+    EXPECT_EQ(provider.counters().computed - afterThumbnail.computed, 1u);
+
+    // Once the exact statistics are known, the thumbnail takes them
+    const BandStatistics exact = provider.get(raster.string(), ds, 1);
+    GDALClose(ds);
+    EXPECT_FALSE(exact.sampled);
+    EXPECT_EQ(exact.min, 1.0);
+    EXPECT_EQ(exact.max, kOutlier);
+    EXPECT_TRUE(fs::exists(sidecar));
+    const auto beforeExact = provider.counters();
+    const RasterImage exactThumbnail = styledThumbnail(raster, "");
+    EXPECT_EQ(provider.counters().sampled, beforeExact.sampled);
+    EXPECT_EQ(provider.counters().computed, beforeExact.computed);
+    expectSameImage(exactThumbnail, styledThumbnail(raster, rescaleOf(exact.min, exact.max)));
+    EXPECT_FALSE(exactThumbnail.color == sampled.color);
+
+    provider.clear();
+    fs::remove(raster);
+    fs::remove(sidecar);
 }
 
 }  // namespace

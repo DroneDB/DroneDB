@@ -64,14 +64,26 @@ namespace ddb
     /// colours keep their balance. Throws GDALException when it is empty.
     std::pair<double, double> displayRange(const std::string &path, GDALDatasetH ds, const std::vector<int> &bands);
 
+    /// Where the default stretch of a render reads the statistics of its bands (D-041)
+    enum class StretchSource
+    {
+        // The exact statistics (RasterStatsProvider::get): the map tiles, the export, the region render
+        Exact,
+        // The statistics of a thumbnail (RasterStatsProvider::getStretchStatistics): the exact ones when they are
+        // known or the band is small, else a bounded sample, so a thumbnail fits in the limits of the worker
+        Bounded
+    };
+
     /// The default stretch of the non-Byte bands of the raster at path (ds, open), one range per band, in
     /// the raw values of the bands (D-041, FR-RAS-21): a single band (a DEM, a thermal raster) over its
     /// minimum to its maximum, several bands each over the mean +- 2.33 standard deviations of the band
     /// (stretchRange), so a 16-bit multispectral ortho is readable. `nodata` is the override of the
-    /// NoData value (FR-RAS-31). Throws GDALException when a band has no pixel with a value.
+    /// NoData value (FR-RAS-31); `source` says which statistics it reads. Throws GDALException when a band
+    /// has no pixel with a value.
     std::vector<std::pair<double, double>> defaultStretch(const std::string &path, GDALDatasetH ds,
                                                           const std::vector<int> &bands,
-                                                          const std::optional<double> &nodata = std::nullopt);
+                                                          const std::optional<double> &nodata = std::nullopt,
+                                                          StretchSource source = StretchSource::Exact);
 
     /// v stretched from [lo, hi] to 0-255, clipped
     inline uint8_t stretchToByte(double v, double lo, double hi)
@@ -202,15 +214,18 @@ namespace ddb
     /// when it does not exist), over the "min,max" rescale, else over the default stretch of the band
     /// (defaultStretch: its minimum to its maximum, from the statistics of the whole raster with the NoData
     /// override `nodata`), both in the physical values of the band (raw * scale + offset), as a formula is.
-    /// A Byte band is stretched as any other.
+    /// A Byte band is stretched as any other. `source` says which statistics the default stretch reads: the
+    /// exact ones for a tile and an export, the bounded ones of D-041 for a thumbnail.
     BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,
-                                const std::string &rescale, const std::optional<double> &nodata);
+                                const std::string &rescale, const std::optional<double> &nodata,
+                                StretchSource source = StretchSource::Exact);
 
     /// The plan of visParams for the raster at path (ds, open, whose statistics and scale the stretch reads)
     /// when they paint one band with a colormap and no formula (styledBand, with the bands or the preset
-    /// resolved by resolveVisBands against maxBand), else none
+    /// resolved by resolveVisBands against maxBand), else none. `source` as in planBandStyle.
     std::optional<BandStylePlan> planVisBandStyle(const std::string &path, GDALDatasetH ds,
-                                                  const ThumbVisParams &visParams, int maxBand);
+                                                  const ThumbVisParams &visParams, int maxBand,
+                                                  StretchSource source = StretchSource::Exact);
 
     /// Renders the band of the plan over window of ds with its colormap: RGBA interleaved, outPixels() * 4
     /// bytes, a pixel with no data (computeBandValues) transparent

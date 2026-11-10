@@ -1386,8 +1386,11 @@ extern "C"
      * shows exactly one band (a raster of one data band, or bands or a preset that name one band, the same one three
      * times included), the RGBA picture of that band with the colormap, as DDBMemoryTileEx and DDBExportRaster3 draw
      * it: over the rescale, else over the minimum to the maximum of the band, in its physical values (raw * scale +
-     * offset), a pixel with no data transparent, and an error for a colormap that does not exist. With several bands
-     * the colormap is ignored. A library older than 2.3.1 draws the band grey and ignores the colormap. */
+     * offset), a pixel with no data transparent, and an error for a colormap that does not exist. The minimum and the
+     * maximum are those of the default stretch of a thumbnail: exact when they are known or the band has at most
+     * 2048 x 2048 pixels, else those of a sample of at most that many pixels, so the thumbnail of a large raster can
+     * differ slightly from its tiles until its statistics are known. With several bands the colormap is ignored. A
+     * library older than 2.3.1 draws the band grey and ignores the colormap. */
     DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx(const char *filePath, int size,
                                                  const char *preset, const char *bands,
                                                  const char *formula, const char *bandFilter,

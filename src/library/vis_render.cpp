@@ -152,12 +152,21 @@ namespace ddb
 
     std::vector<std::pair<double, double>> defaultStretch(const std::string &path, GDALDatasetH ds,
                                                           const std::vector<int> &bands,
-                                                          const std::optional<double> &nodata)
+                                                          const std::optional<double> &nodata, StretchSource source)
     {
+        auto &provider = RasterStatsProvider::instance();
+        // The statistics of the bands: exact, or those of a thumbnail (the bands in one bounded read, D-041)
+        std::vector<BandStatistics> stats;
+        if (source == StretchSource::Bounded)
+            stats = provider.getStretchStatistics(path, ds, bands, nodata);
+        else
+            for (const int b : bands)
+                stats.push_back(provider.get(path, ds, b, nodata));
+
         std::vector<std::pair<double, double>> ranges;
         if (bands.size() == 1)
         {
-            const BandStatistics s = RasterStatsProvider::instance().get(path, ds, bands[0], nodata);
+            const BandStatistics &s = stats[0];
             double lo = s.min, hi = s.max;
             // Avoid divide by zero
             if (lo == hi)
@@ -167,8 +176,8 @@ namespace ddb
             ranges.emplace_back(lo, hi);
             return ranges;
         }
-        for (const int b : bands)
-            ranges.push_back(stretchRange(RasterStatsProvider::instance().get(path, ds, b, nodata)));
+        for (const BandStatistics &s : stats)
+            ranges.push_back(stretchRange(s));
         return ranges;
     }
 
@@ -426,7 +435,8 @@ namespace ddb
     }
 
     BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,
-                                const std::string &rescale, const std::optional<double> &nodata)
+                                const std::string &rescale, const std::optional<double> &nodata,
+                                StretchSource source)
     {
         BandStylePlan plan;
         plan.band = band;
@@ -440,7 +450,7 @@ namespace ddb
             return plan;
         }
 
-        const auto [lo, hi] = defaultStretch(path, ds, {band}, nodata)[0];
+        const auto [lo, hi] = defaultStretch(path, ds, {band}, nodata, source)[0];
         // The stretch is in the raw values of the band
         int hasScale = FALSE, hasOffset = FALSE;
         const GDALRasterBandH hBand = GDALGetRasterBand(ds, band);
@@ -453,7 +463,8 @@ namespace ddb
     }
 
     std::optional<BandStylePlan> planVisBandStyle(const std::string &path, GDALDatasetH ds,
-                                                  const ThumbVisParams &visParams, int maxBand)
+                                                  const ThumbVisParams &visParams, int maxBand,
+                                                  StretchSource source)
     {
         if (!visParams.formula.empty() || visParams.colormap.empty())
             return std::nullopt;
@@ -464,7 +475,7 @@ namespace ddb
         const int band = styledBand(ds, visParams.colormap, chosen);
         if (band == 0)
             return std::nullopt;
-        return planBandStyle(path, ds, band, visParams.colormap, visParams.rescale, visParams.nodata);
+        return planBandStyle(path, ds, band, visParams.colormap, visParams.rescale, visParams.nodata, source);
     }
 
     std::vector<uint8_t> renderBandStyleRgba(GDALDatasetH ds, const BandStylePlan &plan, const RasterWindow &window)
