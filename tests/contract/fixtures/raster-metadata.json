@@ -293,6 +293,7 @@
         ]
       },
       {
+        "category": "thermal",
         "disabled": true,
         "disabledReason": "Requires bands: T",
         "expr": "pixel in degrees Fahrenheit (converted from the unit of the band)",
@@ -302,6 +303,9 @@
         "range": [
           -40.0,
           302.0
+        ],
+        "requiredBands": [
+          "Thermal"
         ]
       }
     ],
