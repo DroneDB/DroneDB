@@ -66,9 +66,37 @@ namespace ddb
         return result;
     }
 
-    // Get MIME type from file extension for STAC assets
-    static std::string getStacMimeType(const std::string &path)
+    // The media type an entry handler declares (BuildArtifact::mediaType) for `path`: the artifact whose path in
+    // the build folder it is ("copc/cloud.copc.laz", alone or at the end of a longer path), or, with a role, the
+    // artifact of that role. Empty when no handler declares one. The declarations are the one source of the media
+    // types of build files (FR-DEV-15); the extension table of stacMediaType is for plain files.
+    static std::string declaredArtifactMediaType(const std::string &path, const char *role = nullptr)
     {
+        const std::string lowerPath = str::toLowerCopy(io::toGenericUtf8(io::fromUtf8(path)));
+        const auto endsWith = [&](const std::string &suffix) {
+            return lowerPath == suffix ||
+                   (lowerPath.size() > suffix.size() && lowerPath.compare(lowerPath.size() - suffix.size(), suffix.size(), suffix) == 0 &&
+                    lowerPath[lowerPath.size() - suffix.size() - 1] == '/');
+        };
+        for (const EntryHandler *handler : entryHandlers())
+        {
+            for (const auto &a : handler->artifacts())
+            {
+                if (a.kind != ArtifactKind::File || a.mediaType.empty()) continue;
+                if (role != nullptr ? a.role == role : endsWith(str::toLowerCopy(a.path)))
+                    return a.mediaType;
+            }
+        }
+        return "";
+    }
+
+    // Get MIME type for STAC assets: a build artifact (copc/cloud.copc.laz) has the type its entry handler
+    // declares for it (application/vnd.laszip+copc), any other file the one of its extension (a plain .laz, such
+    // as an EPT tile, is application/vnd.laszip)
+    std::string stacMediaType(const std::string &path)
+    {
+        if (const auto declared = declaredArtifactMediaType(path); !declared.empty()) return declared;
+
         // With the dot, as the table below spells its extensions
         const auto ext = "." + io::lowerExtension(io::fromUtf8(path));
 
@@ -85,7 +113,7 @@ namespace ddb
         if (ext == ".ico") return "image/x-icon";
 
         // Point clouds
-        if (ext == ".laz") return "application/vnd.laszip+copc";
+        if (ext == ".laz") return "application/vnd.laszip";
         if (ext == ".las") return "application/vnd.las";
         if (ext == ".e57") return "application/x-e57";
         if (ext == ".pts") return "application/x-pts";
@@ -114,13 +142,22 @@ namespace ddb
         if (ext == ".dae") return "model/vnd.collada+xml";
         if (ext == ".3ds") return "application/x-3ds";
         if (ext == ".fbx") return "application/x-fbx";
-        if (ext == ".bm3d" || ext == ".nxs" || ext == ".nxz")
+        if (ext == ".bm3d")
+        {
+            if (const auto declared = declaredArtifactMediaType(path, "model.bm3d"); !declared.empty()) return declared;
+            return "application/octet-stream";
+        }
+        if (ext == ".nxs" || ext == ".nxz")
             return "application/octet-stream";
         if (ext == ".mtl") return "model/mtl";
 
         // Vector / GIS
         if (ext == ".geojson") return "application/geo+json";
-        if (ext == ".gpkg") return "application/geopackage+sqlite3";
+        if (ext == ".gpkg")
+        {
+            if (const auto declared = declaredArtifactMediaType(path, "vector.gpkg"); !declared.empty()) return declared;
+            return "application/geopackage+sqlite3";
+        }
         if (ext == ".fgb" || ext == ".flatgeobuf") return "application/flatgeobuf";
         if (ext == ".kml") return "application/vnd.google-earth.kml+xml";
         if (ext == ".kmz") return "application/vnd.google-earth.kmz";
@@ -450,7 +487,7 @@ namespace ddb
 
         j["assets"] = json::object();
         j["assets"][path] = {{"title", path},
-                             {"type", getStacMimeType(path)},
+                             {"type", stacMediaType(path)},
                              {"roles", json::array({"data"})}};
         if (urls != nullptr)
             j["assets"][path]["href"] = urls->collectionRoot + DOWNLOAD_ENDPOINT + pathQuery;

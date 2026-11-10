@@ -17,6 +17,13 @@ namespace ddb
                       const std::string &id = "",
                       const std::string &stacCatalogRoot = "");
 
+    // The media type of the data asset of the file at `path` in a STAC Item: a build artifact (path
+    // "copc/cloud.copc.laz" in the build folder of an entry) has the type its entry handler declares for it, a
+    // .bm3d and a .gpkg file the one of their build artifact, any other file the one of its extension
+    // ("application/octet-stream" when unknown). A plain .laz, such as an EPT tile, is application/vnd.laszip: only
+    // the COPC file of a build is application/vnd.laszip+copc.
+    std::string stacMediaType(const std::string &path);
+
     // The filters and the page of a STAC ItemCollection
     struct StacItemQuery
     {
