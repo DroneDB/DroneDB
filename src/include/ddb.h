@@ -1370,7 +1370,14 @@ extern "C"
      * @param rescale Rescale range "min,max" (e.g., "-1,1"), or NULL for auto
      * @param outBuffer Pointer to output buffer (caller frees with DDBVSIFree)
      * @param outBufferSize Pointer to receive buffer size
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success, an error otherwise
+     *
+     * An R-JPEG (FLIR or DJI) with a colormap and a thermal formula (CELSIUS, KELVIN, FAHRENHEIT) or none is drawn from
+     * the temperatures of its raw thermal data (changed in 2.3), in the unit of the formula, over the rescale or else the
+     * minimum to the maximum of the image: the hottest pixel has the last colour of the colormap. Its size is that of
+     * the raw thermal image. The raw counts of a DJI R-JPEG are not temperatures (they need DJI's own conversion, which
+     * libddb does not have): they are coloured from their minimum to their maximum, the formula gives them no unit and
+     * the rescale applies only without a formula. */
     DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx(const char *filePath, int size,
                                                  const char *preset, const char *bands,
                                                  const char *formula, const char *bandFilter,
@@ -1630,6 +1637,12 @@ extern "C"
      * of the band (a pixel whose raw sample equals it has no value); a thermal formula (CELSIUS, KELVIN, FAHRENHEIT) gives
      * the value in its unit, converted from the unit of the band (D-022), and the result says it in "unit".
      * NULL options are DDBGetRasterPointValue (plus "unit"). The bbox of the options is not used.
+     * The value of a pixel of an R-JPEG (FLIR or DJI) is the temperature of its raw thermal data with the calibration,
+     * never the byte of the colour preview. An R-JPEG whose raw counts have no conversion (a DJI R-JPEG: its raw counts
+     * need DJI's own conversion, which libddb does not have; a FLIR R-JPEG without the Planck constants in its tags)
+     * gives its raw count with no unit ("unit": ""), and one without raw data its colour byte with no unit; a thermal
+     * formula is then DDBERR_INVALIDARGS (no thermal calibration). Changed in 2.3: they were labelled in degrees
+     * Celsius (the raw counts of a DJI R-JPEG through FLIR's default Planck constants).
      * @param filePath Path to the raster
      * @param x, y The pixel
      * @param options see DDBRasterOptions (nodata, formula), or NULL

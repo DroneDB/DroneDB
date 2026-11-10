@@ -454,11 +454,87 @@
     {
       "id": "dji-mavic-3t",
       "name": "DJI Mavic 3T",
-      "description": "DJI Mavic 3 Thermal / Enterprise thermal camera",
+      "description": "DJI Mavic 3 Thermal (M3T, M3TD) thermal camera",
       "sensorCategory": "thermal",
       "detection": {
         "bandCount": 1,
-        "metadataPatterns": ["Mavic 3T", "M3T", "Mavic 3 Enterprise"],
+        "metadataPatterns": ["Mavic 3T", "M3T", "M3TD", "Mavic 3 Thermal"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "LWIR", "wavelength": 11000, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "ironbow", "name": "Ironbow", "description": "Standard thermal palette", "bandMapping": {"r": 1, "g": 1, "b": 1}, "isDefault": true, "type": "index", "formula": "CELSIUS", "colormap": "ironbow"},
+        {"id": "whitehot", "name": "White Hot", "description": "Grayscale, hot is white", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "whitehot"},
+        {"id": "blackhot", "name": "Black Hot", "description": "Grayscale, hot is black", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "blackhot"}
+      ]
+    },
+    {
+      "id": "dji-h20n",
+      "name": "DJI Zenmuse H20N",
+      "description": "DJI Zenmuse H20N thermal camera",
+      "sensorCategory": "thermal",
+      "detection": {
+        "bandCount": 1,
+        "metadataPatterns": ["H20N", "ZH20N", "Zenmuse H20N"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "LWIR", "wavelength": 11000, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "ironbow", "name": "Ironbow", "description": "Standard thermal palette", "bandMapping": {"r": 1, "g": 1, "b": 1}, "isDefault": true, "type": "index", "formula": "CELSIUS", "colormap": "ironbow"},
+        {"id": "whitehot", "name": "White Hot", "description": "Grayscale, hot is white", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "whitehot"},
+        {"id": "blackhot", "name": "Black Hot", "description": "Grayscale, hot is black", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "blackhot"}
+      ]
+    },
+    {
+      "id": "dji-m2ea",
+      "name": "DJI Mavic 2 Enterprise Advanced",
+      "description": "DJI Mavic 2 Enterprise Advanced thermal camera",
+      "sensorCategory": "thermal",
+      "detection": {
+        "bandCount": 1,
+        "metadataPatterns": ["MAVIC2-ENTERPRISE-ADVANCED", "M2EA"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "LWIR", "wavelength": 11000, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "ironbow", "name": "Ironbow", "description": "Standard thermal palette", "bandMapping": {"r": 1, "g": 1, "b": 1}, "isDefault": true, "type": "index", "formula": "CELSIUS", "colormap": "ironbow"},
+        {"id": "whitehot", "name": "White Hot", "description": "Grayscale, hot is white", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "whitehot"},
+        {"id": "blackhot", "name": "Black Hot", "description": "Grayscale, hot is black", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "blackhot"}
+      ]
+    },
+    {
+      "id": "dji-m30t",
+      "name": "DJI Matrice 30T",
+      "description": "DJI Matrice 30T thermal camera",
+      "sensorCategory": "thermal",
+      "detection": {
+        "bandCount": 1,
+        "metadataPatterns": ["M30T"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "LWIR", "wavelength": 11000, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "ironbow", "name": "Ironbow", "description": "Standard thermal palette", "bandMapping": {"r": 1, "g": 1, "b": 1}, "isDefault": true, "type": "index", "formula": "CELSIUS", "colormap": "ironbow"},
+        {"id": "whitehot", "name": "White Hot", "description": "Grayscale, hot is white", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "whitehot"},
+        {"id": "blackhot", "name": "Black Hot", "description": "Grayscale, hot is black", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "blackhot"}
+      ]
+    },
+    {
+      "id": "dji-h30t",
+      "name": "DJI Zenmuse H30T",
+      "description": "DJI Zenmuse H30T thermal camera",
+      "sensorCategory": "thermal",
+      "detection": {
+        "bandCount": 1,
+        "metadataPatterns": ["H30T", "ZH30T", "Zenmuse H30T"],
         "priority": 10
       },
       "bands": [

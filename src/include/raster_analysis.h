@@ -44,7 +44,8 @@ struct RasterValueOptions {
  *   "isThermal": bool,
  *   "isDirectValue": bool,   // true when values are already in target units
  *   "sensorId": string,      // detected sensor profile id (if any)
- *   "calibration": {...},    // only when isThermal && calibration valid
+ *   "calibration": {...},    // only when isThermal && calibration valid (the Planck constants were read from the file):
+ *                            // the Planck constants, and the measurement parameters the file says (never a default)
  *   "nodata": number|null,   // the NoData value that applies (the override, else the one of the band)
  *   "nodataOverridden": bool, "nodataInvalid": bool, // the NoData value cannot be held by the type of the band
  *   "scale", "offset"        // only when the band has them: valueMin/valueMax are physical values
@@ -71,7 +72,11 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
  * With options: a pixel whose raw sample is the NoData value has no value (a NoRasterDataException), and a
  * thermal formula gives the value in its unit (D-022: CELSIUS in degrees Celsius, KELVIN in K, converted from
  * the unit of the band); any other formula is a RefusedArgumentException. The same for the area statistics.
- * A thermal image GDAL does not read (an R-JPEG) is read as its temperature grid (thermalGridPointJson).
+ * A thermal image GDAL does not read (an R-JPEG) is read as its temperature grid (thermalGridPointJson), or, when
+ * its raw counts have no conversion (DJI: DJI's own conversion is not available), as its raw counts without a unit;
+ * a thermal formula on values that are no temperatures (raw counts without a calibration, the colour preview of a
+ * picture) is a RefusedArgumentException. The value info of such an image says unit "", isDirectValue false and no
+ * calibration, whatever the formula.
  */
 std::string getRasterPointJson(const std::string &filePath, int x, int y, const RasterValueOptions &options = {});
 
