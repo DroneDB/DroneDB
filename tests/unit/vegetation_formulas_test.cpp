@@ -761,7 +761,8 @@ namespace
             ASSERT_TRUE(algorithm["category"].is_string()) << algorithm["id"];
             byId[algorithm["id"]] = algorithm;
         }
-        EXPECT_EQ(byId.size(), 18u);
+        // 18 formulas and FAHRENHEIT (U-202, new in 2.3)
+        EXPECT_EQ(byId.size(), 19u);
 
         const auto bands = [&](const char *id) { return byId.at(id)["requiredBands"]; };
         const auto category = [&](const char *id) { return byId.at(id)["category"].get<std::string>(); };
@@ -777,6 +778,8 @@ namespace
         EXPECT_EQ(bands("CELSIUS"), json::array({"Thermal"}));
         EXPECT_EQ(category("CELSIUS"), "thermal");
         EXPECT_EQ(category("KELVIN"), "thermal");
+        EXPECT_EQ(bands("FAHRENHEIT"), json::array({"Thermal"}));
+        EXPECT_EQ(category("FAHRENHEIT"), "thermal");
         // The reason keeps its text
         EXPECT_EQ(byId.at("NDVI")["disabledReason"], "Requires bands: RN");
     }
