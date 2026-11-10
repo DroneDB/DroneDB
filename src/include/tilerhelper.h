@@ -100,8 +100,26 @@ namespace ddb
         static fs::path toGeoTIFF(const fs::path &tileablePath, bool forceRecreate = false,
                                   const std::string &tileablePathHash = "");
 
-        // Removes what the tiles left in the cache for five days: tiles, downloads and artefacts
+        // Removes what the tiles left in the cache for five days: tiles, downloads and artefacts. A tile
+        // request (getFromUserCache) and a conversion (toGeoTIFF) run it on their way, one in a thousand
         static void cleanupUserCache();
+    };
+
+    // Test seam: while it lives, the tile requests and conversions of the process clean up the cache on
+    // their way one in `chance` (0: never) instead of one in a thousand, so that a test that ages what is in
+    // the cache decides when the clean-up runs (TilerHelper::cleanupUserCache): one that ran at random
+    // first would remove what the test aged before the request touched it. The previous chance is back
+    // when it ends.
+    class ScopedCacheCleanupChanceForTesting
+    {
+    public:
+        explicit ScopedCacheCleanupChanceForTesting(unsigned chance);
+        ~ScopedCacheCleanupChanceForTesting();
+        ScopedCacheCleanupChanceForTesting(const ScopedCacheCleanupChanceForTesting &) = delete;
+        ScopedCacheCleanupChanceForTesting &operator=(const ScopedCacheCleanupChanceForTesting &) = delete;
+
+    private:
+        unsigned previous_;
     };
 
 } // namespace ddb

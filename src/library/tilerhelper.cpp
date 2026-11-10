@@ -9,6 +9,7 @@
 #include "raster_cache.h"
 #include "randomutil.h"
 
+#include <atomic>
 #include <functional>
 
 #include <memory>
@@ -33,6 +34,30 @@
 
 namespace ddb
 {
+
+    namespace
+    {
+        // One in how many tile requests and conversions clean up the cache on their way (0: none)
+        std::atomic<unsigned> cacheCleanupChance{1000};
+
+        // The clean-up a request runs now and then: what it leaves for five days is removed
+        void maybeCleanupUserCache()
+        {
+            const unsigned chance = cacheCleanupChance.load();
+            if (chance != 0 && oneIn(chance))
+                TilerHelper::cleanupUserCache();
+        }
+    } // namespace
+
+    ScopedCacheCleanupChanceForTesting::ScopedCacheCleanupChanceForTesting(unsigned chance)
+        : previous_(cacheCleanupChance.exchange(chance))
+    {
+    }
+
+    ScopedCacheCleanupChanceForTesting::~ScopedCacheCleanupChanceForTesting()
+    {
+        cacheCleanupChance.store(previous_);
+    }
 
     BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange)
     {
@@ -69,8 +94,7 @@ namespace ddb
         const fs::path &tileablePath = request.source.path;
         if (!fs::exists(tileablePath))
             throw FSException(io::toUtf8(tileablePath) + " does not exist");
-        if (oneIn(1000))
-            cleanupUserCache();
+        maybeCleanupUserCache();
 
         const time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
         const fs::path tileCacheFolder =
@@ -285,8 +309,7 @@ namespace ddb
         if (raster::isLibddbArtefact(localTileablePath))
             return localTileablePath;
 
-        if (oneIn(1000))
-            cleanupUserCache();
+        maybeCleanupUserCache();
 
         // The tiler reads only what libddb wrote, so a file of a user (or a download) is read
         // once, by the raster helper, and the tiles come from what it writes

@@ -598,6 +598,9 @@ namespace
 
     TEST_F(RasterArtefacts, aCogThatServesTilesIsTouchedAndTheCleanupLeavesIt)
     {
+        // The clean-up runs when the test asks for it: one that toGeoTIFF ran at random before it touched the
+        // aged COG would remove it, and the COG would be converted again
+        const ScopedCacheCleanupChanceForTesting noRandomCleanup(0);
         const fs::path preparedCog = makeGeoTiff(area_->getPath("prepared") / "cog.tif");
         ConvertingHelper helper(preparedCog);
         const raster::ScopedRasterHelper installed(helper);
@@ -617,6 +620,27 @@ namespace
         EXPECT_TRUE(fs::exists(cog)) << "a COG that tiles are made from stays";
         EXPECT_FALSE(fs::exists(unused));
         EXPECT_EQ(helper.count("cog"), 1u);
+    }
+
+    // What made the test above fail now and then: a conversion whose clean-up runs (one in a thousand, here
+    // every time) removes the COG no request touched for six days before it looks for it, and converts it
+    // again, which is harmless
+    TEST_F(RasterArtefacts, aConversionThatCleansUpTheCacheFirstConvertsAnAgedCogAgain)
+    {
+        const ScopedCacheCleanupChanceForTesting everyTime(1);
+        const fs::path preparedCog = makeGeoTiff(area_->getPath("prepared") / "cog.tif");
+        ConvertingHelper helper(preparedCog);
+        const raster::ScopedRasterHelper installed(helper);
+        const fs::path raw = area_->getPath("raw.tif");
+        writeFile(raw, "bytes that no driver of GDAL opens");
+
+        const fs::path cog = TilerHelper::toGeoTIFF(raw);
+        EXPECT_EQ(helper.count("cog"), 1u);
+        fs::last_write_time(cog, fs::file_time_type::clock::now() - std::chrono::hours(24 * 6));
+
+        EXPECT_EQ(TilerHelper::toGeoTIFF(raw), cog);
+        EXPECT_TRUE(fs::exists(cog));
+        EXPECT_EQ(helper.count("cog"), 2u) << "removed by the clean-up, then converted again";
     }
 
     TEST_F(RasterArtefacts, aPhotoIsGeoprojectedIntoTheArtefactsForTheTiler)
