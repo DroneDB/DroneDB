@@ -620,6 +620,8 @@ namespace ddb
                     LOGW << "Cannot remove the pending marker of " << r.old.path << ": " << ec.message();
                 }
                 const fs::path out = buildDirectory / io::fromUtf8(key);
+                // A file of the old artefacts kept open (raster cache) would block this on Windows
+                releaseCachedFiles(out);
                 for (const auto &folder : handler.artifactFolders(true))
                     io::assureIsRemoved(out / folder);
 
