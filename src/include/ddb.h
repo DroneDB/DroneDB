@@ -1725,7 +1725,19 @@ extern "C"
      * geotransform of the window. A formula export without a rescale takes its auto range from the window.
      * DDBERR_INVALIDARGS for a box without a pixel of the raster, a box across the antimeridian that the raster
      * does not cross, or a raster without a geotransform. A library older than 2.3 exports the whole raster and
-     * ignores the box: check the ABI minor of DDBGetCapabilities before sending it. */
+     * ignores the box: check the ABI minor of DDBGetCapabilities before sending it.
+     *
+     * The output (new in 2.3.1 for a band with a colormap, a patch release with no new export): with a formula,
+     * the RGBA picture of the formula painted with the colormap (rdylgn when NULL) over the rescale, else the
+     * range of the formula, else the 2nd to the 98th percentile of its values. Without a formula and with a
+     * colormap, when the export is exactly one band (a raster of one data band, or bands or a preset that name
+     * one band, the same one three times included), the RGBA picture of that band with the colormap, drawn
+     * as the formula picture is: over the rescale, else over the default stretch of the map tiles (the minimum to
+     * the maximum of the band), the values being the physical ones (raw * scale + offset), a pixel with no data
+     * transparent; DDBERR_INVALIDARGS for a colormap that does not exist. Without a formula and without a
+     * colormap, or with a colormap and several bands, 8-bit GeoTIFF of the bands (the first three, or those
+     * chosen) scaled to the rescale, else to their minimum and maximum, and the colormap is ignored. A library
+     * older than 2.3.1 ignores the colormap of a band without a formula and writes the 8-bit grey band. */
     DDB_DLL DDBErr DDBExportRaster3(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,

@@ -148,6 +148,13 @@ namespace ddb
     void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
                               FormulaBuffers &buffers, NodataMask mask = NodataMask::AnyBand);
 
+    /// Reads window of band `band` (1-based) of ds as float, the physical values (raw * scale + offset) in
+    /// buffers.result, NODATA_SENTINEL where a pixel has none: the pixels that are nodata in the band or
+    /// transparent in the alpha band or the dataset mask (`nodata` is detectBandNodata of ds). The values that a
+    /// band shows with a colormap and no formula. The read stops with the call that is canceled.
+    void computeBandValues(GDALDatasetH ds, const RasterBandNodata &nodata, int band, const RasterWindow &window,
+                           FormulaBuffers &buffers);
+
     /// A computed value that is a number to render: neither the nodata sentinel nor NaN
     inline bool isFormulaValue(float v) { return v != NODATA_SENTINEL && !std::isnan(v); }
 

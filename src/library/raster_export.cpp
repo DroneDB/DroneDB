@@ -4,6 +4,7 @@
 #include "raster_export.h"
 
 #include <algorithm>
+#include <functional>
 #include <random>
 #include <sstream>
 #include <vector>
@@ -290,11 +291,13 @@ GDALDatasetUniquePtr createRgbaOutput(const char *outputPath, GDALDatasetH hSrcD
     return outGuard;
 }
 
-// Computes the formula window by window, colors it and writes the four channels
-void renderWindows(GDALDatasetH hSrcDs, const FormulaPlan &plan, const WindowGrid &grid,
+// The values of a window of the source: NODATA_SENTINEL where a pixel has none, valid until the next call
+using WindowValues = std::function<const std::vector<float> &(const RasterWindow &)>;
+
+// Takes the values of the window by `values`, colors them and writes the four channels, window by window
+void renderWindows(const WindowValues &values, const Colormap &colormap, const WindowGrid &grid,
                    const std::pair<float, float> &range, GDALDatasetH hOut, ExportSession &session)
 {
-    FormulaBuffers buffers;
     std::vector<uint8_t> rgba;
     std::vector<uint8_t> chanData;
     size_t doneTiles = 0;
@@ -313,11 +316,10 @@ void renderWindows(GDALDatasetH hSrcDs, const FormulaPlan &plan, const WindowGri
             const int winW = window.xsize, winH = window.ysize;
             const size_t winPix = static_cast<size_t>(winW) * winH;
 
-            computeFormulaValues(hSrcDs, plan, window, buffers);
+            const std::vector<float> &windowValues = values(window);
 
             rgba.resize(winPix * 4);
-            VegetationEngine::instance().applyColormap(buffers.result.data(), rgba.data(), winPix,
-                                                       *plan.colormap,
+            VegetationEngine::instance().applyColormap(windowValues.data(), rgba.data(), winPix, colormap,
                                                        {range.first, range.second, NODATA_SENTINEL});
 
             chanData.resize(winPix);
@@ -332,39 +334,6 @@ void renderWindows(GDALDatasetH hSrcDs, const FormulaPlan &plan, const WindowGri
             doneTiles++;
         }
     }
-}
-
-// Formula mode: apply formula + colormap, export as RGBA GeoTIFF.
-// Block-windowed so peak memory is O(tileW * tileH * bandCount) and
-// independent of the full raster size.
-void exportFormula(const RasterExport &request, ExportSession &session, GDALDatasetUniquePtr &srcGuard)
-{
-    GDALDatasetH hSrcDs = datasetHandle(srcGuard);
-    const int bandCount = GDALGetRasterCount(hSrcDs);
-    const char *outputPath = request.output.c_str();
-    const SourceWindow part = sourceWindowOf(request, GDALGetRasterXSize(hSrcDs), GDALGetRasterYSize(hSrcDs));
-
-    const FormulaPlan plan =
-        planFormula(hSrcDs, request.input, request.formula, request.bandFilter, request.colormap, true);
-
-    const WindowGrid grid(part, computeExportTileSize(hSrcDs, bandCount, request.tileSize));
-    const std::pair<float, float> range = displayRange(hSrcDs, plan, grid, request.rescale);
-
-    // Deleted unless the export completes; declared first, so the dataset is closed
-    // before the file is deleted
-    PartialOutput partialOutput(outputPath);
-    auto outGuard = createRgbaOutput(outputPath, hSrcDs, grid);
-    GDALDatasetH hOut = datasetHandle(outGuard);
-
-    renderWindows(hSrcDs, plan, grid, range, hOut, session);
-
-    flushOrThrow(hOut, outputPath);
-    // Add internal overviews for efficient zoomed/partial reads.
-    buildInternalOverviews(hOut, grid.width, grid.height);
-    closeOutputOrThrow(std::move(outGuard), outputPath);
-    srcGuard.reset();  // closes hSrcDs
-    partialOutput.commit();
-    session.report(1.0, "rendering");
 }
 
 // The bands to export: the explicit list, the preset of the sensor, or the first three
@@ -404,7 +373,123 @@ std::vector<int> selectBands(const RasterExport &request, int bandCount)
     return selectedBands;
 }
 
-// Non-formula mode: band selection + rescale, export as GeoTIFF
+// Formula mode: apply formula + colormap, export as RGBA GeoTIFF.
+// Block-windowed so peak memory is O(tileW * tileH * bandCount) and
+// independent of the full raster size.
+void exportFormula(const RasterExport &request, ExportSession &session, GDALDatasetUniquePtr &srcGuard)
+{
+    GDALDatasetH hSrcDs = datasetHandle(srcGuard);
+    const int bandCount = GDALGetRasterCount(hSrcDs);
+    const char *outputPath = request.output.c_str();
+    const SourceWindow part = sourceWindowOf(request, GDALGetRasterXSize(hSrcDs), GDALGetRasterYSize(hSrcDs));
+
+    const FormulaPlan plan =
+        planFormula(hSrcDs, request.input, request.formula, request.bandFilter, request.colormap, true);
+
+    const WindowGrid grid(part, computeExportTileSize(hSrcDs, bandCount, request.tileSize));
+    const std::pair<float, float> range = displayRange(hSrcDs, plan, grid, request.rescale);
+
+    // Deleted unless the export completes; declared first, so the dataset is closed
+    // before the file is deleted
+    PartialOutput partialOutput(outputPath);
+    auto outGuard = createRgbaOutput(outputPath, hSrcDs, grid);
+    GDALDatasetH hOut = datasetHandle(outGuard);
+
+    FormulaBuffers buffers;
+    renderWindows(
+        [&](const RasterWindow &window) -> const std::vector<float> & {
+            computeFormulaValues(hSrcDs, plan, window, buffers);
+            return buffers.result;
+        },
+        *plan.colormap, grid, range, hOut, session);
+
+    flushOrThrow(hOut, outputPath);
+    // Add internal overviews for efficient zoomed/partial reads.
+    buildInternalOverviews(hOut, grid.width, grid.height);
+    closeOutputOrThrow(std::move(outGuard), outputPath);
+    srcGuard.reset();  // closes hSrcDs
+    partialOutput.commit();
+    session.report(1.0, "rendering");
+}
+
+// The one band that a styled export of a colormap without a formula draws, or 0 when the export is not one: it
+// needs a colormap, and the export must resolve to exactly one band, as the bands or the preset choose (the same
+// band three times is one), or the first band of a raster of one data band (the alpha band is not a data band, as
+// in the map tiles: dataBandCount). A raster of several bands with no choice is the first three bands, scaled.
+int styledBandOf(const RasterExport &request, GDALDatasetH hSrcDs)
+{
+    if (request.colormap.empty())
+        return 0;
+
+    const int bandCount = GDALGetRasterCount(hSrcDs);
+    if (request.bands.empty() && request.preset.empty())
+        return dataBandCount(hSrcDs) == 1 ? 1 : 0;
+
+    const std::vector<int> selected = selectBands(request, bandCount);
+    for (const int b : selected)
+        if (b != selected.front())
+            return 0;
+    return selected.empty() ? 0 : selected.front();
+}
+
+// One band with a colormap and no formula: the RGBA picture the colormap makes of the band, with the colours of
+// the formula export. The band is stretched over the rescale, else over the default stretch of the map tiles
+// (defaultStretch: for one band its minimum to its maximum, from the statistics of the whole raster, not of the
+// window), both in the physical values of the band (raw * scale + offset), as a formula is. Pixels with no data
+// are transparent. Block-windowed as the formula export.
+void exportStyledBand(const RasterExport &request, int band, ExportSession &session, GDALDatasetUniquePtr &srcGuard)
+{
+    GDALDatasetH hSrcDs = datasetHandle(srcGuard);
+    const char *outputPath = request.output.c_str();
+    const SourceWindow part = sourceWindowOf(request, GDALGetRasterXSize(hSrcDs), GDALGetRasterYSize(hSrcDs));
+
+    const Colormap *colormap = VegetationEngine::instance().getColormap(request.colormap);
+    if (!colormap)
+        throw InvalidArgsException("Unknown colormap: " + request.colormap);
+
+    std::pair<float, float> range;
+    if (!request.rescale.empty())
+    {
+        range = parseRescaleRange(request.rescale);
+    }
+    else
+    {
+        const auto [lo, hi] = defaultStretch(request.input, hSrcDs, {band}, request.nodata)[0];
+        // The stretch is in the raw values of the band
+        int hasScale = FALSE, hasOffset = FALSE;
+        GDALRasterBandH hBand = GDALGetRasterBand(hSrcDs, band);
+        const double scale = GDALGetRasterScale(hBand, &hasScale);
+        const double offset = GDALGetRasterOffset(hBand, &hasOffset);
+        const double m = hasScale ? scale : 1.0, c = hasOffset ? offset : 0.0;
+        range = {static_cast<float>(std::min(lo * m + c, hi * m + c)),
+                 static_cast<float>(std::max(lo * m + c, hi * m + c))};
+    }
+
+    const RasterBandNodata nodata = detectBandNodata(hSrcDs, GDALGetRasterCount(hSrcDs));
+    const WindowGrid grid(part, computeExportTileSize(hSrcDs, 2, request.tileSize));
+
+    // Deleted unless the export completes; declared first, so the dataset is closed before the file is deleted
+    PartialOutput partialOutput(outputPath);
+    auto outGuard = createRgbaOutput(outputPath, hSrcDs, grid);
+    GDALDatasetH hOut = datasetHandle(outGuard);
+
+    FormulaBuffers buffers;
+    renderWindows(
+        [&](const RasterWindow &window) -> const std::vector<float> & {
+            computeBandValues(hSrcDs, nodata, band, window, buffers);
+            return buffers.result;
+        },
+        *colormap, grid, range, hOut, session);
+
+    flushOrThrow(hOut, outputPath);
+    buildInternalOverviews(hOut, grid.width, grid.height);
+    closeOutputOrThrow(std::move(outGuard), outputPath);
+    srcGuard.reset();  // closes hSrcDs
+    partialOutput.commit();
+    session.report(1.0, "rendering");
+}
+
+// Bands mode (no formula, and not one band with a colormap): band selection + rescale, export as GeoTIFF
 void exportBands(const RasterExport &request, ExportSession &session, GDALDatasetUniquePtr &srcGuard)
 {
     GDALDatasetH hSrcDs = datasetHandle(srcGuard);
@@ -512,6 +597,8 @@ void exportRaster(const RasterExport &request)
 
     if (!request.formula.empty())
         exportFormula(request, session, srcGuard);
+    else if (const int band = styledBandOf(request, datasetHandle(srcGuard)); band > 0)
+        exportStyledBand(request, band, session, srcGuard);
     else
         exportBands(request, session, srcGuard);
 }

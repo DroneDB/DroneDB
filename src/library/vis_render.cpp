@@ -242,12 +242,80 @@ namespace ddb
         return planFormula(ds, formulaId, filter, colormapId, withColormap);
     }
 
+    namespace
+    {
+        // Reads window of the bands of ds that `read` marks (the others get a null entry of buffers.ptrs) as
+        // float, masks the transparent and nodata pixels with the sentinel and gives the physical values of a
+        // band: raw * scale + offset (FR-RAS-04). `nodata` is that of the raster (detectBandNodata)
+        void readPhysicalBands(GDALDatasetH ds, const RasterBandNodata &nodata, int bandCount,
+                               const std::vector<bool> &read, const RasterWindow &window, FormulaBuffers &buffers)
+        {
+            const size_t pixels = window.outPixels();
+            buffers.bands.resize(bandCount);
+            buffers.ptrs.resize(bandCount);
+
+            cancel::GdalProgress progress; // the call is canceled
+            GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
+            // Reads the window of a band into out, as type
+            const auto readWindow = [&](GDALRasterBandH band, void *out, GDALDataType type, const std::string &what) {
+                if (GDALRasterIOEx(band, GF_Read, window.x, window.y, window.xsize, window.ysize, out,
+                                   window.outWidth, window.outHeight, type, 0, 0, &extra) != CE_None)
+                {
+                    cancel::throwIfCanceled();
+                    throw GDALException("Cannot read " + what);
+                }
+            };
+            for (int b = 0; b < bandCount; b++)
+            {
+                if (!read[b])
+                {
+                    buffers.ptrs[b] = nullptr;
+                    continue;
+                }
+                buffers.bands[b].resize(pixels);
+                buffers.ptrs[b] = buffers.bands[b].data();
+                readWindow(GDALGetRasterBand(ds, b + 1), buffers.ptrs[b], GDT_Float32, "band " + std::to_string(b + 1));
+            }
+
+            // The dataset mask, when the raster keeps its transparency there instead of in an alpha band
+            const uint8_t *datasetMask = nullptr;
+            if (nodata.datasetMask)
+            {
+                buffers.mask.resize(pixels);
+                readWindow(GDALGetMaskBand(GDALGetRasterBand(ds, 1)), buffers.mask.data(), GDT_Byte,
+                           "the dataset mask");
+                datasetMask = buffers.mask.data();
+            }
+
+            // Transparent and nodata pixels stay out of the values (of the bands that were read)
+            premaskNodata(buffers.ptrs, pixels, bandCount, nodata, NODATA_SENTINEL, datasetMask);
+
+            // The values are the physical ones: raw * scale + offset. The pixels with no data were compared with
+            // the raw samples above and keep the sentinel
+            for (int b = 0; b < bandCount; b++)
+            {
+                if (buffers.ptrs[b] == nullptr)
+                    continue;
+                const GDALRasterBandH hBand = GDALGetRasterBand(ds, b + 1);
+                int hasScale = FALSE, hasOffset = FALSE;
+                const double scale = GDALGetRasterScale(hBand, &hasScale);
+                const double offset = GDALGetRasterOffset(hBand, &hasOffset);
+                if (!((hasScale && scale != 1.0) || (hasOffset && offset != 0.0)))
+                    continue;
+                const double m = hasScale ? scale : 1.0;
+                const double c = hasOffset ? offset : 0.0;
+                float *values = buffers.ptrs[b];
+                for (size_t i = 0; i < pixels; i++)
+                    if (values[i] != NODATA_SENTINEL)
+                        values[i] = static_cast<float>(values[i] * m + c);
+            }
+        }
+    }
+
     void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
                               FormulaBuffers &buffers, NodataMask mask)
     {
         const size_t pixels = window.outPixels();
-        buffers.bands.resize(plan.bandCount);
-        buffers.ptrs.resize(plan.bandCount);
 
         // The bands to read: all of them, or those the formula reads and the alpha band
         std::vector<bool> read(plan.bandCount, true);
@@ -261,64 +329,29 @@ namespace ddb
                 read[plan.nodata.alphaBandIdx] = true;
         }
 
-        cancel::GdalProgress progress; // the call is canceled
-        GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
-        // Reads the window of a band into out, as type
-        const auto readWindow = [&](GDALRasterBandH band, void *out, GDALDataType type, const std::string &what) {
-            if (GDALRasterIOEx(band, GF_Read, window.x, window.y, window.xsize, window.ysize, out, window.outWidth,
-                               window.outHeight, type, 0, 0, &extra) != CE_None)
-            {
-                cancel::throwIfCanceled();
-                throw GDALException("Cannot read " + what);
-            }
-        };
-        for (int b = 0; b < plan.bandCount; b++)
-        {
-            if (!read[b])
-            {
-                buffers.ptrs[b] = nullptr;
-                continue;
-            }
-            buffers.bands[b].resize(pixels);
-            buffers.ptrs[b] = buffers.bands[b].data();
-            readWindow(GDALGetRasterBand(ds, b + 1), buffers.ptrs[b], GDT_Float32, "band " + std::to_string(b + 1));
-        }
-
-        // The dataset mask, when the raster keeps its transparency there instead of in an alpha band
-        const uint8_t *datasetMask = nullptr;
-        if (plan.nodata.datasetMask)
-        {
-            buffers.mask.resize(pixels);
-            readWindow(GDALGetMaskBand(GDALGetRasterBand(ds, 1)), buffers.mask.data(), GDT_Byte, "the dataset mask");
-            datasetMask = buffers.mask.data();
-        }
-
-        // Transparent and nodata pixels stay out of the formula (of the bands that were read)
-        premaskNodata(buffers.ptrs, pixels, plan.bandCount, plan.nodata, NODATA_SENTINEL, datasetMask);
-
-        // The formula reads the physical values of a band: raw * scale + offset (FR-RAS-04). The pixels
-        // with no data were compared with the raw samples above and keep the sentinel
-        for (int b = 0; b < plan.bandCount; b++)
-        {
-            if (buffers.ptrs[b] == nullptr)
-                continue;
-            const GDALRasterBandH hBand = GDALGetRasterBand(ds, b + 1);
-            int hasScale = FALSE, hasOffset = FALSE;
-            const double scale = GDALGetRasterScale(hBand, &hasScale);
-            const double offset = GDALGetRasterOffset(hBand, &hasOffset);
-            if (!((hasScale && scale != 1.0) || (hasOffset && offset != 0.0)))
-                continue;
-            const double m = hasScale ? scale : 1.0;
-            const double c = hasOffset ? offset : 0.0;
-            float *values = buffers.ptrs[b];
-            for (size_t i = 0; i < pixels; i++)
-                if (values[i] != NODATA_SENTINEL)
-                    values[i] = static_cast<float>(values[i] * m + c);
-        }
+        readPhysicalBands(ds, plan.nodata, plan.bandCount, read, window, buffers);
 
         buffers.result.resize(pixels);
         VegetationEngine::instance().applyFormula(*plan.formula, plan.filter, buffers.ptrs, buffers.result.data(),
                                                   pixels, NODATA_SENTINEL, plan.bandUnit);
+    }
+
+    void computeBandValues(GDALDatasetH ds, const RasterBandNodata &nodata, int band, const RasterWindow &window,
+                           FormulaBuffers &buffers)
+    {
+        const int bandCount = GDALGetRasterCount(ds);
+        if (band < 1 || band > bandCount)
+            throw InvalidArgsException("Band index " + std::to_string(band) + " out of range (1-" +
+                                       std::to_string(bandCount) + ")");
+
+        // The band and the alpha band, which says "no data here" for every band
+        std::vector<bool> read(bandCount, false);
+        read[band - 1] = true;
+        if (nodata.alphaBandIdx >= 0)
+            read[nodata.alphaBandIdx] = true;
+
+        readPhysicalBands(ds, nodata, bandCount, read, window, buffers);
+        buffers.result.swap(buffers.bands[band - 1]);
     }
 
     std::optional<std::pair<float, float>> fixedDisplayRange(const std::string &rescale,

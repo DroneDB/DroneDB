@@ -14,7 +14,7 @@ namespace ddb
 {
 
     // What to export of a raster as a GeoTIFF with internal overviews: a vegetation index drawn
-    // with a colormap (RGBA), or three of its bands stretched to Byte
+    // with a colormap (RGBA), one band drawn with a colormap (RGBA), or three of its bands stretched to Byte
     struct RasterExport
     {
         std::string input;
@@ -22,7 +22,10 @@ namespace ddb
 
         // The rendering, all optional: with a formula the export is an RGBA rendering of the index,
         // otherwise `bands` ("1,2,3") or the band `preset` of the sensor choose what to export (the
-        // first three bands by default). rescale is "min,max".
+        // first three bands by default). Without a formula and with a colormap, an export of exactly one
+        // band (the one band chosen, or a raster of one data band) is the RGBA picture of that band with the
+        // colormap, over the rescale or the default stretch of the map tiles (a minimum to a maximum); an
+        // export of several bands ignores the colormap. rescale is "min,max".
         std::string preset;
         std::string bands;
         std::string formula;
