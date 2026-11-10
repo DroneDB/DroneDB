@@ -98,8 +98,9 @@ void expectMonotonic(const std::vector<Report>& reports) {
     for (const auto& r : reports) {
         EXPECT_GE(r.fraction, -1.0);
         EXPECT_LE(r.fraction, 1.0);
-        if (last >= 0.0)
+        if (last >= 0.0) {
             EXPECT_GE(r.fraction, last) << "the fraction went down at phase " << r.phase;
+        }
         last = std::max(last, r.fraction);
     }
 }
@@ -143,10 +144,13 @@ TEST(DDBBuildEx2, aRasterBuildReportsMonotonicProgressAndItsPhases) {
     EXPECT_EQ(recorder.reports.front().fraction, -1.0);
     EXPECT_EQ(recorder.reports.front().phase, "georaster");
     for (const auto& r : recorder.reports)
-        if (r.phase == "warping" && r.fraction >= 0.0)
+    {
+        if (r.phase == "warping" && r.fraction >= 0.0) {
             EXPECT_LT(r.fraction, 0.375);
-        else if (r.phase == "compressing")
+        } else if (r.phase == "compressing") {
             EXPECT_GE(r.fraction, 0.5);
+        }
+    }
 
     EXPECT_TRUE(ds.isBuildComplete("ortho.tif"));
 }

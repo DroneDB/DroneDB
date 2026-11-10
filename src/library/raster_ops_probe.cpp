@@ -257,8 +257,14 @@ std::optional<OGREnvelope> layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGR
         // Without an SRS the extent is WGS84 only when it can be (a GeoJSON without a crs member is
         // WGS84 by its specification, but GDAL gives it its SRS: this is for the other drivers)
         const auto direct = asWgs84(env);
-        if (!direct) LOGD << "Vector parse: layer " << i << " has no SRS and its extent is not a WGS84 one: no footprint";
-        else LOGD << "Vector parse: layer " << i << " has no SRS, its extent fits WGS84";
+        if (!direct)
+        {
+            LOGD << "Vector parse: layer " << i << " has no SRS and its extent is not a WGS84 one: no footprint";
+        }
+        else
+        {
+            LOGD << "Vector parse: layer " << i << " has no SRS, its extent fits WGS84";
+        }
         return direct;
     }
 
@@ -272,7 +278,10 @@ std::optional<OGREnvelope> layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGR
     if (isWgs84)
     {
         const auto direct = asWgs84(env);
-        if (!direct) LOGD << "Vector parse: layer " << i << " says EPSG:4326 but its extent is not a WGS84 one: no footprint";
+        if (!direct)
+        {
+            LOGD << "Vector parse: layer " << i << " says EPSG:4326 but its extent is not a WGS84 one: no footprint";
+        }
         return direct;
     }
 
@@ -310,7 +319,10 @@ std::optional<OGREnvelope> layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGR
     envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
     envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
     const auto result = asWgs84(envWgs84);
-    if (!result) LOGD << "Vector parse: layer " << i << " reprojects outside the WGS84 range: no footprint";
+    if (!result)
+    {
+        LOGD << "Vector parse: layer " << i << " reprojects outside the WGS84 range: no footprint";
+    }
     return result;
 }
 

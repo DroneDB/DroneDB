@@ -781,18 +781,18 @@ namespace
             OGRFeatureH fa = OGR_F_Create(OGR_L_GetLayerDefn(a));
             OGRGeometryH pa = nullptr;
             char *wktA = const_cast<char *>("POINT (576764.77 5188207.22)");
-            OGR_G_CreateFromWkt(&wktA, nullptr, &pa);
+            ASSERT_EQ(OGR_G_CreateFromWkt(&wktA, nullptr, &pa), OGRERR_NONE);
             OGR_F_SetGeometryDirectly(fa, pa);
-            OGR_L_CreateFeature(a, fa);
+            ASSERT_EQ(OGR_L_CreateFeature(a, fa), OGRERR_NONE);
             OGR_F_Destroy(fa);
             // Layer b: no SRS, metres
             OGRLayerH b = GDALDatasetCreateLayer(ds, "b", nullptr, wkbPoint, nullptr);
             OGRFeatureH fb = OGR_F_Create(OGR_L_GetLayerDefn(b));
             OGRGeometryH pb = nullptr;
             char *wktB = const_cast<char *>("POINT (500000 4000000)");
-            OGR_G_CreateFromWkt(&wktB, nullptr, &pb);
+            ASSERT_EQ(OGR_G_CreateFromWkt(&wktB, nullptr, &pb), OGRERR_NONE);
             OGR_F_SetGeometryDirectly(fb, pb);
-            OGR_L_CreateFeature(b, fb);
+            ASSERT_EQ(OGR_L_CreateFeature(b, fb), OGRERR_NONE);
             OGR_F_Destroy(fb);
             OSRDestroySpatialReference(utm);
             GDALClose(ds);
