@@ -6,9 +6,11 @@
 
 #include "gdal_inc.h"
 
+#include <cstdint>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "raster_stats.h"
 #include "tiler.h"
@@ -16,6 +18,7 @@
 
 namespace ddb
 {
+    struct BandStylePlan; // vis_render.h
 
     struct GeoExtent
     {
@@ -92,6 +95,12 @@ namespace ddb
         void readAlpha(const GQResult &g, RasterImage &image);
         void readSelectedBands(const GQResult &g, const std::vector<int> &bands, RasterImage &image);
         void renderFormula(const GQResult &g, const ThumbVisParams &visParams, RasterImage &image);
+        // Places the RGBA (interleaved) of window g in the tile image: three bands and its alpha
+        static void placeRgba(const std::vector<uint8_t> &rgba, const GQResult &g, RasterImage &image);
+        // The tile of one band painted with a colormap (FR-RAS-01), transparent where the raster has no data or
+        // is not (out of its bounds too, as the plain tile is)
+        std::string styledTile(int tz, int tx, int ty, const BandStylePlan &style, const std::optional<double> &nodata,
+                               ImageFormat format, uint8_t **outBuffer, int *outBufferSize);
 
         // Statistics of a band of the raster file (not of the warped VRT)
         BandStatistics bandStatistics(int band);

@@ -345,6 +345,11 @@ namespace ddb
     std::string GDALTiler::tile(int tz, int tx, int ty, const ThumbVisParams &visParams, ImageFormat format,
                                 uint8_t **outBuffer, int *outBufferSize)
     {
+        // One band with a colormap and no formula (FR-RAS-01): the picture the colormap makes of the band, as the
+        // export and the thumbnails draw it (planVisBandStyle), over the statistics of the raster file
+        if (const auto style = planVisBandStyle(inputPath, datasetHandle(fileDataset), visParams, nBands))
+            return styledTile(tz, tx, ty, *style, visParams.nodata, format, outBuffer, outBufferSize);
+
         // If no vis params set, fall through to standard tile
         if (visParams.preset.empty() && visParams.bands.empty() && visParams.formula.empty() && !visParams.nodata)
             return tile(tz, tx, ty, format, outBuffer, outBufferSize);
@@ -426,12 +431,33 @@ namespace ddb
         }
     }
 
+    std::string GDALTiler::styledTile(int tz, int tx, int ty, const BandStylePlan &style,
+                                      const std::optional<double> &nodata, ImageFormat format, uint8_t **outBuffer,
+                                      int *outBufferSize)
+    {
+        // A NoData override: the tile reads a view of the raster that has it, for this call only
+        const NodataOverrideScope nodataScope(*this, nodata);
+
+        // Transparent where the raster is not, as the plain tile is (a tile out of its bounds included)
+        RasterImage image(tileSize, tileSize, 3, true);
+        GQResult g;
+        if (tileWindow(tz, tx, tms ? tmsToXYZ(ty, tz) : ty, g))
+        {
+            const RasterWindow window{g.r.x, g.r.y, g.r.xsize, g.r.ysize, g.w.xsize, g.w.ysize};
+            placeRgba(renderBandStyleRgba(inputDataset, style, window), g, image);
+        }
+        return writeTile(image, format, tz, tx, ty, outBuffer, outBufferSize);
+    }
+
     void GDALTiler::renderFormula(const GQResult &g, const ThumbVisParams &visParams, RasterImage &image)
     {
         const RasterWindow window{g.r.x, g.r.y, g.r.xsize, g.r.ysize, g.w.xsize, g.w.ysize};
-        const auto rgba = renderFormulaRgba(inputDataset, inputPath, window, visParams);
+        placeRgba(renderFormulaRgba(inputDataset, inputPath, window, visParams), g, image);
+    }
 
-        const size_t wSize = window.outPixels();
+    void GDALTiler::placeRgba(const std::vector<uint8_t> &rgba, const GQResult &g, RasterImage &image)
+    {
+        const size_t wSize = static_cast<size_t>(g.w.xsize) * g.w.ysize;
         std::vector<uint8_t> channel(wSize);
         for (int ch = 0; ch < 4; ch++)
         {

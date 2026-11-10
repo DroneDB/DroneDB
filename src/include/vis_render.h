@@ -181,6 +181,40 @@ namespace ddb
     std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
                                            const RasterWindow &window, const ThumbVisParams &visParams,
                                            std::optional<bool> thermalTags = std::nullopt);
+
+    /// One band painted with a colormap and no formula (FR-RAS-01, FR-RAS-26): what the map tiles, the
+    /// thumbnails and the export draw of a band that the visualisation gives a colormap and no formula
+    struct BandStylePlan
+    {
+        int band = 0;                       // 1-based
+        const Colormap *colormap = nullptr; // never null in a plan
+        std::pair<float, float> range;      // the physical values painted from the first to the last colour
+    };
+
+    /// The one band that `colormap` paints without a formula, or 0 when there is none: it needs a colormap, and
+    /// exactly one band, as `chosen` (the bands that a bands list or a preset choose, empty when neither is given)
+    /// names it (the same band three times is one), or the first band of a raster of one data band when nothing
+    /// is chosen (the alpha band is not a data band: dataBandCount). A raster of several data bands with no
+    /// choice, or a choice of several bands, is not one band: it keeps its bands and the colormap is ignored.
+    int styledBand(GDALDatasetH ds, const std::string &colormap, const std::vector<int> &chosen);
+
+    /// The plan of band `band` of the raster at path (ds, open) painted with colormapId (InvalidArgsException
+    /// when it does not exist), over the "min,max" rescale, else over the default stretch of the band
+    /// (defaultStretch: its minimum to its maximum, from the statistics of the whole raster with the NoData
+    /// override `nodata`), both in the physical values of the band (raw * scale + offset), as a formula is.
+    /// A Byte band is stretched as any other.
+    BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,
+                                const std::string &rescale, const std::optional<double> &nodata);
+
+    /// The plan of visParams for the raster at path (ds, open, whose statistics and scale the stretch reads)
+    /// when they paint one band with a colormap and no formula (styledBand, with the bands or the preset
+    /// resolved by resolveVisBands against maxBand), else none
+    std::optional<BandStylePlan> planVisBandStyle(const std::string &path, GDALDatasetH ds,
+                                                  const ThumbVisParams &visParams, int maxBand);
+
+    /// Renders the band of the plan over window of ds with its colormap: RGBA interleaved, outPixels() * 4
+    /// bytes, a pixel with no data (computeBandValues) transparent
+    std::vector<uint8_t> renderBandStyleRgba(GDALDatasetH ds, const BandStylePlan &plan, const RasterWindow &window);
 }
 
 #endif // VIS_RENDER_H

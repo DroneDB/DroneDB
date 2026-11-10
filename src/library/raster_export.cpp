@@ -412,58 +412,31 @@ void exportFormula(const RasterExport &request, ExportSession &session, GDALData
     session.report(1.0, "rendering");
 }
 
-// The one band that a styled export of a colormap without a formula draws, or 0 when the export is not one: it
-// needs a colormap, and the export must resolve to exactly one band, as the bands or the preset choose (the same
-// band three times is one), or the first band of a raster of one data band (the alpha band is not a data band, as
-// in the map tiles: dataBandCount). A raster of several bands with no choice is the first three bands, scaled.
+// The one band that a styled export of a colormap without a formula draws, or 0 when the export is not one: the
+// rule of the map tiles and the thumbnails (styledBand), with the bands that the bands or the preset choose. A
+// raster of several bands with no choice is the first three bands, scaled.
 int styledBandOf(const RasterExport &request, GDALDatasetH hSrcDs)
 {
     if (request.colormap.empty())
         return 0;
-
-    const int bandCount = GDALGetRasterCount(hSrcDs);
-    if (request.bands.empty() && request.preset.empty())
-        return dataBandCount(hSrcDs) == 1 ? 1 : 0;
-
-    const std::vector<int> selected = selectBands(request, bandCount);
-    for (const int b : selected)
-        if (b != selected.front())
-            return 0;
-    return selected.empty() ? 0 : selected.front();
+    const std::vector<int> chosen = request.bands.empty() && request.preset.empty()
+                                        ? std::vector<int>{}
+                                        : selectBands(request, GDALGetRasterCount(hSrcDs));
+    return styledBand(hSrcDs, request.colormap, chosen);
 }
 
 // One band with a colormap and no formula: the RGBA picture the colormap makes of the band, with the colours of
-// the formula export. The band is stretched over the rescale, else over the default stretch of the map tiles
-// (defaultStretch: for one band its minimum to its maximum, from the statistics of the whole raster, not of the
-// window), both in the physical values of the band (raw * scale + offset), as a formula is. Pixels with no data
-// are transparent. Block-windowed as the formula export.
+// the formula export and of the map tiles (planBandStyle: over the rescale, else over the default stretch of the
+// band from the statistics of the whole raster, not of the window, in the physical values of the band). Pixels
+// with no data are transparent. Block-windowed as the formula export.
 void exportStyledBand(const RasterExport &request, int band, ExportSession &session, GDALDatasetUniquePtr &srcGuard)
 {
     GDALDatasetH hSrcDs = datasetHandle(srcGuard);
     const char *outputPath = request.output.c_str();
     const SourceWindow part = sourceWindowOf(request, GDALGetRasterXSize(hSrcDs), GDALGetRasterYSize(hSrcDs));
 
-    const Colormap *colormap = VegetationEngine::instance().getColormap(request.colormap);
-    if (!colormap)
-        throw InvalidArgsException("Unknown colormap: " + request.colormap);
-
-    std::pair<float, float> range;
-    if (!request.rescale.empty())
-    {
-        range = parseRescaleRange(request.rescale);
-    }
-    else
-    {
-        const auto [lo, hi] = defaultStretch(request.input, hSrcDs, {band}, request.nodata)[0];
-        // The stretch is in the raw values of the band
-        int hasScale = FALSE, hasOffset = FALSE;
-        GDALRasterBandH hBand = GDALGetRasterBand(hSrcDs, band);
-        const double scale = GDALGetRasterScale(hBand, &hasScale);
-        const double offset = GDALGetRasterOffset(hBand, &hasOffset);
-        const double m = hasScale ? scale : 1.0, c = hasOffset ? offset : 0.0;
-        range = {static_cast<float>(std::min(lo * m + c, hi * m + c)),
-                 static_cast<float>(std::max(lo * m + c, hi * m + c))};
-    }
+    const BandStylePlan style =
+        planBandStyle(request.input, hSrcDs, band, request.colormap, request.rescale, request.nodata);
 
     const RasterBandNodata nodata = detectBandNodata(hSrcDs, GDALGetRasterCount(hSrcDs));
     const WindowGrid grid(part, computeExportTileSize(hSrcDs, 2, request.tileSize));
@@ -476,10 +449,10 @@ void exportStyledBand(const RasterExport &request, int band, ExportSession &sess
     FormulaBuffers buffers;
     renderWindows(
         [&](const RasterWindow &window) -> const std::vector<float> & {
-            computeBandValues(hSrcDs, nodata, band, window, buffers);
+            computeBandValues(hSrcDs, nodata, style.band, window, buffers);
             return buffers.result;
         },
-        *colormap, grid, range, hOut, session);
+        *style.colormap, grid, style.range, hOut, session);
 
     flushOrThrow(hOut, outputPath);
     buildInternalOverviews(hOut, grid.width, grid.height);

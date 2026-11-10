@@ -1380,7 +1380,14 @@ extern "C"
      * minimum to the maximum of the image: the hottest pixel has the last colour of the colormap. Its size is that of
      * the raw thermal image. The raw counts of a DJI R-JPEG are not temperatures (they need DJI's own conversion, which
      * libddb does not have): they are coloured from their minimum to their maximum, the formula gives them no unit and
-     * the rescale applies only without a formula. */
+     * the rescale applies only without a formula.
+     *
+     * Another raster with a colormap and no formula (changed in 2.3.1, a patch release with no new export): when it
+     * shows exactly one band (a raster of one data band, or bands or a preset that name one band, the same one three
+     * times included), the RGBA picture of that band with the colormap, as DDBMemoryTileEx and DDBExportRaster3 draw
+     * it: over the rescale, else over the minimum to the maximum of the band, in its physical values (raw * scale +
+     * offset), a pixel with no data transparent, and an error for a colormap that does not exist. With several bands
+     * the colormap is ignored. A library older than 2.3.1 draws the band grey and ignores the colormap. */
     DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx(const char *filePath, int size,
                                                  const char *preset, const char *bands,
                                                  const char *formula, const char *bandFilter,
@@ -1405,7 +1412,16 @@ extern "C"
      * @param outBuffer Pointer to output buffer (caller frees with DDBVSIFree)
      * @param outBufferSize Pointer to receive buffer size
      * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for a formula that does not exist or that
-     *         the raster cannot compute (DDBGetLastError: "Unknown formula: X", "Requires bands: RN"); an error otherwise */
+     *         the raster cannot compute (DDBGetLastError: "Unknown formula: X", "Requires bands: RN"); an error otherwise
+     *
+     * A colormap without a formula (changed in 2.3.1, a patch release with no new export): when the tile shows exactly
+     * one band (a raster of one data band, a DEM, or bands or a preset that name one band, the same one three times
+     * included), the tile is the RGBA picture of that band with the colormap, the picture DDBExportRaster3 writes:
+     * over the rescale, else over the default stretch of the band (its minimum to its maximum over the whole raster,
+     * with the NoData of the options), in its physical values (raw * scale + offset), a pixel with no data
+     * transparent; a colormap that does not exist is an error (DDBERR_INVALIDARGS from DDBMemoryTileEx2). An 8-bit
+     * band is stretched as any other. With several bands the colormap is ignored. A library older than 2.3.1 draws
+     * the band grey and ignores the colormap and the rescale of a tile without a formula. */
     DDB_DLL DDBErr DDBMemoryTileEx(const char *inputPath,
                                     int tz, int tx, int ty,
                                     int tileSize, bool tms,

@@ -412,4 +412,70 @@ namespace ddb
                                              visParams.colormap, true, thermalTags);
         return renderPlannedFormulaRgba(ds, plan, window, visParams.rescale);
     }
+
+    int styledBand(GDALDatasetH ds, const std::string &colormap, const std::vector<int> &chosen)
+    {
+        if (colormap.empty())
+            return 0;
+        if (chosen.empty())
+            return dataBandCount(ds) == 1 ? 1 : 0;
+        for (const int b : chosen)
+            if (b != chosen.front())
+                return 0;
+        return chosen.front();
+    }
+
+    BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,
+                                const std::string &rescale, const std::optional<double> &nodata)
+    {
+        BandStylePlan plan;
+        plan.band = band;
+        plan.colormap = VegetationEngine::instance().getColormap(colormapId);
+        if (plan.colormap == nullptr)
+            throw InvalidArgsException("Unknown colormap: " + colormapId);
+
+        if (!rescale.empty())
+        {
+            plan.range = parseRescaleRange(rescale);
+            return plan;
+        }
+
+        const auto [lo, hi] = defaultStretch(path, ds, {band}, nodata)[0];
+        // The stretch is in the raw values of the band
+        int hasScale = FALSE, hasOffset = FALSE;
+        const GDALRasterBandH hBand = GDALGetRasterBand(ds, band);
+        const double scale = GDALGetRasterScale(hBand, &hasScale);
+        const double offset = GDALGetRasterOffset(hBand, &hasOffset);
+        const double m = hasScale ? scale : 1.0, c = hasOffset ? offset : 0.0;
+        plan.range = {static_cast<float>(std::min(lo * m + c, hi * m + c)),
+                      static_cast<float>(std::max(lo * m + c, hi * m + c))};
+        return plan;
+    }
+
+    std::optional<BandStylePlan> planVisBandStyle(const std::string &path, GDALDatasetH ds,
+                                                  const ThumbVisParams &visParams, int maxBand)
+    {
+        if (!visParams.formula.empty() || visParams.colormap.empty())
+            return std::nullopt;
+        // Nothing chosen is not the bands of the detected sensor here: a raster of one data band is that band
+        const std::vector<int> chosen = visParams.bands.empty() && visParams.preset.empty()
+                                            ? std::vector<int>{}
+                                            : resolveVisBands(path, visParams, maxBand);
+        const int band = styledBand(ds, visParams.colormap, chosen);
+        if (band == 0)
+            return std::nullopt;
+        return planBandStyle(path, ds, band, visParams.colormap, visParams.rescale, visParams.nodata);
+    }
+
+    std::vector<uint8_t> renderBandStyleRgba(GDALDatasetH ds, const BandStylePlan &plan, const RasterWindow &window)
+    {
+        FormulaBuffers buffers;
+        computeBandValues(ds, detectBandNodata(ds, GDALGetRasterCount(ds)), plan.band, window, buffers);
+
+        std::vector<uint8_t> rgba(window.outPixels() * 4);
+        VegetationEngine::instance().applyColormap(buffers.result.data(), rgba.data(), window.outPixels(),
+                                                   *plan.colormap,
+                                                   {plan.range.first, plan.range.second, NODATA_SENTINEL});
+        return rgba;
+    }
 }

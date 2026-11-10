@@ -416,9 +416,19 @@ std::optional<RasterImage> renderRJpegThumbnail(const fs::path& imagePath, int t
     return image;
 }
 
-// The thumbnail the visualisation parameters describe: a formula with its colormap, or the bands
-// they choose with a stretch. thermalTags is what the host found in the tags of the file: the
-// helper reads none.
+// The image of RGBA interleaved pixels of width x height
+RasterImage rgbaImage(const std::vector<uint8_t>& rgba, int width, int height) {
+    RasterImage image(width, height, 3, true);
+    for (size_t i = 0; i < image.pixels(); i++) {
+        for (int b = 0; b < 3; b++) image.band(b)[i] = rgba[i * 4 + b];
+        image.alpha[i] = rgba[i * 4 + 3];
+    }
+    return image;
+}
+
+// The thumbnail the visualisation parameters describe: a formula with its colormap, one band with a
+// colormap, or the bands they choose with a stretch. thermalTags is what the host found in the tags
+// of the file: the helper reads none.
 RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, const ThumbVisParams& visParams,
                                       bool thermalTags) {
     // An R-JPEG shows its temperatures, not the colours of its preview
@@ -446,14 +456,15 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
     // Formula mode: vegetation index rendered with its colormap
     if (!visParams.formula.empty()) {
         const RasterWindow window{0, 0, width, height, targetWidth, targetHeight};
-        const auto rgba = renderFormulaRgba(hSrc, io::toUtf8(imagePath), window, visParams, thermalTags);
+        return rgbaImage(renderFormulaRgba(hSrc, io::toUtf8(imagePath), window, visParams, thermalTags), targetWidth,
+                         targetHeight);
+    }
 
-        RasterImage image(targetWidth, targetHeight, 3, true);
-        for (size_t i = 0; i < image.pixels(); i++) {
-            for (int b = 0; b < 3; b++) image.band(b)[i] = rgba[i * 4 + b];
-            image.alpha[i] = rgba[i * 4 + 3];
-        }
-        return image;
+    // One band with a colormap and no formula (FR-RAS-01): the picture the colormap makes of the band, as the map
+    // tiles and the export draw it
+    if (const auto style = planVisBandStyle(io::toUtf8(imagePath), hSrc, visParams, bandCount)) {
+        const RasterWindow window{0, 0, width, height, targetWidth, targetHeight};
+        return rgbaImage(renderBandStyleRgba(hSrc, *style, window), targetWidth, targetHeight);
     }
 
     // Band selection (explicit, preset or detected sensor) + stretch
