@@ -174,6 +174,26 @@ TEST(DDBBuildEx2, aRasterBuildReportsMonotonicProgressAndItsPhases) {
     EXPECT_TRUE(ds.isBuildComplete("ortho.tif"));
 }
 
+// The warp is announced when it starts, whatever GDAL reports during it: a small raster warped in one GDAL chunk
+// goes from 0 straight to its overviews, and its build still says "warping" (right after the raster kind, at 0)
+TEST(DDBBuildEx2, aRasterBuildAnnouncesTheWarpWhenItStarts) {
+    Dataset ds("DDBBuildEx2-warp-start");
+    ds.addRaster("small.tif", 64);
+
+    Recorder recorder;
+    ASSERT_DDB_OK(DDBBuildEx2(ds.root.string().c_str(), "small.tif", nullptr, true, false, nullptr, &record, &recorder));
+
+    ASSERT_GE(recorder.reports.size(), 3u);
+    EXPECT_EQ(recorder.reports[0].fraction, -1.0);
+    EXPECT_EQ(recorder.reports[0].phase, "georaster");
+    EXPECT_EQ(recorder.reports[1].fraction, 0.0);
+    EXPECT_EQ(recorder.reports[1].phase, "warping");
+    expectMonotonic(recorder.reports);
+    expectPhasesInOrder(recorder.reports, {"georaster", "warping", "overviews", "compressing", "publishing"});
+    EXPECT_EQ(recorder.reports.back().fraction, 1.0);
+    EXPECT_TRUE(ds.isBuildComplete("small.tif"));
+}
+
 TEST(DDBBuildEx2, withoutACallbackItIsDDBBuildEx) {
     Dataset ds("DDBBuildEx2-no-callback");
     ds.addRaster("ortho.tif", 256);

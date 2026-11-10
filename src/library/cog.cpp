@@ -439,6 +439,12 @@ namespace ddb
             }
         }
 
+        // The warp is announced when it starts: the helper forwards a fraction only once it passes a whole
+        // percent, and a small raster warped in one GDAL chunk goes from 0 straight to its overviews, so the
+        // phase would never be reported. 0 is the lowest known fraction: the reports stay monotonic.
+        if (hasWarp)
+            options.reportProgress(0.0, cogPhaseOfFraction(0.0, true));
+
         std::atomic<int> lastPct{0};
         const raster::ProgressCallback logProgress = [&lastPct, &options, hasWarp](double fraction) {
             options.reportProgress(fraction, cogPhaseOfFraction(fraction, hasWarp));
