@@ -5,8 +5,8 @@
 // The thermal grid of a raster GDAL reads, read a window at a time (ThermalBandReader): the point of the fallback of
 // getRasterPointJson reads its pixel, the area of the fallback of getRasterAreaStatsJson and the value info of a thermal
 // raster whose statistics GDAL cannot give stream their pixels, so that what a request holds does not grow with the
-// raster (thermal_internal.h kMaxThermalGridBufferBytes), and their JSON is that of the grid read whole, as it was read
-// before (thermalGridPointJson and thermalGridAreaStatsJson of the temperatures and raw counts of the band).
+// raster (area_statistics_internal.h kMaxAreaBufferBytes), and their JSON is that of the grid read whole, as it was
+// read before (thermalGridPointJson and thermalGridAreaStatsJson of the temperatures and raw counts of the band).
 
 #include <cmath>
 #include <functional>
@@ -24,7 +24,7 @@
 #include "json.h"
 #include "raster_analysis.h"
 #include "thermal.h"
-#include "thermal_internal.h"
+#include "area_statistics_internal.h"
 
 namespace
 {
@@ -331,7 +331,7 @@ namespace
 
     // A thermal raster of 16384 x 16384 UInt16 pixels (makeSparseKelvin), whose grid read whole took 10 bytes a pixel
     // (2.7 GB): its value info (the statistics of the band model have no pixel), its area and its point hold at most
-    // kMaxThermalGridBufferBytes of buffers and read at most kThermalGridWindowPixels at a time, and so does the area of
+    // kMaxAreaBufferBytes of buffers and read at most kAreaWindowPixels at a time, and so does the area of
     // a raster whose rows are wider than a window
     TEST(ThermalBandWindows, theValueInfoAreaAndPointOfALargeThermalRasterHoldBoundedBuffers)
     {
@@ -342,11 +342,11 @@ namespace
         ASSERT_FALSE(HasFatalFailure());
         constexpr uint64_t kPixels = static_cast<uint64_t>(kSide) * kSide;
         ASSERT_GT(kPixels, kMaxAreaValuesInMemory);
-        auto &buffers = thermalGridBuffersForTesting();
+        auto &buffers = areaBuffersForTesting();
         const auto expectBounded = [&](uint64_t largestWindow) {
             EXPECT_GT(buffers.peakBytes, 0u);
-            EXPECT_LE(buffers.peakBytes, kMaxThermalGridBufferBytes);
-            EXPECT_LE(kMaxThermalGridBufferBytes, 64ull << 20);
+            EXPECT_LE(buffers.peakBytes, kMaxAreaBufferBytes);
+            EXPECT_LE(kMaxAreaBufferBytes, 64ull << 20);
             EXPECT_EQ(buffers.largestWindowPixels, largestWindow);
             EXPECT_EQ(buffers.heldBytes, 0u) << "every buffer is released";
         };
@@ -384,7 +384,7 @@ namespace
 
         // Rows wider than a window are read in parts of a window
         const fs::path wide = ta.getPath("wide.tif");
-        const int wideWidth = static_cast<int>(kThermalGridWindowPixels) + 300;
+        const int wideWidth = static_cast<int>(kAreaWindowPixels) + 300;
         makeSparseKelvin(wide, wideWidth, 3);
         ASSERT_FALSE(HasFatalFailure());
         const auto wideBand = ThermalBandReader::open(wide.string());
@@ -393,6 +393,6 @@ namespace
         const json rows = json::parse(thermalBandAreaStatsJson(*wideBand, 0, 0, wideWidth - 1, 2));
         EXPECT_EQ(rows["pixelCount"], 3 * static_cast<int64_t>(wideWidth));
         EXPECT_EQ(rows["median"].get<double>(), 7.0);
-        expectBounded(static_cast<uint64_t>(kThermalGridWindowPixels));
+        expectBounded(static_cast<uint64_t>(kAreaWindowPixels));
     }
 }

@@ -8,6 +8,7 @@
 #include "json.h"
 #include "thermal.h"
 #include "thermal_internal.h"
+#include "area_statistics_internal.h"
 #include "sensorprofile.h"
 #include "exceptions.h"
 #include "artefact_cache.h"
@@ -33,6 +34,46 @@
 #include <vector>
 
 namespace ddb {
+
+// ------------------------------------------------------------------ the buffers of the area statistics (test seam)
+
+namespace {
+
+thread_local AreaBufferCounters areaBuffers;
+thread_local std::optional<std::size_t> areaValuesLimitOverride;
+
+} // anonymous namespace
+
+AreaBufferCounters &areaBuffersForTesting() {
+    return areaBuffers;
+}
+
+void countAreaWindow(std::uint64_t pixels) {
+    areaBuffers.largestWindowPixels = std::max(areaBuffers.largestWindowPixels, pixels);
+}
+
+AreaBufferBytes::~AreaBufferBytes() {
+    areaBuffers.heldBytes -= bytes_;
+}
+
+void AreaBufferBytes::set(std::uint64_t bytes) {
+    areaBuffers.heldBytes = areaBuffers.heldBytes - bytes_ + bytes;
+    bytes_ = bytes;
+    areaBuffers.peakBytes = std::max(areaBuffers.peakBytes, areaBuffers.heldBytes);
+}
+
+std::size_t areaValuesInMemoryLimit() {
+    return areaValuesLimitOverride.value_or(kMaxAreaValuesInMemory);
+}
+
+ScopedAreaValuesInMemoryLimitForTesting::ScopedAreaValuesInMemoryLimitForTesting(std::size_t limit)
+    : previous_(areaValuesLimitOverride) {
+    areaValuesLimitOverride = limit;
+}
+
+ScopedAreaValuesInMemoryLimitForTesting::~ScopedAreaValuesInMemoryLimitForTesting() {
+    areaValuesLimitOverride = previous_;
+}
 
 namespace {
 
@@ -204,22 +245,6 @@ ValueFormula bandValueFormula(const DemContext &dem, bool isThermal, bool calibr
     return valueFormulaOf(unit, formula);
 }
 
-// The values of the pixels of the rectangle (inclusive bounds, inside the raster) that have one
-std::vector<float> readAreaValues(const DemContext &dem, const std::optional<ThermalCalibration> &cal,
-                                  const AreaBounds &b, const ValueFormula &vf) {
-    const int roiW = b.x1 - b.x0 + 1;
-    const int roiH = b.y1 - b.y0 + 1;
-    std::vector<float> values = dem.readRaw(b.x0, b.y0, roiW, roiH, roiW, roiH);
-    // A pixel with no value reads back as NaN
-    values.erase(std::remove_if(values.begin(), values.end(), [&](float &v) {
-        if (std::isnan(v)) return true;
-        v = static_cast<float>(vf.apply(valueOfRaw(dem, cal, v)));
-        // A raw count the calibration has no temperature for has no value either
-        return std::isnan(v);
-    }), values.end());
-    return values;
-}
-
 // The statistics of the values of an area, as the area endpoint answers them
 struct AreaStatistics {
     float min = 0;
@@ -276,13 +301,6 @@ std::string areaStatsJson(const AreaStatistics &stats, const AreaBounds &b, cons
     return result.dump();
 }
 
-// The statistics of the values (which must not be empty; sorted here), as the area endpoint
-// answers them
-std::string areaStatsJson(std::vector<float> values, const AreaBounds &b, const std::string &unit,
-                          bool isThermal, GDALDataType type = GDT_Float32) {
-    return areaStatsJson(statisticsOfValues(std::move(values)), b, unit, isThermal, type);
-}
-
 // A sum of doubles with the error of its additions carried along (Neumaier): within an ulp or so of the exact sum,
 // whatever the number and the order of the terms
 class CompensatedSum {
@@ -326,24 +344,24 @@ std::pair<size_t, uint64_t> binOfRank(const std::vector<uint64_t> &histogram, ui
     throw AppException("Cannot read raster data: the values of the area changed while they were read");
 }
 
-// The statistics of the values of an area (thermal_internal.h: at most kMaxThermalGridBufferBytes of buffers): visit(add)
-// calls add(v) for each value of the area that has one, the same values in the same order each time it is called.
-// Up to areaValuesInMemoryLimit() values they are kept and sorted (statisticsOfValues, the statistics of every area
-// before); with more, the values are read twice and the median is selected from the histograms of their keys. No value
-// is a NoRasterDataException
+// The statistics of the values of an area (area_statistics_internal.h: at most kMaxAreaBufferBytes of buffers):
+// visit(add) calls add(v) for each value of the area that has one, the same values in the same order each time it is
+// called. Up to areaValuesInMemoryLimit() values they are kept and sorted (statisticsOfValues, the statistics of every
+// area before); with more, the values are read twice and the median is selected from the histograms of their keys. No
+// value is a NoRasterDataException
 template <class Visit>
 AreaStatistics areaStatistics(uint64_t areaPixels, Visit &&visit) {
     const size_t limit = areaValuesInMemoryLimit();
     std::vector<float> values;
     values.reserve(static_cast<size_t>(std::min<uint64_t>(areaPixels, limit)));
-    ThermalGridBufferBytes valuesBytes;
+    AreaBufferBytes valuesBytes;
     valuesBytes.set(values.capacity() * sizeof(float));
 
     // Past the limit: the count, the range, the sum and the histogram of the upper 16 bits of the keys
     AreaStatistics stats;
     CompensatedSum sum;
     std::vector<uint64_t> upper;
-    ThermalGridBufferBytes upperBytes;
+    AreaBufferBytes upperBytes;
     const auto count = [&](float v) {
         if (stats.count == 0 || v < stats.min) stats.min = v;
         if (stats.count == 0 || v > stats.max) stats.max = v;
@@ -381,7 +399,7 @@ AreaStatistics areaStatistics(uint64_t areaPixels, Visit &&visit) {
     CompensatedSum sqSum;
     std::vector<uint64_t> lowerOfLow(kAreaHistogramBins, 0);
     std::vector<uint64_t> lowerOfHigh(highBin != lowBin ? kAreaHistogramBins : 0, 0);
-    ThermalGridBufferBytes lowerBytes;
+    AreaBufferBytes lowerBytes;
     lowerBytes.set((lowerOfLow.capacity() + lowerOfHigh.capacity()) * sizeof(uint64_t));
     visit([&](float v) {
         const double diff = v - stats.mean;
@@ -406,6 +424,61 @@ AreaStatistics areaStatistics(uint64_t areaPixels, Visit &&visit) {
         stats.median = high;
     }
     return stats;
+}
+
+// The pixels of the rectangle (inclusive)
+uint64_t areaPixels(const AreaBounds &b) {
+    return static_cast<uint64_t>(static_cast<int64_t>(b.x1) - b.x0 + 1) *
+           static_cast<uint64_t>(static_cast<int64_t>(b.y1) - b.y0 + 1);
+}
+
+// read(x, y, w, h) for the windows of the rectangle (inclusive, inside the raster) of a band whose blocks are
+// blockHeight rows high, in the order of its pixels (area_statistics_internal.h): the rows that fit in
+// kAreaWindowPixels (whole blocks of rows when they do), or a part of a row wider than that
+template <class Read>
+void forEachAreaWindow(const AreaBounds &b, int blockHeight, Read &&read) {
+    if (b.x1 < b.x0 || b.y1 < b.y0) return;
+    const int64_t areaWidth = static_cast<int64_t>(b.x1) - b.x0 + 1;
+    const int64_t cols = std::min(areaWidth, kAreaWindowPixels);
+    int64_t rows = std::max<int64_t>(1, kAreaWindowPixels / areaWidth);
+    const int64_t block = std::max(1, blockHeight);
+    if (rows >= block) rows -= rows % block;
+
+    for (int64_t y = b.y0; y <= b.y1; y += rows) {
+        const int h = static_cast<int>(std::min<int64_t>(rows, b.y1 - y + 1));
+        for (int64_t x = b.x0; x <= b.x1; x += cols) {
+            const int w = static_cast<int>(std::min<int64_t>(cols, b.x1 - x + 1));
+            cancel::throwIfCanceled();
+            read(static_cast<int>(x), static_cast<int>(y), w, h);
+        }
+    }
+}
+
+// The statistics of the values of the pixels of the rectangle (inclusive bounds, inside the raster) that have one: a
+// window at a time (forEachAreaWindow), the raw samples (NaN without a value) as their values in the unit of the
+// formula. No value is a NoRasterDataException
+AreaStatistics bandAreaStatistics(const DemContext &dem, const std::optional<ThermalCalibration> &cal,
+                                  const AreaBounds &b, const ValueFormula &vf) {
+    int blockWidth = 0, blockHeight = 0;
+    GDALGetBlockSize(dem.band, &blockWidth, &blockHeight);
+    return areaStatistics(areaPixels(b), [&](auto &&add) {
+        forEachAreaWindow(b, blockHeight, [&](int x, int y, int w, int h) {
+            const uint64_t pixels = static_cast<uint64_t>(w) * static_cast<uint64_t>(h);
+            countAreaWindow(pixels);
+            // What readRaw holds: the samples, and the mask of the band beside them
+            AreaBufferBytes bytes;
+            bytes.set(pixels * (sizeof(float) + (dem.maskBand != nullptr ? sizeof(uint8_t) : 0)));
+            const std::vector<float> samples = dem.readRaw(x, y, w, h, w, h);
+            bytes.set(samples.capacity() * sizeof(float));
+            for (const float raw : samples) {
+                // A pixel with no value reads back as NaN
+                if (std::isnan(raw)) continue;
+                const float v = static_cast<float>(vf.apply(valueOfRaw(dem, cal, raw)));
+                // A raw count the calibration has no temperature for has no value either
+                if (!std::isnan(v)) add(v);
+            }
+        });
+    });
 }
 
 // The thermal calibration of a raster as the value info reports it: the Planck constants, and only the measurement
@@ -509,7 +582,7 @@ private:
     const RawThermalData &raw_;
 };
 
-// The first band of a thermal raster GDAL reads, kThermalGridWindowPixels at a time (thermal_internal.h)
+// The first band of a thermal raster GDAL reads, kAreaWindowPixels at a time (area_statistics_internal.h)
 class BandThermalGrid {
 public:
     explicit BandThermalGrid(const ThermalBandReader &band) : band_(band) {}
@@ -520,39 +593,22 @@ public:
     // that fit in a window (whole blocks of rows when they do), or a part of a row
     template <class F>
     void forEachPixel(const AreaBounds &b, F &&f) const {
-        if (b.x1 < b.x0 || b.y1 < b.y0) return;
-        const int64_t areaWidth = static_cast<int64_t>(b.x1) - b.x0 + 1;
-        const int64_t cols = std::min(areaWidth, kThermalGridWindowPixels);
-        int64_t rows = std::max<int64_t>(1, kThermalGridWindowPixels / areaWidth);
-        if (rows >= band_.blockHeight()) rows -= rows % band_.blockHeight();
-
         std::vector<float> temperatures;
         std::vector<uint16_t> rawCounts;
-        ThermalGridBufferBytes bytes;
-        for (int64_t y = b.y0; y <= b.y1; y += rows) {
-            const int h = static_cast<int>(std::min<int64_t>(rows, b.y1 - y + 1));
-            for (int64_t x = b.x0; x <= b.x1; x += cols) {
-                const int w = static_cast<int>(std::min<int64_t>(cols, b.x1 - x + 1));
-                cancel::throwIfCanceled();
-                if (!band_.read(static_cast<int>(x), static_cast<int>(y), w, h, temperatures, rawCounts))
-                    throw AppException("Cannot read raster data from " + band_.path());
-                bytes.set(temperatures.capacity() * sizeof(float) + rawCounts.capacity() * sizeof(uint16_t));
-                const size_t pixels = static_cast<size_t>(w) * static_cast<size_t>(h);
-                for (size_t i = 0; i < pixels; i++)
-                    f(temperatures[i], rawCounts.empty() ? temperatures[i] : static_cast<float>(rawCounts[i]));
-            }
-        }
+        AreaBufferBytes bytes;
+        forEachAreaWindow(b, band_.blockHeight(), [&](int x, int y, int w, int h) {
+            if (!band_.read(x, y, w, h, temperatures, rawCounts))
+                throw AppException("Cannot read raster data from " + band_.path());
+            bytes.set(temperatures.capacity() * sizeof(float) + rawCounts.capacity() * sizeof(uint16_t));
+            const size_t pixels = static_cast<size_t>(w) * static_cast<size_t>(h);
+            for (size_t i = 0; i < pixels; i++)
+                f(temperatures[i], rawCounts.empty() ? temperatures[i] : static_cast<float>(rawCounts[i]));
+        });
     }
 
 private:
     const ThermalBandReader &band_;
 };
-
-// The pixels of the rectangle (inclusive)
-uint64_t areaPixels(const AreaBounds &b) {
-    return static_cast<uint64_t>(static_cast<int64_t>(b.x1) - b.x0 + 1) *
-           static_cast<uint64_t>(static_cast<int64_t>(b.y1) - b.y0 + 1);
-}
 
 // The point (x, y) of a thermal grid: its temperature (degrees Celsius), the raw sample the NoData value of the options
 // is compared with, and the raw value reported (its raw count, else its temperature)
@@ -1089,9 +1145,10 @@ std::string getRasterPointAtJson(const std::string &filePath, double lon, double
 
 namespace {
 
+// The statistics of the rectangle of the band, read a window at a time (bandAreaStatistics)
 std::string areaOfBounds(const DemContext &dem, const std::optional<ThermalCalibration> &cal, bool isThermal,
                          const AreaBounds &bounds, const ValueFormula &vf) {
-    return areaStatsJson(requireAreaValues(readAreaValues(dem, cal, bounds, vf)), bounds, vf.unit, isThermal,
+    return areaStatsJson(bandAreaStatistics(dem, cal, bounds, vf), bounds, vf.unit, isThermal,
                          GDALGetRasterDataType(dem.band));
 }
 

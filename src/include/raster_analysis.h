@@ -103,6 +103,11 @@ std::string getRasterPointAtJson(const std::string &filePath, double lon, double
  *   "unit": string,
  *   "isThermal": bool
  * }
+ * The rectangle is read a window at a time, so that what the statistics hold does not grow with the area
+ * (area_statistics_internal.h kMaxAreaBufferBytes): the values of up to 2^23 pixels are sorted, as they always were;
+ * an area with more is read twice, its count, range and median still those of the values sorted, its mean and
+ * standard deviation from compensated sums (a relative difference under 2e-6 from those of the values sorted: the
+ * rounding of the last of the 7 digits of a float). The same for getRasterAreaStatsBoxJson.
  */
 std::string getRasterAreaStatsJson(const std::string &filePath,
                                    int x0, int y0, int x1, int y1, const RasterValueOptions &options = {});
@@ -123,8 +128,8 @@ std::string thermalGridAreaStatsJson(const TemperatureData &td, const RawThermal
  * The same of the first band of a thermal raster GDAL reads (ThermalBandReader: its temperatures, and its raw counts
  * when it is UInt16), as the point and the area statistics read a thermal raster the band model cannot read: the point
  * reads its pixel alone, the area its pixels a window at a time, so that what they hold does not grow with the raster
- * (thermal_internal.h kMaxThermalGridBufferBytes). The JSON is that of thermalGridPointJson and thermalGridAreaStatsJson
- * on the grid of the band read whole.
+ * (area_statistics_internal.h kMaxAreaBufferBytes). The JSON is that of thermalGridPointJson and
+ * thermalGridAreaStatsJson on the grid of the band read whole.
  */
 std::string thermalBandPointJson(const ThermalBandReader &band, int x, int y, const RasterValueOptions &options = {});
 std::string thermalBandAreaStatsJson(const ThermalBandReader &band, int x0, int y0, int x1, int y1,

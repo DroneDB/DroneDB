@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "thermal.h"
 #include "thermal_internal.h"
+#include "area_statistics_internal.h"
 #include "stringutil.h"
 #include "exif.h"
 #include "exceptions.h"
@@ -99,42 +100,6 @@ thread_local ThermalReadCounters readCounters;
 
 const ThermalReadCounters &thermalReadCountersForTesting() {
     return readCounters;
-}
-
-// ---- The pixel buffers of the thermal grids (test seam) ----
-
-namespace {
-
-thread_local ThermalGridBufferCounters gridBuffers;
-thread_local std::optional<std::size_t> areaValuesLimitOverride;
-
-} // anonymous namespace
-
-ThermalGridBufferCounters &thermalGridBuffersForTesting() {
-    return gridBuffers;
-}
-
-ThermalGridBufferBytes::~ThermalGridBufferBytes() {
-    gridBuffers.heldBytes -= bytes_;
-}
-
-void ThermalGridBufferBytes::set(std::uint64_t bytes) {
-    gridBuffers.heldBytes = gridBuffers.heldBytes - bytes_ + bytes;
-    bytes_ = bytes;
-    gridBuffers.peakBytes = std::max(gridBuffers.peakBytes, gridBuffers.heldBytes);
-}
-
-std::size_t areaValuesInMemoryLimit() {
-    return areaValuesLimitOverride.value_or(kMaxAreaValuesInMemory);
-}
-
-ScopedAreaValuesInMemoryLimitForTesting::ScopedAreaValuesInMemoryLimitForTesting(std::size_t limit)
-    : previous_(areaValuesLimitOverride) {
-    areaValuesLimitOverride = limit;
-}
-
-ScopedAreaValuesInMemoryLimitForTesting::~ScopedAreaValuesInMemoryLimitForTesting() {
-    areaValuesLimitOverride = previous_;
 }
 
 // ---- JPEG marker walk ----
@@ -1446,7 +1411,7 @@ bool ThermalBandReader::hasRawCounts() const { return impl->rawCounts; }
 bool ThermalBandReader::read(int x, int y, int w, int h, std::vector<float> &temperatures,
                              std::vector<uint16_t> &rawCounts) const {
     const size_t pixels = static_cast<size_t>(w) * static_cast<size_t>(h);
-    gridBuffers.largestWindowPixels = std::max<std::uint64_t>(gridBuffers.largestWindowPixels, pixels);
+    countAreaWindow(pixels);
     temperatures.resize(pixels);
     if (!impl->rawCounts) {
         // Direct temperature values
