@@ -70,14 +70,16 @@ namespace
     // DDBRasterOptions with the raster value exports (DDBGetRasterValueInfoEx,
     // DDBGetRasterPointValueEx, DDBGetRasterPointValuePixelEx, DDBGetRasterAreaStatsEx,
     // DDBGetRasterAreaStatsPixelEx, DDBGetRasterProfileEx, DDBGenerateContoursEx,
-    // DDBGenerateMemoryThumbnailEx2, DDBMemoryTileEx2, DDBExportRaster3) and the build key members.
+    // DDBGenerateMemoryThumbnailEx2, DDBMemoryTileEx2, DDBExportRaster3) and the build key members;
+    // 2.3 adds DDBBuildEx2, DDBGenerateContoursEx2, DDBRasterOptions.rescaleUnit and the window
+    // of DDBExportRaster3 (DDB_RASTER_OPT_BBOX).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_2)
+    TEST(AbiVersion, is2_3)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 2);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x00020002u);
+        EXPECT_EQ(DDB_ABI_MINOR, 3);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x00020003u);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

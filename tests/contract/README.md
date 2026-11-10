@@ -577,3 +577,28 @@ Registry has to adopt first.
   profile's presets stand. The generic profile is named `Generic 4-band`. A raster of fewer than three data bands that is not thermal has no band filter, so
   every formula that needs bands is listed disabled with "Requires bands: ...". `raster-metadata.schema.json`
   and `raster-info.schema.json` changed; the two `raster-metadata` fixtures changed, `raster-info` did not.
+* 2026-11-10: `capabilities` lists `DDBBuildEx2` (new in 2.3, FR-PRC-42), also in `cancellable`: `DDBBuildEx`
+  with a progress callback (fraction from 0 to 1, or -1 while nothing is measured; the phase: the type of the
+  entry, `warping`, `overviews`, `compressing`, `publishing`; a non-zero return cancels). The STAC asset of a
+  plain `.laz` is `application/vnd.laszip` (only the COPC file of a build is `application/vnd.laszip+copc`) and
+  the footprint of a vector entry is always a WGS 84 envelope (the rescan replaces one in metres); no fixture
+  changed.
+* 2026-11-10: `DDBExportRaster3` exports a window (new in 2.3, U-406, FR-RAS-16): with `DDB_RASTER_OPT_BBOX` the
+  bbox of `DDBRasterOptions` is also the part of the raster the export writes. No export, field or fixture
+  changed; a 2.2 library ignores the box and exports the whole raster.
+* 2026-11-10: `entry.schema.json` documents `warningCode` (new in 2.3, U-408, FR-EXP-18), the stable code of
+  the `warning` of an entry: `dwg-converter-missing` for a DWG drawing without the dwg2dxf converter. No
+  fixture changed.
+* 2026-11-10: R-JPEG (U-603, FR-RAS-13..15, changed in 2.3): a DJI R-JPEG is read from its raw thermal data;
+  its raw counts have no conversion in libddb, so value info, point and area give the raw counts with `unit`
+  "" (`isDirectValue` false, no `calibration`, whatever the formula), and point and area refuse a thermal
+  formula (DDBERR_INVALIDARGS); a FLIR
+  R-JPEG has a `calibration` only when its tags give the Planck constants. No schema or fixture changed.
+
+* 2026-11-10: 2.3.0 (ABI 2.3): `capabilities` has `abi.minor` 3. 2.3 ships `DDBBuildEx2` and
+  `DDBGenerateContoursEx2` (both in `cancellable`), `DDBRasterOptions.rescaleUnit`, the window export of
+  `DDBExportRaster3` (`DDB_RASTER_OPT_BBOX`), `truncated` and `featureCap` of the contour result, the
+  `warningCode` of an entry, and `requiredBands`, `category` and `detectedSensorName` of the raster panels
+  (above). Additive: no export was removed or changed its signature, and a `DDBRasterOptions` of the 2.2 size
+  still works. A host that calls a new export, sets `rescaleUnit` or sends a bbox to `DDBExportRaster3` checks
+  `DDBGetAbiVersion()` for 2.3 or later.

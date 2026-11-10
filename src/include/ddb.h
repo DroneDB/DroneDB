@@ -1344,13 +1344,16 @@ extern "C"
      *  "EVI"], [] when the raster has none. A raster has an index when its bands are named by its
      *  sensor profile (or it has five or more unnamed data bands, read as R, G, B, Red edge, NIR)
      *  and, for SAVI and EVI, which need reflectance, when its data is floating point:
-     *  DDBRenderRasterIndex refuses the others.
+     *  DDBRenderRasterIndex refuses the others. "detectedSensor" is the id of the sensor profile
+     *  and "detectedSensorName" (new in 2.3) its name, absent when no profile matched.
      * @param path Path to raster file
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetRasterInfo(const char *path, char **output);
 
-    /** Get raster statistics and histogram for a band or formula
+    /** Get raster statistics and histogram for a band or formula, and the list of formulas ("algorithms"):
+     * each item has "requiredBands" (new in 2.3: the names of the bands the formula reads, ["Red", "NIR"])
+     * and "category" (new in 2.3: "rgb", "multispectral" or "thermal"), next to "disabled" and "disabledReason"
      * @param path Path to raster file
      * @param formula Optional formula (e.g., "NDVI"), NULL for raw bands
      * @param bandFilter Band order (e.g., "RGB", "RGBNRe"), NULL for auto-detect
