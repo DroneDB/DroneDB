@@ -21,7 +21,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -35,6 +37,27 @@ namespace {
 constexpr int    MAX_LEVELS               = 1000;
 constexpr int    DEFAULT_COUNT            = 20;
 constexpr double MIN_INTERVAL             = 1e-9;
+
+// Reports the progress of a generation to ContourOptions::progress and turns its request to stop into a
+// cancel of the call (the checkpoints then throw), as the raster export does. It never throws: GDAL
+// calls it through its progress callback.
+class ContourSession {
+public:
+    explicit ContourSession(const std::function<bool(double, const char *)> &progress) : progress_(progress) {}
+
+    // Statistics, then the GDAL generator, then the lines read back, each in its share of [0,1]
+    static constexpr double kLevelsFrom = 0.05;
+    static constexpr double kLinesFrom = 0.70;
+
+    void report(double fraction, const char *phase) {
+        if (progress_ && progress_(std::clamp(fraction, 0.0, 1.0), phase))
+            callToken_.cancel("Contour generation canceled by the progress callback");
+    }
+
+private:
+    const std::function<bool(double, const char *)> &progress_;
+    cancel::CallToken callToken_;
+};
 
 // Convert an OGRGeometry to GeoJSON coordinates (LineString or
 // MultiLineString) and append the resulting Feature(s) to `out`.
@@ -219,7 +242,8 @@ private:
 };
 
 // Runs the GDAL contour generator over the band into a new in-memory layer in the CRS of the raster
-ContourLayer generateContourLayer(const DemContext &dem, double interval, const ContourOptions &options) {
+ContourLayer generateContourLayer(const DemContext &dem, double interval, const ContourOptions &options,
+                                  ContourSession &session) {
     const bool rasterHasSrs = dem.srs != nullptr;
 
     GDALDriverH memDrv = GDALGetDriverByName("Memory");
@@ -264,7 +288,11 @@ ContourLayer generateContourLayer(const DemContext &dem, double interval, const 
     }
 
     // The generation stops when the call is canceled
-    cancel::GdalProgress progress;
+    cancel::GdalProgress progress([&session](double fraction) {
+        session.report(ContourSession::kLevelsFrom +
+                           fraction * (ContourSession::kLinesFrom - ContourSession::kLevelsFrom),
+                       "levels");
+    });
     const CPLErr cErr = GDALContourGenerateEx(source, hLayer, opts.List(),
                                               progress.function(), progress.data());
 
@@ -281,9 +309,12 @@ struct ContourFeatures {
     double minElev = std::numeric_limits<double>::infinity();
     double maxElev = -std::numeric_limits<double>::infinity();
     int kept = 0;
+    // The lines were cut at options.maxFeatures: the layer had more
+    bool truncated = false;
 };
 
-ContourFeatures collectFeatures(OGRLayerH hLayer, const DemContext &dem, const ContourOptions &options) {
+ContourFeatures collectFeatures(OGRLayerH hLayer, const DemContext &dem, const ContourOptions &options,
+                                ContourSession &session) {
     // --- Build coordinate transform back to WGS84 -------------------------
     const auto rasterToWgs = dem.demToWgs84();
 
@@ -292,11 +323,20 @@ ContourFeatures collectFeatures(OGRLayerH hLayer, const DemContext &dem, const C
     json &features = out.features;
 
     OGR_L_ResetReading(hLayer);
+    // A layer in memory knows its count without a pass
+    const GIntBig total = std::max<GIntBig>(1, OGR_L_GetFeatureCount(hLayer, TRUE));
+    const size_t cap = static_cast<size_t>(std::max(1, options.maxFeatures));
+    GIntBig read = 0;
     while (true) {
+        if (read % 256 == 0)
+            session.report(ContourSession::kLinesFrom +
+                               (1.0 - ContourSession::kLinesFrom) * static_cast<double>(read) / static_cast<double>(total),
+                           "lines");
         cancel::throwIfCanceled();
         const FeaturePtr feature(OGR_L_GetNextFeature(hLayer));
         if (!feature) break;
         OGRFeatureH hFeat = feature.get();
+        read++;
 
         const double rawElev = OGR_F_GetFieldAsDouble(hFeat, elevFieldIdx);
         // raw * scale + offset carries the noise of the arithmetic (12.000000000000002): 15 digits keep the level
@@ -332,6 +372,13 @@ ContourFeatures collectFeatures(OGRLayerH hLayer, const DemContext &dem, const C
             workGeom = ownedTransformed.get();
         }
 
+        // A line that does not fit is not kept: the result is cut here and says so (FR-RAS-11)
+        if (features.size() >= cap) {
+            LOGD << "Contour generation hit feature cap";
+            out.truncated = true;
+            break;
+        }
+
         const size_t before = features.size();
         appendGeometryAsFeature(features, workGeom, elev);
         if (features.size() > before) {
@@ -340,8 +387,10 @@ ContourFeatures collectFeatures(OGRLayerH hLayer, const DemContext &dem, const C
             out.maxElev = std::max(out.maxElev, elev);
         }
 
-        if (out.kept >= MAX_LEVELS * 100) {
-            LOGD << "Contour generation hit feature cap";
+        // The lines of one geometry may pass the cap: the result holds exactly `cap` lines
+        if (features.size() > cap) {
+            features.erase(features.begin() + static_cast<std::ptrdiff_t>(cap), features.end());
+            out.truncated = true;
             break;
         }
     }
@@ -354,6 +403,8 @@ std::string generateContoursJson(const std::string &rasterPath,
                                  const ContourOptions &options) {
     validateOptions(options);
     cancel::throwIfCanceled();
+    ContourSession session(options.progress);
+    session.report(0.0, "statistics");
 
     // --- Open raster ------------------------------------------------------
     const DemContext dem = openDem(rasterPath, options.bandIndex, BandValueOptions{options.nodata});
@@ -370,14 +421,16 @@ std::string generateContoursJson(const std::string &rasterPath,
     const double interval = resolveInterval(options, bMin, bMax);
 
     // --- Build in-memory OGR layer to collect contours, and read it back -------
-    const ContourLayer contours = generateContourLayer(dem, interval, options);
-    const ContourFeatures collected = collectFeatures(contours.layer, dem, options);
-    const json &features = collected.features;
+    session.report(ContourSession::kLevelsFrom, "levels");
+    const ContourLayer contours = generateContourLayer(dem, interval, options, session);
+    ContourFeatures collected = collectFeatures(contours.layer, dem, options, session);
+    const size_t featureCount = collected.features.size();
 
     // --- Build output JSON -----------------------------------------------
     json result;
     result["type"] = "FeatureCollection";
-    result["features"] = features;
+    // Moved, not copied: a result of 100000 lines is not held twice
+    result["features"] = std::move(collected.features);
     result["interval"] = interval;
     result["baseOffset"] = options.baseOffset;
     if (collected.kept > 0) {
@@ -387,10 +440,15 @@ std::string generateContoursJson(const std::string &rasterPath,
         result["min"] = nullptr;
         result["max"] = nullptr;
     }
-    result["featureCount"] = static_cast<int>(features.size());
+    result["featureCount"] = static_cast<int>(featureCount);
     result["unit"] = unit;
     result["rasterMin"] = bMin;
     result["rasterMax"] = bMax;
+    // new in 2.3: the lines were cut at the cap (FR-RAS-11)
+    result["truncated"] = collected.truncated;
+    result["featureCap"] = std::max(1, options.maxFeatures);
+
+    session.report(1.0, "lines");
 
     return result.dump();
 }

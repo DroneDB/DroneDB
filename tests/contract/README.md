@@ -551,3 +551,10 @@ Registry has to adopt first.
   `DDBRasterOptions` of U-201 (above; all ten are in `cancellable` too) and the build key members of U-210
   (`key`, `buildKey`, `buildKeyChanged`). Additive: no export was removed or changed its signature. A host
   that reads `key` or calls one of the new exports checks `DDBGetAbiVersion()` for 2.2 or later.
+
+* 2026-11-10: `capabilities` lists `DDBGenerateContoursEx2` (new in 2.3, U-413, FR-RAS-11), also in
+  `cancellable`: `DDBGenerateContoursEx` with a progress callback (fraction, phase "statistics", "levels" or
+  "lines"; a non-zero return cancels). The contour result gains `truncated` (true when the lines were cut at the
+  cap) and `featureCap` (the cap, 100000 lines); both are in the output of `DDBGenerateContours`,
+  `DDBGenerateContoursEx` and `DDBGenerateContoursEx2`. A host that calls the new export checks
+  `DDBGetAbiVersion()` for 2.3 or later. No fixture lists a contour result.

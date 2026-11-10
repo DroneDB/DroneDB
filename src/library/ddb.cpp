@@ -1934,6 +1934,14 @@ DDBErr DDBGetRasterProfileEx(const char *filePath, const char *geoJsonLineString
 DDBErr DDBGenerateContoursEx(const char *rasterPath, double interval, int count, double baseOffset,
                              double minElev, double maxElev, double simplifyTolerance, int bandIndex,
                              const DDBRasterOptions *options, char **output) {
+    return DDBGenerateContoursEx2(rasterPath, interval, count, baseOffset, minElev, maxElev, simplifyTolerance,
+                                  bandIndex, options, nullptr, nullptr, output);
+}
+
+DDBErr DDBGenerateContoursEx2(const char *rasterPath, double interval, int count, double baseOffset,
+                              double minElev, double maxElev, double simplifyTolerance, int bandIndex,
+                              const DDBRasterOptions *options, DDBProgressCallback progress,
+                              void *progressUserData, char **output) {
     return guardedOutput<kNewExportCodes>(output, [&] {
         requireText(rasterPath, "No raster path provided");
         requireOutput(output);
@@ -1947,6 +1955,11 @@ DDBErr DDBGenerateContoursEx(const char *rasterPath, double interval, int count,
         opts.simplifyTolerance = std::max(0.0, simplifyTolerance);
         opts.bandIndex = (bandIndex > 0) ? bandIndex : 1;
         opts.nodata = rasterOptions(options).nodata;
+        if (progress != nullptr) {
+            opts.progress = [progress, progressUserData](double fraction, const char *phase) {
+                return progress(fraction, phase, progressUserData) != 0;
+            };
+        }
         return ddb::generateContoursJson(std::string(rasterPath), opts);
     });
 }

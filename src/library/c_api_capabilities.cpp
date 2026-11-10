@@ -63,6 +63,7 @@ constexpr std::string_view kCancellable[] = {
     "DDBExportSplatTrainingData",
     "DDBGenerateContours",
     "DDBGenerateContoursEx",
+    "DDBGenerateContoursEx2",
     "DDBGenerateMemoryThumbnail",
     "DDBGenerateMemoryThumbnailEx",
     "DDBGenerateMemoryThumbnailEx2",

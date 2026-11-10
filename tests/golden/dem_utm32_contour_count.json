@@ -1,5 +1,6 @@
 {
  "baseOffset": 0.5,
+ "featureCap": 100000,
  "featureCount": 10,
  "features": [
   {
@@ -2698,6 +2699,7 @@
  "min": 100.18003845214844,
  "rasterMax": 107.12000274658203,
  "rasterMin": 100.0,
+ "truncated": false,
  "type": "FeatureCollection",
  "unit": ""
 }

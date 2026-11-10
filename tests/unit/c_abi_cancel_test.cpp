@@ -340,6 +340,12 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
                  return DDBGenerateContoursEx(dem.c_str(), 5.0, 0, 0.0, NAN, NAN, 0.0, 1, nullptr, text);
              });
          }},
+        {"DDBGenerateContoursEx2",
+         [=] {
+             return withString([&](char** text) {
+                 return DDBGenerateContoursEx2(dem.c_str(), 5.0, 0, 0.0, NAN, NAN, 0.0, 1, nullptr, nullptr, nullptr, text);
+             });
+         }},
         {"DDBGenerateMemoryThumbnail",
          [=] {
              return withBuffer([&](uint8_t** b, int* s) {
