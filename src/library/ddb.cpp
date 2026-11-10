@@ -1764,7 +1764,8 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
                             const char* colormap, const char* rescale,
                             int tileSize,
                             DDBProgressCallback progress, void* progressUserData,
-                            const std::optional<double>& nodata = std::nullopt) {
+                            const std::optional<double>& nodata = std::nullopt,
+                            const std::optional<std::array<double, 4>>& bbox = std::nullopt) {
     requireText(inputPath, "No input path provided");
     requireText(outputPath, "No output path provided");
 
@@ -1779,6 +1780,7 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
     request.rescale = optStr(rescale);
     request.tileSize = tileSize;
     request.nodata = nodata;
+    request.bbox = bbox;
     if (progress != nullptr) {
         request.progress = [progress, progressUserData](double fraction, const char* phase) {
             return progress(fraction, phase, progressUserData) != 0;
@@ -1823,7 +1825,7 @@ DDBErr DDBExportRaster3(const char* inputPath, const char* outputPath,
     return guarded<kNewExportCodes>([&] {
         const RasterOptionsView raster = rasterOptions(options);
         exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter, colormap, rescale,
-                         tileSize, progress, progressUserData, raster.nodata);
+                         tileSize, progress, progressUserData, raster.nodata, raster.values.bbox);
     });
 }
 

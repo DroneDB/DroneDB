@@ -1522,7 +1522,9 @@ extern "C"
         uint32_t structSize;   /* sizeof(DDBRasterOptions) */
         uint32_t flags;        /* DDB_RASTER_OPT_* bits: which of the fields below are set */
         double nodata;         /* with DDB_RASTER_OPT_NODATA: a finite NoData value that replaces the NoData value of every band */
-        double bbox[4];        /* with DDB_RASTER_OPT_BBOX (value info only): minLon, minLat, maxLon, maxLat (WGS84) */
+        double bbox[4];        /* with DDB_RASTER_OPT_BBOX: minLon, minLat, maxLon, maxLat (WGS84). The window of the value
+                                  info (its estimate of the export) and, new in 2.3, the part of the raster that
+                                  DDBExportRaster3 exports; the other calls ignore it */
         const char *formula;   /* the formula of the values (an index for the default stretch of value info; a thermal
                                   formula, CELSIUS or KELVIN, for the unit of a point or an area), or NULL */
     } DDBRasterOptions;
@@ -1631,7 +1633,14 @@ extern "C"
                                      uint8_t **outBuffer, int *outBufferSize);
 
     /** DDBExportRaster2 with options (new in 2.2): the NoData value of the options replaces the one of the
-     * bands (a pixel equal to it is not exported). */
+     * bands (a pixel equal to it is not exported).
+     * New in 2.3: with DDB_RASTER_OPT_BBOX the export is the window of the raster under the WGS84 box of the
+     * options (minLon, minLat, maxLon, maxLat; FR-RAS-16): the pixels whose centre is inside the box, cut at the
+     * edges of the raster, at the resolution of the input, in its CRS (libddb moves the box to it) and with the
+     * geotransform of the window. A formula export without a rescale takes its auto range from the window.
+     * DDBERR_INVALIDARGS for a box without a pixel of the raster, a box across the antimeridian that the raster
+     * does not cross, or a raster without a geotransform. A library older than 2.3 exports the whole raster and
+     * ignores the box: check the ABI minor of DDBGetCapabilities before sending it. */
     DDB_DLL DDBErr DDBExportRaster3(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,
