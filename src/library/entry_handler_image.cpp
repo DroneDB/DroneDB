@@ -129,13 +129,11 @@ void readCamera(ExifParser *e, const fs::path &path, Entry &entry, SensorSize &s
     {
         std::string make = entry.properties.value("make", "");
         std::string model = entry.properties.value("model", "");
-        if (isThermalImageFromExif(make, model)) {
+        // A DJI picture by the raw thermal image in the file, whatever its model (the wide and zoom pictures of a
+        // thermal drone have the model of its thermal camera), any other by its make and model (FR-RAS-13)
+        if (isThermalPicture(make, model, io::toUtf8(path))) {
             entry.properties["sensorCategory"] = "thermal";
             LOGD << "Detected thermal sensor: " << make << " " << model;
-        } else if (make.find("DJI") != std::string::npos && hasDjiRawThermal(io::toUtf8(path))) {
-            // A DJI camera whose model is not listed: the raw thermal image in the file says it (FR-RAS-13)
-            entry.properties["sensorCategory"] = "thermal";
-            LOGD << "Detected the DJI raw thermal image of " << make << " " << model;
         }
     }
 

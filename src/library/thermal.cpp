@@ -25,6 +25,7 @@
 #include <cctype>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <numeric>
 
 namespace ddb {
@@ -72,6 +73,24 @@ bool isThermalImageFromExif(const std::string &make, const std::string &model) {
         }
     }
     return false;
+}
+
+namespace {
+
+// Whether the make of a camera is DJI
+bool isDjiMake(const std::string &make) {
+    std::string makeLower = make;
+    str::toLower(makeLower);
+    return makeLower.find("dji") != std::string::npos;
+}
+
+} // anonymous namespace
+
+bool isThermalPicture(const std::string &make, const std::string &model, const std::string &filePath) {
+    // The wide and zoom pictures of a DJI thermal drone have the model of its thermal camera: only the raw thermal image
+    // in the file tells the thermal picture
+    if (isDjiMake(make)) return hasDjiRawThermal(filePath);
+    return isThermalImageFromExif(make, model);
 }
 
 // ---- R-JPEG segment finding ----
@@ -430,78 +449,57 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
     ExifParser &parser = *parserPtr;
 
     try {
-        // Try FLIR XMP namespace first
-        auto getXmpDouble = [&](const std::initializer_list<std::string> &keys, double defaultVal) -> double {
+        // The number of the first of the XMP keys the file has, when it is a number; nothing otherwise (never a default)
+        const auto xmpNumber = [&](const std::initializer_list<std::string> &keys) -> std::optional<double> {
             auto it = parser.findXmpKey(keys);
-            if (it) {
-                try {
-                    return std::stod(it->toString());
-                } catch (const std::invalid_argument &) {
-                    // Non-numeric XMP value; use default silently.
-                } catch (const std::out_of_range &) {
-                    // Numeric out of double range; use default silently.
-                }
+            if (!it) return std::nullopt;
+            try {
+                const double value = std::stod(it->toString());
+                if (std::isfinite(value)) return value;
+            } catch (const std::invalid_argument &) {
+                // Not a number: the file does not say it
+            } catch (const std::out_of_range &) {
+                // Out of the range of a double: the file does not say it
             }
-            return defaultVal;
+            return std::nullopt;
         };
 
-        // FLIR XMP calibration data
-        cal.planckR1 = getXmpDouble({"Xmp.FLIR.PlanckR1"}, cal.planckR1);
-        cal.planckB = getXmpDouble({"Xmp.FLIR.PlanckB"}, cal.planckB);
-        cal.planckF = getXmpDouble({"Xmp.FLIR.PlanckF"}, cal.planckF);
-        cal.planckO = getXmpDouble({"Xmp.FLIR.PlanckO"}, cal.planckO);
-        cal.planckR2 = getXmpDouble({"Xmp.FLIR.PlanckR2"}, cal.planckR2);
-        cal.emissivity = getXmpDouble({"Xmp.FLIR.Emissivity"}, cal.emissivity);
-        cal.objectDistance = getXmpDouble({"Xmp.FLIR.ObjectDistance", "Xmp.FLIR.SubjectDistance"}, cal.objectDistance);
-        cal.reflectedApparentTemperature = getXmpDouble(
-            {"Xmp.FLIR.ReflectedApparentTemperature"}, cal.reflectedApparentTemperature);
-        cal.atmosphericTemperature = getXmpDouble(
-            {"Xmp.FLIR.AtmosphericTemperature"}, cal.atmosphericTemperature);
-        cal.relativeHumidity = getXmpDouble(
-            {"Xmp.FLIR.RelativeHumidity"}, cal.relativeHumidity);
-        cal.irWindowTemperature = getXmpDouble(
-            {"Xmp.FLIR.IRWindowTemperature"}, cal.irWindowTemperature);
-        cal.irWindowTransmission = getXmpDouble(
-            {"Xmp.FLIR.IRWindowTransmission"}, cal.irWindowTransmission);
+        // FLIR XMP: what the camera was set to for the measurement
+        cal.emissivity = xmpNumber({"Xmp.FLIR.Emissivity"});
+        cal.objectDistance = xmpNumber({"Xmp.FLIR.ObjectDistance", "Xmp.FLIR.SubjectDistance"});
+        cal.reflectedApparentTemperature = xmpNumber({"Xmp.FLIR.ReflectedApparentTemperature"});
+        cal.atmosphericTemperature = xmpNumber({"Xmp.FLIR.AtmosphericTemperature"});
+        cal.relativeHumidity = xmpNumber({"Xmp.FLIR.RelativeHumidity"});
+        cal.irWindowTemperature = xmpNumber({"Xmp.FLIR.IRWindowTemperature"});
+        cal.irWindowTransmission = xmpNumber({"Xmp.FLIR.IRWindowTransmission"});
 
-        // Check if we found any FLIR-specific data
-        auto flirCheck = parser.findXmpKey({"Xmp.FLIR.PlanckR1", "Xmp.FLIR.Emissivity"});
-        if (flirCheck) {
+        // FLIR XMP: the Planck constants. The calibration is valid only with the five of them: the defaults of no
+        // camera are the calibration of this one
+        const auto r1 = xmpNumber({"Xmp.FLIR.PlanckR1"});
+        const auto b = xmpNumber({"Xmp.FLIR.PlanckB"});
+        const auto f = xmpNumber({"Xmp.FLIR.PlanckF"});
+        const auto o = xmpNumber({"Xmp.FLIR.PlanckO"});
+        const auto r2 = xmpNumber({"Xmp.FLIR.PlanckR2"});
+        if (r1 && b && f && o && r2) {
+            cal.planckR1 = *r1;
+            cal.planckB = *b;
+            cal.planckF = *f;
+            cal.planckO = *o;
+            cal.planckR2 = *r2;
             cal.valid = true;
             LOGD << "Found FLIR XMP calibration data";
             return cal;
         }
 
-        // Fallback: DJI thermal EXIF/XMP tags
-        cal.emissivity = getXmpDouble(
-            {"Xmp.drone-dji.ThermalObjectEmissivity"}, cal.emissivity);
-        cal.objectDistance = getXmpDouble(
-            {"Xmp.drone-dji.ThermalObjectDistance"}, cal.objectDistance);
-        cal.reflectedApparentTemperature = getXmpDouble(
-            {"Xmp.drone-dji.ThermalReflection"}, cal.reflectedApparentTemperature);
-        cal.atmosphericTemperature = getXmpDouble(
-            {"Xmp.drone-dji.ThermalAtmosphericTemperature"}, cal.atmosphericTemperature);
-
-        auto djiCheck = parser.findXmpKey({"Xmp.drone-dji.ThermalObjectEmissivity",
-                                           "Xmp.drone-dji.ThermalMeasureMode"});
-        if (djiCheck) {
-            cal.valid = true;
-            LOGD << "Found DJI thermal XMP calibration data";
-            return cal;
-        }
-
-        // If we detect it's a thermal image by Make/Model, use defaults
-        std::string make = parser.extractMake();
-        std::string model = parser.extractModel();
-        if (isThermalImageFromExif(make, model)) {
-            cal.valid = true;
-            LOGD << "Using default thermal calibration for " << make << " " << model;
-        } else if (hasDjiRawThermal(filePath)) {
-            // A DJI camera whose model is not listed (FR-RAS-13): its raw thermal image is the proof
-            cal.valid = true;
-            LOGD << "Using default thermal calibration for the DJI raw thermal image of " << make << " " << model;
-        }
-
+        // DJI XMP: the measurement parameters the file says, never a calibration. The raw counts of a DJI camera are not
+        // those of the Planck formula: only DJI's conversion turns them into temperatures (djiRawToTemperatureMap)
+        if (!cal.emissivity) cal.emissivity = xmpNumber({"Xmp.drone-dji.ThermalObjectEmissivity"});
+        if (!cal.objectDistance) cal.objectDistance = xmpNumber({"Xmp.drone-dji.ThermalObjectDistance"});
+        if (!cal.reflectedApparentTemperature)
+            cal.reflectedApparentTemperature = xmpNumber({"Xmp.drone-dji.ThermalReflection"});
+        if (!cal.atmosphericTemperature)
+            cal.atmosphericTemperature = xmpNumber({"Xmp.drone-dji.ThermalAtmosphericTemperature"});
+        LOGD << "No thermal calibration (Planck constants) in the tags of " << filePath;
     } catch (const std::exception &e) {
         LOGD << "Error reading thermal calibration: " << e.what();
     }
@@ -513,15 +511,18 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
 
 double rawToTemperature(uint16_t raw, const ThermalCalibration &cal) {
     // T = B / ln(R1 / (R2 * (raw + O)) + F) - 273.15
-    double rawD = static_cast<double>(raw);
-    double denom = cal.planckR2 * (rawD + cal.planckO);
+    // A raw count outside the range of the calibration has no temperature (NaN: no value), not 0 degrees Celsius
+    constexpr double noTemperature = std::numeric_limits<double>::quiet_NaN();
+    const double rawD = static_cast<double>(raw);
+    const double denom = cal.planckR2 * (rawD + cal.planckO);
 
-    if (std::abs(denom) < 1e-30) return 0.0;
+    if (!(std::abs(denom) >= 1e-30)) return noTemperature;
 
-    double arg = cal.planckR1 / denom + cal.planckF;
-    if (arg <= 0.0) return 0.0;
+    const double arg = cal.planckR1 / denom + cal.planckF;
+    if (!(arg > 1.0)) return noTemperature;
 
-    double tempK = cal.planckB / std::log(arg);
+    const double tempK = cal.planckB / std::log(arg);
+    if (!std::isfinite(tempK) || tempK <= 0.0) return noTemperature;
     return tempK - 273.15;
 }
 
@@ -580,7 +581,9 @@ bool tagsSayThermal(ExifParser &parser) {
         std::string make = parser.extractMake();
         std::string model = parser.extractModel();
 
-        if (isThermalImageFromExif(make, model)) return true;
+        // A DJI model is not enough: the wide and zoom pictures of a thermal drone have the model of the thermal camera.
+        // The raw thermal image of the file (contentSaysThermal) tells a DJI thermal picture (FR-RAS-13)
+        if (isThermalImageFromExif(make, model) && !isDjiMake(make)) return true;
 
         // Method 2: Check for FLIR XMP namespace
         auto flirIt = parser.findXmpKey({"Xmp.FLIR.PlanckR1",
@@ -867,6 +870,13 @@ TemperatureData readTemperatureData(const std::string &filePath) {
     return td;
 }
 
+std::optional<std::vector<float>> djiRawToTemperatureMap(const RawThermalData &raw, const std::string &filePath) {
+    // DJI's conversion (dji_irp) is not available: no temperature is told from the raw counts of a DJI camera
+    LOGD << "No conversion of the " << raw.data.size() << " DJI raw thermal counts of " << filePath
+         << " into temperatures: it needs DJI's own conversion, which is not available";
+    return std::nullopt;
+}
+
 std::optional<RJpegThermal> readRJpegThermal(const std::string &filePath) {
     RJpegThermal result;
     result.raw = extractRJpegRawThermal(filePath);
@@ -875,12 +885,16 @@ std::optional<RJpegThermal> readRJpegThermal(const std::string &filePath) {
     result.grid.width = result.raw.width;
     result.grid.height = result.raw.height;
 
-    // DJI: the default calibration, no tag is read (the raster helper reads none); FLIR: the tags of the file
     if (hasDjiRawThermal(filePath)) {
-        result.calibration.valid = true;
-    } else {
-        result.calibration = extractThermalCalibration(filePath);
+        // DJI: DJI's own conversion, not the Planck formula of FLIR, and no calibration (no tag is read: the raster
+        // helper reads none)
+        if (auto temperatures = djiRawToTemperatureMap(result.raw, filePath))
+            result.grid.temperatures = std::move(*temperatures);
+        return result;
     }
+
+    // FLIR: the calibration of the tags of the file
+    result.calibration = extractThermalCalibration(filePath);
     if (result.calibration.valid)
         result.grid.temperatures = rawToTemperatureMap(result.raw, result.calibration);
     return result;

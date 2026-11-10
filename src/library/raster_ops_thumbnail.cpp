@@ -338,8 +338,11 @@ float sampleGrid(const std::vector<float>& grid, int width, int height, double g
 // The thumbnail of an R-JPEG the visualisation parameters colour (FR-RAS-15): its temperatures, from the raw
 // thermal data of the camera and not from the colour preview GDAL reads (FR-RAS-14), in the unit of the thermal
 // formula (CELSIUS when the parameters name none), over the rescale or else the minimum to the maximum of the image:
-// the coldest pixel has the first colour of the colormap and the hottest the last. Nothing when the parameters do not
-// ask for a thermal rendering, or the file is no R-JPEG with temperatures (the caller renders it as any raster).
+// the coldest pixel has the first colour of the colormap and the hottest the last. An R-JPEG whose raw counts no
+// conversion turns into temperatures (DJI, whose conversion is DJI's own) is coloured by its raw counts, from their
+// minimum to their maximum: a thermal formula gives them no unit, and the rescale applies only without one (with a
+// formula it is in a unit of temperature). Nothing when the parameters do not ask for a thermal rendering, or the file
+// is no R-JPEG (the caller renders it as any raster).
 std::optional<RasterImage> renderRJpegThumbnail(const fs::path& imagePath, int thumbSize, const ThumbVisParams& vis) {
     if (!vis.formula.empty() && !isThermalFormulaId(vis.formula)) return std::nullopt;
     if (vis.formula.empty() && vis.colormap.empty()) return std::nullopt;
@@ -352,34 +355,44 @@ std::optional<RasterImage> renderRJpegThumbnail(const fs::path& imagePath, int t
         LOGD << "No thermal rendering of " << io::toUtf8(imagePath) << ": " << e.what();
         return std::nullopt;
     }
-    if (!rjpeg || rjpeg->grid.temperatures.empty()) return std::nullopt;
+    if (!rjpeg) return std::nullopt;
 
     auto& ve = VegetationEngine::instance();
     const std::string colormapId = vis.colormap.empty() ? "ironbow" : vis.colormap;
     const Colormap* colormap = ve.getColormap(colormapId);
     if (!colormap) throw InvalidArgsException("Unknown colormap: " + colormapId);
-    const ThermalFormulaConversion unit = celsiusFormulaConversion(vis.formula.empty() ? "CELSIUS" : vis.formula);
 
-    // The grid in the unit of the formula, NODATA_SENTINEL where no temperature can be told
+    // The grid in the unit of the formula (or the raw counts without a unit), NODATA_SENTINEL where no temperature
+    // can be told
     const int width = rjpeg->grid.width;
     const int height = rjpeg->grid.height;
-    std::vector<float> grid(rjpeg->grid.temperatures.size());
+    const bool rawCounts = !rjpeg->hasTemperatures();
+    std::vector<float> grid(static_cast<size_t>(width) * height);
     float vMin = std::numeric_limits<float>::max();
     float vMax = std::numeric_limits<float>::lowest();
-    for (size_t i = 0; i < grid.size(); i++) {
-        const float t = rjpeg->grid.temperatures[i];
-        if (!isGridTemperature(t)) {
-            grid[i] = NODATA_SENTINEL;
-            continue;
+    if (rawCounts) {
+        for (size_t i = 0; i < grid.size(); i++) {
+            grid[i] = static_cast<float>(rjpeg->raw.data[i]);
+            vMin = std::min(vMin, grid[i]);
+            vMax = std::max(vMax, grid[i]);
         }
-        grid[i] = static_cast<float>(unit.conversion.apply(t));
-        vMin = std::min(vMin, grid[i]);
-        vMax = std::max(vMax, grid[i]);
+    } else {
+        const ThermalFormulaConversion unit = celsiusFormulaConversion(vis.formula.empty() ? "CELSIUS" : vis.formula);
+        for (size_t i = 0; i < grid.size(); i++) {
+            const float t = rjpeg->grid.temperatures[i];
+            if (!isGridTemperature(t)) {
+                grid[i] = NODATA_SENTINEL;
+                continue;
+            }
+            grid[i] = static_cast<float>(unit.conversion.apply(t));
+            vMin = std::min(vMin, grid[i]);
+            vMax = std::max(vMax, grid[i]);
+        }
     }
     if (vMin > vMax) return std::nullopt;
 
     std::pair<float, float> range = {vMin, vMax > vMin ? vMax : vMin + 1.0f};
-    if (!vis.rescale.empty()) range = parseRescaleRange(vis.rescale);
+    if (!vis.rescale.empty() && !(rawCounts && !vis.formula.empty())) range = parseRescaleRange(vis.rescale);
 
     int targetWidth = 0, targetHeight = 0;
     computeThumbTargetSize(width, height, thumbSize, targetWidth, targetHeight);

@@ -12,20 +12,24 @@
 
 namespace ddb {
 
+// The radiometric calibration of a thermal camera: the Planck constants that turn its raw counts into temperatures
+// (rawToTemperature), and what the camera was set to for the measurement. Every field is one the file says (FLIR: its
+// XMP tags), never a default: a calibration is valid only when the five Planck constants were read, and a measurement
+// field the file does not have is empty (the raster API reports only the fields that are set).
 struct ThermalCalibration {
-    double planckR1 = 21106.77;
-    double planckB = 1501.0;
-    double planckF = 1.0;
-    double planckO = -7340.0;
-    double planckR2 = 0.012545258;
-    double emissivity = 0.95;
-    double objectDistance = 5.0;
-    double reflectedApparentTemperature = 20.0;
-    double atmosphericTemperature = 20.0;
-    double relativeHumidity = 50.0;
-    double irWindowTemperature = 20.0;
-    double irWindowTransmission = 1.0;
-    bool valid = false;
+    double planckR1 = 0.0;
+    double planckB = 0.0;
+    double planckF = 0.0;
+    double planckO = 0.0;
+    double planckR2 = 0.0;
+    std::optional<double> emissivity;
+    std::optional<double> objectDistance;
+    std::optional<double> reflectedApparentTemperature;
+    std::optional<double> atmosphericTemperature;
+    std::optional<double> relativeHumidity;
+    std::optional<double> irWindowTemperature;
+    std::optional<double> irWindowTransmission;
+    bool valid = false; // the Planck constants were read from the file: the raw counts are temperatures
 };
 
 // R-JPEG raw thermal data extracted from FLIR APP1 segment
@@ -51,7 +55,14 @@ bool hasThermalTags(const std::string &filePath);
 bool isThermalImage(const std::string &filePath, std::optional<bool> thermalTags = std::nullopt);
 bool isThermalImageFromExif(const std::string &make, const std::string &model);
 
-// Calibration extraction
+// Whether a picture is one of a thermal camera, as the scan of an entry marks it (sensorCategory "thermal", FR-RAS-13):
+// a DJI picture only when it carries the raw thermal image of the camera (hasDjiRawThermal), whatever its model, since
+// the wide and zoom pictures of a thermal drone (M30T, M3T, M2EA, H20N, H20T, H30T) have the model of the thermal one;
+// any other camera by its make and model (isThermalImageFromExif)
+bool isThermalPicture(const std::string &make, const std::string &model, const std::string &filePath);
+
+// The calibration the tags of the file give (FLIR XMP). DJI tags give measurement parameters, never a valid calibration:
+// the raw counts of DJI cameras are not those of the Planck formula (see djiRawToTemperatureMap)
 ThermalCalibration extractThermalCalibration(const std::string &filePath);
 
 // R-JPEG raw data extraction. An R-JPEG is a JPEG that carries the raw sensor counts of a thermal camera: FLIR (the
@@ -68,9 +79,18 @@ RawThermalData extractRJpegRawThermal(const std::string &filePath);
 // extractRJpegRawThermal reads the same segments. Only the header of the file is read.
 bool hasDjiRawThermal(const std::string &filePath);
 
-// Temperature conversion
+// Temperature conversion (Planck, FLIR): degrees Celsius, NaN for a raw count the calibration cannot convert (no
+// temperature: the pixel has no value)
 double rawToTemperature(uint16_t raw, const ThermalCalibration &cal);
 std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal);
+
+// The extension point of DJI's own conversion of the raw counts of a DJI R-JPEG into degrees Celsius (dji_irp of the DJI
+// Thermal SDK). The raw counts of DJI cameras are not those of the FLIR Planck formula: their conversion depends on the
+// camera and on the measurement parameters of the file (APP4), and only DJI's conversion gives the temperatures the DJI
+// software shows. It is not available (the SDK is not distributed with DroneDB, its license does not allow it), so this
+// gives nothing and the raw counts of a DJI R-JPEG stay raw counts without a unit (FR-RAS-14). A conversion put here must
+// give the temperatures of the DJI Thermal SDK samples (M2EA, H20T, H20N) as dji_irp gives them.
+std::optional<std::vector<float>> djiRawToTemperatureMap(const RawThermalData &raw, const std::string &filePath);
 
 // Check if a GeoTIFF contains direct temperature values (e.g., ODM output)
 bool isDirectTemperatureRaster(const std::string &filePath);
@@ -89,16 +109,18 @@ struct TemperatureData {
 
 TemperatureData readTemperatureData(const std::string &filePath);
 
-// The temperatures of an R-JPEG, as the raster API reads them (FR-RAS-14): the raw counts of the camera with their
-// calibration. Nothing for a file that is not an R-JPEG. grid.temperatures (degrees Celsius, one per raw count,
-// grid.width x grid.height) is empty when the raw counts have no calibration to turn them into temperatures: the
-// file is an R-JPEG, but no temperature can be told. DJI needs no tag (its calibration is the default one), FLIR
-// reads its tags (a RawThermalData of a FLIR file needs the metadata reader, which the raster helper does not
-// have: it throws there).
+// The temperatures of an R-JPEG, as the raster API reads them (FR-RAS-14): the raw counts of the camera, and their
+// temperatures when they can be told. Nothing for a file that is not an R-JPEG. grid.temperatures (degrees Celsius, one
+// per raw count, grid.width x grid.height) is empty when no conversion of the raw counts is known: the file is an
+// R-JPEG, its values are raw counts without a unit. FLIR: the Planck formula with the calibration of its tags (a
+// RawThermalData of a FLIR file needs the metadata reader, which the raster helper does not have: it throws there).
+// DJI: DJI's own conversion (djiRawToTemperatureMap), which is not available: raw counts, no calibration.
 struct RJpegThermal {
     RawThermalData raw;
     ThermalCalibration calibration;
     TemperatureData grid;
+
+    bool hasTemperatures() const { return !grid.temperatures.empty(); }
 };
 std::optional<RJpegThermal> readRJpegThermal(const std::string &filePath);
 void pixelToGeo(double px, double py, const double geoTransform[6],
