@@ -24,6 +24,9 @@
 #include <fstream>
 #include <cctype>
 #include <cmath>
+#include <cstddef>
+#include <cstring>
+#include <iterator>
 #include <algorithm>
 #include <limits>
 #include <numeric>
@@ -199,10 +202,9 @@ static void locateRawData(const std::vector<uint8_t> &data, size_t flirSegmentSt
     }
 }
 
-// Locates the raw UInt16 thermal block of a FLIR or DJI R-JPEG. The FFF record directory is not
-// parsed: the segment after the magic and 3 index bytes holds the raw values directly (DJI) or
-// FFF sub-segments, so the block is found by its size (from the XMP, or a common sensor size)
-// and the range of its values.
+// Locates the raw UInt16 thermal block of a FLIR APP1 segment that holds no FFF records (a file with them is read
+// from its RawData record, see fffRawThermal): the segment after the magic and 3 index bytes holds the raw values,
+// so the block is found by its size (from the XMP, or a common sensor size) and the range of its values.
 static FlirSegmentInfo findFlirSegment(const std::string &filePath, const FlirTags &tags) {
     FlirSegmentInfo info;
 
@@ -238,6 +240,256 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath, const FlirTa
     locateRawData(data, *flirSegmentStart, info);
     return info;
 }
+
+// ---- FLIR FFF records ----
+//
+// The FLIR APP1 segments of an R-JPEG hold an FFF file, split in segments of at most 64 KB: each payload is "FLIR\0",
+// a byte, the index of the segment and the index of the last one, then its part of the FFF data. The FFF data starts
+// with a header of 64 bytes ("FFF\0" or "AFF\0", the version at 0x14, the offset of the record directory at 0x18 and
+// its number of entries at 0x1c), whose byte order is the one that reads a version from 100 to 199. Each entry of the
+// directory has 32 bytes: the type of the record (int16u at 0x00), its offset in the FFF data (int32u at 0x0c) and
+// its length (int32u at 0x10). The records read here are RawData (type 1: the raw thermal image) and CameraInfo
+// (type 0x20: the Planck constants and the measurement parameters). A record has its own byte order: its first
+// int16u reads below 0x100 in it. This is the layout ExifTool documents (Image::ExifTool::FLIR, ProcessFLIR, the
+// CameraInfo and RawData tables).
+
+namespace {
+
+// The bytes of a JPEG file; empty when the file does not start as a JPEG (SOI), so that no other raster is read whole
+std::vector<uint8_t> readJpegBytes(const std::string &filePath) {
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    if (!file.is_open()) return {};
+    uint8_t soi[2] = {};
+    file.read(reinterpret_cast<char *>(soi), 2);
+    if (file.gcount() != 2 || soi[0] != 0xFF || soi[1] != 0xD8) return {};
+    file.seekg(0);
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+uint16_t get16(const std::vector<uint8_t> &d, size_t at, bool bigEndian) {
+    return bigEndian ? static_cast<uint16_t>((d[at] << 8) | d[at + 1])
+                     : static_cast<uint16_t>(d[at] | (d[at + 1] << 8));
+}
+
+uint32_t get32(const std::vector<uint8_t> &d, size_t at, bool bigEndian) {
+    uint32_t v = 0;
+    for (int i = 0; i < 4; i++) {
+        const uint32_t byte = d[at + (bigEndian ? i : 3 - i)];
+        v = (v << 8) | byte;
+    }
+    return v;
+}
+
+float getFloat(const std::vector<uint8_t> &d, size_t at, bool bigEndian) {
+    const uint32_t bits = get32(d, at, bigEndian);
+    float value;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+// The FFF data of the FLIR APP1 segments of a JPEG (the bytes of the file), in the order of their index: empty when the
+// file has none, or when a segment is missing
+std::vector<uint8_t> flirFffData(const std::vector<uint8_t> &file) {
+    if (file.size() < 4 || file[0] != 0xFF || file[1] != 0xD8) return {};
+
+    struct Part {
+        size_t offset = 0;
+        size_t size = 0;
+        bool present = false;
+    };
+    std::vector<Part> parts;
+    int last = -1;
+
+    size_t pos = 2;
+    while (pos + 4 <= file.size() && file[pos] == 0xFF) {
+        const uint8_t marker = file[pos + 1];
+        if (marker == 0xFF) { // a fill byte
+            pos++;
+            continue;
+        }
+        if (marker == 0xDA || marker == 0xD9) break; // start of scan, end of image: the segments are over
+        if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD8)) { // no length
+            pos += 2;
+            continue;
+        }
+        const size_t length = static_cast<size_t>(file[pos + 2]) * 256 + file[pos + 3];
+        if (length < 2 || pos + 2 + length > file.size()) break;
+        const size_t payload = pos + 4;
+        const size_t size = length - 2;
+
+        if (marker == 0xE1 && size >= 8 && std::memcmp(&file[payload], "FLIR\0", 5) == 0) {
+            const int index = file[payload + 6];
+            const int lastIndex = file[payload + 7];
+            if (last < 0) {
+                last = lastIndex;
+                parts.resize(static_cast<size_t>(last) + 1);
+            }
+            // A segment of another FFF file (another last index), or one seen twice, is not part of this one
+            if (lastIndex == last && index <= last && !parts[index].present)
+                parts[index] = {payload + 8, size - 8, true};
+        }
+        pos += 2 + length;
+    }
+
+    std::vector<uint8_t> fff;
+    for (const Part &part : parts) {
+        if (!part.present) return {};
+        fff.insert(fff.end(), file.begin() + static_cast<std::ptrdiff_t>(part.offset),
+                   file.begin() + static_cast<std::ptrdiff_t>(part.offset + part.size));
+    }
+    return fff;
+}
+
+// A record of the FFF data: where it is, its length and its byte order
+struct FffRecord {
+    size_t offset = 0;
+    size_t length = 0;
+    bool bigEndian = true;
+};
+
+// The records of the FFF data that are read here
+struct FffRecords {
+    std::optional<FffRecord> rawData;
+    std::optional<FffRecord> cameraInfo;
+};
+
+constexpr uint16_t kFffRawData = 0x01;
+constexpr uint16_t kFffCameraInfo = 0x20;
+
+// The RawData and CameraInfo records of the FFF data (the first of each type); nothing when it is no FFF data
+std::optional<FffRecords> fffRecords(const std::vector<uint8_t> &fff) {
+    if (fff.size() < 0x40) return std::nullopt;
+    if (std::memcmp(fff.data(), "FFF\0", 4) != 0 && std::memcmp(fff.data(), "AFF\0", 4) != 0) return std::nullopt;
+
+    // The byte order of the header: the one that reads a version from 100 to 199
+    const auto knownVersion = [&](bool bigEndian) {
+        const uint32_t version = get32(fff, 0x14, bigEndian);
+        return version >= 100 && version < 200;
+    };
+    bool bigEndian = true;
+    if (!knownVersion(true)) {
+        if (!knownVersion(false)) return std::nullopt;
+        bigEndian = false;
+    }
+
+    const size_t directory = get32(fff, 0x18, bigEndian);
+    const size_t entries = get32(fff, 0x1c, bigEndian);
+    if (directory > fff.size() || entries > (fff.size() - directory) / 32) return std::nullopt;
+
+    FffRecords records;
+    for (size_t i = 0; i < entries; i++) {
+        const size_t entry = directory + i * 32;
+        const uint16_t type = get16(fff, entry, bigEndian);
+        if (type != kFffRawData && type != kFffCameraInfo) continue;
+        auto &slot = type == kFffRawData ? records.rawData : records.cameraInfo;
+        if (slot) continue;
+
+        const size_t offset = get32(fff, entry + 0x0c, bigEndian);
+        const size_t length = get32(fff, entry + 0x10, bigEndian);
+        // A record outside the data, or too short to say its byte order, is not read
+        if (offset > fff.size() || length > fff.size() - offset || length < 2) continue;
+        // The first int16u of a record reads below 0x100 in the byte order of the record
+        const bool recordBigEndian = get16(fff, offset, bigEndian) >= 0x100 ? !bigEndian : bigEndian;
+        slot = FffRecord{offset, length, recordBigEndian};
+    }
+    return records;
+}
+
+// The FFF data of the FLIR APP1 segments of a file and its records; nothing when the file has none
+struct FlirFff {
+    std::vector<uint8_t> data;
+    FffRecords records;
+};
+
+std::optional<FlirFff> readFlirFff(const std::string &filePath) {
+    FlirFff result;
+    result.data = flirFffData(readJpegBytes(filePath));
+    const auto records = fffRecords(result.data);
+    if (!records) return std::nullopt;
+    result.records = *records;
+    return result;
+}
+
+// The raw thermal image of the RawData record: its width (int16u at 0x02) and height (int16u at 0x04), and the raw
+// counts from 0x20 on, int16u in the byte order of the record. Nothing when the counts are in a PNG image (the format
+// of the FLIR handheld cameras): decoding it needs GDAL, which only the raster helper opens user data with, so its
+// raw counts are not read (the picture is its colour preview).
+std::optional<RawThermalData> fffRawThermal(const std::vector<uint8_t> &fff, const FffRecord &record) {
+    if (record.length < 0x20) return std::nullopt;
+    const int width = get16(fff, record.offset + 0x02, record.bigEndian);
+    const int height = get16(fff, record.offset + 0x04, record.bigEndian);
+    if (width <= 0 || height <= 0) return std::nullopt;
+
+    const size_t start = record.offset + 0x20;
+    const uint8_t pngSignature[] = {0x89, 'P', 'N', 'G'};
+    if (record.length >= 0x24 && std::memcmp(&fff[start], pngSignature, 4) == 0) {
+        LOGD << "The FLIR raw thermal image is a PNG image, which is not decoded here";
+        return std::nullopt;
+    }
+
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+    if (record.length - 0x20 < pixelCount * 2) return std::nullopt;
+
+    RawThermalData raw;
+    raw.data.resize(pixelCount);
+    for (size_t i = 0; i < pixelCount; i++) raw.data[i] = get16(fff, start + i * 2, record.bigEndian);
+    raw.width = width;
+    raw.height = height;
+    raw.valid = true;
+    return raw;
+}
+
+// The calibration of the CameraInfo record: the Planck constants (PlanckR1, PlanckB and PlanckF, floats at 0x58,
+// 0x5c and 0x60; PlanckO, int32s at 0x308; PlanckR2, float at 0x30c), valid only when the five are there and are
+// those of a camera (R1, B and R2 positive), and the measurement parameters: Emissivity (0x20), ObjectDistance (0x24,
+// m), ReflectedApparentTemperature, AtmosphericTemperature and IRWindowTemperature (0x28, 0x2c, 0x30: K, given in
+// degrees Celsius), IRWindowTransmission (0x34), RelativeHumidity (0x3c: a fraction, or a percentage when over 2, as
+// ExifTool reads it, given as a fraction) and AtmosphericTransAlpha1, Alpha2, Beta1, Beta2 and X (0x70 to 0x80). A field
+// beyond the end of the record, or that is not a number, is not set.
+ThermalCalibration fffCameraInfoCalibration(const std::vector<uint8_t> &fff, const FffRecord &record) {
+    ThermalCalibration cal;
+    const auto number = [&](size_t at) -> std::optional<double> {
+        if (at + 4 > record.length) return std::nullopt;
+        const double value = getFloat(fff, record.offset + at, record.bigEndian);
+        if (!std::isfinite(value)) return std::nullopt;
+        return value;
+    };
+    const auto celsius = [&](size_t at) -> std::optional<double> {
+        const auto kelvin = number(at);
+        if (!kelvin) return std::nullopt;
+        return *kelvin - 273.15;
+    };
+
+    cal.emissivity = number(0x20);
+    cal.objectDistance = number(0x24);
+    cal.reflectedApparentTemperature = celsius(0x28);
+    cal.atmosphericTemperature = celsius(0x2c);
+    cal.irWindowTemperature = celsius(0x30);
+    cal.irWindowTransmission = number(0x34);
+    cal.relativeHumidity = number(0x3c);
+    if (cal.relativeHumidity && *cal.relativeHumidity > 2) *cal.relativeHumidity /= 100.0;
+    cal.atmosphericTransAlpha1 = number(0x70);
+    cal.atmosphericTransAlpha2 = number(0x74);
+    cal.atmosphericTransBeta1 = number(0x78);
+    cal.atmosphericTransBeta2 = number(0x7c);
+    cal.atmosphericTransX = number(0x80);
+
+    const auto r1 = number(0x58);
+    const auto b = number(0x5c);
+    const auto f = number(0x60);
+    const auto r2 = number(0x30c);
+    if (r1 && b && f && r2 && 0x308 + 4 <= record.length && *r1 > 0 && *b > 0 && *r2 > 0) {
+        cal.planckR1 = *r1;
+        cal.planckB = *b;
+        cal.planckF = *f;
+        cal.planckO = static_cast<int32_t>(get32(fff, record.offset + 0x308, record.bigEndian));
+        cal.planckR2 = *r2;
+        cal.valid = true;
+    }
+    return cal;
+}
+
+} // anonymous namespace
 
 // ---- DJI raw thermal probe ----
 
@@ -374,7 +626,17 @@ RawThermalData extractRJpegRawThermal(const std::string &filePath) {
     RawThermalData dji = readDjiRawThermal(filePath);
     if (dji.valid) return dji;
 
-    // FLIR: the APP1 segment
+    // FLIR: the RawData record of the FFF data of the APP1 segments. A file with FFF records is read only from them: a
+    // raw image that is not read there (a PNG image, a record that is not whole) is not looked for elsewhere
+    if (const auto fff = readFlirFff(filePath)) {
+        if (!fff->records.rawData) return RawThermalData();
+        auto raw = fffRawThermal(fff->data, *fff->records.rawData);
+        if (!raw) return RawThermalData();
+        LOGD << "Extracted " << raw->data.size() << " raw thermal pixels from the FLIR RawData record of " << filePath;
+        return std::move(*raw);
+    }
+
+    // FLIR without FFF records: the raw block of the APP1 segment, found by its size and its values
     RawThermalData result;
     std::unique_ptr<ExifParser> tags;
     FlirSegmentInfo seg = findFlirSegment(filePath, [&] {
@@ -441,6 +703,17 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
 // ---- Calibration extraction ----
 
 ThermalCalibration extractThermalCalibration(const std::string &filePath) {
+    // FLIR: the CameraInfo record of the FFF data, where the camera writes its Planck constants. It is read from the
+    // bytes of the file, without the tag reader (the raster helper has none)
+    if (const auto fff = readFlirFff(filePath); fff && fff->records.cameraInfo) {
+        const ThermalCalibration fromRecord = fffCameraInfoCalibration(fff->data, *fff->records.cameraInfo);
+        if (fromRecord.valid) {
+            LOGD << "Found the FLIR calibration in the CameraInfo record of " << filePath;
+            return fromRecord;
+        }
+    }
+
+    // Else the tags of the file
     ThermalCalibration cal;
 
     // A reader that cannot work (no metadata-util) is not a problem of this file and propagates
@@ -748,7 +1021,12 @@ bool isThermalByGdalMetadata(const std::string &filePath) {
 bool contentSaysThermal(const std::string &filePath, const FlirTags &tags) {
     // The raw thermal image of a DJI camera, whatever its model (the probe is also what reads it)
     if (hasDjiRawThermal(filePath)) return true;
-    if (findFlirSegment(filePath, tags).found) return true;
+    // The raw thermal image of a FLIR camera: the RawData record of its FFF data, else the raw block of its APP1 segment
+    if (const auto fff = readFlirFff(filePath)) {
+        if (fff->records.rawData) return true;
+    } else if (findFlirSegment(filePath, tags).found) {
+        return true;
+    }
     return isThermalByGdalMetadata(filePath);
 }
 
@@ -888,6 +1166,7 @@ std::optional<RJpegThermal> readRJpegThermal(const std::string &filePath) {
     if (hasDjiRawThermal(filePath)) {
         // DJI: DJI's own conversion, not the Planck formula of FLIR, and no calibration (no tag is read: the raster
         // helper reads none)
+        result.dji = true;
         if (auto temperatures = djiRawToTemperatureMap(result.raw, filePath))
             result.grid.temperatures = std::move(*temperatures);
         return result;

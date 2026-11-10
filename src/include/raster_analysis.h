@@ -10,10 +10,13 @@
 #include <utility>
 #include <vector>
 
+#include "thermal.h"
+
 namespace ddb {
 
 struct TemperatureData;
 struct RawThermalData;
+struct DemContext;
 
 /**
  * The options that every raster value endpoint (value info, point, area statistics, profile, contours)
@@ -175,6 +178,26 @@ ValueHistogram binValues(const std::vector<double> &values, double lo, double hi
  * added: the indices the WMS vegetation-index layer can render from it (DDBGetRasterInfo).
  */
 std::string getRasterInfoJson(const std::string &path);
+
+/**
+ * The rules of the values of the first band of a raster that the value endpoints (value info, point, area, profile)
+ * share, so that they agree on what is a temperature (FR-RAS-14, D-022).
+ *
+ * bandValueConversion: the unit of the values and the conversion of a formula of the options into the unit it gives.
+ * The unit of the band is its unit type; for a thermal raster that has none, degrees Celsius, except for values that are
+ * no temperatures, which have no unit (""): the 8-bit colour preview of a picture, and the raw UInt16 counts of a sensor
+ * that no calibration converts (calibrated: bandRawCalibration gave one). A UInt16 band with a scale or an offset (the
+ * Landsat encoding) holds physical values, not raw counts. No formula keeps the unit of the band; a thermal formula
+ * (CELSIUS, KELVIN, FAHRENHEIT) converts from it; any other formula, or a thermal formula on thermal values without a
+ * unit (no temperatures), is a RefusedArgumentException ("No thermal calibration" for the latter, with the reason).
+ *
+ * bandRawCalibration: the Planck calibration that turns the raw UInt16 counts of a thermal band into temperatures, when
+ * the file has one; none for any other band, nor for a band with a scale or an offset.
+ */
+ThermalFormulaConversion bandValueConversion(const DemContext &dem, bool isThermal, bool calibrated,
+                                             const std::string &formula);
+std::optional<ThermalCalibration> bandRawCalibration(const DemContext &dem, bool isThermal,
+                                                     const std::string &filePath);
 
 } // namespace ddb
 

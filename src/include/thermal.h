@@ -13,9 +13,11 @@
 namespace ddb {
 
 // The radiometric calibration of a thermal camera: the Planck constants that turn its raw counts into temperatures
-// (rawToTemperature), and what the camera was set to for the measurement. Every field is one the file says (FLIR: its
-// XMP tags), never a default: a calibration is valid only when the five Planck constants were read, and a measurement
-// field the file does not have is empty (the raster API reports only the fields that are set).
+// (rawToTemperature), and what the camera was set to for the measurement. Every field is one the file says (FLIR: the
+// CameraInfo record of its FFF data, else its XMP tags), never a default: a calibration is valid only when the five
+// Planck constants were read, and a measurement field the file does not have is empty (the raster API reports only
+// the fields that are set). From the CameraInfo record, the temperatures are in degrees Celsius (the record has them in
+// K), the distance in metres and the humidity a fraction (0 to 1); from the XMP, as the tags say them.
 struct ThermalCalibration {
     double planckR1 = 0.0;
     double planckB = 0.0;
@@ -29,6 +31,12 @@ struct ThermalCalibration {
     std::optional<double> relativeHumidity;
     std::optional<double> irWindowTemperature;
     std::optional<double> irWindowTransmission;
+    // The coefficients of the atmospheric transmission (CameraInfo record only)
+    std::optional<double> atmosphericTransAlpha1;
+    std::optional<double> atmosphericTransAlpha2;
+    std::optional<double> atmosphericTransBeta1;
+    std::optional<double> atmosphericTransBeta2;
+    std::optional<double> atmosphericTransX;
     bool valid = false; // the Planck constants were read from the file: the raw counts are temperatures
 };
 
@@ -61,12 +69,14 @@ bool isThermalImageFromExif(const std::string &make, const std::string &model);
 // any other camera by its make and model (isThermalImageFromExif)
 bool isThermalPicture(const std::string &make, const std::string &model, const std::string &filePath);
 
-// The calibration the tags of the file give (FLIR XMP). DJI tags give measurement parameters, never a valid calibration:
-// the raw counts of DJI cameras are not those of the Planck formula (see djiRawToTemperatureMap)
+// The calibration of a FLIR file: the CameraInfo record of the FFF data of its FLIR APP1 segments (no tag reader is
+// needed), else its FLIR XMP tags. DJI tags give measurement parameters, never a valid calibration: the raw counts of
+// DJI cameras are not those of the Planck formula (see djiRawToTemperatureMap)
 ThermalCalibration extractThermalCalibration(const std::string &filePath);
 
 // R-JPEG raw data extraction. An R-JPEG is a JPEG that carries the raw sensor counts of a thermal camera: FLIR (the
-// FLIR APP1 segment) or DJI (the APP3 segments). The raw data of a file that is not an R-JPEG are the UInt16 band of
+// RawData record of the FFF data of its FLIR APP1 segments, when the counts are not a PNG image) or DJI (the APP3
+// segments). The raw data of a file that is not an R-JPEG are the UInt16 band of
 // a raster GDAL reads (a thermal GeoTIFF); the 8-bit colour bands of an R-JPEG are a preview, never raw data.
 RawThermalData extractRawThermalData(const std::string &filePath);
 
@@ -112,13 +122,15 @@ TemperatureData readTemperatureData(const std::string &filePath);
 // The temperatures of an R-JPEG, as the raster API reads them (FR-RAS-14): the raw counts of the camera, and their
 // temperatures when they can be told. Nothing for a file that is not an R-JPEG. grid.temperatures (degrees Celsius, one
 // per raw count, grid.width x grid.height) is empty when no conversion of the raw counts is known: the file is an
-// R-JPEG, its values are raw counts without a unit. FLIR: the Planck formula with the calibration of its tags (a
-// RawThermalData of a FLIR file needs the metadata reader, which the raster helper does not have: it throws there).
-// DJI: DJI's own conversion (djiRawToTemperatureMap), which is not available: raw counts, no calibration.
+// R-JPEG, its values are raw counts without a unit. FLIR: the Planck formula with the calibration of its CameraInfo
+// record, else of its XMP tags (a FLIR file without the FFF records needs the metadata reader, which the raster helper
+// does not have: it throws there). DJI: DJI's own conversion (djiRawToTemperatureMap), which is not available: raw
+// counts, no calibration (dji is true).
 struct RJpegThermal {
     RawThermalData raw;
     ThermalCalibration calibration;
     TemperatureData grid;
+    bool dji = false; // the raw counts of a DJI camera
 
     bool hasTemperatures() const { return !grid.temperatures.empty(); }
 };

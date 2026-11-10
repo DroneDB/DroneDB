@@ -3,9 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // Radiometric R-JPEGs (U-603: FR-RAS-13, FR-RAS-14, FR-RAS-15, FR-XC-24, D-012, D-022). A DJI R-JPEG carries the raw
-// thermal image of the camera in its APP3 segments; a FLIR R-JPEG carries it in its FLIR APP1 segment, and its Planck
-// calibration in its XMP. These tests write such pictures (a JPEG, an EXIF block with the make and model, the raw image)
-// so that no download is needed; the DJI thermal SDK samples (M2EA, H20T, H20N) are in
+// thermal image of the camera in its APP3 segments; a FLIR R-JPEG carries it, and its Planck calibration, in the
+// RawData and CameraInfo records of the FFF data of its FLIR APP1 segments (older writers: a raw block in the APP1
+// segment and the calibration in the XMP). These tests write such pictures (a JPEG, an EXIF block with the make and
+// model, the raw image) so that no download is needed; the DJI thermal SDK samples (M2EA, H20T, H20N) are in
 // tests/integration/thermal_test.cpp. The raw counts of a DJI camera need DJI's own conversion, which DroneDB does not
 // have: the raster API gives them as raw counts without a unit. The expected temperatures of the FLIR picture are
 // literals computed outside the code under test: the Planck formula (R1 21106.77, B 1501, F 1, O -7340, R2 0.012545258)
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -449,10 +451,13 @@ namespace
         EXPECT_FALSE(point["hasGeo"].get<bool>());
         EXPECT_EQ(pointOf(path, 63, 47)["value"], 22240);
 
-        // No temperature can be asked for: there is no calibration (DJI's conversion is not available)
+        // No temperature can be asked for: there is no calibration (DJI's conversion is not available), which the
+        // refusal says
         const auto [err, message] = pointErrorOf(path, 0, 0, "KELVIN");
         EXPECT_EQ(err, DDBERR_INVALIDARGS);
         EXPECT_NE(message.find("No thermal calibration"), std::string::npos) << message;
+        EXPECT_NE(message.find("raw sensor counts"), std::string::npos) << message;
+        EXPECT_NE(message.find("DJI's own conversion"), std::string::npos) << message;
         // A formula that does not exist is refused as on any raster
         const auto [unknownErr, unknownMessage] = pointErrorOf(path, 0, 0, "NOPE");
         EXPECT_EQ(unknownErr, DDBERR_INVALIDARGS);
@@ -507,10 +512,14 @@ namespace
         EXPECT_EQ(point["unit"], "");
         EXPECT_EQ(point["value"], kPreviewGrey);
 
-        // A thermal formula cannot make degrees of the colours (the byte 147 was 147 degrees Celsius)
+        // A thermal formula cannot make degrees of the colours (the byte 147 was 147 degrees Celsius): the refusal
+        // says that they are the colours of the preview, not raw counts nor anything about DJI
         const auto [err, message] = pointErrorOf(path, 10, 5, "CELSIUS");
         EXPECT_EQ(err, DDBERR_INVALIDARGS);
         EXPECT_NE(message.find("No thermal calibration"), std::string::npos) << message;
+        EXPECT_NE(message.find("colours of its preview"), std::string::npos) << message;
+        EXPECT_EQ(message.find("raw sensor counts"), std::string::npos) << message;
+        EXPECT_EQ(message.find("DJI"), std::string::npos) << message;
     }
 
     // ---------------------------------------------------------------- FLIR: the Planck calibration of its tags
@@ -580,6 +589,300 @@ namespace
         EXPECT_EQ(info["valueMin"], 15104);
         EXPECT_EQ(info["valueMax"], 22344);
         EXPECT_EQ(pointOf(path, 10, 5)["value"], 16204);
+
+        // A thermal formula is refused for want of the Planck constants: a FLIR picture has nothing to do with the
+        // conversion of DJI
+        const auto [err, message] = pointErrorOf(path, 10, 5, "CELSIUS");
+        EXPECT_EQ(err, DDBERR_INVALIDARGS);
+        EXPECT_NE(message.find("No thermal calibration"), std::string::npos) << message;
+        EXPECT_NE(message.find("no Planck constants"), std::string::npos) << message;
+        EXPECT_EQ(message.find("DJI"), std::string::npos) << message;
+    }
+
+    // ---------------------------------------------------------------- FLIR: the FFF records of the APP1 segments
+
+    // A FLIR R-JPEG keeps its Planck constants and its raw image in the FFF data of its FLIR APP1 segments, not in its
+    // XMP: the CameraInfo record (type 0x20) and the RawData record (type 1), as ExifTool documents them
+    // (Image::ExifTool::FLIR). No real FLIR picture is in the test data: these pictures are written here with the layout
+    // of a FLIR camera (a big-endian FFF header, little-endian records). The constants of their CameraInfo record are
+    // those of a FLIR Vue Pro R (R1 16528.178, B 1427.5, F 1, O -1307, R2 0.012874875); stored as floats, they are
+    // R1 16528.177734375 and R2 0.012874875217676163. The expected temperatures are literals of the Planck formula
+    // T = B / ln(R1 / (R2 * (raw + O)) + F) - 273.15 computed outside the code with those floats: 15104 -> 41.0155 C,
+    // 15124 -> 41.1146 C, 15204 -> 41.5103 C, 15224 -> 41.6090 C, 16204 -> 46.3498 C, 22344 -> 72.6997 C.
+
+    struct FffSpec
+    {
+        bool headerBigEndian = true;      // the FFF header and its record directory
+        bool cameraInfoBigEndian = false; // the CameraInfo record
+        bool rawBigEndian = false;        // the RawData record
+        bool pngRaw = false;              // the raw image is a PNG image (the format of the FLIR handheld cameras)
+        bool withCameraInfo = true;
+        float humidity = 0.5f;            // RelativeHumidity: a fraction, or a percentage
+        size_t segment = 1500;            // the FFF bytes in each FLIR APP1 segment
+    };
+
+    void putBytes(std::vector<uint8_t> &out, size_t at, uint32_t value, int size, bool bigEndian)
+    {
+        for (int i = 0; i < size; i++)
+        {
+            const int shift = 8 * (bigEndian ? size - 1 - i : i);
+            out[at + static_cast<size_t>(i)] = static_cast<uint8_t>((value >> shift) & 0xFF);
+        }
+    }
+
+    void putFloat(std::vector<uint8_t> &out, size_t at, float value, bool bigEndian)
+    {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        putBytes(out, at, bits, 4, bigEndian);
+    }
+
+    // The FFF data of a FLIR picture of kWidth x kHeight raw counts (flirRawAt)
+    std::vector<uint8_t> fffData(const FffSpec &spec)
+    {
+        const size_t entries = spec.withCameraInfo ? 2 : 1;
+        const size_t rawOffset = 0x40 + entries * 32;
+        const size_t rawLength = 0x20 + static_cast<size_t>(kWidth) * kHeight * 2;
+        const size_t cameraOffset = rawOffset + rawLength;
+        const size_t cameraLength = 0x320;
+        std::vector<uint8_t> fff(cameraOffset + (spec.withCameraInfo ? cameraLength : 0), 0);
+
+        // The header: "FFF\0", the creator (16 bytes), the version, the directory and its entries
+        std::memcpy(fff.data(), "FFF\0", 4);
+        const bool h = spec.headerBigEndian;
+        putBytes(fff, 0x14, 100, 4, h);
+        putBytes(fff, 0x18, 0x40, 4, h);
+        putBytes(fff, 0x1c, static_cast<uint32_t>(entries), 4, h);
+        const auto entry = [&](size_t i, uint16_t type, size_t offset, size_t length) {
+            const size_t at = 0x40 + i * 32;
+            putBytes(fff, at, type, 2, h);
+            putBytes(fff, at + 0x02, 1, 2, h);    // subtype
+            putBytes(fff, at + 0x04, 0x64, 4, h); // version
+            putBytes(fff, at + 0x08, 1, 4, h);    // index id
+            putBytes(fff, at + 0x0c, static_cast<uint32_t>(offset), 4, h);
+            putBytes(fff, at + 0x10, static_cast<uint32_t>(length), 4, h);
+        };
+        entry(0, 0x01, rawOffset, rawLength);
+        if (spec.withCameraInfo)
+            entry(1, 0x20, cameraOffset, cameraLength);
+
+        // RawData: its byte order (2), width and height, then the raw counts from 0x20
+        const bool r = spec.rawBigEndian;
+        putBytes(fff, rawOffset, 2, 2, r);
+        putBytes(fff, rawOffset + 0x02, kWidth, 2, r);
+        putBytes(fff, rawOffset + 0x04, kHeight, 2, r);
+        for (int y = 0; y < kHeight; y++)
+            for (int x = 0; x < kWidth; x++)
+                putBytes(fff, rawOffset + 0x20 + (static_cast<size_t>(y) * kWidth + x) * 2, flirRawAt(x, y), 2, r);
+        if (spec.pngRaw)
+        {
+            const uint8_t png[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+            std::memcpy(&fff[rawOffset + 0x20], png, sizeof(png));
+        }
+
+        if (spec.withCameraInfo)
+        {
+            const bool c = spec.cameraInfoBigEndian;
+            const size_t o = cameraOffset;
+            putBytes(fff, o, 2, 2, c);
+            putFloat(fff, o + 0x20, 0.95f, c);       // Emissivity
+            putFloat(fff, o + 0x24, 3.0f, c);        // ObjectDistance, m
+            putFloat(fff, o + 0x28, 293.15f, c);     // ReflectedApparentTemperature, K
+            putFloat(fff, o + 0x2c, 295.15f, c);     // AtmosphericTemperature, K
+            putFloat(fff, o + 0x30, 293.15f, c);     // IRWindowTemperature, K
+            putFloat(fff, o + 0x34, 1.0f, c);        // IRWindowTransmission
+            putFloat(fff, o + 0x3c, spec.humidity, c);
+            putFloat(fff, o + 0x58, 16528.178f, c);  // PlanckR1
+            putFloat(fff, o + 0x5c, 1427.5f, c);     // PlanckB
+            putFloat(fff, o + 0x60, 1.0f, c);        // PlanckF
+            putFloat(fff, o + 0x70, 0.006569f, c);   // AtmosphericTransAlpha1
+            putFloat(fff, o + 0x74, 0.01262f, c);    // AtmosphericTransAlpha2
+            putFloat(fff, o + 0x78, -0.002276f, c);  // AtmosphericTransBeta1
+            putFloat(fff, o + 0x7c, -0.00667f, c);   // AtmosphericTransBeta2
+            putFloat(fff, o + 0x80, 1.9f, c);        // AtmosphericTransX
+            putBytes(fff, o + 0x308, static_cast<uint32_t>(-1307), 4, c); // PlanckO, int32s
+            putFloat(fff, o + 0x30c, 0.012874875f, c);                    // PlanckR2
+        }
+        return fff;
+    }
+
+    // A picture of a FLIR camera with FFF records: the EXIF block, an XMP packet with the Planck constants of another
+    // camera (kFlirCalibration: the CameraInfo record is what the camera says), and the FFF data in FLIR APP1 segments
+    // ("FLIR\0", 0x01, the index of the segment, the index of the last one, then spec.segment bytes of the data)
+    fs::path writeFlirFffPicture(const fs::path &path, const FffSpec &spec)
+    {
+        const auto jpeg = plainJpeg(path.string() + ".tmp.jpg");
+        std::vector<uint8_t> out = {0xFF, 0xD8};
+        const auto exif = exifSegment("FLIR Systems AB", "FLIR Vue Pro R");
+        out.insert(out.end(), exif.begin(), exif.end());
+
+        std::string xmp = std::string("http://ns.adobe.com/xap/1.0/") + '\0' +
+                          "<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?>"
+                          "<x:xmpmeta xmlns:x='adobe:ns:meta/'><rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+                          "<rdf:Description rdf:about='' xmlns:FLIR='http://ns.flir.com/xmp/1.0/'";
+        for (const auto &[name, value] : kFlirCalibration)
+            xmp += " FLIR:" + name + "='" + value + "'";
+        xmp += "/></rdf:RDF></x:xmpmeta><?xpacket end='w'?>";
+        const auto xmpSegment = app1(xmp);
+        out.insert(out.end(), xmpSegment.begin(), xmpSegment.end());
+
+        const std::vector<uint8_t> fff = fffData(spec);
+        const size_t segments = (fff.size() + spec.segment - 1) / spec.segment;
+        for (size_t i = 0; i < segments; i++)
+        {
+            std::string payload("FLIR\0\x01", 6);
+            payload.push_back(static_cast<char>(i));
+            payload.push_back(static_cast<char>(segments - 1));
+            const size_t at = i * spec.segment;
+            payload.append(reinterpret_cast<const char *>(fff.data() + at), std::min(spec.segment, fff.size() - at));
+            const auto segment = app1(payload);
+            out.insert(out.end(), segment.begin(), segment.end());
+        }
+        out.insert(out.end(), jpeg.begin() + 2, jpeg.end());
+
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char *>(out.data()), static_cast<std::streamsize>(out.size()));
+        return path;
+    }
+
+    void expectVueProCalibration(const ThermalCalibration &cal)
+    {
+        ASSERT_TRUE(cal.valid);
+        EXPECT_DOUBLE_EQ(cal.planckR1, 16528.177734375);
+        EXPECT_DOUBLE_EQ(cal.planckB, 1427.5);
+        EXPECT_DOUBLE_EQ(cal.planckF, 1.0);
+        EXPECT_DOUBLE_EQ(cal.planckO, -1307.0);
+        EXPECT_DOUBLE_EQ(cal.planckR2, 0.012874875217676163);
+        ASSERT_TRUE(cal.emissivity && cal.objectDistance && cal.reflectedApparentTemperature &&
+                    cal.atmosphericTemperature && cal.irWindowTemperature && cal.irWindowTransmission &&
+                    cal.relativeHumidity);
+        EXPECT_NEAR(*cal.emissivity, 0.95, 1e-6);
+        EXPECT_NEAR(*cal.objectDistance, 3.0, 1e-6);
+        // 293.15 K and 295.15 K in degrees Celsius
+        EXPECT_NEAR(*cal.reflectedApparentTemperature, 20.0, 1e-4);
+        EXPECT_NEAR(*cal.atmosphericTemperature, 22.0, 1e-4);
+        EXPECT_NEAR(*cal.irWindowTemperature, 20.0, 1e-4);
+        EXPECT_NEAR(*cal.irWindowTransmission, 1.0, 1e-6);
+        EXPECT_NEAR(*cal.relativeHumidity, 0.5, 1e-6);
+        ASSERT_TRUE(cal.atmosphericTransAlpha1 && cal.atmosphericTransAlpha2 && cal.atmosphericTransBeta1 &&
+                    cal.atmosphericTransBeta2 && cal.atmosphericTransX);
+        EXPECT_NEAR(*cal.atmosphericTransAlpha1, 0.006569, 1e-7);
+        EXPECT_NEAR(*cal.atmosphericTransAlpha2, 0.01262, 1e-7);
+        EXPECT_NEAR(*cal.atmosphericTransBeta1, -0.002276, 1e-7);
+        EXPECT_NEAR(*cal.atmosphericTransBeta2, -0.00667, 1e-7);
+        EXPECT_NEAR(*cal.atmosphericTransX, 1.9, 1e-6);
+    }
+
+    TEST(RJpegThermal, theCalibrationOfAFlirRJpegIsTheOneOfItsCameraInfoRecord)
+    {
+        TestArea ta(TEST_NAME);
+        // The layout of a FLIR R-JPEG (a big-endian header, a little-endian record), a big-endian record, and the
+        // little-endian header of an FFF file; the humidity as a fraction or as a percentage
+        FffSpec flir;
+        FffSpec bigEndianRecord;
+        bigEndianRecord.cameraInfoBigEndian = true;
+        FffSpec littleEndianHeader;
+        littleEndianHeader.headerBigEndian = false;
+        littleEndianHeader.humidity = 50.0f;
+        int n = 0;
+        for (const FffSpec &spec : {flir, bigEndianRecord, littleEndianHeader})
+        {
+            SCOPED_TRACE(n);
+            const auto path = writeFlirFffPicture(ta.getPath("FLIR_FFF_" + std::to_string(n++) + ".JPG"), spec);
+            // Not the constants of the XMP (R1 21106.77): those of the camera, in its CameraInfo record
+            expectVueProCalibration(extractThermalCalibration(path.string()));
+        }
+    }
+
+    TEST(RJpegThermal, theRawImageOfAFlirRJpegIsTheOneOfItsRawDataRecord)
+    {
+        TestArea ta(TEST_NAME);
+        // The FFF data spans 6 APP1 segments of 1500 bytes, the raw image several of them
+        FffSpec flir;
+        FffSpec bigEndianRaw;
+        bigEndianRaw.rawBigEndian = true;
+        int n = 0;
+        for (const FffSpec &spec : {flir, bigEndianRaw})
+        {
+            SCOPED_TRACE(n);
+            const auto path = writeFlirFffPicture(ta.getPath("FLIR_RAW_" + std::to_string(n++) + ".JPG"), spec);
+            EXPECT_TRUE(isThermalImage(path.string()));
+            const RawThermalData raw = extractRawThermalData(path.string());
+            ASSERT_TRUE(raw.valid);
+            EXPECT_EQ(raw.width, kWidth);
+            EXPECT_EQ(raw.height, kHeight);
+            ASSERT_EQ(raw.data.size(), static_cast<size_t>(kWidth) * kHeight);
+            EXPECT_EQ(raw.data[0], 15104);
+            EXPECT_EQ(raw.data[10 + 5 * kWidth], 16204);
+            EXPECT_EQ(raw.data[63 + 47 * kWidth], 22344);
+        }
+    }
+
+    TEST(RJpegThermal, theRasterApiOfAFlirRJpegGivesTheTemperaturesOfItsCameraInfoRecord)
+    {
+        TestArea ta(TEST_NAME);
+        const auto path = writeFlirFffPicture(ta.getPath("FLIR_0010.JPG"), FffSpec());
+
+        const json info = valueInfoOf(path);
+        EXPECT_EQ(info["width"], kWidth);
+        EXPECT_EQ(info["height"], kHeight);
+        EXPECT_EQ(info["unit"], kCelsius);
+        EXPECT_TRUE(info["isThermal"].get<bool>());
+        EXPECT_NEAR(info["valueMin"].get<double>(), 41.0155, 0.01);
+        EXPECT_NEAR(info["valueMax"].get<double>(), 72.6997, 0.01);
+        ASSERT_TRUE(info.contains("calibration"));
+        const json &calibration = info["calibration"];
+        EXPECT_NEAR(calibration["planckR1"].get<double>(), 16528.1777, 1e-3);
+        EXPECT_NEAR(calibration["planckO"].get<double>(), -1307.0, 1e-9);
+        EXPECT_NEAR(calibration["reflectedApparentTemperature"].get<double>(), 20.0, 1e-4);
+        EXPECT_NEAR(calibration["relativeHumidity"].get<double>(), 0.5, 1e-6);
+        EXPECT_NEAR(calibration["atmosphericTransX"].get<double>(), 1.9, 1e-6);
+
+        const json point = pointOf(path, 10, 5);
+        EXPECT_NEAR(point["value"].get<double>(), 46.3498, 0.01);
+        EXPECT_EQ(point["rawValue"], 16204);
+        EXPECT_EQ(point["unit"], kCelsius);
+        const json kelvin = pointOf(path, 63, 47, "KELVIN");
+        EXPECT_EQ(kelvin["unit"], "K");
+        EXPECT_NEAR(kelvin["value"].get<double>(), 345.8497, 0.01);
+
+        char *output = nullptr;
+        ASSERT_EQ(DDBGetRasterAreaStatsPixelEx(path.string().c_str(), 0, 0, 1, 1, nullptr, &output), DDBERR_NONE)
+            << DDBGetLastError();
+        const json area = json::parse(std::string(output));
+        DDBFree(output);
+        // 15104, 15204, 15124, 15224
+        EXPECT_EQ(area["pixelCount"], 4);
+        EXPECT_NEAR(area["min"].get<double>(), 41.0155, 0.01);
+        EXPECT_NEAR(area["max"].get<double>(), 41.6090, 0.01);
+        EXPECT_NEAR(area["mean"].get<double>(), 41.3124, 0.01);
+    }
+
+    TEST(RJpegThermal, aFlirRawImageInAPngImageIsNotTakenForRawCounts)
+    {
+        TestArea ta(TEST_NAME);
+        // The raw image of the RawData record is a PNG image, which is not decoded: no raw count is read from the bytes
+        // of the record (nor from those of the APP1 segments), and the picture is its colour preview
+        FffSpec spec;
+        spec.pngRaw = true;
+        const auto path = writeFlirFffPicture(ta.getPath("FLIR_0011.JPG"), spec);
+
+        EXPECT_TRUE(isThermalImage(path.string()));
+        EXPECT_FALSE(extractRawThermalData(path.string()).valid);
+        EXPECT_FALSE(readRJpegThermal(path.string()).has_value());
+
+        const json info = valueInfoOf(path);
+        EXPECT_TRUE(info["isThermal"].get<bool>());
+        EXPECT_EQ(info["unit"], "");
+        EXPECT_FALSE(info.contains("calibration"));
+        EXPECT_EQ(pointOf(path, 10, 5)["value"], kPreviewGrey);
+
+        // The reason of the refusal is the colour preview, not raw counts nor DJI's conversion
+        const auto [err, message] = pointErrorOf(path, 10, 5, "CELSIUS");
+        EXPECT_EQ(err, DDBERR_INVALIDARGS);
+        EXPECT_NE(message.find("No thermal calibration"), std::string::npos) << message;
+        EXPECT_NE(message.find("colours of its preview"), std::string::npos) << message;
+        EXPECT_EQ(message.find("DJI"), std::string::npos) << message;
     }
 
     // ---------------------------------------------------------------- FR-RAS-15: the thumbnail colours the temperatures

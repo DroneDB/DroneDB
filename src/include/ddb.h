@@ -1642,7 +1642,7 @@ extern "C"
      * NULL options are DDBGetRasterPointValue (plus "unit"). The bbox of the options is not used.
      * The value of a pixel of an R-JPEG (FLIR or DJI) is the temperature of its raw thermal data with the calibration,
      * never the byte of the colour preview. An R-JPEG whose raw counts have no conversion (a DJI R-JPEG: its raw counts
-     * need DJI's own conversion, which libddb does not have; a FLIR R-JPEG without the Planck constants in its tags)
+     * need DJI's own conversion, which libddb does not have; a FLIR R-JPEG without the Planck constants in its file)
      * gives its raw count with no unit ("unit": ""), and one without raw data its colour byte with no unit; a thermal
      * formula is then DDBERR_INVALIDARGS (no thermal calibration). Changed in 2.3: they were labelled in degrees
      * Celsius (the raw counts of a DJI R-JPEG through FLIR's default Planck constants).

@@ -210,6 +210,9 @@ public:
         const double c10 = toValue(v10);
         const double c01 = toValue(v01);
         const double c11 = toValue(v11);
+        // A raw count the calibration has no temperature for (NaN) has no value: neither has the sample
+        if (!std::isfinite(c00) || !std::isfinite(c10) || !std::isfinite(c01) || !std::isfinite(c11))
+            return std::nullopt;
 
         const double top = c00 + fx * (c10 - c00);
         const double bot = c01 + fx * (c11 - c01);
@@ -305,28 +308,19 @@ std::string getRasterProfileJson(const std::string &filePath,
     const DemContext dem = openDem(filePath, 1, BandValueOptions{options.nodata});
     ProfileSampler sampler(dem);
 
-    GDALRasterBandH hBand = dem.band;
-    const GDALDataType dt = GDALGetRasterDataType(hBand);
-
-    std::string unit = dem.unit;
-
     const bool isThermal = detectIsThermalProfile(filePath);
-    ThermalCalibration cal;
-    const bool needsThermalCalib = isThermal && dt == GDT_UInt16;
-    if (needsThermalCalib) {
-        cal = extractThermalCalibration(filePath);
-        sampler.calibrate(cal);
-    }
+    // The raw UInt16 counts of a thermal sensor are temperatures with the calibration of the file (not those of a band
+    // with a scale or an offset, which are physical values)
+    const std::optional<ThermalCalibration> cal = bandRawCalibration(dem, isThermal, filePath);
+    if (cal) sampler.calibrate(*cal);
 
-    if (unit.empty() && isThermal) unit = "\xC2\xB0\x43"; // UTF-8 "°C"
-
-    // A thermal formula gives the values in its unit, converted from the unit of the band (D-022); any other
-    // formula has no value along a line (a RefusedArgumentException)
-    if (!options.formula.empty()) {
-        const ThermalFormulaConversion converted = thermalFormulaConversion(unit, options.formula);
-        sampler.convert(converted.conversion);
-        unit = converted.unit;
-    }
+    // The unit and the formula follow the rules of the point and the area (D-022, FR-RAS-14): degrees Celsius for a
+    // thermal raster without a unit type, no unit for the raw counts of a sensor without a calibration or for a colour
+    // preview, on which a thermal formula is refused (no thermal calibration); a thermal formula gives the values in
+    // its unit, converted from the unit of the band; any other formula has no value along a line
+    const ThermalFormulaConversion converted = bandValueConversion(dem, isThermal, cal.has_value(), options.formula);
+    sampler.convert(converted.conversion);
+    const std::string unit = converted.unit;
 
     const ProfilePath path = buildPath(dem, *line);
 
