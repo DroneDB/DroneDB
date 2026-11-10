@@ -26,7 +26,8 @@ struct ContourOptions {
     int                   bandIndex = 1;          // 1-based raster band index
     std::optional<double> nodata;       // NoData value that replaces the one of the band (FR-RAS-31)
     std::string           formula;      // a thermal formula (CELSIUS, KELVIN, FAHRENHEIT): the levels, the options below and
-                                        // the output are in its unit, converted from the unit of the band (D-022); "" = the band's
+                                        // the output are in its unit, converted from the unit of the band (D-022); "" = the band's.
+                                        // Any other formula (an index) is ignored, as in 2.2; one that does not exist is refused
 };
 
 /**

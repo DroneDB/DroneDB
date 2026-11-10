@@ -19,7 +19,10 @@
 #include "test.h"
 #include "testarea.h"
 
+#include "build_layout.h"
+#include "cog.h"
 #include "contour.h"
+#include "dbops.h"
 #include "ddb.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
@@ -30,6 +33,7 @@
 #include "raster_test_utils.h"
 #include "thermal.h"
 #include "tilerhelper.h"
+#include "utils.h"
 #include "vegetation.h"
 #include "vis_render.h"
 
@@ -302,7 +306,7 @@ namespace
     }
 
     // An index is no unit: the value info keeps its meaning (the stretch of the index), and a formula that does not
-    // exist is still refused by the values of a point
+    // exist is still refused by the values of a point and by the contours
     TEST(ThermalUnits, aFormulaThatIsNotThermalIsRefusedAtAPoint)
     {
         TestArea ta(TEST_NAME, true);
@@ -314,7 +318,7 @@ namespace
                      RefusedArgumentException);
         ContourOptions contours;
         contours.interval = 5.0;
-        contours.formula = "NDVI";
+        contours.formula = "NOPE";
         EXPECT_THROW(generateContoursJson(path, contours), RefusedArgumentException);
     }
 
@@ -656,5 +660,248 @@ namespace
         EXPECT_EQ(convertRescale("32,212", TemperatureUnit::Fahrenheit, TemperatureUnit::Celsius), "0,100");
         EXPECT_THROW(convertRescale("10", TemperatureUnit::Celsius, TemperatureUnit::Kelvin), InvalidArgsException);
         EXPECT_THROW(convertRescale("a,b", TemperatureUnit::Celsius, TemperatureUnit::Kelvin), InvalidArgsException);
+    }
+    // ---------------------------------------------------------------- contours of a layer styled with an index (2.2)
+
+    // A host of 2.2 passes the options of the layer to the contours, whose formula 2.2 ignored: an index (the Plant
+    // Health formula of the layer) is still ignored, so the contours are those of the band (K, on multiples of 5 K);
+    // a thermal formula converts; a formula that does not exist is refused
+    TEST(ThermalUnits, theContoursIgnoreAnIndexFormulaAsIn2_2)
+    {
+        TestArea ta(TEST_NAME, true);
+        ThermalSpec spec = kelvinSpec();
+        spec.epsg = 4326;
+        spec.originX = 10.0;
+        spec.originY = 45.0;
+        spec.pixel = 0.0001;
+        const std::string path = makeThermalRaster(ta.getPath("kelvin-geo.tif"), spec).string();
+
+        ContourOptions index;
+        index.interval = 5.0;
+        index.formula = "NDVI";
+        const json contours = json::parse(generateContoursJson(path, index));
+        EXPECT_EQ(contours["unit"], "K");
+        EXPECT_NEAR(contours["rasterMin"].get<double>(), 284.0, 1e-3);
+        EXPECT_NEAR(contours["min"].get<double>(), 285.0, 1e-4);
+        EXPECT_NEAR(contours["max"].get<double>(), 300.0, 1e-4);
+        EXPECT_EQ(contours["featureCount"], 4);
+
+        // The same through the C export, with the options of a layer styled with VARI
+        const auto contoursEx = [&](const char *formula, char **output) {
+            DDBRasterOptions options = {};
+            options.structSize = sizeof(options);
+            options.formula = formula;
+            return DDBGenerateContoursEx(path.c_str(), 5.0, 0, 0.0, std::nan(""), std::nan(""), 0.0, 1, &options,
+                                         output);
+        };
+        char *output = nullptr;
+        ASSERT_EQ(contoursEx("VARI", &output), DDBERR_NONE) << DDBGetLastError();
+        const json vari = json::parse(output);
+        DDBFree(output);
+        EXPECT_EQ(vari["unit"], "K");
+        EXPECT_NEAR(vari["min"].get<double>(), 285.0, 1e-4);
+
+        output = nullptr;
+        ASSERT_EQ(contoursEx("FAHRENHEIT", &output), DDBERR_NONE) << DDBGetLastError();
+        const json fahrenheit = json::parse(output);
+        DDBFree(output);
+        EXPECT_EQ(fahrenheit["unit"], kFahrenheit);
+        // 51.53 F to 87.17 F: the levels 55 F to 85 F
+        EXPECT_NEAR(fahrenheit["min"].get<double>(), 55.0, 1e-4);
+        EXPECT_NEAR(fahrenheit["max"].get<double>(), 85.0, 1e-4);
+
+        output = nullptr;
+        EXPECT_EQ(contoursEx("NOPE", &output), DDBERR_INVALIDARGS);
+        EXPECT_EQ(output, nullptr);
+    }
+
+    // ---------------------------------------------------------------- the COG of the build keeps the unit (D-021, D-022)
+
+    // The tiles of a GeoRaster come from the COG of its build, and planFormula reads the unit of its first band: a COG
+    // that lost "K" would be read as degrees Celsius, KELVIN would add 273.15 to 284..304 K and every default tile (the
+    // range of KELVIN, 233.15..423.15 K) would be white. The dataset build keeps the unit (warped to the tile grid, and
+    // encoded again at its own grid when it is a COG already), and a default KELVIN or CELSIUS tile of the COG is a
+    // gradient: 284..303.8 K is 26.8% to 37.2% of the range of KELVIN, grey levels 68 to 95
+    TEST(ThermalUnits, theCogOfTheBuildKeepsTheKelvinUnitAndItsDefaultTilesAreAGradient)
+    {
+        IndexFixture index(TEST_NAME, "");
+        ThermalSpec spec = kelvinSpec();
+        spec.epsg = 4326;
+        spec.originX = 10.0;
+        spec.originY = 45.0;
+        spec.pixel = 0.0001;
+        makeThermalRaster(index.root / "thermal.tif", spec);
+        {
+            // A thermal mosaic says which pixels have no value: the warp to the tile grid keeps the margin it adds
+            // without value (a raster without NoData gets an opaque margin of zeros, 0 K)
+            GDALDatasetH hDs = GDALOpen((index.root / "thermal.tif").string().c_str(), GA_Update);
+            ASSERT_NE(hDs, nullptr);
+            GDALSetRasterNoDataValue(GDALGetRasterBand(hDs, 1), -9999.0);
+            GDALClose(hDs);
+        }
+        addToIndex(index.db.get(), {(index.root / "thermal.tif").string()});
+
+        ASSERT_EQ(DDBBuild(index.root.string().c_str(), "thermal.tif", nullptr, true, false), DDBERR_NONE)
+            << DDBGetLastError();
+        fs::path cog;
+        for (const auto &entry : fs::recursive_directory_iterator(index.db->buildDirectory()))
+            if (entry.is_regular_file() && entry.path().filename() == CogFileName)
+                cog = entry.path();
+        ASSERT_FALSE(cog.empty()) << "no COG in the build folder";
+
+        const auto unitOf = [](const fs::path &raster) {
+            GDALDatasetH hDs = GDALOpen(raster.string().c_str(), GA_ReadOnly);
+            EXPECT_NE(hDs, nullptr) << raster;
+            if (hDs == nullptr)
+                return std::string("<cannot open>");
+            const char *unit = GDALGetRasterUnitType(GDALGetRasterBand(hDs, 1));
+            const std::string text = unit != nullptr ? unit : "";
+            GDALClose(hDs);
+            return text;
+        };
+        EXPECT_EQ(unitOf(cog), "K") << "the warp to the tile grid dropped the unit";
+
+        // A COG that is optimized already is encoded again at its own grid: the unit stays
+        const fs::path again = index.ta.getPath("again.tif");
+        buildCog(cog.string(), again.string(), BuildOptions(), true);
+        EXPECT_EQ(unitOf(again), "K") << "the encoding at its own grid dropped the unit";
+
+        // The value info of the COG with KELVIN is in K, not 273.15 K more
+        char *output = nullptr;
+        DDBRasterOptions kelvinOptions = {};
+        kelvinOptions.structSize = sizeof(kelvinOptions);
+        kelvinOptions.formula = "KELVIN";
+        ASSERT_EQ(DDBGetRasterValueInfoEx(cog.string().c_str(), &kelvinOptions, &output), DDBERR_NONE)
+            << DDBGetLastError();
+        const json info = json::parse(output);
+        DDBFree(output);
+        EXPECT_EQ(info["unit"], "K");
+        EXPECT_NEAR(info["valueMin"].get<double>(), 284.0, 0.5);
+        EXPECT_NEAR(info["valueMax"].get<double>(), 303.8, 0.5);
+
+        // The default tiles of the COG (no rescale: the range of the formula)
+        int z = 0;
+        BoundingBox<Projected2Di> b;
+        {
+            GDALTiler t(cog.string(), "", 256);
+            z = t.getMinMaxZ().max;
+            b = t.getMinMaxCoordsForZ(z);
+        }
+        const auto grey = [&](const char *formula, int x, int y) {
+            uint8_t *buffer = nullptr;
+            int size = 0;
+            const DDBErr err = DDBMemoryTileEx2(cog.string().c_str(), z, x, y, 256, false, false, nullptr, nullptr,
+                                                nullptr, formula, nullptr, "grayscale", nullptr, nullptr, &buffer,
+                                                &size);
+            EXPECT_EQ(err, DDBERR_NONE) << DDBGetLastError();
+            std::vector<uint8_t> out;
+            if (err != DDBERR_NONE)
+                return out;
+            const auto image = testutils::decodeImage(buffer, static_cast<size_t>(size));
+            DDBVSIFree(buffer);
+            for (size_t i = 0; i < image.bands[0].size(); i++)
+                if (!image.hasAlpha() || image.alpha()[i] > 0)
+                    out.push_back(image.bands[0][i]);
+            return out;
+        };
+        int bestX = b.min.x, bestY = b.min.y;
+        size_t best = 0;
+        for (int x = b.min.x; x <= b.max.x; x++)
+            for (int y = b.min.y; y <= b.max.y; y++)
+            {
+                const size_t count = grey("KELVIN", x, y).size();
+                if (count > best)
+                {
+                    best = count;
+                    bestX = x;
+                    bestY = y;
+                }
+            }
+        ASSERT_GT(best, 1000u);
+
+        const auto kelvin = grey("KELVIN", bestX, bestY);
+        const std::set<uint8_t> levels(kelvin.begin(), kelvin.end());
+        EXPECT_GT(levels.size(), 10u) << "a KELVIN tile of a K raster read as degrees Celsius is one saturated level";
+        EXPECT_GE(*levels.begin(), 60);
+        EXPECT_LE(*levels.rbegin(), 100);
+
+        // CELSIUS (-40..150 C): 10.85..30.65 C is grey levels 68 to 95 too; read as degrees Celsius, 284 C saturates
+        const auto celsius = grey("CELSIUS", bestX, bestY);
+        const std::set<uint8_t> celsiusLevels(celsius.begin(), celsius.end());
+        EXPECT_GT(celsiusLevels.size(), 10u);
+        EXPECT_LE(*celsiusLevels.rbegin(), 100);
+    }
+
+    // ---------------------------------------------------------------- a multi-band raster with a thermal formula
+
+    // The thermal formulas read the first band of the raster: the value info of a raster of three bands (a K band,
+    // then a reflectance band and a band of counts) with a thermal formula gives one stretch, that of the first band in
+    // the unit of the formula, not one per band and not one over the other bands
+    TEST(ThermalUnits, theValueInfoOfAMultiBandRasterWithAThermalFormulaStretchesItsFirstBand)
+    {
+        TestArea ta(TEST_NAME, true);
+        const std::string path = ta.getPath("three-bands.tif").string();
+        {
+            GDALDatasetH hDs =
+                GDALCreate(GDALGetDriverByName("GTiff"), path.c_str(), 100, 100, 3, GDT_Float32, nullptr);
+            ASSERT_NE(hDs, nullptr);
+            const double gt[6] = {1670000.0, 4.0, 0.0, 5645600.0, 0.0, -4.0};
+            GDALSetGeoTransform(hDs, const_cast<double *>(gt));
+            OGRSpatialReference srs;
+            srs.importFromEPSG(3857);
+            char *wkt = nullptr;
+            srs.exportToWkt(&wkt);
+            GDALSetProjection(hDs, wkt);
+            CPLFree(wkt);
+            std::vector<float> row(100);
+            for (int b = 1; b <= 3; b++)
+            {
+                GDALRasterBandH band = GDALGetRasterBand(hDs, b);
+                for (int y = 0; y < 100; y++)
+                {
+                    for (int x = 0; x < 100; x++)
+                        row[static_cast<size_t>(x)] = b == 1   ? static_cast<float>(284.0 + 0.2 * x)
+                                                      : b == 2 ? static_cast<float>(0.01 * y)
+                                                               : static_cast<float>(1000 + 10 * x + y);
+                    ASSERT_EQ(GDALRasterIO(band, GF_Write, 0, y, 100, 1, row.data(), 100, 1, GDT_Float32, 0, 0),
+                              CE_None);
+                }
+            }
+            GDALSetRasterUnitType(GDALGetRasterBand(hDs, 1), "K");
+            GDALClose(hDs);
+        }
+
+        // Without a formula: one stretch per band, in the values of each band
+        const json plain = json::parse(getRasterValueInfoJson(path));
+        EXPECT_EQ(plain["unit"], "K");
+        EXPECT_EQ(plain["stretch"].size(), 3u);
+
+        const json celsius = json::parse(getRasterValueInfoJson(path, formulaOptions("CELSIUS")));
+        EXPECT_EQ(celsius["unit"], kCelsius);
+        EXPECT_NEAR(celsius["valueMin"].get<double>(), 10.85, 1e-3);
+        EXPECT_NEAR(celsius["valueMax"].get<double>(), 30.65, 1e-3);
+        ASSERT_EQ(celsius["stretch"].size(), 1u);
+        EXPECT_NEAR(celsius["stretch"][0]["min"].get<double>(), 10.85, 1e-3);
+        EXPECT_NEAR(celsius["stretch"][0]["max"].get<double>(), 30.65, 1e-3);
+
+        const json kelvin = json::parse(getRasterValueInfoJson(path, formulaOptions("KELVIN")));
+        EXPECT_EQ(kelvin["unit"], "K");
+        ASSERT_EQ(kelvin["stretch"].size(), 1u);
+        EXPECT_NEAR(kelvin["stretch"][0]["min"].get<double>(), 284.0, 1e-3);
+        EXPECT_NEAR(kelvin["stretch"][0]["max"].get<double>(), 303.8, 1e-3);
+
+        const json fahrenheit = json::parse(getRasterValueInfoJson(path, formulaOptions("FAHRENHEIT")));
+        EXPECT_EQ(fahrenheit["unit"], kFahrenheit);
+        ASSERT_EQ(fahrenheit["stretch"].size(), 1u);
+        EXPECT_NEAR(fahrenheit["stretch"][0]["min"].get<double>(), 51.53, 1e-3);
+        EXPECT_NEAR(fahrenheit["stretch"][0]["max"].get<double>(), 87.17, 1e-3);
+
+        // The render of the formula reads the same band: the stretch of the value info gives a full gradient
+        const auto image = thumbnailOf(path, "CELSIUS", "10.85,30.65", nullptr);
+        ASSERT_GT(image.size(), 1000u);
+        const std::set<uint8_t> levels(image.begin(), image.end());
+        EXPECT_GT(levels.size(), 30u);
+        EXPECT_LE(*levels.begin(), 10);
+        EXPECT_GE(*levels.rbegin(), 245);
     }
 }

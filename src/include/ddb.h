@@ -1615,7 +1615,9 @@ extern "C"
     /** DDBGenerateContours with options (new in 2.2): the NoData value of the options replaces the one of the
      * band; the levels, the statistics and the elevations of the output are in the units of the band
      * (raw * scale + offset), or in the unit of a thermal formula of the options (CELSIUS, KELVIN, FAHRENHEIT,
-     * converted from the unit of the band: interval, minElev, maxElev and baseOffset are in it too; D-022, new in 2.3). */
+     * converted from the unit of the band: interval, minElev, maxElev and baseOffset are in it too; D-022, new in 2.3).
+     * Any other formula of the options (an index) is ignored, as in 2.2: the contours are those of the band; a
+     * formula that does not exist is DDBERR_INVALIDARGS. */
     DDB_DLL DDBErr DDBGenerateContoursEx(const char *rasterPath, double interval, int count, double baseOffset,
                                          double minElev, double maxElev, double simplifyTolerance, int bandIndex,
                                          const DDBRasterOptions *options, char **output);

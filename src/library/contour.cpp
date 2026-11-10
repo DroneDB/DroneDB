@@ -6,6 +6,7 @@
 #include "dem.h"
 #include "raster_stats.h"
 #include "thermal.h"
+#include "vegetation.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "json.h"
@@ -356,11 +357,18 @@ std::string generateContoursJson(const std::string &rasterPath,
     validateOptions(options);
     cancel::throwIfCanceled();
 
+    // A thermal formula gives the levels in its unit (below). Any other formula of the options (the index a layer
+    // is styled with) is ignored, as 2.2 ignored every formula: the contours are those of the values of the band.
+    // A formula that does not exist is refused.
+    if (!options.formula.empty() && !isThermalFormulaId(options.formula) &&
+        VegetationEngine::instance().getFormula(options.formula) == nullptr)
+        throw RefusedArgumentException("Unknown formula: " + options.formula);
+
     // --- Open raster ------------------------------------------------------
     DemContext dem = openDem(rasterPath, options.bandIndex, BandValueOptions{options.nodata});
     // A thermal formula gives the levels in its unit (D-022): the band model reads the values in it, so the
     // statistics, the levels and the elevations written back are all in that unit
-    if (!options.formula.empty()) {
+    if (isThermalFormulaId(options.formula)) {
         const ThermalFormulaConversion converted = thermalFormulaConversion(dem.unit, options.formula);
         const double scale = dem.hasScale ? dem.scale : 1.0;
         const double offset = dem.hasScale ? dem.offset : 0.0;
