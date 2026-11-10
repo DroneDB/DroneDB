@@ -1626,7 +1626,8 @@ extern "C"
      * that applies), "nodataInvalid" (the NoData value of the band cannot be held by its type),
      * "pixelCount" and "validPixelCount", "windowPixelCount" (with the bbox option: the source pixels in
      * it) and "stretch": the default stretch (one {min, max} per band, one for an index, none for a Byte
-     * raster of several bands).
+     * raster of several bands). Changed in 2.4.1: for a thermal raster that the GDAL statistics cannot serve, the
+     * values are read a window at a time (a 5.38 GB peak became 142 MB), with the same output.
      * @param filePath Path to the raster (the source file: its values and statistics are those of the file)
      * @param options see DDBRasterOptions, or NULL
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
@@ -1649,7 +1650,9 @@ extern "C"
                                             const DDBRasterOptions *options, char **output);
 
     /** Value statistics for a WGS84 rectangle (new in 2.4): the pixels of the file whose centre is inside it
-     * ("bounds" are those pixels), in the units of the band.
+     * ("bounds" are those pixels), in the units of the band. Changed in 2.4.1: the rectangle is read in windows
+     * (at most about 40 MB of pixel buffers, whatever its size); up to 2^23 values the output is identical to
+     * 2.4.0, above that count, min, max and median are exact and mean and std within a relative 2e-6.
      * @param filePath Path to the raster
      * @param minLon, minLat, maxLon, maxLat The rectangle (WGS84)
      * @param options see DDBRasterOptions (nodata), or NULL
@@ -1684,7 +1687,7 @@ extern "C"
     /** DDBGetRasterAreaStats with options (new in 2.4): the statistics of a rectangle of PIXELS, for a raster
      * that has no map (an R-JPEG). The options as for DDBGetRasterPointValuePixelEx: the NoData value leaves its
      * pixels out, a thermal formula gives the statistics in its unit ("unit"). NULL options are
-     * DDBGetRasterAreaStats.
+     * DDBGetRasterAreaStats. Changed in 2.4.1: read in windows, as DDBGetRasterAreaStatsEx.
      * @param filePath Path to the raster
      * @param x0, y0, x1, y1 The rectangle (inclusive pixels)
      * @param options see DDBRasterOptions (nodata, formula), or NULL
@@ -1789,7 +1792,9 @@ extern "C"
     DDB_DLL DDBErr DDBGetRasterPointValue(const char *filePath, int x, int y, char **output);
 
     /** Get value statistics (min/max/mean/stddev/median) for a rectangular area: the part of
-     * the rectangle inside the raster ("bounds"), its pixels with a value.
+     * the rectangle inside the raster ("bounds"), its pixels with a value. Changed in 2.4.1: the rectangle is read
+     * in windows (at most about 40 MB of pixel buffers, whatever its size); up to 2^23 values the output is
+     * identical to 2.4.0, above that count, min, max and median are exact and mean and std within a relative 2e-6.
      * @param filePath Path to raster
      * @param x0 Left X coordinate
      * @param y0 Top Y coordinate

@@ -616,3 +616,15 @@ Registry has to adopt first.
   indexes the staging folders (`.align-stage-`, `.mask-stage-`, `.merge-stage-`, `.bm3d-stage-`, `.cog-stage-`,
   `.copc-stage-` and 16 characters) that an interrupted operation left in a dataset, and the progress of
   `DDBBuildEx2` always reports `warping` (fraction 0) for a build that warps (FR-PRC-42).
+
+* 2026-11-11: 2.4.1 (ABI 2.4, a patch: no export is added or removed, `capabilities` is unchanged and
+  `abi.minor` stays 4). Behaviour that changed for the callers of the raster API, with no new export and no
+  schema or fixture change: the area statistics (`DDBGetRasterAreaStats`, `DDBGetRasterAreaStatsEx` and
+  `DDBGetRasterAreaStatsPixelEx`) read the raster in windows with at most about 40 MB of pixel buffers, so
+  the area of a large raster no longer exhausts the memory (the whole area of a 30000 x 30000 raster took
+  3547 MB of peak memory, 148 MB now); the result is identical up to 2^23 values, and above that `count`, `min`,
+  `max` and `median` are exact and `mean` and `std` are within a relative 2e-6 of the exact ones (compensated
+  sums). The thermal fallbacks, which read the values of a thermal raster that the GDAL statistics cannot serve
+  (the point, the area statistics and the value info of such a raster), read windows too (the value info of a
+  large raster: 5.38 GB down to 142 MB of peak memory), and the raw thermal data of a GDAL raster (a thermal
+  GeoTIFF) of more than 4 megapixels is refused instead of read whole.
