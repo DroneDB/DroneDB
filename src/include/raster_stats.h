@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "fs.h"
 #include "gdal_inc.h"
@@ -27,7 +28,16 @@ namespace ddb
         double stdDev = 0.0;
         uint64_t validCount = 0; // pixels with a value; 0 when the source of the statistics does not know it
         uint64_t pixelCount = 0; // width x height of the band, 0 when not known
+        // Read from a sample of at most the stretch budget of pixels (getStretchStatistics): then
+        // validCount counts the sampled pixels that have a value. False for exact statistics.
+        bool sampled = false;
     };
+
+    /// The most pixels of a band the default stretch of a render reads when the exact statistics of
+    /// the band are not known yet (2048 x 2048): a thumbnail runs in the confined gdal-util worker,
+    /// under a cpu time limit, and the exact pass over the bands of a large raster (every block of the
+    /// file decoded) does not fit in it.
+    inline constexpr uint64_t kStretchStatisticsMaxPixels = uint64_t{1} << 22;
 
     /**
      * Band statistics used to stretch non-Byte rasters (tiles, thumbnails), to describe a raster (value
@@ -58,6 +68,7 @@ namespace ddb
         {
             uint64_t fromSidecar = 0;
             uint64_t computed = 0;
+            uint64_t sampled = 0; // bands whose stretch statistics were read from a sample
         };
 
         static RasterStatsProvider &instance();
@@ -69,6 +80,22 @@ namespace ddb
         /// @throws GDALException when no pixel of the band has a value
         BandStatistics get(const std::string &path, GDALDatasetH ds, int band,
                            const std::optional<double> &nodata = std::nullopt, bool persist = false);
+
+        /// Statistics for the default stretch (D-041) of a render of `bands` (1-based) of the raster at
+        /// path, one per band in the order of `bands`, with a bounded read: the exact statistics when
+        /// they are known (in memory, in the sidecar), else read in one pass over all the bands that
+        /// lack them (a pixel-interleaved file is decoded once, not once per band). That pass is exact
+        /// (and kept as get() keeps it) when a band has at most `maxPixels` pixels; for a larger band it
+        /// reads at most `maxPixels` pixels of each band (sampleBandStatistics: an overview, else whole
+        /// blocks spread over the raster), and the result, marked sampled, is kept in memory only: never
+        /// in the sidecar, never returned by get(). A sample in which no pixel has a value is read once
+        /// more with 16 times the budget (exact when the band fits in it). Value info, contours and the
+        /// build use get().
+        /// @throws GDALException when no pixel of a band has a value
+        std::vector<BandStatistics> getStretchStatistics(const std::string &path, GDALDatasetH ds,
+                                                         const std::vector<int> &bands,
+                                                         const std::optional<double> &nodata = std::nullopt,
+                                                         uint64_t maxPixels = kStretchStatisticsMaxPixels);
 
         /// How the statistics returned so far were obtained. Tests read it to check that the
         /// statistics of a raster are computed once and that a sidecar is used when there is one.
@@ -109,6 +136,23 @@ namespace ddb
     /// mask of the dataset, and every sample that is not a number. The call can be canceled.
     /// @throws GDALException when no pixel has a value
     BandStatistics computeExactStatistics(GDALRasterBandH band, const std::optional<double> &nodata);
+
+    /// The exact statistics of several bands (1-based) of ds, as computeExactStatistics computes them
+    /// for one, read in one pass: a file whose blocks hold every band (pixel interleaving) is decoded
+    /// once, not once per band. The call can be canceled.
+    /// @throws GDALException when no pixel of a band has a value
+    std::vector<BandStatistics> computeBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
+                                                      const std::optional<double> &nodata);
+
+    /// The statistics of several bands (1-based) of ds from at most maxPixels pixels of each band, read in
+    /// one pass: the exact ones (computeBandStatistics) when a band has no more pixels than that; else
+    /// the pixels of the largest overview that has no more (every band has it), else those of whole blocks
+    /// of the raster spread on an even lattice, so that only the blocks read are decoded. Those are
+    /// marked sampled, and their validCount counts the pixels read that have a value. The call can be
+    /// canceled.
+    /// @throws GDALException when no pixel of a band has a value
+    std::vector<BandStatistics> sampleBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
+                                                     const std::optional<double> &nodata, uint64_t maxPixels);
 }
 
 #endif // RASTER_STATS_H

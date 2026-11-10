@@ -260,12 +260,6 @@ RasterImage translateToImage(GDALDatasetH hSrc, const ImageTranslation& spec) {
     return image;
 }
 
-// Display range of the source band (its minimum and maximum) for a stretch to 0-255
-ScaleRange bandRange(const fs::path& imagePath, GDALDatasetH hSrc, int band) {
-    const auto s = RasterStatsProvider::instance().get(io::toUtf8(imagePath), hSrc, band);
-    return {s.min, s.max};
-}
-
 // The thumbnail of a photo or a raster: its colours, or the first bands stretched to 0-255 for
 // data that is not 8-bit
 RasterImage renderPlainThumbnail(const fs::path& imagePath, int thumbSize) {
@@ -288,13 +282,14 @@ RasterImage renderPlainThumbnail(const fs::path& imagePath, int thumbSize) {
     computeThumbTargetSize(frameWidth, frameHeight, thumbSize, targetWidth, targetHeight);
 
     // Grey (and grey + alpha) is replicated to RGB; otherwise the first three bands.
-    // Only non-Byte data (DEM, thermal...) is stretched, from the raster statistics:
-    // 8-bit photos keep their colours.
+    // Only non-Byte data (DEM, thermal...) is stretched over the minimum to the maximum of each band,
+    // from the statistics of the stretch (the shown bands read in one pass, a sample of a large raster:
+    // the worker that renders a thumbnail runs under a cpu time limit): 8-bit photos keep their colours.
     const std::vector<int> bands = bandCount <= 2 ? std::vector<int>{1, 1, 1} : std::vector<int>{1, 2, 3};
     std::vector<ScaleRange> scales;
     if (!hasPalette && !isByte) {
-        for (int b : bands)
-            scales.push_back(bandRange(imagePath, hSrc, b));
+        for (const auto& s : RasterStatsProvider::instance().getStretchStatistics(io::toUtf8(imagePath), hSrc, bands))
+            scales.push_back({s.min, s.max});
     }
 
     const auto alpha = alphaSourceOf(hSrc, bandCount);
@@ -357,9 +352,10 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
     } else if (srcType != GDT_Byte) {
         double globalMin = std::numeric_limits<double>::max();
         double globalMax = std::numeric_limits<double>::lowest();
-        for (int b : bands) {
-            const auto [sMin, sMax] =
-                stretchRange(RasterStatsProvider::instance().get(io::toUtf8(imagePath), hSrc, b, visParams.nodata));
+        // The shown bands in one pass, a sample of a large raster (getStretchStatistics)
+        for (const auto& s :
+             RasterStatsProvider::instance().getStretchStatistics(io::toUtf8(imagePath), hSrc, bands, visParams.nodata)) {
+            const auto [sMin, sMax] = stretchRange(s);
             globalMin = std::min(globalMin, sMin);
             globalMax = std::max(globalMax, sMax);
         }

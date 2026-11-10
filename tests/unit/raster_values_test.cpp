@@ -642,6 +642,228 @@ namespace
         EXPECT_EQ(fromSidecar.min, 0.0);
     }
 
+    // ---------------------------------------------------------------- the statistics of a stretch within the worker limits
+
+    // A Float32 GeoTIFF of `bands` bands in tiles of 64 x 64 pixels, interleaved by pixel (every block holds
+    // every band, as in a multi-band raster of a scientific product)
+    fs::path makeTiledRaster(const fs::path &path, int width, int height, int bands,
+                             const std::function<double(int band, int x, int y)> &value,
+                             const std::optional<double> &nodata = std::nullopt)
+    {
+        char **opts = CSLSetNameValue(nullptr, "TILED", "YES");
+        opts = CSLSetNameValue(opts, "BLOCKXSIZE", "64");
+        opts = CSLSetNameValue(opts, "BLOCKYSIZE", "64");
+        opts = CSLSetNameValue(opts, "INTERLEAVE", "PIXEL");
+        GDALDatasetH hDs = GDALCreate(GDALGetDriverByName("GTiff"), path.string().c_str(), width, height, bands,
+                                      GDT_Float32, opts);
+        CSLDestroy(opts);
+        if (!hDs)
+            throw std::runtime_error("Cannot create the test raster");
+        std::vector<double> row(static_cast<size_t>(width));
+        for (int b = 1; b <= bands; b++)
+        {
+            GDALRasterBandH band = GDALGetRasterBand(hDs, b);
+            if (nodata)
+                GDALSetRasterNoDataValue(band, *nodata);
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                    row[static_cast<size_t>(x)] = value(b, x, y);
+                EXPECT_EQ(GDALRasterIO(band, GF_Write, 0, y, width, 1, row.data(), width, 1, GDT_Float64, 0, 0),
+                          CE_None);
+            }
+        }
+        GDALClose(hDs);
+        return path;
+    }
+
+    // Band b of a 512 x 512 raster in blocks of 64: 100 b + the column of the block + 10 x its row
+    double blockValue(int band, int x, int y)
+    {
+        return 100.0 * band + x / 64 + 10.0 * (y / 64);
+    }
+
+    // A band of at most the budget of pixels: the exact statistics, read once for all the bands, and
+    // kept for value info (get() does not compute them again)
+    TEST(RasterStats, theStretchOfASmallRasterIsTheExactStatistics)
+    {
+        TestArea ta(TEST_NAME, true);
+        testutils::GeoRasterSpec spec;
+        spec.width = 128;
+        spec.height = 128;
+        spec.bands = 3;
+        spec.type = GDT_UInt16;
+        spec.value = [](int band, int x, int y) { return band * 1000.0 + (x + y) * 4.0; };
+        const auto raster = testutils::createGeoRaster(ta.getPath("ortho16.tif"), spec);
+
+        auto &provider = RasterStatsProvider::instance();
+        provider.clear();
+        GDALDatasetH hDs = GDALOpen(raster.string().c_str(), GA_ReadOnly);
+        ASSERT_NE(hDs, nullptr);
+        const auto before = provider.counters();
+        const std::vector<BandStatistics> stats = provider.getStretchStatistics(raster.string(), hDs, {1, 2, 3, 2});
+        const auto afterStretch = provider.counters();
+        const BandStatistics band2 = provider.get(raster.string(), hDs, 2);
+        const auto afterGet = provider.counters();
+        GDALClose(hDs);
+
+        ASSERT_EQ(stats.size(), 4u);
+        // Band 2: 2000 + 4 (x + y), x + y in 0..254, mean 2000 + 4 x 127
+        EXPECT_EQ(stats[1].min, 2000.0);
+        EXPECT_EQ(stats[1].max, 3016.0);
+        EXPECT_NEAR(stats[1].mean, 2508.0, 1e-9);
+        EXPECT_EQ(stats[1].validCount, 16384u);
+        EXPECT_FALSE(stats[1].sampled);
+        EXPECT_EQ(stats[2].min, 3000.0);
+        EXPECT_EQ(stats[3].max, 3016.0);
+        EXPECT_EQ(afterStretch.computed - before.computed, 3u);
+        EXPECT_EQ(afterStretch.sampled, before.sampled);
+        EXPECT_EQ(band2.max, 3016.0);
+        EXPECT_EQ(afterGet.computed, afterStretch.computed);
+    }
+
+    // A larger band: whole blocks on an even lattice, at most the budget of pixels, the shown bands in one
+    // read. 64 blocks of 64 x 64 and a budget of 4 blocks: the middle block of each 4 x 4 cell of blocks,
+    // (2, 2), (6, 2), (2, 6) and (6, 6). The value info statistics stay exact.
+    TEST(RasterStats, theStretchOfALargeRasterReadsWholeBlocksWithinTheBudget)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = makeTiledRaster(ta.getPath("blocks.tif"), 512, 512, 3, blockValue);
+
+        auto &provider = RasterStatsProvider::instance();
+        provider.clear();
+        GDALDatasetH hDs = GDALOpen(raster.string().c_str(), GA_ReadOnly);
+        ASSERT_NE(hDs, nullptr);
+        const auto before = provider.counters();
+        const std::vector<BandStatistics> stats =
+            provider.getStretchStatistics(raster.string(), hDs, {1, 2, 3}, std::nullopt, 16384);
+        const auto afterStretch = provider.counters();
+        const BandStatistics exact = provider.get(raster.string(), hDs, 1);
+        const auto afterGet = provider.counters();
+        GDALClose(hDs);
+
+        ASSERT_EQ(stats.size(), 3u);
+        EXPECT_TRUE(stats[0].sampled);
+        EXPECT_EQ(stats[0].validCount, 16384u); // 4 blocks of 4096 pixels: the budget, no more
+        EXPECT_EQ(stats[0].pixelCount, 262144u);
+        EXPECT_EQ(stats[0].min, 122.0);
+        EXPECT_EQ(stats[0].max, 166.0);
+        EXPECT_NEAR(stats[0].mean, 144.0, 1e-9);
+        EXPECT_EQ(stats[2].min, 322.0);
+        EXPECT_EQ(stats[2].max, 366.0);
+        EXPECT_EQ(afterStretch.sampled - before.sampled, 3u);
+        EXPECT_EQ(afterStretch.computed, before.computed);
+        EXPECT_EQ(afterStretch.fromSidecar, before.fromSidecar);
+
+        // get() never returns the sample: the exact statistics of band 1, 100 to 177
+        EXPECT_FALSE(exact.sampled);
+        EXPECT_EQ(exact.min, 100.0);
+        EXPECT_EQ(exact.max, 177.0);
+        EXPECT_EQ(exact.validCount, 262144u);
+        EXPECT_EQ(afterGet.computed - afterStretch.computed, 1u);
+    }
+
+    // With an overview within the budget, the stretch reads that overview and not the raster: its pixels
+    // (written here as 1000 + x, which no pixel of the raster holds) give the statistics
+    TEST(RasterStats, theStretchOfALargeRasterReadsItsOverviewWithinTheBudget)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster =
+            makeTiledRaster(ta.getPath("overview.tif"), 400, 300, 1, [](int, int x, int y) { return x + y; });
+        {
+            GDALDatasetH hDs = GDALOpen(raster.string().c_str(), GA_Update);
+            ASSERT_NE(hDs, nullptr);
+            int levels[] = {2, 4};
+            ASSERT_EQ(GDALBuildOverviews(hDs, "NEAREST", 2, levels, 0, nullptr, nullptr, nullptr), CE_None);
+            GDALRasterBandH overview = GDALGetOverview(GDALGetRasterBand(hDs, 1), 0);
+            ASSERT_NE(overview, nullptr);
+            ASSERT_EQ(GDALGetRasterBandXSize(overview), 200);
+            std::vector<double> row(200);
+            for (int x = 0; x < 200; x++)
+                row[static_cast<size_t>(x)] = 1000.0 + x;
+            for (int y = 0; y < 150; y++)
+                ASSERT_EQ(GDALRasterIO(overview, GF_Write, 0, y, 200, 1, row.data(), 200, 1, GDT_Float64, 0, 0),
+                          CE_None);
+            GDALClose(hDs);
+        }
+
+        auto &provider = RasterStatsProvider::instance();
+        provider.clear();
+        GDALDatasetH hDs = GDALOpen(raster.string().c_str(), GA_ReadOnly);
+        ASSERT_NE(hDs, nullptr);
+        // 120000 pixels; the overviews have 30000 and 7500: the larger one within 40000
+        const std::vector<BandStatistics> stats =
+            provider.getStretchStatistics(raster.string(), hDs, {1}, std::nullopt, 40000);
+        GDALClose(hDs);
+
+        ASSERT_EQ(stats.size(), 1u);
+        EXPECT_TRUE(stats[0].sampled);
+        EXPECT_EQ(stats[0].validCount, 30000u);
+        EXPECT_EQ(stats[0].min, 1000.0);
+        EXPECT_EQ(stats[0].max, 1199.0);
+    }
+
+    // A sample that holds one value is kept: the stretch reads no more than its budget (the renders
+    // stretch a flat range over a range of their own)
+    TEST(RasterStats, aFlatSampleStaysWithinTheBudget)
+    {
+        TestArea ta(TEST_NAME, true);
+        // Zero but for one pixel of block (0, 0), which the lattice of 4 blocks does not read
+        const auto flat = makeTiledRaster(ta.getPath("flat.tif"), 512, 512, 1,
+                                          [](int, int x, int y) { return x == 5 && y == 7 ? 9.5 : 0.0; });
+
+        auto &provider = RasterStatsProvider::instance();
+        provider.clear();
+        const auto before = provider.counters();
+        GDALDatasetH hDs = GDALOpen(flat.string().c_str(), GA_ReadOnly);
+        ASSERT_NE(hDs, nullptr);
+        const BandStatistics stats = provider.getStretchStatistics(flat.string(), hDs, {1}, std::nullopt, 16384)[0];
+        GDALClose(hDs);
+        const auto after = provider.counters();
+
+        EXPECT_TRUE(stats.sampled);
+        EXPECT_EQ(stats.min, 0.0);
+        EXPECT_EQ(stats.max, 0.0);
+        EXPECT_EQ(stats.validCount, 16384u);
+        EXPECT_EQ(after.sampled - before.sampled, 1u);
+        EXPECT_EQ(after.computed, before.computed);
+    }
+
+    // A sample in which no pixel has a value is read once more with 16 times the budget: the whole band of
+    // a raster that fits in it (its exact statistics), a larger lattice of blocks of a larger raster, and no
+    // more (the statistics then fail as those of a band without a value)
+    TEST(RasterStats, aSampleWithoutValuesIsReadAgainWithALargerBudget)
+    {
+        TestArea ta(TEST_NAME, true);
+        // NoData (-1) but for block (0, 0)
+        const auto sparseValue = [](int, int x, int y) { return x < 64 && y < 64 ? x + 1.0 : -1.0; };
+        const auto sparse = makeTiledRaster(ta.getPath("sparse.tif"), 512, 512, 1, sparseValue, -1.0);
+        // 1024 x 1024: 16 x 16 blocks; 16 x 16384 pixels are 64 blocks, every other block of every other
+        // row from (1, 1): block (0, 0) is not read
+        const auto larger = makeTiledRaster(ta.getPath("larger.tif"), 1024, 1024, 1, sparseValue, -1.0);
+
+        auto &provider = RasterStatsProvider::instance();
+        provider.clear();
+        const auto before = provider.counters();
+
+        GDALDatasetH hSparse = GDALOpen(sparse.string().c_str(), GA_ReadOnly);
+        ASSERT_NE(hSparse, nullptr);
+        const BandStatistics stats = provider.getStretchStatistics(sparse.string(), hSparse, {1}, std::nullopt, 16384)[0];
+        GDALClose(hSparse);
+        EXPECT_FALSE(stats.sampled);
+        EXPECT_EQ(stats.min, 1.0);
+        EXPECT_EQ(stats.max, 64.0);
+        EXPECT_EQ(stats.validCount, 4096u);
+        const auto after = provider.counters();
+        EXPECT_EQ(after.computed - before.computed, 1u);
+        EXPECT_EQ(after.sampled, before.sampled);
+
+        GDALDatasetH hLarger = GDALOpen(larger.string().c_str(), GA_ReadOnly);
+        ASSERT_NE(hLarger, nullptr);
+        EXPECT_THROW(provider.getStretchStatistics(larger.string(), hLarger, {1}, std::nullopt, 16384), GDALException);
+        GDALClose(hLarger);
+    }
+
     // ---------------------------------------------------------------- the stretch of a 16-bit ortho (FR-RAS-21, D-041)
 
     TEST(RasterValues, aMultiBandRasterHasOneStretchPerBand)
