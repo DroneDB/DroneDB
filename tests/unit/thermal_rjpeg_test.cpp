@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,8 @@
 #include "raster_analysis.h"
 #include "raster_test_utils.h"
 #include "thermal.h"
+#include "thermal_internal.h"
+#include "user_open_child.h"
 
 namespace
 {
@@ -1313,6 +1316,508 @@ namespace
                 EXPECT_EQ(fromCounts.data[10 + 5 * 2048], 16204);
             }
         }
+    }
+
+    // ---------------------------------------------------------------- The PNG decoder on its own
+
+    // The bound of the decoder itself, not only the one fffRawThermal checks first: a PNG image of 2048 x 2049 zeros is
+    // refused before anything is inflated, and the same image of 2048 x 2048 is read; a size that is not positive is
+    // no image
+    TEST(RJpegThermal, theFlirPngDecoderReadsAnImageUpToFourMegapixelsItself)
+    {
+        for (const int height : {2048, 2049})
+        {
+            SCOPED_TRACE(height);
+            const size_t rowsSize = static_cast<size_t>(height) * (1 + 2048 * 2);
+            const auto png = pngOf({{"IHDR", ihdrOf(2048, static_cast<uint32_t>(height))},
+                                    {"IDAT", zlibZeros(rowsSize)},
+                                    {"IEND", {}}});
+            const uint64_t inflates = thermalReadCountersForTesting().pngInflates;
+            const auto counts = decodeFlirPng(png.data(), png.size(), 2048, height, false);
+            if (height == 2048)
+            {
+                ASSERT_TRUE(counts.has_value());
+                ASSERT_EQ(counts->size(), kMaxRawThermalPixels);
+                EXPECT_EQ(std::count(counts->begin(), counts->end(), uint16_t(0)),
+                          static_cast<std::ptrdiff_t>(kMaxRawThermalPixels));
+                EXPECT_EQ(thermalReadCountersForTesting().pngInflates, inflates + 1);
+            }
+            else
+            {
+                EXPECT_FALSE(counts.has_value());
+                EXPECT_EQ(thermalReadCountersForTesting().pngInflates, inflates);
+            }
+        }
+
+        const auto png = pngOf({{"IHDR", ihdrOf(kWidth, kHeight)},
+                                {"IDAT", zlibStored(filteredRows(kWidth, kHeight, false))},
+                                {"IEND", {}}});
+        ASSERT_TRUE(decodeFlirPng(png.data(), png.size(), kWidth, kHeight, false).has_value());
+        const uint64_t inflates = thermalReadCountersForTesting().pngInflates;
+        for (const auto &[width, height] : std::vector<std::pair<int, int>>{{0, kHeight}, {kWidth, 0}, {-kWidth, kHeight},
+                                                                           {kWidth, -kHeight}, {-kWidth, -kHeight}})
+        {
+            SCOPED_TRACE(std::to_string(width) + " x " + std::to_string(height));
+            EXPECT_FALSE(decodeFlirPng(png.data(), png.size(), width, height, false).has_value());
+        }
+        EXPECT_EQ(thermalReadCountersForTesting().pngInflates, inflates);
+    }
+
+    // IDAT data that cannot inflate to the rows is refused before they are allocated: deflate gives at most 1032 bytes a
+    // byte. The streams here are whole zlib streams that zlib inflates (stored blocks of zeros, 11 bytes more than their
+    // data: each is read as the image whose rows it holds), too short for the rows of a 2048 x 2048 image (8390656
+    // bytes, 8130.5 times 1032): the one of 8130 bytes is refused by the ratio, without inflating, and the one of 8131
+    // bytes is inflated, and refused because it does not give the rows
+    TEST(RJpegThermal, idatDataTooShortForTheRowsIsRefusedByTheDeflateRatioBeforeInflating)
+    {
+        const size_t rowsSize = static_cast<size_t>(2048) * (1 + 2048 * 2);
+        ASSERT_EQ(rowsSize, static_cast<size_t>(8390656));
+
+        struct Case
+        {
+            size_t zeros;      // the data of the stream
+            int width, height; // the image its data are the rows of
+            bool ratioPasses;  // stream size * 1032 >= the rows of 2048 x 2048
+        };
+        // 8119 = 23 rows of 1 + 176 * 2 bytes, 8120 = 8 rows of 1 + 507 * 2 bytes
+        for (const Case &c : {Case{8119, 176, 23, false}, Case{8120, 507, 8, true}})
+        {
+            SCOPED_TRACE(c.zeros);
+            const std::vector<uint8_t> stream = zlibStored(std::vector<uint8_t>(c.zeros, 0));
+            ASSERT_EQ(stream.size(), c.zeros + 11);
+            EXPECT_EQ(static_cast<uint64_t>(stream.size()) * 1032 >= rowsSize, c.ratioPasses);
+
+            // zlib inflates the stream: as the image whose rows it holds, it is read
+            const auto own = pngOf({{"IHDR", ihdrOf(static_cast<uint32_t>(c.width), static_cast<uint32_t>(c.height))},
+                                    {"IDAT", stream},
+                                    {"IEND", {}}});
+            const auto counts = decodeFlirPng(own.data(), own.size(), c.width, c.height, false);
+            ASSERT_TRUE(counts.has_value());
+            EXPECT_EQ(counts->size(), static_cast<size_t>(c.width) * c.height);
+
+            // As the rows of 2048 x 2048 pixels it is refused, by the ratio before inflating, or by inflate
+            const auto large = pngOf({{"IHDR", ihdrOf(2048, 2048)}, {"IDAT", stream}, {"IEND", {}}});
+            const uint64_t inflates = thermalReadCountersForTesting().pngInflates;
+            EXPECT_FALSE(decodeFlirPng(large.data(), large.size(), 2048, 2048, false).has_value());
+            EXPECT_EQ(thermalReadCountersForTesting().pngInflates, inflates + (c.ratioPasses ? 1 : 0));
+        }
+    }
+
+    // ---------------------------------------------------------------- The marker walk of the R-JPEG reader
+
+    // The segments of a JPEG are walked marker by marker up to the scan (walkJpegSegments): one walker for the FFF data
+    // of FLIR (readFlirFffData), the APP3 segments of DJI and the FLIR segment without FFF records. The JPEGs here are
+    // written byte by byte: SOI, the bytes given, a scan header (SOS), the bytes after it and EOI; no image
+
+    std::vector<uint8_t> join(const std::vector<std::vector<uint8_t>> &parts)
+    {
+        std::vector<uint8_t> out;
+        for (const auto &part : parts)
+            out.insert(out.end(), part.begin(), part.end());
+        return out;
+    }
+
+    fs::path writeJpegBytes(const fs::path &path, const std::vector<uint8_t> &body,
+                            const std::vector<uint8_t> &afterScan = {})
+    {
+        const std::vector<uint8_t> sos = {0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00};
+        const std::vector<uint8_t> out = join({{0xFF, 0xD8}, body, sos, afterScan, {0xFF, 0xD9}});
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char *>(out.data()), static_cast<std::streamsize>(out.size()));
+        return path;
+    }
+
+    // A segment: the marker, the length (payload + 2, or the one given) and the payload
+    std::vector<uint8_t> segmentOf(uint8_t marker, const std::vector<uint8_t> &payload, int length = -1)
+    {
+        const size_t declared = length < 0 ? payload.size() + 2 : static_cast<size_t>(length);
+        return join({{0xFF, marker, static_cast<uint8_t>(declared >> 8), static_cast<uint8_t>(declared & 0xFF)}, payload});
+    }
+
+    // A FLIR APP1 segment of an FFF file: "FLIR\0", 0x01, its index, the index of the last one, then its data
+    std::vector<uint8_t> flirPart(int index, int last, const std::string &data)
+    {
+        std::vector<uint8_t> payload = {'F', 'L', 'I', 'R', 0x00, 0x01, static_cast<uint8_t>(index),
+                                        static_cast<uint8_t>(last)};
+        payload.insert(payload.end(), data.begin(), data.end());
+        return segmentOf(0xE1, payload);
+    }
+
+    std::string fffDataOf(const fs::path &path)
+    {
+        const std::vector<uint8_t> fff = readFlirFffData(path.string());
+        return std::string(fff.begin(), fff.end());
+    }
+
+    TEST(RJpegThermal, theFffDataIsReadFromTheFlirSegmentsTheMarkerWalkReaches)
+    {
+        TestArea ta(TEST_NAME);
+        const auto part0 = flirPart(0, 1, "AB");
+        const auto part1 = flirPart(1, 1, "CD");
+        const auto comment = segmentOf(0xFE, {'x', 'y', 'z'});
+
+        struct Case
+        {
+            const char *name;
+            std::vector<uint8_t> body;
+            std::vector<uint8_t> afterScan;
+            std::string fff;
+        };
+        const std::vector<Case> cases = {
+            {"two parts in order", join({comment, part0, part1}), {}, "ABCD"},
+            {"fill bytes before the markers", join({{0xFF, 0xFF}, comment, {0xFF, 0xFF, 0xFF}, part0, {0xFF}, part1}), {},
+             "ABCD"},
+            {"RSTn, TEM and SOI markers between the segments (no length)",
+             join({{0xFF, 0xD0}, part0, {0xFF, 0x01, 0xFF, 0xD7, 0xFF, 0xD8}, part1}), {}, "ABCD"},
+            {"the parts out of order", join({part1, comment, part0}), {}, "ABCD"},
+            {"an index seen twice: the first is kept", join({part0, flirPart(0, 1, "XX"), part1}), {}, "ABCD"},
+            {"a segment of another FFF file (another last index)", join({part0, flirPart(0, 2, "YY"), part1}), {},
+             "ABCD"},
+            {"an index after the last one", join({part0, flirPart(5, 1, "ZZ"), part1}), {}, "ABCD"},
+            {"a segment that is not FLIR's", join({part0, segmentOf(0xE1, {'E', 'x', 'i', 'f', 0, 0}), part1}), {},
+             "ABCD"},
+            {"a missing part", join({flirPart(0, 2, "AB"), flirPart(2, 2, "EF")}), {}, ""},
+            {"a length below 2 before the last part", join({part0, segmentOf(0xE1, {}, 1), part1}), {}, ""},
+            {"a byte that is no marker before the last part", join({part0, {0x00}, part1}), {}, ""},
+            {"the last part past the end of the file", join({part0, segmentOf(0xE1, {'F', 'L', 'I', 'R', 0, 1, 1, 1}, 60000)}),
+             {}, ""},
+            {"the end of the image before the last part", join({part0, {0xFF, 0xD9}, part1}), {}, ""},
+            {"the last part after the scan", part0, part1, ""},
+            {"a segment past the end of the file after the parts", join({part0, part1, segmentOf(0xFE, {}, 60000)}), {},
+             "ABCD"},
+            {"no FLIR segment", comment, {}, ""},
+        };
+        int n = 0;
+        for (const Case &c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            const auto path = writeJpegBytes(ta.getPath("FFF_" + std::to_string(n++) + ".JPG"), c.body, c.afterScan);
+            EXPECT_EQ(fffDataOf(path), c.fff);
+        }
+
+        // A file that is no JPEG has none, whatever it holds
+        const auto notJpeg = ta.getPath("FFF_NOT_JPEG.bin");
+        {
+            const auto bytes = join({{0x00, 0xD8}, part0, part1});
+            std::ofstream file(notJpeg, std::ios::binary);
+            file.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        }
+        EXPECT_EQ(fffDataOf(notJpeg), "");
+    }
+
+    // A crafted file cannot make the walk take tens of millions of steps: at most kMaxJpegMarkers markers (4096, over 60
+    // times the markers real R-JPEGs have before their scan) and kMaxJpegFillBytes fill bytes (64 KB, none in real ones)
+    // are walked; what is after them is not read
+    TEST(RJpegThermal, theMarkerWalkStopsAfter4096MarkersAnd64KBOfFillBytes)
+    {
+        TestArea ta(TEST_NAME);
+        static_assert(kMaxJpegMarkers == 4096, "the markers walked");
+        static_assert(kMaxJpegFillBytes == 65536, "the fill bytes walked");
+        const auto parts = join({flirPart(0, 1, "AB"), flirPart(1, 1, "CD")});
+
+        // RST markers before the two FLIR segments: these are the markers 4095 and 4096 after 4094 of them
+        for (const size_t rst : {static_cast<size_t>(4094), static_cast<size_t>(4095)})
+        {
+            SCOPED_TRACE(rst);
+            std::vector<uint8_t> body;
+            for (size_t i = 0; i < rst; i++)
+                body.insert(body.end(), {0xFF, static_cast<uint8_t>(0xD0 + i % 8)});
+            body.insert(body.end(), parts.begin(), parts.end());
+            const auto path = writeJpegBytes(ta.getPath("RST_" + std::to_string(rst) + ".JPG"), body);
+            EXPECT_EQ(fffDataOf(path), rst + 2 <= kMaxJpegMarkers ? "ABCD" : "");
+        }
+
+        // Fill bytes before the first FLIR segment
+        for (const size_t fill : {kMaxJpegFillBytes, kMaxJpegFillBytes + 1})
+        {
+            SCOPED_TRACE(fill);
+            std::vector<uint8_t> body(fill, 0xFF);
+            body.insert(body.end(), parts.begin(), parts.end());
+            const auto path = writeJpegBytes(ta.getPath("FILL_" + std::to_string(fill) + ".JPG"), body);
+            EXPECT_EQ(fffDataOf(path), fill <= kMaxJpegFillBytes ? "ABCD" : "");
+        }
+
+        // 4 MB of RST markers, and of fill bytes: each probe reads a few KB of them, not the file
+        const size_t size = static_cast<size_t>(4) << 20;
+        std::vector<uint8_t> rstBody;
+        for (size_t i = 0; i < size / 2; i++)
+            rstBody.insert(rstBody.end(), {0xFF, 0xD0});
+        rstBody.insert(rstBody.end(), parts.begin(), parts.end());
+        std::vector<uint8_t> fillBody(size, 0xFF);
+        fillBody.insert(fillBody.end(), parts.begin(), parts.end());
+        const std::vector<std::pair<std::string, std::vector<uint8_t>>> files = {{"RST_4MB.JPG", rstBody},
+                                                                                {"FILL_4MB.JPG", fillBody}};
+        for (const auto &[name, body] : files)
+        {
+            SCOPED_TRACE(name);
+            const auto path = writeJpegBytes(ta.getPath(name), body);
+            ASSERT_GT(fs::file_size(path), size);
+            const auto bytesOf = [&](const std::function<void()> &call) {
+                const uint64_t before = thermalReadCountersForTesting().fileBytes;
+                call();
+                return thermalReadCountersForTesting().fileBytes - before;
+            };
+            const uint64_t bound = 2 * kMaxJpegMarkers + kMaxJpegFillBytes + 64;
+            EXPECT_LE(bytesOf([&] { EXPECT_EQ(fffDataOf(path), ""); }), bound);
+            EXPECT_LE(bytesOf([&] { EXPECT_FALSE(hasDjiRawThermal(path.string())); }), bound);
+            EXPECT_LE(bytesOf([&] { EXPECT_FALSE(isThermalPicture("DJI", "FC220", path.string())); }), 2 * bound);
+        }
+    }
+
+    // ---------------------------------------------------------------- DJI: what the APP3 segments can make the scan read
+
+    // The DJI raw image of the bytes given (little-endian UInt16), in APP3 segments of chunk bytes with empty APP3
+    // segments (FF E3 00 02) before each, then a frame header (SOF0) of the picture size given: what the probe reads
+    std::vector<uint8_t> djiHeaders(const std::vector<uint8_t> &bytes, size_t chunk, int pictureWidth, int pictureHeight,
+                                    size_t emptyBefore = 0)
+    {
+        std::vector<uint8_t> out = exifSegment("DJI", "ZZ-NEW-THERMAL-9");
+        for (size_t at = 0; at < bytes.size(); at += chunk)
+        {
+            for (size_t i = 0; i < emptyBefore; i++)
+                out.insert(out.end(), {0xFF, 0xE3, 0x00, 0x02});
+            const size_t n = std::min(chunk, bytes.size() - at);
+            const auto segment = segmentOf(0xE3, std::vector<uint8_t>(bytes.begin() + static_cast<std::ptrdiff_t>(at),
+                                                                      bytes.begin() + static_cast<std::ptrdiff_t>(at + n)));
+            out.insert(out.end(), segment.begin(), segment.end());
+        }
+        const auto sof = segmentOf(0xC0, {0x08, static_cast<uint8_t>(pictureHeight >> 8),
+                                          static_cast<uint8_t>(pictureHeight & 0xFF),
+                                          static_cast<uint8_t>(pictureWidth >> 8),
+                                          static_cast<uint8_t>(pictureWidth & 0xFF), 0x01, 0x01, 0x11, 0x00});
+        out.insert(out.end(), sof.begin(), sof.end());
+        return out;
+    }
+
+    std::vector<uint8_t> littleEndianBytes(const std::vector<uint16_t> &raw)
+    {
+        std::vector<uint8_t> bytes;
+        for (const uint16_t v : raw)
+            bytes.insert(bytes.end(), {static_cast<uint8_t>(v & 0xFF), static_cast<uint8_t>(v >> 8)});
+        return bytes;
+    }
+
+    // An empty APP3 segment holds nothing of the raw image and is skipped (it was a 16-byte entry for 4 bytes of the
+    // file); the raw image is read from at most kMaxDjiRawThermalChunks segments (256: the H30T has 41, the 640 x 512
+    // cameras 11)
+    TEST(RJpegThermal, theRawImageOfADjiPictureIsReadFromAtMost256NonEmptyApp3Segments)
+    {
+        TestArea ta(TEST_NAME);
+        static_assert(kMaxDjiRawThermalChunks == 256, "the APP3 segments of a DJI raw image");
+        const auto bytes = littleEndianBytes(rawGrid(kWidth, kHeight)); // 6144 bytes
+
+        // 1000 empty APP3 segments before each of the 3 that hold the image
+        const auto withEmpty = writeJpegBytes(ta.getPath("DJI_EMPTY.JPG"), djiHeaders(bytes, 2048, kWidth, kHeight, 1000));
+        EXPECT_TRUE(hasDjiRawThermal(withEmpty.string()));
+        const RawThermalData raw = extractRJpegRawThermal(withEmpty.string());
+        ASSERT_TRUE(raw.valid);
+        EXPECT_EQ(raw.width, kWidth);
+        EXPECT_EQ(raw.height, kHeight);
+        EXPECT_EQ(raw.data, rawGrid(kWidth, kHeight));
+
+        // 256 segments of 24 bytes are read, 268 of 23 are not
+        for (const size_t chunk : {static_cast<size_t>(24), static_cast<size_t>(23)})
+        {
+            SCOPED_TRACE(chunk);
+            const size_t segments = (bytes.size() + chunk - 1) / chunk;
+            EXPECT_EQ(segments <= kMaxDjiRawThermalChunks, chunk == 24);
+            const auto path = writeJpegBytes(ta.getPath("DJI_CHUNK_" + std::to_string(chunk) + ".JPG"),
+                                             djiHeaders(bytes, chunk, kWidth, kHeight));
+            EXPECT_EQ(hasDjiRawThermal(path.string()), chunk == 24);
+            const RawThermalData read = extractRJpegRawThermal(path.string());
+            EXPECT_EQ(read.valid, chunk == 24);
+            if (read.valid)
+            {
+                EXPECT_EQ(read.data, rawGrid(kWidth, kHeight));
+            }
+        }
+    }
+
+    // The APP3 segments of a DJI picture are read up to kMaxRawThermalPixels: the raw image of a 2048 x 2048 picture
+    // (8 MB in 129 segments of 65532 bytes, as DJI writes them) is read, the one of 2048 x 2049 is not (it was read up to
+    // 10000 x 10000, 200 MB, twice: the bytes of the segments and the counts)
+    TEST(RJpegThermal, theRawImageOfADjiPictureIsReadUpToFourMegapixels)
+    {
+        TestArea ta(TEST_NAME);
+        for (const int height : {2048, 2049})
+        {
+            SCOPED_TRACE(height);
+            const size_t pixels = static_cast<size_t>(2048) * height;
+            std::vector<uint16_t> raw(pixels);
+            for (size_t i = 0; i < pixels; i++)
+                raw[i] = static_cast<uint16_t>(i * 7);
+            const auto path = writeJpegBytes(ta.getPath("DJI_" + std::to_string(height) + ".JPG"),
+                                             djiHeaders(littleEndianBytes(raw), 65532, 2048, height));
+            EXPECT_EQ(hasDjiRawThermal(path.string()), height == 2048);
+            const RawThermalData read = extractRJpegRawThermal(path.string());
+            EXPECT_EQ(read.valid, height == 2048);
+            if (read.valid)
+            {
+                EXPECT_EQ(read.width, 2048);
+                EXPECT_EQ(read.height, 2048);
+                EXPECT_EQ(read.data, raw);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- FLIR: the raw block of a segment without FFF data
+
+    // A picture of a FLIR camera without FFF records nor XMP: the EXIF block, a FLIR APP1 segment ("FLIR\0", 3 bytes of
+    // index, 16 bytes of zero) with the raw image of width x height counts (flirRawAt) when inSegment, the JPEG data,
+    // then tailBytes after its end: the raw image, when it is not in the segment, then zeros
+    fs::path writeFlirSegmentPicture(const fs::path &path, int width, int height, bool inSegment, size_t tailBytes)
+    {
+        const auto jpeg = plainJpeg(path.string() + ".tmp.jpg");
+        std::vector<uint8_t> rawBytes;
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                const uint16_t v = flirRawAt(x, y);
+                rawBytes.insert(rawBytes.end(), {static_cast<uint8_t>(v & 0xFF), static_cast<uint8_t>(v >> 8)});
+            }
+        std::vector<uint8_t> flir = {'F', 'L', 'I', 'R', 0, 0, 0, 0};
+        flir.resize(flir.size() + 16, 0);
+        if (inSegment)
+            flir.insert(flir.end(), rawBytes.begin(), rawBytes.end());
+        std::vector<uint8_t> tail;
+        if (!inSegment)
+            tail = rawBytes;
+        tail.resize(std::max(tail.size(), tailBytes), 0);
+
+        const auto out = join({{0xFF, 0xD8}, exifSegment("FLIR Systems AB", "FLIR Vue Pro R"), segmentOf(0xE1, flir),
+                               std::vector<uint8_t>(jpeg.begin() + 2, jpeg.end()), tail});
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char *>(out.data()), static_cast<std::streamsize>(out.size()));
+        return path;
+    }
+
+    // The raw block of a FLIR segment without FFF records is looked for in the segments from it to the scan, which alone
+    // are read (the whole file was): a 160 x 120 block there is found by its size, with or without the tags (the raster
+    // helper finds it by the common sizes), and one after the scan is not looked for
+    TEST(RJpegThermal, theRawBlockOfAFlirSegmentWithoutFffDataIsLookedForInTheSegmentsBeforeTheScanAlone)
+    {
+        TestArea ta(TEST_NAME);
+        const size_t tail = static_cast<size_t>(4) << 20;
+        const auto bytesOf = [](const std::function<void()> &call) {
+            const uint64_t before = thermalReadCountersForTesting().fileBytes;
+            call();
+            return thermalReadCountersForTesting().fileBytes - before;
+        };
+
+        const auto inSegment = writeFlirSegmentPicture(ta.getPath("FLIR_SEG.JPG"), 160, 120, true, tail);
+        ASSERT_GT(fs::file_size(inSegment), tail);
+        EXPECT_LT(bytesOf([&] { EXPECT_TRUE(isThermalImage(inSegment.string(), false)); }), static_cast<uint64_t>(200000));
+        RawThermalData raw;
+        EXPECT_LT(bytesOf([&] { raw = extractRJpegRawThermal(inSegment.string()); }), static_cast<uint64_t>(200000));
+        ASSERT_TRUE(raw.valid);
+        EXPECT_EQ(raw.width, 160);
+        EXPECT_EQ(raw.height, 120);
+        EXPECT_EQ(raw.data[0], flirRawAt(0, 0));
+        EXPECT_EQ(raw.data[10 + 5 * 160], flirRawAt(10, 5));
+        EXPECT_EQ(raw.data[159 + 119 * 160], flirRawAt(159, 119));
+
+        const auto afterScan = writeFlirSegmentPicture(ta.getPath("FLIR_TAIL.JPG"), 160, 120, false, tail);
+        EXPECT_LT(bytesOf([&] { EXPECT_FALSE(extractRJpegRawThermal(afterScan.string()).valid); }),
+                  static_cast<uint64_t>(200000));
+    }
+
+    // The XMP size of the raw block of a FLIR segment without FFF records is that of a raw image: positive, and at most
+    // kMaxRawThermalPixels; another one is not the file's, and the block is looked for at the common sizes. The block of
+    // 2048 x 2048 counts is read at its XMP size; with an XMP size of 2048 x 2049 it is read as the 640 x 512 of a
+    // common sensor, the first that fits; the 64 x 48 block of writeFlirPicture fits no common size
+    TEST(RJpegThermal, theXmpSizeOfTheRawBlockOfAFlirSegmentIsPositiveAndAtMostFourMegapixels)
+    {
+        TestArea ta(TEST_NAME);
+        struct Case
+        {
+            const char *width;
+            const char *height;
+            bool read;
+        };
+        int n = 0;
+        for (const Case &c : {Case{"64", "48", true}, Case{"-64", "48", false}, Case{"64", "-48", false},
+                              Case{"0", "48", false}, Case{"100000", "100000", false}, Case{"4294967360", "48", false}})
+        {
+            SCOPED_TRACE(std::string(c.width) + " x " + c.height);
+            const auto path = writeFlirPicture(ta.getPath("FLIR_XMP_" + std::to_string(n++) + ".JPG"),
+                                               {{"RawThermalImageWidth", c.width}, {"RawThermalImageHeight", c.height}});
+            const RawThermalData raw = extractRJpegRawThermal(path.string());
+            EXPECT_EQ(raw.valid, c.read);
+            if (raw.valid)
+            {
+                EXPECT_EQ(raw.width, kWidth);
+                EXPECT_EQ(raw.height, kHeight);
+                EXPECT_EQ(raw.data[10 + 5 * kWidth], flirRawAt(10, 5));
+            }
+        }
+
+        // A block of 8 MB in the FLIR APP1 segment and the 130 APP1 segments of 65532 bytes after it: counts of 0x4040,
+        // whatever their alignment
+        for (const int height : {2048, 2049})
+        {
+            SCOPED_TRACE(height);
+            const auto jpeg = plainJpeg(ta.getPath("FLIR_BIG.tmp.jpg"));
+            std::string xmp = std::string("http://ns.adobe.com/xap/1.0/") + '\0' +
+                              "<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?>"
+                              "<x:xmpmeta xmlns:x='adobe:ns:meta/'><rdf:RDF "
+                              "xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>"
+                              "<rdf:Description rdf:about='' xmlns:FLIR='http://ns.flir.com/xmp/1.0/' "
+                              "FLIR:RawThermalImageWidth='2048' FLIR:RawThermalImageHeight='" +
+                              std::to_string(height) + "'/></rdf:RDF></x:xmpmeta><?xpacket end='w'?>";
+            std::vector<uint8_t> body = join({exifSegment("FLIR Systems AB", "FLIR Vue Pro R"), app1(xmp)});
+            std::vector<uint8_t> first = {'F', 'L', 'I', 'R', 0};
+            first.resize(65532, 0x40); // the index bytes too: the block starts after the magic
+            const auto firstSegment = segmentOf(0xE1, first);
+            body.insert(body.end(), firstSegment.begin(), firstSegment.end());
+            const auto filler = segmentOf(0xE1, std::vector<uint8_t>(65532, 0x40));
+            for (int i = 0; i < 130; i++)
+                body.insert(body.end(), filler.begin(), filler.end());
+            const auto out = join({{0xFF, 0xD8}, body, std::vector<uint8_t>(jpeg.begin() + 2, jpeg.end())});
+            const auto path = ta.getPath("FLIR_BIG_" + std::to_string(height) + ".JPG");
+            {
+                std::ofstream file(path, std::ios::binary);
+                file.write(reinterpret_cast<const char *>(out.data()), static_cast<std::streamsize>(out.size()));
+            }
+
+            const RawThermalData raw = extractRJpegRawThermal(path.string());
+            ASSERT_TRUE(raw.valid);
+            EXPECT_EQ(raw.width, height == 2048 ? 2048 : 640);
+            EXPECT_EQ(raw.height, height == 2048 ? 2048 : 512);
+            EXPECT_EQ(raw.data.size(), static_cast<size_t>(raw.width) * raw.height);
+            EXPECT_EQ(raw.data.front(), 0x4040);
+        }
+    }
+
+    // The probe of a raster that is no JPEG (a GeoTIFF, a COG of gigabytes, which the value info, the profile and the
+    // vegetation analysis ask about) reads its first 2 bytes for the segments of an R-JPEG (the FLIR search read the whole
+    // file, twice for a value info); its GDAL metadata still say it is thermal. In the raster helper, which opens it
+    TEST(RJpegThermal, theThermalProbeOfARasterThatIsNoJpegReadsTwoBytesOfIt)
+    {
+        TestArea ta(TEST_NAME);
+        const auto path = ta.getPath("kelvin.tif");
+        {
+            GDALDatasetH ds = GDALCreate(GDALGetDriverByName("GTiff"), path.string().c_str(), 1024, 1024, 1, GDT_Float32,
+                                         nullptr);
+            ASSERT_NE(ds, nullptr);
+            GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+            GDALSetRasterUnitType(band, "Kelvin");
+            std::vector<float> values(static_cast<size_t>(1024) * 1024, 290.0f);
+            EXPECT_EQ(GDALRasterIO(band, GF_Write, 0, 0, 1024, 1024, values.data(), 1024, 1024, GDT_Float32, 0, 0),
+                      CE_None);
+            GDALClose(ds);
+        }
+        ASSERT_GT(fs::file_size(path), static_cast<uintmax_t>(4) << 20);
+
+        testutils::runWithUserFileOpens([&] {
+            const auto bytesOf = [](const std::function<void()> &call) {
+                const uint64_t before = thermalReadCountersForTesting().fileBytes;
+                call();
+                return thermalReadCountersForTesting().fileBytes - before;
+            };
+            EXPECT_LE(bytesOf([&] { EXPECT_TRUE(isThermalImage(path.string(), false)); }), 2u);
+            EXPECT_LE(bytesOf([&] { EXPECT_FALSE(extractRJpegRawThermal(path.string()).valid); }), 2u);
+            EXPECT_LE(bytesOf([&] { EXPECT_FALSE(hasDjiRawThermal(path.string())); }), 2u);
+        });
     }
 
     // ---------------------------------------------------------------- FR-RAS-15: the thumbnail colours the temperatures

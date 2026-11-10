@@ -45,9 +45,10 @@ struct ThermalCalibration {
     bool valid = false; // the Planck constants were read from the file: the raw counts are temperatures
 };
 
-// The most pixels the raw thermal image of a FLIR R-JPEG is read with (the RawData record of its FFF data, int16u or a
-// PNG image, and the raw block of an APP1 segment without FFF records), checked on the size the file declares before
-// anything is allocated for it: 4 MP (2048 x 2048). The largest radiometric sensors are 1280 x 1024 (FLIR A8580 and
+// The most pixels the raw thermal image of an R-JPEG is read with (FLIR: the RawData record of its FFF data, int16u or a
+// PNG image, and the raw block of an APP1 segment without FFF records; DJI: the APP3 segments, whose payloads may add
+// up to twice this in bytes), checked on the size the file declares before anything is allocated for it: 4 MP
+// (2048 x 2048). The largest radiometric sensors are 1280 x 1024 (FLIR A8580 and
 // X8580, DJI Zenmuse H30T); 4 MP is over three times that and holds twice the side of a 1024 x 768 sensor (2048 x 1536).
 // A larger declaration is no raw thermal image: a small file must not make a request allocate gigabytes (a PNG image
 // declaring 10000 x 10000 pixels inflates from some 200 KB to 200 MB of rows), while at this bound the counts, the rows

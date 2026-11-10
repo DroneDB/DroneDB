@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "thermal.h"
+#include "thermal_internal.h"
 #include "stringutil.h"
 #include "exif.h"
 #include "exceptions.h"
@@ -92,6 +93,104 @@ bool isDjiMake(const std::string &make) {
 // Whether the JPEG has the FFF data of a FLIR camera with a RawData record (defined with the FFF reader below)
 bool hasFlirRawData(const std::string &filePath);
 
+thread_local ThermalReadCounters readCounters;
+
+} // anonymous namespace
+
+const ThermalReadCounters &thermalReadCountersForTesting() {
+    return readCounters;
+}
+
+// ---- JPEG marker walk ----
+
+namespace {
+
+// Reads size bytes of the file where it is: whether they were all there (counted in readCounters)
+bool readBytes(std::istream &file, void *to, size_t size) {
+    file.read(static_cast<char *>(to), static_cast<std::streamsize>(size));
+    const auto got = file.gcount();
+    readCounters.fileBytes += static_cast<uint64_t>(got);
+    return static_cast<size_t>(got) == size;
+}
+
+// Reads size bytes of the file at offset: whether they were all there
+bool readBytesAt(std::istream &file, std::streamoff offset, void *to, size_t size) {
+    file.clear();
+    file.seekg(offset);
+    return readBytes(file, to, size);
+}
+
+// Whether the file starts as a JPEG (SOI): an R-JPEG is one, and nothing else is read for its raw thermal data
+bool startsAsJpeg(const std::string &filePath) {
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    uint8_t soi[2] = {};
+    return file.is_open() && readBytes(file, soi, 2) && soi[0] == 0xFF && soi[1] == 0xD8;
+}
+
+// A segment of a JPEG: its marker, and where its payload (after the length) is and its size
+struct JpegSegment {
+    uint8_t marker = 0;
+    std::streamoff offset = 0;
+    size_t size = 0;
+};
+
+// Where the walk of a JPEG ended: whether the file is a JPEG, and the offset of the marker it stopped at (the scan, or
+// the first marker it could not walk past: a byte that is no marker, a length below 2, a segment past the end of the
+// file, the end of the image, one of the bounds); the segments before it are those that were walked
+struct JpegWalk {
+    bool jpeg = false;
+    std::streamoff end = 0;
+};
+
+// Called for each segment with a length that is whole in the file, before the scan: false stops the walk. It may read
+// the file anywhere (readBytesAt): the walk seeks to the next segment itself
+using JpegVisit = std::function<bool(std::istream &file, const JpegSegment &segment)>;
+
+// Walks the markers of a JPEG up to its scan (SOS) or its end (EOI): one walker for the probes and readers of the raw
+// thermal data (the FFF data of FLIR, the APP3 segments of DJI, the FLIR segment without FFF records). The markers are
+// read in sequence (fill bytes, RSTn, TEM and SOI have no length and are stepped over without a seek) and the payload
+// of a segment is skipped with one seek, at most kMaxJpegMarkers markers and kMaxJpegFillBytes fill bytes in all: the
+// scan of a dataset walks every DJI picture, and what a crafted file holds must not make it walk tens of millions of
+// markers
+JpegWalk walkJpegSegments(std::istream &file, const JpegVisit &visit) {
+    JpegWalk walk;
+    file.clear();
+    file.seekg(0, std::ios::end);
+    const std::streamoff fileSize = file.tellg();
+    uint8_t soi[2] = {};
+    if (fileSize < 4 || !readBytesAt(file, 0, soi, 2) || soi[0] != 0xFF || soi[1] != 0xD8) return walk;
+    walk.jpeg = true;
+
+    std::streamoff pos = 2;
+    size_t markers = 0;
+    size_t fillBytes = 0;
+    while (true) {
+        walk.end = pos;
+        uint8_t bytes[2] = {};
+        if (!readBytes(file, bytes, 2) || bytes[0] != 0xFF) return walk;
+        std::streamoff at = pos + 2;
+        uint8_t marker = bytes[1];
+        while (marker == 0xFF) { // a fill byte
+            if (++fillBytes > kMaxJpegFillBytes || !readBytes(file, &marker, 1)) return walk;
+            at++;
+        }
+        if (++markers > kMaxJpegMarkers) return walk;
+        if (marker == 0xDA || marker == 0xD9) return walk; // start of scan, end of image: the segments are over
+        if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD8)) { // no length
+            pos = at;
+            continue;
+        }
+
+        if (!readBytes(file, bytes, 2)) return walk;
+        const std::streamoff length = static_cast<std::streamoff>(bytes[0]) * 256 + bytes[1];
+        if (length < 2 || at + length > fileSize) return walk;
+        if (!visit(file, JpegSegment{marker, at + 2, static_cast<size_t>(length) - 2})) return walk;
+        pos = at + length;
+        file.clear();
+        file.seekg(pos);
+    }
+}
+
 } // anonymous namespace
 
 bool isThermalPicture(const std::string &make, const std::string &model, const std::string &filePath) {
@@ -113,31 +212,6 @@ struct FlirSegmentInfo {
     int rawHeight = 0;
     bool found = false;
 };
-
-// The offset just after the "FLIR\0" magic of an APP1 segment, when the file has one
-static std::optional<size_t> findFlirMagic(const std::vector<uint8_t> &data) {
-    const size_t fileSize = data.size();
-
-    // Search for FLIR FFF record marker within APP1 segments
-    // Pattern: FF E1 (APP1 marker) ... "FLIR\0" magic
-    const uint8_t flirMagic[] = { 'F', 'L', 'I', 'R', 0x00 };
-
-    for (size_t i = 0; i < fileSize - 10; i++) {
-        // Check for APP1 marker: 0xFF 0xE1
-        if (data[i] == 0xFF && data[i + 1] == 0xE1) {
-            // Get segment length (big-endian 2 bytes after marker)
-            uint16_t segLen = (static_cast<uint16_t>(data[i + 2]) << 8) | data[i + 3];
-
-            // Check for FLIR magic after length
-            if (i + 4 + 5 <= fileSize &&
-                std::memcmp(&data[i + 4], flirMagic, 5) == 0) {
-                LOGD << "Found FLIR APP1 segment at offset " << i << ", length " << segLen;
-                return i + 4 + 5; // After "FLIR\0"
-            }
-        }
-    }
-    return std::nullopt;
-}
 
 // The tags of the file whose FLIR segment is looked for, read only if the segment is there: null
 // when the file has none, or when the caller reads no tags (the raster helper)
@@ -189,13 +263,12 @@ static void findRawDimensions(const FlirTags &tags, size_t remainingData, FlirSe
     }
 }
 
-// Search for the raw thermal data blob: a contiguous block of rawWidth * rawHeight * 2 bytes
-// near the beginning of the FLIR APP1 data area
-static void locateRawData(const std::vector<uint8_t> &data, size_t flirSegmentStart, FlirSegmentInfo &info) {
-    const size_t fileSize = data.size();
-    size_t expectedRawSize = static_cast<size_t>(info.rawWidth) * info.rawHeight * 2;
+// Search for the raw thermal data blob: a contiguous block of rawWidth * rawHeight * 2 bytes near the beginning of
+// the FLIR APP1 data area (data, read from the offset dataOffset of the file)
+static void locateRawData(const std::vector<uint8_t> &data, size_t dataOffset, FlirSegmentInfo &info) {
+    const size_t expectedRawSize = static_cast<size_t>(info.rawWidth) * info.rawHeight * 2;
 
-    for (size_t searchPos = flirSegmentStart; searchPos + expectedRawSize <= fileSize; searchPos++) {
+    for (size_t searchPos = 0; searchPos + expectedRawSize <= data.size(); searchPos++) {
         // Heuristic: raw thermal data typically has values in a reasonable range
         // Check first few pixels to validate
         uint16_t firstPixel = data[searchPos] | (static_cast<uint16_t>(data[searchPos + 1]) << 8);
@@ -205,10 +278,10 @@ static void locateRawData(const std::vector<uint8_t> &data, size_t flirSegmentSt
         // Typical raw thermal values are in range 5000-30000 for room temp scenes
         if (firstPixel > 2000 && firstPixel < 50000 &&
             midPixel > 2000 && midPixel < 50000) {
-            info.rawDataOffset = searchPos;
+            info.rawDataOffset = dataOffset + searchPos;
             info.rawDataSize = expectedRawSize;
             info.found = true;
-            LOGD << "Found raw thermal data at offset " << searchPos
+            LOGD << "Found raw thermal data at offset " << info.rawDataOffset
                  << " (" << info.rawWidth << "x" << info.rawHeight << ")";
             break;
         }
@@ -217,40 +290,43 @@ static void locateRawData(const std::vector<uint8_t> &data, size_t flirSegmentSt
 
 // Locates the raw UInt16 thermal block of a FLIR APP1 segment that holds no FFF records (a file with them is read
 // from its RawData record, see fffRawThermal): the segment after the magic and 3 index bytes holds the raw values,
-// so the block is found by its size (from the XMP, or a common sensor size) and the range of its values.
+// so the block is found by its size (from the XMP, or a common sensor size) and the range of its values. The FLIR
+// segment is the first APP1 segment whose payload starts with "FLIR\0" (walkJpegSegments), and the block is looked for
+// in the segments from it to the scan, at most kMaxFlirDataBytes: only they are read, never the scan nor a file that is
+// no JPEG (the probe of a GeoTIFF of gigabytes reads its first 2 bytes)
 static FlirSegmentInfo findFlirSegment(const std::string &filePath, const FlirTags &tags) {
     FlirSegmentInfo info;
 
     std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
     if (!file.is_open()) return info;
 
-    // Read entire file into memory for simpler parsing
-    file.seekg(0, std::ios::end);
-    size_t fileSize = static_cast<size_t>(file.tellg());
-    file.seekg(0, std::ios::beg);
-
-    if (fileSize < 20) return info;
-
-    std::vector<uint8_t> data(fileSize);
-    file.read(reinterpret_cast<char*>(data.data()), fileSize);
-    file.close();
-
-    const auto flirSegmentStart = findFlirMagic(data);
+    // The offset just after the "FLIR\0" magic, and where the segments before the scan end
+    std::optional<std::streamoff> flirSegmentStart;
+    const JpegWalk walk = walkJpegSegments(file, [&](std::istream &in, const JpegSegment &segment) {
+        if (!flirSegmentStart && segment.marker == 0xE1 && segment.size >= 5) {
+            uint8_t magic[5] = {};
+            if (readBytesAt(in, segment.offset, magic, 5) && std::memcmp(magic, "FLIR\0", 5) == 0) {
+                LOGD << "Found FLIR APP1 segment at offset " << segment.offset - 4 << ", length " << segment.size + 2;
+                flirSegmentStart = segment.offset + 5;
+            }
+        }
+        return true;
+    });
     if (!flirSegmentStart) {
         LOGD << "No FLIR APP1 segment found in " << filePath;
         return info;
     }
 
-    // After FLIR magic, skip 3 bytes (segment index info)
-    size_t pos = *flirSegmentStart + 3;
+    // After FLIR magic, skip 3 bytes (segment index info), then the FFF header (64 bytes)
+    const size_t dataSize = std::min(static_cast<size_t>(walk.end - *flirSegmentStart), kMaxFlirDataBytes);
+    if (dataSize < 3 + 64) return info;
 
-    // Parse FFF header
-    if (pos + 64 > fileSize) return info;
-
-    findRawDimensions(tags, fileSize - pos, info);
+    findRawDimensions(tags, dataSize - 3, info);
     if (info.rawWidth == 0 || info.rawHeight == 0) return info;
 
-    locateRawData(data, *flirSegmentStart, info);
+    std::vector<uint8_t> data(dataSize);
+    if (!readBytesAt(file, *flirSegmentStart, data.data(), dataSize)) return info;
+    locateRawData(data, static_cast<size_t>(*flirSegmentStart), info);
     return info;
 }
 
@@ -289,21 +365,16 @@ float getFloat(const std::vector<uint8_t> &d, size_t at, bool bigEndian) {
     return value;
 }
 
+} // anonymous namespace
+
 // The FFF data of the FLIR APP1 segments of a JPEG file, in the order of their index: empty when the file is no JPEG,
-// has none, or when a segment is missing. The markers are walked with seeks up to the scan and only the payloads of the
-// FLIR APP1 segments are read (at most 256 of 64 KB): the scan of a dataset asks this of every DJI picture
-// (isThermalPicture), which is not read whole
+// has none, or when a segment is missing. The markers are walked up to the scan (walkJpegSegments) and only the
+// payloads of the FLIR APP1 segments are read (at most 256 of 64 KB): the scan of a dataset asks this of every DJI
+// picture (isThermalPicture), which is not read whole. A segment of another FFF file (another last index), or an index
+// seen twice, is not part of this one: the first segment of an index is kept, whatever the order of the segments
 std::vector<uint8_t> readFlirFffData(const std::string &filePath) {
     std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
     if (!file.is_open()) return {};
-    file.seekg(0, std::ios::end);
-    const std::streamoff fileSize = file.tellg();
-    if (fileSize < 4) return {};
-
-    uint8_t header[8] = {};
-    file.seekg(0);
-    file.read(reinterpret_cast<char *>(header), 2);
-    if (file.gcount() != 2 || header[0] != 0xFF || header[1] != 0xD8) return {};
 
     struct Part {
         std::streamoff offset = 0;
@@ -313,44 +384,21 @@ std::vector<uint8_t> readFlirFffData(const std::string &filePath) {
     std::vector<Part> parts;
     int last = -1;
 
-    std::streamoff pos = 2;
-    while (pos + 4 <= fileSize) {
-        file.clear();
-        file.seekg(pos);
-        file.read(reinterpret_cast<char *>(header), 4);
-        if (file.gcount() != 4 || header[0] != 0xFF) break;
-
-        const uint8_t marker = header[1];
-        if (marker == 0xFF) { // a fill byte
-            pos++;
-            continue;
+    walkJpegSegments(file, [&](std::istream &in, const JpegSegment &segment) {
+        if (segment.marker != 0xE1 || segment.size < 8) return true;
+        // "FLIR\0", a byte, the index of the segment and the index of the last one
+        uint8_t header[8] = {};
+        if (!readBytesAt(in, segment.offset, header, 8) || std::memcmp(header, "FLIR\0", 5) != 0) return true;
+        const int index = header[6];
+        const int lastIndex = header[7];
+        if (last < 0) {
+            last = lastIndex;
+            parts.resize(static_cast<size_t>(last) + 1);
         }
-        if (marker == 0xDA || marker == 0xD9) break; // start of scan, end of image: the segments are over
-        if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD8)) { // no length
-            pos += 2;
-            continue;
-        }
-        const std::streamoff length = static_cast<std::streamoff>(header[2]) * 256 + header[3];
-        if (length < 2 || pos + 2 + length > fileSize) break;
-        const size_t size = static_cast<size_t>(length) - 2;
-
-        if (marker == 0xE1 && size >= 8) {
-            // "FLIR\0", a byte, the index of the segment and the index of the last one
-            file.read(reinterpret_cast<char *>(header), 8);
-            if (file.gcount() == 8 && std::memcmp(header, "FLIR\0", 5) == 0) {
-                const int index = header[6];
-                const int lastIndex = header[7];
-                if (last < 0) {
-                    last = lastIndex;
-                    parts.resize(static_cast<size_t>(last) + 1);
-                }
-                // A segment of another FFF file (another last index), or one seen twice, is not part of this one
-                if (lastIndex == last && index <= last && !parts[static_cast<size_t>(index)].present)
-                    parts[static_cast<size_t>(index)] = {pos + 4 + 8, size - 8, true};
-            }
-        }
-        pos += 2 + length;
-    }
+        if (lastIndex == last && index <= last && !parts[static_cast<size_t>(index)].present)
+            parts[static_cast<size_t>(index)] = {segment.offset + 8, segment.size - 8, true};
+        return true;
+    });
 
     size_t total = 0;
     for (const Part &part : parts) {
@@ -360,14 +408,13 @@ std::vector<uint8_t> readFlirFffData(const std::string &filePath) {
     std::vector<uint8_t> fff(total);
     size_t at = 0;
     for (const Part &part : parts) {
-        file.clear();
-        file.seekg(part.offset);
-        file.read(reinterpret_cast<char *>(fff.data() + at), static_cast<std::streamsize>(part.size));
-        if (static_cast<size_t>(file.gcount()) != part.size) return {};
+        if (!readBytesAt(file, part.offset, fff.data() + at, part.size)) return {};
         at += part.size;
     }
     return fff;
 }
+
+namespace {
 
 // A record of the FFF data: where it is, its length and its byte order
 struct FffRecord {
@@ -449,6 +496,8 @@ uint32_t bigEndian32(const uint8_t *p) {
            (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
 }
 
+} // anonymous namespace
+
 // The PNG image of a RawData record (the format of the FLIR handheld cameras: E4 to E8, i3 to i7, the ONE, T420,
 // T630sc...): the raw counts, width x height int16u. Only what FLIR writes is read: a greyscale image of 16 bits, not
 // interlaced, of the size of the record, whose chunks have their CRC; anything else is nothing (no raw data). The
@@ -516,6 +565,7 @@ std::optional<std::vector<uint16_t>> decodeFlirPng(const uint8_t *png, size_t si
         return std::nullopt;
     }
     std::vector<uint8_t> rows(rowsSize);
+    readCounters.pngInflates++;
     z_stream stream{};
     if (inflateInit(&stream) != Z_OK) return std::nullopt;
     stream.next_in = idat.data();
@@ -567,6 +617,8 @@ std::optional<std::vector<uint16_t>> decodeFlirPng(const uint8_t *png, size_t si
     }
     return counts;
 }
+
+namespace {
 
 // The raw thermal image of the RawData record: its width (int16u at 0x02) and height (int16u at 0x04), and the raw
 // counts from 0x20 on: int16u in the byte order of the record, or a PNG image (decodeFlirPng). The size is the one of
@@ -684,51 +736,42 @@ struct DjiRawThermal {
     bool found = false;
 };
 
+// The APP3 segments are found by the marker walk (walkJpegSegments): an empty one carries nothing and is skipped, and
+// a file whose payloads add up to more than kMaxRawThermalPixels * 2 bytes, or are split in more than
+// kMaxDjiRawThermalChunks segments, has no raw thermal image (a bad file must not make the scan allocate for it)
 DjiRawThermal findDjiRawThermal(const std::string &filePath) {
     DjiRawThermal result;
 
     std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
     if (!file.is_open()) return result;
 
-    uint8_t header[4];
-    file.read(reinterpret_cast<char *>(header), 2);
-    if (file.gcount() != 2 || header[0] != 0xFF || header[1] != 0xD8) return result;
-
     int pictureWidth = 0, pictureHeight = 0;
     size_t total = 0;
+    bool tooLarge = false;
     std::vector<DjiRawThermal::Chunk> chunks;
 
-    std::streamoff pos = 2;
-    while (true) {
-        file.clear();
-        file.seekg(pos);
-        file.read(reinterpret_cast<char *>(header), 4);
-        if (file.gcount() != 4 || header[0] != 0xFF) break;
-
-        const uint8_t marker = header[1];
-        if (marker == 0xDA) break; // start of scan: the segments are over
-        const int length = header[2] * 256 + header[3];
-        if (length < 2) break;
-        const size_t payload = static_cast<size_t>(length) - 2;
-
+    const JpegWalk walk = walkJpegSegments(file, [&](std::istream &in, const JpegSegment &segment) {
+        const uint8_t marker = segment.marker;
         if (marker == 0xE3) {
-            total += payload;
-            // A picture of a sensor of 10000 x 10000 pixels is no thermal image (a bad EXIF must not allocate 200 MB)
-            if (total > static_cast<size_t>(10000) * 10000 * 2) return result;
-            chunks.push_back({pos + 4, payload});
+            if (segment.size == 0) return true;
+            total += segment.size;
+            if (total > kMaxRawThermalPixels * 2 || chunks.size() >= kMaxDjiRawThermalChunks) {
+                tooLarge = true;
+                return false;
+            }
+            chunks.push_back({segment.offset, segment.size});
         } else if (marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
             // The frame header: precision (1 byte), height and width (2 bytes each)
             uint8_t frame[5];
-            file.read(reinterpret_cast<char *>(frame), 5);
-            if (file.gcount() == 5) {
+            if (segment.size >= 5 && readBytesAt(in, segment.offset, frame, 5)) {
                 pictureHeight = frame[1] * 256 + frame[2];
                 pictureWidth = frame[3] * 256 + frame[4];
             }
         }
-        pos += 2 + length;
-    }
+        return true;
+    });
 
-    if (chunks.empty() || total == 0) return result;
+    if (!walk.jpeg || tooLarge || chunks.empty() || total == 0) return result;
     if (pictureWidth > 0 && pictureHeight > 0 && total == static_cast<size_t>(pictureWidth) * pictureHeight * 2) {
         result.width = pictureWidth;
         result.height = pictureHeight;
@@ -743,6 +786,8 @@ DjiRawThermal findDjiRawThermal(const std::string &filePath) {
     return result;
 }
 
+// The raw counts are read straight into the image (its bytes, then their little-endian values in place): one buffer
+// of width * height * 2 bytes, not a second one for the bytes of the segments
 RawThermalData readDjiRawThermal(const std::string &filePath) {
     RawThermalData result;
     const DjiRawThermal dji = findDjiRawThermal(filePath);
@@ -751,18 +796,14 @@ RawThermalData readDjiRawThermal(const std::string &filePath) {
     std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
     if (!file.is_open()) return result;
 
-    std::vector<uint8_t> bytes;
-    bytes.reserve(static_cast<size_t>(dji.width) * dji.height * 2);
-    for (const auto &chunk : dji.chunks) {
-        const size_t at = bytes.size();
-        bytes.resize(at + chunk.size);
-        file.seekg(chunk.offset);
-        file.read(reinterpret_cast<char *>(bytes.data() + at), static_cast<std::streamsize>(chunk.size));
-        if (static_cast<size_t>(file.gcount()) != chunk.size) return RawThermalData();
-    }
-
     const size_t pixelCount = static_cast<size_t>(dji.width) * dji.height;
     result.data.resize(pixelCount);
+    uint8_t *bytes = reinterpret_cast<uint8_t *>(result.data.data());
+    size_t at = 0;
+    for (const auto &chunk : dji.chunks) {
+        if (!readBytesAt(file, chunk.offset, bytes + at, chunk.size)) return RawThermalData();
+        at += chunk.size;
+    }
     for (size_t i = 0; i < pixelCount; i++)
         result.data[i] = static_cast<uint16_t>(bytes[i * 2] | (static_cast<uint16_t>(bytes[i * 2 + 1]) << 8));
     result.width = dji.width;
@@ -780,20 +821,8 @@ bool hasDjiRawThermal(const std::string &filePath) {
 
 // ---- R-JPEG raw data extraction ----
 
-namespace {
-
-// Whether the file starts as a JPEG (SOI): an R-JPEG is one, and nothing else is read for its raw thermal data
-bool startsAsJpeg(const std::string &filePath) {
-    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
-    uint8_t soi[2] = {};
-    file.read(reinterpret_cast<char *>(soi), 2);
-    return file.gcount() == 2 && soi[0] == 0xFF && soi[1] == 0xD8;
-}
-
-} // anonymous namespace
-
 RawThermalData extractRJpegRawThermal(const std::string &filePath) {
-    // The FLIR search reads the whole file: a raster that is not a JPEG has no raw thermal segments to look for
+    // A raster that is not a JPEG has no raw thermal segments to look for: only its first 2 bytes are read
     if (!startsAsJpeg(filePath)) return RawThermalData();
 
     // DJI: the APP3 segments (the probe of FR-RAS-13: what detects the file is what reads it)
@@ -822,10 +851,10 @@ RawThermalData extractRJpegRawThermal(const std::string &filePath) {
     std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
     if (!file.is_open()) return result;
 
-    file.seekg(seg.rawDataOffset);
     size_t pixelCount = static_cast<size_t>(seg.rawWidth) * seg.rawHeight;
     result.data.resize(pixelCount);
-    file.read(reinterpret_cast<char*>(result.data.data()), pixelCount * 2);
+    if (!readBytesAt(file, static_cast<std::streamoff>(seg.rawDataOffset), result.data.data(), pixelCount * 2))
+        return RawThermalData();
 
     result.width = seg.rawWidth;
     result.height = seg.rawHeight;
@@ -1267,13 +1296,18 @@ bool isThermalByGdalMetadata(const std::string &filePath) {
 // Methods 4-5: what the file holds besides its tags, the DJI or FLIR segments of an R-JPEG and the GDAL
 // metadata of a single-band raster
 bool contentSaysThermal(const std::string &filePath, const FlirTags &tags) {
-    // The raw thermal image of a DJI camera, whatever its model (the probe is also what reads it)
-    if (hasDjiRawThermal(filePath)) return true;
-    // The raw thermal image of a FLIR camera: the RawData record of its FFF data, else the raw block of its APP1 segment
-    if (const auto fff = readFlirFff(filePath)) {
-        if (fff->records.rawData) return true;
-    } else if (findFlirSegment(filePath, tags).found) {
-        return true;
+    // The segments of an R-JPEG: a raster that is no JPEG (a GeoTIFF, a COG of gigabytes) has none, and only its first
+    // 2 bytes are read for them
+    if (startsAsJpeg(filePath)) {
+        // The raw thermal image of a DJI camera, whatever its model (the probe is also what reads it)
+        if (hasDjiRawThermal(filePath)) return true;
+        // The raw thermal image of a FLIR camera: the RawData record of its FFF data, else the raw block of its APP1
+        // segment
+        if (const auto fff = readFlirFff(filePath)) {
+            if (fff->records.rawData) return true;
+        } else if (findFlirSegment(filePath, tags).found) {
+            return true;
+        }
     }
     return isThermalByGdalMetadata(filePath);
 }
