@@ -4,6 +4,7 @@
 #ifndef RASTER_EXPORT_H
 #define RASTER_EXPORT_H
 
+#include <array>
 #include <functional>
 #include <optional>
 #include <string>
@@ -31,6 +32,13 @@ namespace ddb
         // The NoData value that replaces the one of the bands (FR-RAS-31, finite): the pixels equal to it
         // are not exported
         std::optional<double> nodata;
+
+        // A WGS84 window (minLon, minLat, maxLon, maxLat) to export instead of the whole raster (FR-RAS-16):
+        // the pixels whose centre is inside it (DemContext::wgs84BoxToPixelBounds), cut at the edges of the
+        // raster, at the resolution of the input, with its CRS and a geotransform that places the window.
+        // A window that holds no pixel of the raster, or a raster without a geotransform, is an
+        // InvalidArgsException. A formula export without a rescale takes its auto range from the window.
+        std::optional<std::array<double, 4>> bbox;
 
         // Window size of a formula export in pixels (clamped to 64..8192 and a multiple of 16);
         // 0 chooses one that keeps the working set around 64 MB

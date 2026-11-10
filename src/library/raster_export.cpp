@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "cancellation.h"
+#include "dem.h"
 #include "exceptions.h"
 #include "artefact_cache.h"
 #include "gdal_raii.h"
@@ -139,26 +140,60 @@ private:
     cancel::CallToken callToken_;
 };
 
-// The grid of windows a formula export reads and writes
+// The part of the source that is exported: the whole raster, or the window of the request (in source pixels)
+struct SourceWindow
+{
+    int x = 0, y = 0;
+    int width = 0, height = 0;
+};
+
+// The pixels of the raster under the WGS84 window of the request (those whose centre is inside it, by the one
+// geo-to-pixel conversion of the raster values), cut at the edges of the raster; the whole raster without a window
+SourceWindow sourceWindowOf(const RasterExport &request, int width, int height)
+{
+    if (!request.bbox)
+        return SourceWindow{0, 0, width, height};
+
+    // The same file as the export reads: its geotransform and CRS
+    const DemContext dem = openDem(request.input, 1, BandValueOptions(), false);
+    if (!dem.hasGeoTransform)
+        throw InvalidArgsException("The raster has no geotransform: no window can be placed on it");
+
+    const auto &box = *request.bbox;
+    int x0, y0, x1, y1;
+    dem.wgs84BoxToPixelBounds(box[0], box[1], box[2], box[3], x0, y0, x1, y1);
+    x0 = std::max(x0, 0);
+    y0 = std::max(y0, 0);
+    x1 = std::min(x1, width - 1);
+    y1 = std::min(y1, height - 1);
+    if (x1 < x0 || y1 < y0)
+        throw InvalidArgsException("The window does not overlap the raster: nothing to export");
+    return SourceWindow{x0, y0, x1 - x0 + 1, y1 - y0 + 1};
+}
+
+// The grid of windows a formula export reads and writes: over the exported part of the source (`origin`), whose
+// size is the size of the output
 struct WindowGrid
 {
+    SourceWindow origin;
     int width = 0, height = 0;
     int tw = 0, th = 0;     // window size
     int ntx = 0, nty = 0;   // windows across and down
 
-    WindowGrid(int rasterWidth, int rasterHeight, int tileSize)
-        : width(rasterWidth), height(rasterHeight), tw(tileSize), th(tileSize),
-          ntx((rasterWidth + tw - 1) / tw), nty((rasterHeight + th - 1) / th) {}
+    WindowGrid(const SourceWindow &part, int tileSize)
+        : origin(part), width(part.width), height(part.height), tw(tileSize), th(tileSize),
+          ntx((part.width + tw - 1) / tw), nty((part.height + th - 1) / th) {}
 
     size_t total() const { return static_cast<size_t>(ntx) * nty; }
 
-    // The window (tx, ty): its origin and size (smaller at the right and bottom edges)
+    // The window (tx, ty) in the pixels of the source: its origin and size (smaller at the right and bottom
+    // edges); its place in the output is the same origin less the one of the exported part
     RasterWindow at(int tx, int ty) const
     {
         const int x0 = tx * tw, y0 = ty * th;
         const int winW = std::min(tw, width - x0);
         const int winH = std::min(th, height - y0);
-        return RasterWindow{x0, y0, winW, winH, winW, winH};
+        return RasterWindow{origin.x + x0, origin.y + y0, winW, winH, winW, winH};
     }
 };
 
@@ -240,6 +275,13 @@ GDALDatasetUniquePtr createRgbaOutput(const char *outputPath, GDALDatasetH hSrcD
         throw GDALException("Cannot create output GeoTIFF");
     GDALDatasetH hOut = datasetHandle(outGuard);
 
+    if (hasGeoTransform)
+    {
+        // The corner of the exported part of the source
+        const double ox = grid.origin.x, oy = grid.origin.y;
+        geoTransform[0] += ox * geoTransform[1] + oy * geoTransform[2];
+        geoTransform[3] += ox * geoTransform[4] + oy * geoTransform[5];
+    }
     if (hasGeoTransform && GDALSetGeoTransform(hOut, geoTransform) != CE_None)
         throw GDALException("Cannot set the geotransform of the output GeoTIFF");
     if (!projection.empty() && GDALSetProjection(hOut, projection.c_str()) != CE_None)
@@ -266,7 +308,8 @@ void renderWindows(GDALDatasetH hSrcDs, const FormulaPlan &plan, const WindowGri
             session.checkpoint(static_cast<double>(doneTiles) / static_cast<double>(totalTiles), "rendering");
 
             const RasterWindow window = grid.at(tx, ty);
-            const int x0 = window.x, y0 = window.y;
+            // Where the window goes in the output
+            const int x0 = window.x - grid.origin.x, y0 = window.y - grid.origin.y;
             const int winW = window.xsize, winH = window.ysize;
             const size_t winPix = static_cast<size_t>(winW) * winH;
 
@@ -297,15 +340,14 @@ void renderWindows(GDALDatasetH hSrcDs, const FormulaPlan &plan, const WindowGri
 void exportFormula(const RasterExport &request, ExportSession &session, GDALDatasetUniquePtr &srcGuard)
 {
     GDALDatasetH hSrcDs = datasetHandle(srcGuard);
-    const int width = GDALGetRasterXSize(hSrcDs);
-    const int height = GDALGetRasterYSize(hSrcDs);
     const int bandCount = GDALGetRasterCount(hSrcDs);
     const char *outputPath = request.output.c_str();
+    const SourceWindow part = sourceWindowOf(request, GDALGetRasterXSize(hSrcDs), GDALGetRasterYSize(hSrcDs));
 
     const FormulaPlan plan =
         planFormula(hSrcDs, request.input, request.formula, request.bandFilter, request.colormap, true);
 
-    const WindowGrid grid(width, height, computeExportTileSize(hSrcDs, bandCount, request.tileSize));
+    const WindowGrid grid(part, computeExportTileSize(hSrcDs, bandCount, request.tileSize));
     const std::pair<float, float> range = displayRange(hSrcDs, plan, grid, request.rescale);
 
     // Deleted unless the export completes; declared first, so the dataset is closed
@@ -318,7 +360,7 @@ void exportFormula(const RasterExport &request, ExportSession &session, GDALData
 
     flushOrThrow(hOut, outputPath);
     // Add internal overviews for efficient zoomed/partial reads.
-    buildInternalOverviews(hOut, width, height);
+    buildInternalOverviews(hOut, grid.width, grid.height);
     closeOutputOrThrow(std::move(outGuard), outputPath);
     srcGuard.reset();  // closes hSrcDs
     partialOutput.commit();
@@ -366,10 +408,9 @@ std::vector<int> selectBands(const RasterExport &request, int bandCount)
 void exportBands(const RasterExport &request, ExportSession &session, GDALDatasetUniquePtr &srcGuard)
 {
     GDALDatasetH hSrcDs = datasetHandle(srcGuard);
-    const int width = GDALGetRasterXSize(hSrcDs);
-    const int height = GDALGetRasterYSize(hSrcDs);
     const char *outputPath = request.output.c_str();
     const std::string &rescaleStr = request.rescale;
+    const SourceWindow part = sourceWindowOf(request, GDALGetRasterXSize(hSrcDs), GDALGetRasterYSize(hSrcDs));
 
     const std::vector<int> selectedBands = selectBands(request, GDALGetRasterCount(hSrcDs));
 
@@ -379,6 +420,13 @@ void exportBands(const RasterExport &request, ExportSession &session, GDALDatase
     CPLStringList targs;
     targs.AddString("-ot");
     targs.AddString("Byte");
+
+    if (request.bbox)
+    {
+        targs.AddString("-srcwin");
+        for (const int v : {part.x, part.y, part.width, part.height})
+            targs.AddString(std::to_string(v).c_str());
+    }
 
     for (int b : selectedBands)
     {
@@ -435,7 +483,7 @@ void exportBands(const RasterExport &request, ExportSession &session, GDALDatase
     // reads). Best-effort: a failure here is non-fatal.
     if (const auto ovr = raster::reopenWrittenRaster(io::fromUtf8(outputPath), raster::ArtefactAccess::Update))
     {
-        buildInternalOverviews(datasetHandle(ovr), width, height);
+        buildInternalOverviews(datasetHandle(ovr), part.width, part.height);
     }
     partialOutput.commit();
     session.report(1.0, "converting");

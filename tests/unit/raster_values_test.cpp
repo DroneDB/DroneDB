@@ -1184,6 +1184,177 @@ namespace
         GDALClose(hExport);
     }
 
+    // ---------------------------------------------------------------- export of a window (FR-RAS-16, D-023)
+
+    // A WGS84 raster of 100 x 100 pixels of 0.0001 degrees from (10, 45); the pixel (x, y) holds 115 + x + 2y
+    ValueRasterSpec degreeSpec()
+    {
+        ValueRasterSpec spec;
+        spec.epsg = 4326;
+        spec.originX = 10.0;
+        spec.originY = 45.0;
+        spec.pixel = 0.0001;
+        return spec;
+    }
+
+    // The box 10.00102..10.00298 E, 44.99502..44.99698 N holds the pixels whose centre is inside it: the centres
+    // are at 10 + (x + 0.5) * 0.0001 and 45 - (y + 0.5) * 0.0001, so columns 10..29 and rows 30..49 (20 x 20 pixels,
+    // from the corner (10.001, 44.997)), by hand and not by the code under test
+    DDBRasterOptions degreeWindow()
+    {
+        DDBRasterOptions options = {};
+        options.structSize = sizeof(options);
+        options.flags = DDB_RASTER_OPT_BBOX;
+        const double bbox[4] = {10.00102, 44.99502, 10.00298, 44.99698};
+        std::copy(bbox, bbox + 4, options.bbox);
+        return options;
+    }
+
+    TEST(RasterValuesCApi, theExportOfAWindowIsThePixelsUnderTheBox)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = makeValueRaster(ta.getPath("degrees.tif"), degreeSpec());
+        const std::string out = ta.getPath("window.tif").string();
+
+        DDBRasterOptions options = degreeWindow();
+        // 0..255 on a Byte copy keeps the values of the raster (they are 185..242 in the window)
+        ASSERT_EQ(DDBExportRaster3(raster.string().c_str(), out.c_str(), nullptr, nullptr, nullptr, nullptr, nullptr,
+                                   "0,255", 0, nullptr, nullptr, &options),
+                  DDBERR_NONE)
+            << DDBGetLastError();
+
+        GDALDatasetH hOut = GDALOpen(out.c_str(), GA_ReadOnly);
+        ASSERT_NE(hOut, nullptr);
+        EXPECT_EQ(GDALGetRasterXSize(hOut), 20);
+        EXPECT_EQ(GDALGetRasterYSize(hOut), 20);
+        double gt[6];
+        ASSERT_EQ(GDALGetGeoTransform(hOut, gt), CE_None);
+        EXPECT_NEAR(gt[0], 10.001, 1e-9);
+        EXPECT_NEAR(gt[3], 44.997, 1e-9);
+        // The resolution of the raster, not a resampled one
+        EXPECT_NEAR(gt[1], 0.0001, 1e-12);
+        EXPECT_NEAR(gt[5], -0.0001, 1e-12);
+        std::vector<uint8_t> pixels(400);
+        ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(hOut, 1), GF_Read, 0, 0, 20, 20, pixels.data(), 20, 20, GDT_Byte, 0,
+                               0),
+                  CE_None);
+        // Pixel (10, 30) of the raster: 115 + 10 + 60; (29, 49): 115 + 29 + 98; (29, 30): 115 + 29 + 60
+        EXPECT_EQ(pixels[0], 185);
+        EXPECT_EQ(pixels[19 * 20 + 19], 242);
+        EXPECT_EQ(pixels[19], 204);
+        GDALClose(hOut);
+    }
+
+    TEST(RasterValuesCApi, theExportOfAWindowOfAnIndexIsAnRgbaPictureOfTheWindow)
+    {
+        TestArea ta(TEST_NAME, true);
+        ValueRasterSpec spec = degreeSpec();
+        spec.type = GDT_Float32;
+        const auto raster = makeValueRaster(ta.getPath("degrees.tif"), spec);
+        const std::string out = ta.getPath("window-rgba.tif").string();
+
+        DDBRasterOptions options = degreeWindow();
+        ASSERT_EQ(DDBExportRaster3(raster.string().c_str(), out.c_str(), nullptr, nullptr, "CELSIUS", nullptr,
+                                   "ironbow", "100,420", 0, nullptr, nullptr, &options),
+                  DDBERR_NONE)
+            << DDBGetLastError();
+
+        GDALDatasetH hOut = GDALOpen(out.c_str(), GA_ReadOnly);
+        ASSERT_NE(hOut, nullptr);
+        EXPECT_EQ(GDALGetRasterCount(hOut), 4);
+        EXPECT_EQ(GDALGetRasterXSize(hOut), 20);
+        EXPECT_EQ(GDALGetRasterYSize(hOut), 20);
+        double gt[6];
+        ASSERT_EQ(GDALGetGeoTransform(hOut, gt), CE_None);
+        EXPECT_NEAR(gt[0], 10.001, 1e-9);
+        EXPECT_NEAR(gt[3], 44.997, 1e-9);
+        EXPECT_NEAR(gt[1], 0.0001, 1e-12);
+        // Every pixel of the window has a value: opaque
+        std::vector<uint8_t> alpha(400);
+        ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(hOut, 4), GF_Read, 0, 0, 20, 20, alpha.data(), 20, 20, GDT_Byte, 0, 0),
+                  CE_None);
+        EXPECT_EQ(alpha[0], 255);
+        EXPECT_EQ(alpha[399], 255);
+        GDALClose(hOut);
+    }
+
+    // The window of a raster in another CRS: the box is moved to it. 10 x 10 pixels of 2 m under the box of the
+    // value info test of the same raster (windowPixelCount 100), whose corner is on the grid of the raster
+    TEST(RasterValuesCApi, theExportOfAWindowOfAProjectedRasterHasThePixelsOfTheValueInfoWindow)
+    {
+        TestArea ta(TEST_NAME, true);
+        ValueRasterSpec spec;
+        spec.epsg = 3857;
+        spec.originX = 1670000.0;
+        spec.originY = 5645600.0;
+        const auto raster = makeValueRaster(ta.getPath("m3857.tif"), spec);
+
+        DDBRasterOptions options = {};
+        options.structSize = sizeof(options);
+        options.flags = DDB_RASTER_OPT_BBOX;
+        const double bbox[4] = {15.0020449078528, 45.1523636332569, 15.0022245709097, 45.1524903357998};
+        std::copy(bbox, bbox + 4, options.bbox);
+
+        char *info = nullptr;
+        ASSERT_EQ(DDBGetRasterValueInfoEx(raster.string().c_str(), &options, &info), DDBERR_NONE);
+        const json value = json::parse(info);
+        DDBFree(info);
+        ASSERT_EQ(value["windowPixelCount"], 100);
+
+        const std::string out = ta.getPath("window.tif").string();
+        ASSERT_EQ(DDBExportRaster3(raster.string().c_str(), out.c_str(), nullptr, nullptr, nullptr, nullptr, nullptr,
+                                   "0,255", 0, nullptr, nullptr, &options),
+                  DDBERR_NONE)
+            << DDBGetLastError();
+        GDALDatasetH hOut = GDALOpen(out.c_str(), GA_ReadOnly);
+        ASSERT_NE(hOut, nullptr);
+        EXPECT_EQ(static_cast<int64_t>(GDALGetRasterXSize(hOut)) * GDALGetRasterYSize(hOut), 100);
+        double gt[6];
+        ASSERT_EQ(GDALGetGeoTransform(hOut, gt), CE_None);
+        EXPECT_NEAR(gt[1], 2.0, 1e-9);
+        EXPECT_NEAR(gt[5], -2.0, 1e-9);
+        // On the grid of the raster: a whole number of pixels from its corner, inside it
+        EXPECT_NEAR(std::fmod(gt[0] - 1670000.0, 2.0), 0.0, 1e-6);
+        EXPECT_NEAR(std::fmod(5645600.0 - gt[3], 2.0), 0.0, 1e-6);
+        EXPECT_GE(gt[0], 1670000.0);
+        EXPECT_LE(gt[3], 5645600.0);
+        GDALClose(hOut);
+    }
+
+    // A box that holds no pixel of the raster, or none of the box, is refused and leaves no file; no box exports
+    // the whole raster
+    TEST(RasterValuesCApi, theExportOfAWindowRefusesABoxOutsideTheRasterAndLeavesNoFile)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = makeValueRaster(ta.getPath("degrees.tif"), degreeSpec());
+        const std::string out = ta.getPath("outside.tif").string();
+
+        DDBRasterOptions options = {};
+        options.structSize = sizeof(options);
+        options.flags = DDB_RASTER_OPT_BBOX;
+        const double bbox[4] = {11.0, 46.0, 11.1, 46.1};
+        std::copy(bbox, bbox + 4, options.bbox);
+        EXPECT_EQ(DDBExportRaster3(raster.string().c_str(), out.c_str(), nullptr, nullptr, nullptr, nullptr, nullptr,
+                                   "0,255", 0, nullptr, nullptr, &options),
+                  DDBERR_INVALIDARGS);
+        EXPECT_NE(std::string(DDBGetLastError()).find("does not overlap"), std::string::npos) << DDBGetLastError();
+        EXPECT_FALSE(fs::exists(out));
+
+        // A box that sticks out of the raster is cut at its edge: the 100 x 100 raster from (10, 45) has the columns
+        // 80..99 and the rows 0..18 (their centres are at most 0.0019 degrees south of 45) under 10.00802..10.5 E, 44.9981..45.5 N
+        const double cut[4] = {10.00802, 44.9981, 10.5, 45.5};
+        std::copy(cut, cut + 4, options.bbox);
+        ASSERT_EQ(DDBExportRaster3(raster.string().c_str(), out.c_str(), nullptr, nullptr, nullptr, nullptr, nullptr,
+                                   "0,255", 0, nullptr, nullptr, &options),
+                  DDBERR_NONE)
+            << DDBGetLastError();
+        GDALDatasetH hOut = GDALOpen(out.c_str(), GA_ReadOnly);
+        ASSERT_NE(hOut, nullptr);
+        EXPECT_EQ(GDALGetRasterXSize(hOut), 20);
+        EXPECT_EQ(GDALGetRasterYSize(hOut), 19);
+        GDALClose(hOut);
+    }
+
     // ---------------------------------------------------------------- contours (FR-RAS-04, FR-RAS-31)
 
     // Raw 115..214 with a scale of 0.1 is 11.5..21.4: the levels of a 2 interval are 12, 14, ... 20
