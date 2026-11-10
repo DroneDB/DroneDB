@@ -54,8 +54,19 @@ bool isThermalImageFromExif(const std::string &make, const std::string &model);
 // Calibration extraction
 ThermalCalibration extractThermalCalibration(const std::string &filePath);
 
-// R-JPEG raw data extraction
+// R-JPEG raw data extraction. An R-JPEG is a JPEG that carries the raw sensor counts of a thermal camera: FLIR (the
+// FLIR APP1 segment) or DJI (the APP3 segments). The raw data of a file that is not an R-JPEG are the UInt16 band of
+// a raster GDAL reads (a thermal GeoTIFF); the 8-bit colour bands of an R-JPEG are a preview, never raw data.
 RawThermalData extractRawThermalData(const std::string &filePath);
+
+// The raw thermal data of an R-JPEG alone (FLIR or DJI), nothing for any other file: GDAL is not used
+RawThermalData extractRJpegRawThermal(const std::string &filePath);
+
+// The DJI raw-thermal probe (FR-RAS-13): whether the JPEG carries the raw thermal image of a DJI camera in its APP3
+// segments, whatever its model (the rule of the GDAL JPEG driver: the segments hold width * height * 2 bytes, or
+// the 640 x 512 of the nominal sensor when the picture has another size). Detection and reading agree because
+// extractRJpegRawThermal reads the same segments. Only the header of the file is read.
+bool hasDjiRawThermal(const std::string &filePath);
 
 // Temperature conversion
 double rawToTemperature(uint16_t raw, const ThermalCalibration &cal);
@@ -77,6 +88,19 @@ struct TemperatureData {
 };
 
 TemperatureData readTemperatureData(const std::string &filePath);
+
+// The temperatures of an R-JPEG, as the raster API reads them (FR-RAS-14): the raw counts of the camera with their
+// calibration. Nothing for a file that is not an R-JPEG. grid.temperatures (degrees Celsius, one per raw count,
+// grid.width x grid.height) is empty when the raw counts have no calibration to turn them into temperatures: the
+// file is an R-JPEG, but no temperature can be told. DJI needs no tag (its calibration is the default one), FLIR
+// reads its tags (a RawThermalData of a FLIR file needs the metadata reader, which the raster helper does not
+// have: it throws there).
+struct RJpegThermal {
+    RawThermalData raw;
+    ThermalCalibration calibration;
+    TemperatureData grid;
+};
+std::optional<RJpegThermal> readRJpegThermal(const std::string &filePath);
 void pixelToGeo(double px, double py, const double geoTransform[6],
                 const std::string &projection, double &geoX, double &geoY);
 

@@ -138,9 +138,11 @@ ValueFormula valueFormulaOf(const std::string &bandUnit, const std::string &form
     return ValueFormula{converted.conversion, converted.unit};
 }
 
-// The unit of the values of a band: its unit type, degrees Celsius for a thermal raster that has none
+// The unit of the values of a band: its unit type, degrees Celsius for a thermal raster that has none. The 8-bit
+// band of a thermal picture is a colour preview, not temperatures: it has no unit (an R-JPEG whose raw thermal data
+// cannot be read, FR-RAS-14)
 std::string bandUnitOf(const DemContext &dem, bool isThermal) {
-    if (dem.unit.empty() && isThermal) return "\xC2\xB0\x43";
+    if (dem.unit.empty() && isThermal && GDALGetRasterDataType(dem.band) != GDT_Byte) return "\xC2\xB0\x43";
     return dem.unit;
 }
 
@@ -433,6 +435,51 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
 
 } // anonymous namespace
 
+namespace {
+
+// The value info of a grid of temperatures (degrees Celsius): the range, the calibration and the stretch, in the unit
+// of the thermal formula of the options when it has one (D-022). raw are the raw counts of the camera, when the
+// caller needs them for the NoData value of the options (FR-RAS-31).
+std::string thermalGridValueInfoJson(const TemperatureData &td, const RawThermalData &raw, const ThermalCalibration &cal,
+                                     bool isDirect, const std::string &sensorId, const RasterValueOptions &options) {
+    // The temperatures of the grid are in degrees Celsius; a thermal formula gives them in its unit (D-022)
+    const ValueFormula unit = valueFormulaOf("\xC2\xB0\x43", isThermalFormulaId(options.formula) ? options.formula : "");
+    float vMin = std::numeric_limits<float>::max();
+    float vMax = std::numeric_limits<float>::lowest();
+    uint64_t validCount = 0;
+    for (size_t i = 0; i < td.temperatures.size(); i++) {
+        if (!thermalGridHasValue(td, raw, i, options)) continue;
+        const float t = td.temperatures[i];
+        vMin = std::min(vMin, t);
+        vMax = std::max(vMax, t);
+        validCount++;
+    }
+    if (validCount == 0)
+        throw NoRasterDataException("Cannot compute statistics: no pixel of the image has a value");
+
+    json result;
+    result["width"] = td.width;
+    result["height"] = td.height;
+    result["bandCount"] = 1;
+    result["dataType"] = dataTypeName(GDT_Unknown);
+    result["valueMin"] = unit.apply(vMin);
+    result["valueMax"] = unit.apply(vMax);
+    result["unit"] = unit.unit;
+    result["isThermal"] = true;
+    result["isDirectValue"] = isDirect;
+    result["sensorId"] = sensorId;
+    if (cal.valid) result["calibration"] = calibrationJson(cal);
+    result["nodata"] = options.nodata ? json(*options.nodata) : json(nullptr);
+    result["nodataOverridden"] = options.nodata.has_value();
+    result["nodataInvalid"] = false;
+    result["pixelCount"] = static_cast<uint64_t>(td.width) * static_cast<uint64_t>(td.height);
+    result["validPixelCount"] = validCount;
+    result["stretch"] = json::array({stretchEntry(unit.apply(vMin), unit.apply(vMax > vMin ? vMax : vMin + 1.0))});
+    return result.dump();
+}
+
+} // anonymous namespace
+
 std::string getRasterValueInfoJson(const std::string &filePath, const RasterValueOptions &options) {
     cancel::throwIfCanceled();
     std::string sensorId;
@@ -441,6 +488,14 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
     if (isThermal) cal = extractThermalCalibration(filePath);
 
     const bool isDirect = isThermal ? isDirectTemperatureRaster(filePath) : true;
+
+    // An R-JPEG: the temperatures come from its raw thermal data and its calibration, not from the colour bands
+    // GDAL reads (the preview, 0-255, FR-RAS-14)
+    if (isThermal) {
+        if (const auto rjpeg = readRJpegThermal(filePath); rjpeg && !rjpeg->grid.temperatures.empty()) {
+            return thermalGridValueInfoJson(rjpeg->grid, rjpeg->raw, rjpeg->calibration, false, sensorId, options);
+        }
+    }
 
     json result;
     bool hasStats = false;
@@ -514,40 +569,9 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
     if (!hasStats && isThermal) {
         TemperatureData td = readTemperatureData(filePath);
         if (!td.temperatures.empty()) {
-            // The temperatures of the grid are in degrees Celsius; a thermal formula gives them in its unit (D-022)
-            const ValueFormula unit = valueFormulaOf("\xC2\xB0\x43", isThermalFormulaId(options.formula) ? options.formula : "");
             // A raw sample equal to the NoData value of the options has no value (FR-RAS-31)
             const RawThermalData raw = options.nodata ? extractRawThermalData(filePath) : RawThermalData();
-            float vMin = std::numeric_limits<float>::max();
-            float vMax = std::numeric_limits<float>::lowest();
-            uint64_t validCount = 0;
-            for (size_t i = 0; i < td.temperatures.size(); i++) {
-                if (!thermalGridHasValue(td, raw, i, options)) continue;
-                const float t = td.temperatures[i];
-                vMin = std::min(vMin, t);
-                vMax = std::max(vMax, t);
-                validCount++;
-            }
-            if (validCount == 0)
-                throw NoRasterDataException("Cannot compute statistics: no pixel of the image has a value");
-            result["width"] = td.width;
-            result["height"] = td.height;
-            result["bandCount"] = 1;
-            result["dataType"] = dataTypeName(GDT_Unknown);
-            result["valueMin"] = unit.apply(vMin);
-            result["valueMax"] = unit.apply(vMax);
-            result["unit"] = unit.unit;
-            result["isThermal"] = isThermal;
-            result["isDirectValue"] = isDirect;
-            result["sensorId"] = sensorId;
-            if (cal.valid) result["calibration"] = calibrationJson(cal);
-            result["nodata"] = options.nodata ? json(*options.nodata) : json(nullptr);
-            result["nodataOverridden"] = options.nodata.has_value();
-            result["nodataInvalid"] = false;
-            result["pixelCount"] = static_cast<uint64_t>(td.width) * static_cast<uint64_t>(td.height);
-            result["validPixelCount"] = validCount;
-            result["stretch"] = json::array({stretchEntry(unit.apply(vMin), unit.apply(vMax > vMin ? vMax : vMin + 1.0))});
-            hasStats = true;
+            return thermalGridValueInfoJson(td, raw, cal, isDirect, sensorId, options);
         }
     }
 
@@ -579,6 +603,14 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y, const 
     cancel::throwIfCanceled();
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
+
+    // An R-JPEG: the temperature of the raw thermal grid, not the colour byte of the preview (FR-RAS-14). The pixel
+    // is a pixel of that grid (the picture has no geotransform)
+    if (isThermal) {
+        valueFormulaOf("\xC2\xB0\x43", options.formula); // a bad formula is refused before the image is read
+        if (const auto rjpeg = readRJpegThermal(filePath); rjpeg && !rjpeg->grid.temperatures.empty())
+            return thermalGridPointJson(rjpeg->grid, rjpeg->raw, x, y, options);
+    }
 
     try {
         return pointAtPixel(filePath, x, y, isThermal, options);
@@ -633,6 +665,13 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
     cancel::throwIfCanceled();
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
+
+    // An R-JPEG: the temperatures of the raw thermal grid (FR-RAS-14)
+    if (isThermal) {
+        valueFormulaOf("\xC2\xB0\x43", options.formula); // a bad formula is refused before the image is read
+        if (const auto rjpeg = readRJpegThermal(filePath); rjpeg && !rjpeg->grid.temperatures.empty())
+            return thermalGridAreaStatsJson(rjpeg->grid, rjpeg->raw, x0, y0, x1, y1, options);
+    }
 
     try {
         const DemContext dem = openDem(filePath, 1, BandValueOptions{options.nodata}, false);

@@ -6,6 +6,7 @@
 #include "raster_ops.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <limits>
 #include <optional>
@@ -21,6 +22,7 @@
 #include "raster_stats.h"
 #include "raster_utils.h"
 #include "thumbs.h"
+#include "thermal.h"
 #include "thumb_internal.h"
 #include "vis_render.h"
 
@@ -301,11 +303,115 @@ RasterImage renderPlainThumbnail(const fs::path& imagePath, int thumbSize) {
     return image;
 }
 
+// The temperature of a grid pixel as the thumbnail shows it: whether a sensor can see it (not NaN, above absolute
+// zero, below 1000 degrees Celsius: the rule of the value endpoints, thermalGridHasValue)
+bool isGridTemperature(float t) {
+    return std::isfinite(t) && t > -273.15f && t < 1000.0f;
+}
+
+// The value of the grid at the fractional pixel position (gx, gy), pixel centres at +0.5: bilinear over the
+// neighbours that have a temperature, NODATA_SENTINEL when none has
+float sampleGrid(const std::vector<float>& grid, int width, int height, double gx, double gy) {
+    const double fx = std::clamp(gx - 0.5, 0.0, static_cast<double>(width - 1));
+    const double fy = std::clamp(gy - 0.5, 0.0, static_cast<double>(height - 1));
+    const int x0 = static_cast<int>(std::floor(fx));
+    const int y0 = static_cast<int>(std::floor(fy));
+    const int x1 = std::min(x0 + 1, width - 1);
+    const int y1 = std::min(y0 + 1, height - 1);
+    const double wx = fx - x0;
+    const double wy = fy - y0;
+
+    double sum = 0, weights = 0;
+    const auto add = [&](int x, int y, double w) {
+        const float v = grid[static_cast<size_t>(y) * width + x];
+        if (w <= 0 || v == NODATA_SENTINEL) return;
+        sum += v * w;
+        weights += w;
+    };
+    add(x0, y0, (1 - wx) * (1 - wy));
+    add(x1, y0, wx * (1 - wy));
+    add(x0, y1, (1 - wx) * wy);
+    add(x1, y1, wx * wy);
+    return weights > 0 ? static_cast<float>(sum / weights) : NODATA_SENTINEL;
+}
+
+// The thumbnail of an R-JPEG the visualisation parameters colour (FR-RAS-15): its temperatures, from the raw
+// thermal data of the camera and not from the colour preview GDAL reads (FR-RAS-14), in the unit of the thermal
+// formula (CELSIUS when the parameters name none), over the rescale or else the minimum to the maximum of the image:
+// the coldest pixel has the first colour of the colormap and the hottest the last. Nothing when the parameters do not
+// ask for a thermal rendering, or the file is no R-JPEG with temperatures (the caller renders it as any raster).
+std::optional<RasterImage> renderRJpegThumbnail(const fs::path& imagePath, int thumbSize, const ThumbVisParams& vis) {
+    if (!vis.formula.empty() && !isThermalFormulaId(vis.formula)) return std::nullopt;
+    if (vis.formula.empty() && vis.colormap.empty()) return std::nullopt;
+
+    std::optional<RJpegThermal> rjpeg;
+    try {
+        rjpeg = readRJpegThermal(io::toUtf8(imagePath));
+    } catch (const std::exception& e) {
+        // A FLIR picture needs the tags of the file for its calibration, which the raster helper cannot read
+        LOGD << "No thermal rendering of " << io::toUtf8(imagePath) << ": " << e.what();
+        return std::nullopt;
+    }
+    if (!rjpeg || rjpeg->grid.temperatures.empty()) return std::nullopt;
+
+    auto& ve = VegetationEngine::instance();
+    const std::string colormapId = vis.colormap.empty() ? "ironbow" : vis.colormap;
+    const Colormap* colormap = ve.getColormap(colormapId);
+    if (!colormap) throw InvalidArgsException("Unknown colormap: " + colormapId);
+    const ThermalFormulaConversion unit = celsiusFormulaConversion(vis.formula.empty() ? "CELSIUS" : vis.formula);
+
+    // The grid in the unit of the formula, NODATA_SENTINEL where no temperature can be told
+    const int width = rjpeg->grid.width;
+    const int height = rjpeg->grid.height;
+    std::vector<float> grid(rjpeg->grid.temperatures.size());
+    float vMin = std::numeric_limits<float>::max();
+    float vMax = std::numeric_limits<float>::lowest();
+    for (size_t i = 0; i < grid.size(); i++) {
+        const float t = rjpeg->grid.temperatures[i];
+        if (!isGridTemperature(t)) {
+            grid[i] = NODATA_SENTINEL;
+            continue;
+        }
+        grid[i] = static_cast<float>(unit.conversion.apply(t));
+        vMin = std::min(vMin, grid[i]);
+        vMax = std::max(vMax, grid[i]);
+    }
+    if (vMin > vMax) return std::nullopt;
+
+    std::pair<float, float> range = {vMin, vMax > vMin ? vMax : vMin + 1.0f};
+    if (!vis.rescale.empty()) range = parseRescaleRange(vis.rescale);
+
+    int targetWidth = 0, targetHeight = 0;
+    computeThumbTargetSize(width, height, thumbSize, targetWidth, targetHeight);
+    std::vector<float> values(static_cast<size_t>(targetWidth) * targetHeight);
+    for (int y = 0; y < targetHeight; y++) {
+        for (int x = 0; x < targetWidth; x++) {
+            values[static_cast<size_t>(y) * targetWidth + x] =
+                sampleGrid(grid, width, height, (x + 0.5) * width / targetWidth, (y + 0.5) * height / targetHeight);
+        }
+    }
+
+    std::vector<uint8_t> rgba(values.size() * 4);
+    ve.applyColormap(values.data(), rgba.data(), values.size(), *colormap, {range.first, range.second, NODATA_SENTINEL});
+
+    RasterImage image(targetWidth, targetHeight, 3, true);
+    for (size_t i = 0; i < image.pixels(); i++) {
+        for (int b = 0; b < 3; b++) image.band(b)[i] = rgba[i * 4 + b];
+        image.alpha[i] = rgba[i * 4 + 3];
+    }
+    LOGD << "Rendered the temperatures of the R-JPEG " << io::toUtf8(imagePath) << " as a thumbnail";
+    return image;
+}
+
 // The thumbnail the visualisation parameters describe: a formula with its colormap, or the bands
 // they choose with a stretch. thermalTags is what the host found in the tags of the file: the
 // helper reads none.
 RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, const ThumbVisParams& visParams,
                                       bool thermalTags) {
+    // An R-JPEG shows its temperatures, not the colours of its preview
+    if (auto rjpeg = renderRJpegThumbnail(imagePath, thumbSize, visParams))
+        return std::move(*rjpeg);
+
     const auto src = openUserRaster(io::toUtf8(imagePath));
     if (!src)
         throw raster::RasterOpException(raster::ErrorCode::Unreadable, "Cannot open " + io::toUtf8(imagePath) + " for reading");

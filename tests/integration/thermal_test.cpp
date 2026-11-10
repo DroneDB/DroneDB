@@ -13,9 +13,12 @@
 #include "ddb.h"
 #include "sensorprofile.h"
 #include "gdal_inc.h"
+#include "entry.h"
+#include "raster_test_utils.h"
 
 #include "mio.h"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 
@@ -301,6 +304,132 @@ TEST(thermal, cApiPixelExportsTakeTheOptions) {
         DDBFree(output);
     } else {
         EXPECT_EQ(err, DDBERR_INVALIDARGS); // every pixel of the area had that value
+    }
+}
+
+// ============================================================
+// The DJI thermal SDK samples (U-603: FR-RAS-13, FR-RAS-14, FR-RAS-15)
+// ============================================================
+
+// The DJI_0001_R.JPG of the SDK: M2EA (Mavic 2 Enterprise Advanced), H20T and H20N, 640 x 512. M2EA and H20N are
+// in test_data/thermal/<camera>/, the H20T is test_data/thermal/DJI_0001_R.JPG. The raw counts and the pixels are
+// those of the DJI_RAW_THERMAL_IMAGE subdataset (gdalinfo -stats, a read of the array) and the temperatures are
+// those of the Planck formula with the default calibration, computed outside the code under test.
+struct DjiSample {
+    const char *camera;
+    const char *model;
+    const char *asset;      // path under test_data
+    int rawMin, rawMax;     // raw counts, the extremes of the image
+    double tempMin, tempMax;
+    int rawAtCentre;        // the pixel (320, 256)
+    double tempAtCentre;
+    int previewAtCentre;    // the byte of the colour preview there, which the raster API used to report as degrees
+    int hotX, hotY;         // the one pixel with the hottest raw count
+};
+
+const DjiSample DJI_SAMPLES[] = {
+    {"M2EA", "MAVIC2-ENTERPRISE-ADVANCED", "thermal/M2EA/DJI_0001_R.JPG", 17228, 20036, 18.7289, 33.5372, 18384, 25.1017, 31, 637, 450},
+    {"H20T", "ZH20T", "thermal/DJI_0001_R.JPG", 13537, 20670, -5.4784, 36.5976, 15908, 10.8586, 147, 260, 353},
+    {"H20N", "ZH20N", "thermal/H20N/DJI_0001_R.JPG", 17836, 19568, 22.1346, 31.2187, 18764, 27.1066, 140, 470, 326},
+};
+
+// The sample copied in the area, or a skipped test when it is not in test_data (M2EA and H20N come with the test_data
+// that follows this change)
+fs::path djiSample(TestArea &ta, const DjiSample &sample) {
+    try {
+        return ta.downloadTestAsset(testDataUrl(sample.asset), std::string(sample.camera) + "_DJI_0001_R.JPG");
+    } catch (const std::exception &e) {
+        return {};
+    }
+}
+
+#define DJI_SAMPLE_OR_SKIP(name, ta, sample)                                                            \
+    const fs::path name = djiSample(ta, sample);                                                          \
+    if (name.empty()) GTEST_SKIP() << sample.asset << " is not in test_data (DJI thermal SDK sample)"
+
+TEST(thermal, theDjiSdkSamplesAreThermalWithCalibration) {
+    for (const auto &sample : DJI_SAMPLES) {
+        SCOPED_TRACE(sample.camera);
+        TestArea ta(TEST_NAME);
+        DJI_SAMPLE_OR_SKIP(img, ta, sample);
+
+        EXPECT_TRUE(isThermalImageFromExif("DJI", sample.model));
+        EXPECT_TRUE(hasDjiRawThermal(img.string()));
+        EXPECT_TRUE(isThermalImage(img.string()));
+        EXPECT_TRUE(extractThermalCalibration(img.string()).valid);
+
+        const auto raw = extractRawThermalData(img.string());
+        ASSERT_TRUE(raw.valid);
+        EXPECT_EQ(raw.width, 640);
+        EXPECT_EQ(raw.height, 512);
+        EXPECT_EQ(*std::min_element(raw.data.begin(), raw.data.end()), sample.rawMin);
+        EXPECT_EQ(*std::max_element(raw.data.begin(), raw.data.end()), sample.rawMax);
+        EXPECT_EQ(raw.data[320 + 256 * 640], sample.rawAtCentre);
+
+        Entry entry;
+        parseEntry(img, ta.getFolder(), entry, false);
+        EXPECT_EQ(entry.properties.value("sensorCategory", ""), "thermal");
+    }
+}
+
+TEST(thermal, theRasterApiOfTheDjiSdkSamplesReportsTemperatures) {
+    for (const auto &sample : DJI_SAMPLES) {
+        SCOPED_TRACE(sample.camera);
+        TestArea ta(TEST_NAME);
+        DJI_SAMPLE_OR_SKIP(img, ta, sample);
+        const std::string path = img.string();
+
+        char *output = nullptr;
+        ASSERT_EQ(DDBGetRasterValueInfo(path.c_str(), &output), DDBERR_NONE) << DDBGetLastError();
+        const auto info = json::parse(std::string(output));
+        DDBFree(output);
+        EXPECT_EQ(info["width"], 640);
+        EXPECT_EQ(info["height"], 512);
+        EXPECT_TRUE(info["isThermal"].get<bool>());
+        EXPECT_FALSE(info["isDirectValue"].get<bool>());
+        EXPECT_EQ(info["unit"], "\xC2\xB0" "C");
+        EXPECT_TRUE(info.contains("calibration"));
+        EXPECT_NEAR(info["valueMin"].get<double>(), sample.tempMin, 0.01);
+        EXPECT_NEAR(info["valueMax"].get<double>(), sample.tempMax, 0.01);
+
+        // The pixel (320, 256) is a temperature, not the byte of the colour preview (147 for the H20T)
+        ASSERT_EQ(DDBGetRasterPointValuePixelEx(path.c_str(), 320, 256, nullptr, &output), DDBERR_NONE) << DDBGetLastError();
+        const auto point = json::parse(std::string(output));
+        DDBFree(output);
+        EXPECT_NEAR(point["value"].get<double>(), sample.tempAtCentre, 0.01);
+        EXPECT_NE(static_cast<int>(point["value"].get<double>()), sample.previewAtCentre);
+        EXPECT_EQ(point["rawValue"], sample.rawAtCentre);
+        EXPECT_EQ(point["unit"], "\xC2\xB0" "C");
+
+        // The pixel with the hottest raw count is the maximum of the value info
+        ASSERT_EQ(DDBGetRasterPointValuePixelEx(path.c_str(), sample.hotX, sample.hotY, nullptr, &output), DDBERR_NONE);
+        EXPECT_NEAR(json::parse(std::string(output))["value"].get<double>(), sample.tempMax, 0.01);
+        DDBFree(output);
+    }
+}
+
+// The thumbnail of an R-JPEG with a colormap colours its raw temperatures: the hottest pixel has the last colour of the
+// map ("rainbow" ends at 200, 0, 0 and starts at 150, 0, 90), the picture has the size of the raw thermal image
+TEST(thermal, theThumbnailOfTheDjiSdkSamplesColoursTheRawTemperatures) {
+    for (const auto &sample : DJI_SAMPLES) {
+        SCOPED_TRACE(sample.camera);
+        TestArea ta(TEST_NAME);
+        DJI_SAMPLE_OR_SKIP(img, ta, sample);
+
+        uint8_t *buffer = nullptr;
+        int size = 0;
+        ASSERT_EQ(DDBGenerateMemoryThumbnailEx(img.string().c_str(), 640, nullptr, nullptr, "CELSIUS", nullptr, "rainbow",
+                                               nullptr, &buffer, &size),
+                  DDBERR_NONE) << DDBGetLastError();
+        const auto image = testutils::decodeImage(std::vector<uint8_t>(buffer, buffer + size));
+        DDBVSIFree(buffer);
+        ASSERT_EQ(image.width, 640);
+        ASSERT_EQ(image.height, 512);
+
+        const size_t hot = static_cast<size_t>(sample.hotY) * 640 + sample.hotX;
+        EXPECT_NEAR(image.bands[0][hot], 200, 16);
+        EXPECT_NEAR(image.bands[1][hot], 0, 16);
+        EXPECT_NEAR(image.bands[2][hot], 0, 16);
     }
 }
 

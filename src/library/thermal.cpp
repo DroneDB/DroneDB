@@ -36,13 +36,20 @@ static const std::vector<std::pair<std::string, std::string>> thermalSensorPatte
     {"DJI", "H20T"},
     {"DJI", "ZH20T"},
     {"DJI", "Zenmuse H20T"},
+    {"DJI", "H20N"},
+    {"DJI", "ZH20N"},
+    {"DJI", "Zenmuse H20N"},
     {"DJI", "H30T"},
     {"DJI", "ZH30T"},
     {"DJI", "Zenmuse H30T"},
+    {"DJI", "M30T"},
     {"DJI", "MAVIC3T"},
-    {"DJI", "M3T"},
+    {"DJI", "M3T"},        // M3T and M3TD
     {"DJI", "Mavic 3T"},
-    {"DJI", "Mavic 3 Enterprise"},
+    {"DJI", "Mavic 3 Thermal"},
+    {"DJI", "MAVIC2-ENTERPRISE-ADVANCED"},
+    {"DJI", "M2EA"},
+    // "Mavic 3 Enterprise" is not here: it names the M3E too, which has no thermal camera (the M3T is "M3T")
     {"Workswell", "WirisProSc"},
     {"MicaSense", "Altum"},
 };
@@ -213,36 +220,175 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath, const FlirTa
     return info;
 }
 
+// ---- DJI raw thermal probe ----
+
+namespace {
+
+// The APP3 segments of a DJI R-JPEG that hold its raw thermal image: where each one's payload is, and the size of
+// the image. The rule is that of the GDAL JPEG driver (JPGDatasetCommon::ReadDJIMetadata): the payloads of the APP3
+// segments before the scan add up to width * height * 2 bytes of the picture, or to 640 * 512 * 2 (the nominal sensor,
+// for the models whose picture is larger than their thermal image, such as the M4T), little-endian UInt16.
+struct DjiRawThermal {
+    struct Chunk {
+        std::streamoff offset = 0;
+        size_t size = 0;
+    };
+    std::vector<Chunk> chunks;
+    int width = 0;
+    int height = 0;
+    bool found = false;
+};
+
+DjiRawThermal findDjiRawThermal(const std::string &filePath) {
+    DjiRawThermal result;
+
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    if (!file.is_open()) return result;
+
+    uint8_t header[4];
+    file.read(reinterpret_cast<char *>(header), 2);
+    if (file.gcount() != 2 || header[0] != 0xFF || header[1] != 0xD8) return result;
+
+    int pictureWidth = 0, pictureHeight = 0;
+    size_t total = 0;
+    std::vector<DjiRawThermal::Chunk> chunks;
+
+    std::streamoff pos = 2;
+    while (true) {
+        file.clear();
+        file.seekg(pos);
+        file.read(reinterpret_cast<char *>(header), 4);
+        if (file.gcount() != 4 || header[0] != 0xFF) break;
+
+        const uint8_t marker = header[1];
+        if (marker == 0xDA) break; // start of scan: the segments are over
+        const int length = header[2] * 256 + header[3];
+        if (length < 2) break;
+        const size_t payload = static_cast<size_t>(length) - 2;
+
+        if (marker == 0xE3) {
+            total += payload;
+            // A picture of a sensor of 10000 x 10000 pixels is no thermal image (a bad EXIF must not allocate 200 MB)
+            if (total > static_cast<size_t>(10000) * 10000 * 2) return result;
+            chunks.push_back({pos + 4, payload});
+        } else if (marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC) {
+            // The frame header: precision (1 byte), height and width (2 bytes each)
+            uint8_t frame[5];
+            file.read(reinterpret_cast<char *>(frame), 5);
+            if (file.gcount() == 5) {
+                pictureHeight = frame[1] * 256 + frame[2];
+                pictureWidth = frame[3] * 256 + frame[4];
+            }
+        }
+        pos += 2 + length;
+    }
+
+    if (chunks.empty() || total == 0) return result;
+    if (pictureWidth > 0 && pictureHeight > 0 && total == static_cast<size_t>(pictureWidth) * pictureHeight * 2) {
+        result.width = pictureWidth;
+        result.height = pictureHeight;
+    } else if (total == static_cast<size_t>(640) * 512 * 2) {
+        result.width = 640;
+        result.height = 512;
+    } else {
+        return result;
+    }
+    result.chunks = std::move(chunks);
+    result.found = true;
+    return result;
+}
+
+RawThermalData readDjiRawThermal(const std::string &filePath) {
+    RawThermalData result;
+    const DjiRawThermal dji = findDjiRawThermal(filePath);
+    if (!dji.found) return result;
+
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    if (!file.is_open()) return result;
+
+    std::vector<uint8_t> bytes;
+    bytes.reserve(static_cast<size_t>(dji.width) * dji.height * 2);
+    for (const auto &chunk : dji.chunks) {
+        const size_t at = bytes.size();
+        bytes.resize(at + chunk.size);
+        file.seekg(chunk.offset);
+        file.read(reinterpret_cast<char *>(bytes.data() + at), static_cast<std::streamsize>(chunk.size));
+        if (static_cast<size_t>(file.gcount()) != chunk.size) return RawThermalData();
+    }
+
+    const size_t pixelCount = static_cast<size_t>(dji.width) * dji.height;
+    result.data.resize(pixelCount);
+    for (size_t i = 0; i < pixelCount; i++)
+        result.data[i] = static_cast<uint16_t>(bytes[i * 2] | (static_cast<uint16_t>(bytes[i * 2 + 1]) << 8));
+    result.width = dji.width;
+    result.height = dji.height;
+    result.valid = true;
+    LOGD << "Extracted " << pixelCount << " raw thermal pixels from the DJI segments of " << filePath;
+    return result;
+}
+
+} // anonymous namespace
+
+bool hasDjiRawThermal(const std::string &filePath) {
+    return findDjiRawThermal(filePath).found;
+}
+
 // ---- R-JPEG raw data extraction ----
 
-RawThermalData extractRawThermalData(const std::string &filePath) {
-    RawThermalData result;
+namespace {
 
-    // Method 1: Try FLIR APP1 segment extraction (FLIR R-JPEG format)
+// Whether the file starts as a JPEG (SOI): an R-JPEG is one, and nothing else is read for its raw thermal data
+bool startsAsJpeg(const std::string &filePath) {
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    uint8_t soi[2] = {};
+    file.read(reinterpret_cast<char *>(soi), 2);
+    return file.gcount() == 2 && soi[0] == 0xFF && soi[1] == 0xD8;
+}
+
+} // anonymous namespace
+
+RawThermalData extractRJpegRawThermal(const std::string &filePath) {
+    // The FLIR search reads the whole file: a raster that is not a JPEG has no raw thermal segments to look for
+    if (!startsAsJpeg(filePath)) return RawThermalData();
+
+    // DJI: the APP3 segments (the probe of FR-RAS-13: what detects the file is what reads it)
+    RawThermalData dji = readDjiRawThermal(filePath);
+    if (dji.valid) return dji;
+
+    // FLIR: the APP1 segment
+    RawThermalData result;
     std::unique_ptr<ExifParser> tags;
     FlirSegmentInfo seg = findFlirSegment(filePath, [&] {
         tags = readExifParser(io::fromUtf8(filePath));
         return tags.get();
     });
-    if (seg.found) {
-        std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
-        if (!file.is_open()) return result;
+    if (!seg.found) return result;
 
-        file.seekg(seg.rawDataOffset);
-        size_t pixelCount = static_cast<size_t>(seg.rawWidth) * seg.rawHeight;
-        result.data.resize(pixelCount);
-        file.read(reinterpret_cast<char*>(result.data.data()), pixelCount * 2);
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    if (!file.is_open()) return result;
 
-        result.width = seg.rawWidth;
-        result.height = seg.rawHeight;
-        result.valid = true;
+    file.seekg(seg.rawDataOffset);
+    size_t pixelCount = static_cast<size_t>(seg.rawWidth) * seg.rawHeight;
+    result.data.resize(pixelCount);
+    file.read(reinterpret_cast<char*>(result.data.data()), pixelCount * 2);
 
-        LOGD << "Extracted " << pixelCount << " raw thermal pixels from " << filePath;
-        return result;
-    }
+    result.width = seg.rawWidth;
+    result.height = seg.rawHeight;
+    result.valid = true;
 
-    // Method 2: GDAL fallback (DJI R-JPEG, thermal GeoTIFF, etc.)
-    LOGD << "No FLIR segment found, trying GDAL fallback for " << filePath;
+    LOGD << "Extracted " << pixelCount << " raw thermal pixels from " << filePath;
+    return result;
+}
+
+RawThermalData extractRawThermalData(const std::string &filePath) {
+    // An R-JPEG (FLIR or DJI)
+    RawThermalData rjpeg = extractRJpegRawThermal(filePath);
+    if (rjpeg.valid) return rjpeg;
+
+    // GDAL fallback: a thermal GeoTIFF with the raw UInt16 counts of the sensor. The 8-bit colour bands of an
+    // R-JPEG are its preview, not raw data: no temperature comes from them (FR-RAS-14)
+    LOGD << "No R-JPEG raw thermal data found, trying GDAL for " << filePath;
+    RawThermalData result;
 
     const auto dataset = raster::openInputRaster(filePath);
     if (!dataset) return result;
@@ -266,17 +412,6 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
                 result.height = h;
                 result.valid = true;
                 LOGD << "Extracted " << pixelCount << " raw thermal pixels via GDAL (UInt16)";
-            }
-        } else if (dt == GDT_Byte) {
-            // 8-bit thermal image (e.g., DJI R-JPEG)
-            // Read first band and cast to UInt16
-            result.data.resize(pixelCount);
-            if (GDALRasterIO(hBand, GF_Read, 0, 0, w, h,
-                             result.data.data(), w, h, GDT_UInt16, 0, 0) == CE_None) {
-                result.width = w;
-                result.height = h;
-                result.valid = true;
-                LOGD << "Extracted " << pixelCount << " thermal pixels via GDAL (Byte->UInt16)";
             }
         }
     }
@@ -361,6 +496,10 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
         if (isThermalImageFromExif(make, model)) {
             cal.valid = true;
             LOGD << "Using default thermal calibration for " << make << " " << model;
+        } else if (hasDjiRawThermal(filePath)) {
+            // A DJI camera whose model is not listed (FR-RAS-13): its raw thermal image is the proof
+            cal.valid = true;
+            LOGD << "Using default thermal calibration for the DJI raw thermal image of " << make << " " << model;
         }
 
     } catch (const std::exception &e) {
@@ -601,9 +740,11 @@ bool isThermalByGdalMetadata(const std::string &filePath) {
     return looksThermal(signals);
 }
 
-// Methods 4-5: what the file holds besides its tags, the FLIR segment of an R-JPEG and the GDAL
+// Methods 4-5: what the file holds besides its tags, the DJI or FLIR segments of an R-JPEG and the GDAL
 // metadata of a single-band raster
 bool contentSaysThermal(const std::string &filePath, const FlirTags &tags) {
+    // The raw thermal image of a DJI camera, whatever its model (the probe is also what reads it)
+    if (hasDjiRawThermal(filePath)) return true;
     if (findFlirSegment(filePath, tags).found) return true;
     return isThermalByGdalMetadata(filePath);
 }
@@ -687,7 +828,23 @@ TemperatureData readTemperatureData(const std::string &filePath) {
         }
     }
 
+    // Not a raster of temperatures (an 8-bit picture, a band that could not be read): nothing was read
+    td.temperatures.clear();
+
     // Try R-JPEG extraction
+    if (const auto rjpeg = readRJpegThermal(filePath)) {
+        if (rjpeg->grid.temperatures.empty()) {
+            // The raw counts of the camera have no calibration: they are not temperatures (FR-RAS-14)
+            LOGD << "No valid thermal calibration for " << filePath << ", the R-JPEG has no temperatures";
+            td.width = rjpeg->raw.width;
+            td.height = rjpeg->raw.height;
+        } else {
+            td = rjpeg->grid;
+        }
+        return td;
+    }
+
+    // Raw UInt16 data of a raster that GDAL could not read as one band (nothing else holds raw data)
     RawThermalData raw = extractRawThermalData(filePath);
     if (raw.valid) {
         ThermalCalibration cal = extractThermalCalibration(filePath);
@@ -695,7 +852,7 @@ TemperatureData readTemperatureData(const std::string &filePath) {
             td.temperatures = rawToTemperatureMap(raw, cal);
         } else {
             LOGD << "No valid thermal calibration for " << filePath
-                 << ", returning raw R-JPEG values as float";
+                 << ", returning raw values as float";
             size_t pixCount = raw.data.size();
             td.temperatures.resize(pixCount);
             for (size_t p = 0; p < pixCount; p++) {
@@ -708,6 +865,25 @@ TemperatureData readTemperatureData(const std::string &filePath) {
     }
 
     return td;
+}
+
+std::optional<RJpegThermal> readRJpegThermal(const std::string &filePath) {
+    RJpegThermal result;
+    result.raw = extractRJpegRawThermal(filePath);
+    if (!result.raw.valid) return std::nullopt;
+
+    result.grid.width = result.raw.width;
+    result.grid.height = result.raw.height;
+
+    // DJI: the default calibration, no tag is read (the raster helper reads none); FLIR: the tags of the file
+    if (hasDjiRawThermal(filePath)) {
+        result.calibration.valid = true;
+    } else {
+        result.calibration = extractThermalCalibration(filePath);
+    }
+    if (result.calibration.valid)
+        result.grid.temperatures = rawToTemperatureMap(result.raw, result.calibration);
+    return result;
 }
 
 // ---- Helper: convert pixel to geo coordinates ----

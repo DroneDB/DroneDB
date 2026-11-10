@@ -117,7 +117,8 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
 // The camera of an image: orientation, make and model (a thermal sensor is marked), the sensor
 // size, the focal length and the orientation of the camera; sensorSize, focal and cameraOri
 // also feed the footprint
-void readCamera(ExifParser *e, Entry &entry, SensorSize &sensorSize, Focal &focal, CameraOrientation &cameraOri)
+void readCamera(ExifParser *e, const fs::path &path, Entry &entry, SensorSize &sensorSize, Focal &focal,
+                CameraOrientation &cameraOri)
 {
     entry.properties["orientation"] = e->extractImageOrientation();
     entry.properties["make"] = e->extractMake();
@@ -131,6 +132,10 @@ void readCamera(ExifParser *e, Entry &entry, SensorSize &sensorSize, Focal &foca
         if (isThermalImageFromExif(make, model)) {
             entry.properties["sensorCategory"] = "thermal";
             LOGD << "Detected thermal sensor: " << make << " " << model;
+        } else if (make.find("DJI") != std::string::npos && hasDjiRawThermal(io::toUtf8(path))) {
+            // A DJI camera whose model is not listed: the raw thermal image in the file says it (FR-RAS-13)
+            entry.properties["sensorCategory"] = "thermal";
+            LOGD << "Detected the DJI raw thermal image of " << make << " " << model;
         }
     }
 
@@ -277,7 +282,7 @@ void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &
 
         if (image)
         {
-            readCamera(e, entry, sensorSize, focal, cameraOri);
+            readCamera(e, path, entry, sensorSize, focal, cameraOri);
             readFlight(e, entry);
         }
 
