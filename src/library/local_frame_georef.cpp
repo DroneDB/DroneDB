@@ -16,6 +16,7 @@
 #include "exceptions.h"
 #include "fs.h"
 #include "gdal_inc.h"
+#include "geo.h"
 #include "json.h"
 #include "logger.h"
 #include "mio.h"
@@ -30,8 +31,9 @@ namespace ddb
 
         bool inRange(const Wgs84Position &p)
         {
-            return std::isfinite(p.latitude) && std::isfinite(p.longitude) && std::isfinite(p.altitude) &&
-                   p.latitude >= -90.0 && p.latitude <= 90.0 && p.longitude >= -180.0 && p.longitude <= 180.0;
+            // The altitude has to be finite too; the position is a point: the envelope helper decides the rest
+            return std::isfinite(p.altitude) &&
+                   isWgs84Envelope(p.longitude, p.latitude, p.longitude, p.latitude);
         }
 
         // The CRS of a projected georef. A definition never names a file or reaches the network: it comes

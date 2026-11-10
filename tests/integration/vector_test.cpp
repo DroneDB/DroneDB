@@ -14,7 +14,9 @@
 #include "gdal_inc.h"
 #include "gdal_failure_counter.h"
 
+#include <array>
 #include <fstream>
+#include <sstream>
 #include <memory>
 #include <algorithm>
 #include <cctype>
@@ -613,5 +615,204 @@ namespace
             counts[layer.at("name").get<std::string>()] = layer.at("featureCount").get<int64_t>();
         EXPECT_EQ(counts, (std::map<std::string, int64_t>{{"tracks", 1}, {"track_points", 3}}))
             << entry.properties.dump();
+    }
+
+    // ---- footprints in WGS 84 (FR-SHR-03, D-050)
+
+    // A GeoJSON of one triangle, with the legacy "crs" member when crsName is given. x0/y0 is the
+    // lower left corner of the triangle, 100 units wide and high.
+    std::string geoJsonTriangle(double x0, double y0, const char *crsName)
+    {
+        std::ostringstream o;
+        o.precision(12);
+        o << R"({"type":"FeatureCollection",)";
+        if (crsName != nullptr)
+            o << R"("crs":{"type":"name","properties":{"name":")" << crsName << R"("}},)";
+        o << R"("features":[{"type":"Feature","properties":{},"geometry":{"type":"Polygon","coordinates":[[[)"
+          << x0 << "," << y0 << "],[" << x0 + 100 << "," << y0 << "],[" << x0 + 100 << "," << y0 + 100 << "],["
+          << x0 << "," << y0 << "]]]}}]}";
+        return o.str();
+    }
+
+    Entry parseVector(TestArea &ta, const std::string &name, const std::string &content)
+    {
+        const auto src = ta.getPath(name);
+        std::ofstream(src) << content;
+        Entry entry;
+        parseEntry(src, ta.getFolder(), entry, false);
+        EXPECT_EQ(entry.type, EntryType::Vector) << name;
+        return entry;
+    }
+
+    // A footprint of the corner points of the polygon: minX, minY, maxX, maxY
+    std::array<double, 4> footprintOf(Entry entry)
+    {
+        double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
+        for (int i = 0; i < entry.polygon_geom.size(); i++)
+        {
+            const auto p = entry.polygon_geom.getPoint(i);
+            minX = std::min(minX, p.x);
+            maxX = std::max(maxX, p.x);
+            minY = std::min(minY, p.y);
+            maxY = std::max(maxY, p.y);
+        }
+        return {minX, minY, maxX, maxY};
+    }
+
+    // GDAL reads the legacy "crs" member of a GeoJSON itself: the footprint of a layer in UTM 15N is
+    // reprojected to degrees. The expected values are those of GDAL's transformation of the four
+    // corners (gdaltransform -s_srs EPSG:32615 -t_srs EPSG:4326), never the metres of the file.
+    TEST(testVectorFootprint, aUtmGeoJsonWithACrsIsReprojected)
+    {
+        TestArea ta(TEST_NAME, true);
+        auto entry = parseVector(ta, "utm.geojson", geoJsonTriangle(576764.77, 5188207.22, "urn:ogc:def:crs:EPSG::32615"));
+
+        ASSERT_EQ(entry.polygon_geom.size(), 5) << entry.properties.dump();
+        const auto fp = footprintOf(entry);
+        EXPECT_NEAR(fp[0], -91.9932194933515, 1e-7);
+        EXPECT_NEAR(fp[1], 46.8429676951816, 1e-7);
+        EXPECT_NEAR(fp[2], -91.9918913544162, 1e-7);
+        EXPECT_NEAR(fp[3], 46.8438789991937, 1e-7);
+
+        ASSERT_EQ(entry.point_geom.size(), 1);
+        EXPECT_NEAR(entry.point_geom.getPoint(0).x, (-91.9932194933515 + -91.9918913544162) / 2.0, 1e-7);
+
+        // The extent of the layer is the one of the footprint
+        const auto extent = entry.properties.at("vector").at("layers").at(0).at("extent");
+        ASSERT_EQ(extent.size(), 4u);
+        EXPECT_NEAR(extent[0].get<double>(), -91.9932194933515, 1e-7);
+        EXPECT_NEAR(extent[3].get<double>(), 46.8438789991937, 1e-7);
+    }
+
+    // The EPSG object spelling of the legacy member is read as well
+    TEST(testVectorFootprint, aUtmGeoJsonWithAnEpsgCodeCrsIsReprojected)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto entry = parseVector(ta, "utm.geojson", geoJsonTriangle(576764.77, 5188207.22, "EPSG:32615"));
+
+        ASSERT_EQ(entry.polygon_geom.size(), 5) << entry.properties.dump();
+        EXPECT_NEAR(footprintOf(entry)[0], -91.9932194933515, 1e-7);
+    }
+
+    // Without a crs member a GeoJSON is WGS 84 by its specification: UTM metres are no degrees, so the
+    // entry has no footprint (and its layer no extent), never one in metres
+    TEST(testVectorFootprint, aUtmGeoJsonWithoutACrsHasNoFootprint)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto entry = parseVector(ta, "utm.geojson", geoJsonTriangle(576764.77, 5188207.22, nullptr));
+
+        EXPECT_TRUE(entry.polygon_geom.empty()) << entry.polygon_geom.toWkt();
+        EXPECT_TRUE(entry.point_geom.empty());
+        const auto &layer = entry.properties.at("vector").at("layers").at(0);
+        EXPECT_FALSE(layer.contains("extent")) << layer.dump();
+        EXPECT_EQ(layer.at("featureCount").get<int>(), 1);
+    }
+
+    // A crs name GDAL cannot use leaves the layer WGS 84 by default: the same rule as no crs member
+    TEST(testVectorFootprint, aCrsGdalCannotUseHasNoFootprint)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto entry = parseVector(ta, "utm.geojson", geoJsonTriangle(576764.77, 5188207.22, "not a crs"));
+
+        EXPECT_TRUE(entry.polygon_geom.empty()) << entry.polygon_geom.toWkt();
+    }
+
+    // A layer in degrees keeps its footprint exactly
+    TEST(testVectorFootprint, aGeoJsonInDegreesKeepsItsFootprint)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto entry = parseVector(ta, "deg.geojson", geoJsonTriangle(10.0, -40.0, nullptr));
+
+        ASSERT_EQ(entry.polygon_geom.size(), 5);
+        const auto fp = footprintOf(entry);
+        EXPECT_DOUBLE_EQ(fp[0], 10.0);
+        EXPECT_DOUBLE_EQ(fp[1], -40.0);
+        EXPECT_DOUBLE_EQ(fp[2], 110.0);
+        EXPECT_DOUBLE_EQ(fp[3], 60.0);
+    }
+
+    // ... but the SRS saying WGS 84 does not make coordinates beyond the range degrees
+    TEST(testVectorFootprint, aWgs84LayerBeyondTheRangeHasNoFootprint)
+    {
+        TestArea ta(TEST_NAME, true);
+        // latitude 45 + 100 > 90
+        const auto entry = parseVector(ta, "beyond.geojson", geoJsonTriangle(10.0, 45.0, "urn:ogc:def:crs:EPSG::4326"));
+
+        EXPECT_TRUE(entry.polygon_geom.empty()) << entry.polygon_geom.toWkt();
+    }
+
+    // A reprojection that fails (an easting of 1e15 m is not a place of UTM 15N) gives no footprint
+    TEST(testVectorFootprint, aFailingReprojectionHasNoFootprint)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto entry = parseVector(ta, "far.geojson", geoJsonTriangle(1e15, 5188207.22, "urn:ogc:def:crs:EPSG::32615"));
+
+        EXPECT_TRUE(entry.polygon_geom.empty()) << entry.polygon_geom.toWkt();
+        EXPECT_TRUE(entry.point_geom.empty());
+    }
+
+    // A reprojection that succeeds but gives a longitude beyond 180 (NAD83 longitudes of 200 are
+    // the same numbers in WGS 84) gives no footprint either
+    TEST(testVectorFootprint, aReprojectedResultBeyondTheRangeHasNoFootprint)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto entry = parseVector(ta, "nad83.geojson", geoJsonTriangle(200.0, 10.0, "urn:ogc:def:crs:EPSG::4269"));
+
+        EXPECT_TRUE(entry.polygon_geom.empty()) << entry.polygon_geom.toWkt();
+    }
+
+    // The layers of one file are told apart: the one in UTM (with a crs) keeps its footprint, one without
+    // an envelope stays out of the total
+    TEST(testVectorFootprint, aLayerWithoutAnEnvelopeStaysOutOfTheTotal)
+    {
+        TestArea ta(TEST_NAME, true);
+        // A GML-free way to hold two layers: a GeoPackage written by OGR
+        const auto src = ta.getPath("two.gpkg");
+        {
+            GDALDriverH drv = GDALGetDriverByName("GPKG");
+            ASSERT_NE(drv, nullptr);
+            GDALDatasetH ds = GDALCreate(drv, src.string().c_str(), 0, 0, 0, GDT_Unknown, nullptr);
+            ASSERT_NE(ds, nullptr);
+            OGRSpatialReferenceH utm = OSRNewSpatialReference(nullptr);
+            OSRImportFromEPSG(utm, 32615);
+            OSRSetAxisMappingStrategy(utm, OAMS_TRADITIONAL_GIS_ORDER);
+            // Layer a: UTM 15N, a point of the area above
+            OGRLayerH a = GDALDatasetCreateLayer(ds, "a", utm, wkbPoint, nullptr);
+            OGRFeatureH fa = OGR_F_Create(OGR_L_GetLayerDefn(a));
+            OGRGeometryH pa = nullptr;
+            char *wktA = const_cast<char *>("POINT (576764.77 5188207.22)");
+            OGR_G_CreateFromWkt(&wktA, nullptr, &pa);
+            OGR_F_SetGeometryDirectly(fa, pa);
+            OGR_L_CreateFeature(a, fa);
+            OGR_F_Destroy(fa);
+            // Layer b: no SRS, metres
+            OGRLayerH b = GDALDatasetCreateLayer(ds, "b", nullptr, wkbPoint, nullptr);
+            OGRFeatureH fb = OGR_F_Create(OGR_L_GetLayerDefn(b));
+            OGRGeometryH pb = nullptr;
+            char *wktB = const_cast<char *>("POINT (500000 4000000)");
+            OGR_G_CreateFromWkt(&wktB, nullptr, &pb);
+            OGR_F_SetGeometryDirectly(fb, pb);
+            OGR_L_CreateFeature(b, fb);
+            OGR_F_Destroy(fb);
+            OSRDestroySpatialReference(utm);
+            GDALClose(ds);
+        }
+        Entry entry;
+        parseEntry(src, ta.getFolder(), entry, false);
+
+        const auto &layers = entry.properties.at("vector").at("layers");
+        ASSERT_EQ(layers.size(), 2u);
+        std::map<std::string, bool> hasExtent;
+        for (const auto &l : layers)
+            hasExtent[l.at("name").get<std::string>()] = l.contains("extent");
+        EXPECT_TRUE(hasExtent.at("a"));
+        // GPKG gives a layer without an SRS the undefined SRS: the metres are no WGS 84 envelope
+        EXPECT_FALSE(hasExtent.at("b")) << layers.dump();
+
+        // The total is the footprint of layer a alone: its point, in degrees
+        ASSERT_EQ(entry.polygon_geom.size(), 5) << entry.properties.dump();
+        const auto fp = footprintOf(entry);
+        EXPECT_NEAR(fp[0], -91.9932194933515, 1e-7);
+        EXPECT_NEAR(fp[1], 46.8429792372048, 1e-7);
     }
 }

@@ -110,6 +110,12 @@ namespace ddb
     Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone);
     Geographic2D fromUTM(double x, double y, const UTMZone &zone);
 
+    // True when the envelope is a plausible WGS 84 longitude/latitude one: all four values finite,
+    // longitudes within [-180, 180], latitudes within [-90, 90], and min <= max on both axes. The one
+    // test applied at index time to every footprint that is stored as WGS 84 (FR-SHR-03): a UTM
+    // envelope (metres), a NaN, or a reversed one fails.
+    bool isWgs84Envelope(double minX, double minY, double maxX, double maxY);
+
 }
 
 #endif // GEO_H
