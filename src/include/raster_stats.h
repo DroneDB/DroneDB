@@ -20,11 +20,21 @@ namespace ddb
 {
 
     /// No pixel of the band (or of the sample read for it) has a value: all NoData, NaN or masked. A GDALException,
-    /// named so that a render can tell it from a failed read and paint nothing instead of failing
+    /// named so that a render can tell it from a failed read and paint nothing instead of failing. sampled() says
+    /// that only a sample of the band was read (getStretchStatistics on a large band): the band may still have
+    /// pixels with a value outside it, so the result is not known to be empty
     class NoValidPixelsException : public GDALException
     {
     public:
-        explicit NoValidPixelsException(const std::string &message) : GDALException(message) {}
+        explicit NoValidPixelsException(const std::string &message, bool sampled = false)
+            : GDALException(message), sampled_(sampled) {}
+
+        /// True when the pixels read were a sample of the band (an overview or some of its blocks), false when
+        /// every pixel of the band was read and none has a value
+        bool sampled() const noexcept { return sampled_; }
+
+    private:
+        bool sampled_;
     };
 
     /// The statistics of the values of a band, over its pixels that have a value (not NoData, not
@@ -101,7 +111,9 @@ namespace ddb
         /// in the sidecar, never returned by get(). A sample in which no pixel has a value is read once
         /// more with 16 times the budget (exact when the band fits in it). Value info, contours and the
         /// build use get().
-        /// @throws NoValidPixelsException (a GDALException) when no pixel of a band has a value
+        /// @throws NoValidPixelsException (a GDALException) when no pixel of a band has a value: sampled() when
+        /// that second read was still a sample (a band of more than 16 times the budget), so the band may have
+        /// pixels with a value that the sample missed
         std::vector<BandStatistics> getStretchStatistics(const std::string &path, GDALDatasetH ds,
                                                          const std::vector<int> &bands,
                                                          const std::optional<double> &nodata = std::nullopt,
@@ -160,7 +172,8 @@ namespace ddb
     /// of the raster spread on an even lattice, so that only the blocks read are decoded. Those are
     /// marked sampled, and their validCount counts the pixels read that have a value. The call can be
     /// canceled.
-    /// @throws NoValidPixelsException (a GDALException) when no pixel of a band has a value
+    /// @throws NoValidPixelsException (a GDALException) when no pixel of a band has a value, sampled() when
+    /// the pixels read were a sample
     std::vector<BandStatistics> sampleBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
                                                      const std::optional<double> &nodata, uint64_t maxPixels);
 }

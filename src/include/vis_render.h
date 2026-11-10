@@ -215,7 +215,9 @@ namespace ddb
     /// (defaultStretch: its minimum to its maximum, from the statistics of the whole raster with the NoData
     /// override `nodata`), both in the physical values of the band (raw * scale + offset), as a formula is.
     /// A band with no pixel that has a value (all NoData or masked) has no range: the plan has the nominal range
-    /// 0 to 1 and its render is all transparent. A Byte band is stretched as any other (over its exact minimum to
+    /// 0 to 1 and its render is all transparent. When only a sample of the band was read (StretchSource::Bounded on
+    /// a large band) and no pixel of it has a value, the band may still have values: the NoValidPixelsException
+    /// (sampled()) is thrown, not the nominal range. A Byte band is stretched as any other (over its exact minimum to
     /// maximum, which a plain Byte tile does not read). `source` says which statistics the default stretch reads: the
     /// exact ones for a tile and an export, the bounded ones of D-041 for a thumbnail.
     BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,

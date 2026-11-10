@@ -186,7 +186,10 @@ namespace ddb
             BandStatistics finish(uint64_t pixelCount, bool sampled) const
             {
                 if (n_ == 0)
-                    throw NoValidPixelsException("Cannot compute statistics: no pixel of the band has a value");
+                    throw NoValidPixelsException(sampled ? "Cannot compute statistics: no pixel of the sample of the "
+                                                           "band has a value"
+                                                         : "Cannot compute statistics: no pixel of the band has a value",
+                                                 sampled);
                 BandStatistics s;
                 s.min = lo_;
                 s.max = hi_;

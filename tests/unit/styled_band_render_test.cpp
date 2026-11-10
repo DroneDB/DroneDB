@@ -446,6 +446,112 @@ TEST_F(StyledBandRender, aByteBandOfNodataOnlyHasATransparentTileThumbnailAndExp
     expectAllNodataBandRendersTransparent(nothing, "1");
 }
 
+// A raster larger than 16 times the budget of the stretch of a thumbnail (D-041), so that both of its bounded reads are
+// samples: 8256 x 8256 Float32 pixels with NoData -9999 in blocks of 64 x 64 (129 x 129 blocks), a sparse GTiff in
+// which the blocks not written read as NoData. The first sample reads the middle block of every 5 x 5 cell of blocks,
+// the second that of every 2 x 2 cell, so neither reads block (0, 0). With a value it holds 500 (in no sample).
+constexpr int kSparseSize = 8256;
+constexpr double kSparseNodata = -9999.0;
+constexpr float kSparseValue = 500.0f;
+
+void makeSparseRaster(const fs::path& path, bool withValue) {
+    char** opts = CSLSetNameValue(nullptr, "TILED", "YES");
+    opts = CSLSetNameValue(opts, "BLOCKXSIZE", "64");
+    opts = CSLSetNameValue(opts, "BLOCKYSIZE", "64");
+    opts = CSLSetNameValue(opts, "SPARSE_OK", "TRUE");
+    GDALDatasetH ds =
+        GDALCreate(GDALGetDriverByName("GTiff"), path.string().c_str(), kSparseSize, kSparseSize, 1, GDT_Float32, opts);
+    CSLDestroy(opts);
+    ASSERT_NE(ds, nullptr);
+    const GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+    ASSERT_EQ(GDALSetRasterNoDataValue(band, kSparseNodata), CE_None);
+    if (withValue) {
+        std::vector<float> block(64 * 64, kSparseValue);
+        ASSERT_EQ(GDALRasterIO(band, GF_Write, 0, 0, 64, 64, block.data(), 64, 64, GDT_Float32, 0, 0), CE_None);
+    }
+    GDALClose(ds);
+}
+
+// planBandStyle with `source`: the NoValidPixelsException it throws, with whether it was sampled, else none
+std::optional<bool> noValidPixelsOfPlan(const fs::path& raster, GDALDatasetH ds, StretchSource source,
+                                        BandStylePlan* plan) {
+    try {
+        *plan = planBandStyle(raster.string(), ds, 1, "viridis", "", std::nullopt, source);
+    } catch (const NoValidPixelsException& e) {
+        return e.sampled();
+    }
+    return std::nullopt;
+}
+
+// A sample of the statistics in which no pixel has a value does not say that the band has none (D-041): the band of a
+// large sparse raster whose values the bounded reads of a thumbnail miss is not painted over the nominal range 0 to 1
+// (its values saturated); its thumbnail fails, as before the nominal range, and the exact statistics of its tile and
+// export give its range. Only exact statistics without a value give the nominal range.
+TEST_F(StyledBandRender, aBandWithoutAValueInTheSampleOfItsThumbnailFailsItAndOnlyAnExactPassGivesTheNominalRange) {
+    TestArea ta(TEST_NAME, true);
+    auto& provider = RasterStatsProvider::instance();
+
+    const fs::path sparse = ta.getPath("sparse.tif");
+    makeSparseRaster(sparse, true);
+    ASSERT_FALSE(HasFatalFailure());
+    provider.clear();
+    {
+        GDALDatasetH ds = GDALOpen(sparse.string().c_str(), GA_ReadOnly);
+        ASSERT_NE(ds, nullptr);
+        try {
+            sampleBandStatistics(ds, {1}, std::nullopt, kStretchStatisticsMaxPixels);
+            ADD_FAILURE() << "the sample has no pixel with a value";
+        } catch (const NoValidPixelsException& e) {
+            EXPECT_TRUE(e.sampled());
+            EXPECT_NE(std::string(e.what()).find("no pixel of the sample"), std::string::npos) << e.what();
+        }
+
+        // The thumbnail (bounded statistics): both samples miss the values, so the plan fails
+        BandStylePlan plan;
+        const auto before = provider.counters();
+        EXPECT_EQ(noValidPixelsOfPlan(sparse, ds, StretchSource::Bounded, &plan), std::optional<bool>(true));
+        EXPECT_EQ(provider.counters().computed, before.computed) << "no exact pass for the thumbnail";
+
+        // The tile and the export (exact statistics): the range of the values
+        ASSERT_EQ(noValidPixelsOfPlan(sparse, ds, StretchSource::Exact, &plan), std::nullopt);
+        EXPECT_EQ(plan.range.first, kSparseValue);
+        EXPECT_EQ(plan.range.second, static_cast<float>(static_cast<double>(kSparseValue) + 0.1));
+        GDALClose(ds);
+    }
+    provider.clear();
+
+    // Through the public thumbnail: an error, not a picture over 0 to 1
+    uint8_t* buffer = nullptr;
+    int size = 0;
+    EXPECT_NE(DDBGenerateMemoryThumbnailEx2(sparse.string().c_str(), kSize, nullptr, nullptr, nullptr, nullptr,
+                                            "viridis", nullptr, nullptr, &buffer, &size),
+              DDBERR_NONE);
+    EXPECT_NE(std::string(DDBGetLastError()).find("no pixel of the sample"), std::string::npos) << DDBGetLastError();
+    if (buffer != nullptr) testutils::takeBuffer(buffer, size);
+
+    // Without any value: the sample still fails the thumbnail, the exact pass gives the nominal range
+    const fs::path empty = ta.getPath("empty.tif");
+    makeSparseRaster(empty, false);
+    ASSERT_FALSE(HasFatalFailure());
+    provider.clear();
+    {
+        GDALDatasetH ds = GDALOpen(empty.string().c_str(), GA_ReadOnly);
+        ASSERT_NE(ds, nullptr);
+        BandStylePlan plan;
+        EXPECT_EQ(noValidPixelsOfPlan(empty, ds, StretchSource::Bounded, &plan), std::optional<bool>(true));
+        try {
+            computeBandStatistics(ds, {1}, std::nullopt);
+            ADD_FAILURE() << "no pixel of the band has a value";
+        } catch (const NoValidPixelsException& e) {
+            EXPECT_FALSE(e.sampled());
+        }
+        ASSERT_EQ(noValidPixelsOfPlan(empty, ds, StretchSource::Exact, &plan), std::nullopt);
+        EXPECT_EQ(plan.range, (std::pair<float, float>{0.0f, 1.0f}));
+        GDALClose(ds);
+    }
+    provider.clear();
+}
+
 // A raster larger than the budget of the stretch of a thumbnail (D-041): 2304 x 2304 Float32 pixels in blocks of
 // 64 x 64 (36 x 36 blocks), each pixel the column plus the row of its block, but for block (0, 0), which holds 10000.
 // The sample of a thumbnail reads the middle block of every 2 x 2 cell of blocks, so never block (0, 0): its range is

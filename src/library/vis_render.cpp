@@ -456,8 +456,13 @@ namespace ddb
         {
             stretch = defaultStretch(path, ds, {band}, nodata, source)[0];
         }
-        catch (const NoValidPixelsException &)
+        catch (const NoValidPixelsException &e)
         {
+            // Only a sample of the band was read (the bounded statistics of a thumbnail of a large raster, D-041):
+            // the band may have values that the sample missed, which the nominal range would paint saturated. The
+            // render fails as it did before; the exact pass is not taken here (it does not fit in the worker)
+            if (e.sampled())
+                throw;
             // A band with no pixel that has a value (all NoData or masked, or empty under the NoData override) has
             // no range to stretch, and every pixel of its render is transparent whatever the range is: a nominal
             // one, so that its tile, thumbnail and export are empty pictures as the plain tile is (not errors)
