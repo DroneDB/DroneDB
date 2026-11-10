@@ -14,7 +14,9 @@
 // 18784 -> 27.2110 C, 22344 -> 44.2823 C.
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -598,6 +600,48 @@ namespace
         }
     }
 
+    // No real FLIR file has the temperatures of the measurement in its XMP (Xmp.FLIR.ReflectedApparentTemperature,
+    // AtmosphericTemperature, IRWindowTemperature: the FLIR XMP of the Vue Pro R, Duo Pro R and Zenmuse XT, XT R and
+    // XT2 has none of them), so their unit is not known (the CameraInfo record has K): they are not read. The emissivity
+    // is applied with the reflected temperature only, the atmosphere with its temperature and the window with its
+    // own, so an XMP calibration with all of them keeps the temperatures of its Planck constants (the literals at the
+    // top of this file)
+    TEST(RJpegThermal, theXmpTemperaturesOfAFlirPictureAreNotReadSoItsEmissivityLeavesThePlanckTemperatures)
+    {
+        TestArea ta(TEST_NAME);
+        auto tags = kFlirCalibration; // Emissivity 0.95, ObjectDistance 5
+        tags.emplace_back("ReflectedApparentTemperature", "20");
+        tags.emplace_back("AtmosphericTemperature", "22");
+        tags.emplace_back("RelativeHumidity", "0.5");
+        tags.emplace_back("IRWindowTemperature", "20");
+        tags.emplace_back("IRWindowTransmission", "0.8");
+        const auto path = writeFlirPicture(ta.getPath("FLIR_XMP_TEMPS.JPG"), tags);
+
+        const ThermalCalibration cal = extractThermalCalibration(path.string());
+        ASSERT_TRUE(cal.valid);
+        ASSERT_TRUE(cal.emissivity && cal.objectDistance && cal.relativeHumidity && cal.irWindowTransmission);
+        EXPECT_DOUBLE_EQ(*cal.emissivity, 0.95);
+        EXPECT_DOUBLE_EQ(*cal.objectDistance, 5.0);
+        EXPECT_DOUBLE_EQ(*cal.relativeHumidity, 0.5);
+        EXPECT_DOUBLE_EQ(*cal.irWindowTransmission, 0.8);
+        EXPECT_FALSE(cal.reflectedApparentTemperature.has_value());
+        EXPECT_FALSE(cal.atmosphericTemperature.has_value());
+        EXPECT_FALSE(cal.irWindowTemperature.has_value());
+        EXPECT_NEAR(rawToTemperature(16204, cal), 12.6860, 0.01);
+
+        const json info = valueInfoOf(path);
+        EXPECT_EQ(info["unit"], kCelsius);
+        EXPECT_NEAR(info["valueMin"].get<double>(), 5.6850, 0.01);
+        EXPECT_NEAR(info["valueMax"].get<double>(), 44.2823, 0.01);
+        ASSERT_TRUE(info.contains("calibration"));
+        const json &calibration = info["calibration"];
+        EXPECT_DOUBLE_EQ(calibration["emissivity"].get<double>(), 0.95);
+        EXPECT_FALSE(calibration.contains("reflectedApparentTemperature"));
+        EXPECT_FALSE(calibration.contains("atmosphericTemperature"));
+        EXPECT_FALSE(calibration.contains("irWindowTemperature"));
+        EXPECT_NEAR(pointOf(path, 10, 5)["value"].get<double>(), 12.6860, 0.01);
+    }
+
     TEST(RJpegThermal, aFlirRJpegWithoutThePlanckConstantsHasRawCountsWithoutAUnit)
     {
         TestArea ta(TEST_NAME);
@@ -645,6 +689,9 @@ namespace
         bool withCameraInfo = true;
         float humidity = 0.5f;            // RelativeHumidity: a fraction, or a percentage
         size_t segment = 1500;            // the FFF bytes in each FLIR APP1 segment
+        int rawWidth = kWidth;            // the size the RawData record declares
+        int rawHeight = kHeight;
+        std::vector<uint8_t> rawImage;    // when given, the bytes of the RawData record from 0x20 (a PNG image)
     };
 
     void putBytes(std::vector<uint8_t> &out, size_t at, uint32_t value, int size, bool bigEndian)
@@ -668,7 +715,9 @@ namespace
     {
         const size_t entries = spec.withCameraInfo ? 2 : 1;
         const size_t rawOffset = 0x40 + entries * 32;
-        const size_t rawLength = 0x20 + static_cast<size_t>(kWidth) * kHeight * 2;
+        const size_t rawLength = 0x20 + (spec.rawImage.empty()
+                                             ? static_cast<size_t>(spec.rawWidth) * spec.rawHeight * 2
+                                             : spec.rawImage.size());
         const size_t cameraOffset = rawOffset + rawLength;
         const size_t cameraLength = 0x320;
         std::vector<uint8_t> fff(cameraOffset + (spec.withCameraInfo ? cameraLength : 0), 0);
@@ -695,11 +744,15 @@ namespace
         // RawData: its byte order (2), width and height, then the raw counts from 0x20
         const bool r = spec.rawBigEndian;
         putBytes(fff, rawOffset, 2, 2, r);
-        putBytes(fff, rawOffset + 0x02, kWidth, 2, r);
-        putBytes(fff, rawOffset + 0x04, kHeight, 2, r);
-        for (int y = 0; y < kHeight; y++)
-            for (int x = 0; x < kWidth; x++)
-                putBytes(fff, rawOffset + 0x20 + (static_cast<size_t>(y) * kWidth + x) * 2, flirRawAt(x, y), 2, r);
+        putBytes(fff, rawOffset + 0x02, static_cast<uint32_t>(spec.rawWidth), 2, r);
+        putBytes(fff, rawOffset + 0x04, static_cast<uint32_t>(spec.rawHeight), 2, r);
+        if (!spec.rawImage.empty())
+            std::memcpy(&fff[rawOffset + 0x20], spec.rawImage.data(), spec.rawImage.size());
+        else
+            for (int y = 0; y < spec.rawHeight; y++)
+                for (int x = 0; x < spec.rawWidth; x++)
+                    putBytes(fff, rawOffset + 0x20 + (static_cast<size_t>(y) * spec.rawWidth + x) * 2,
+                             flirRawAt(x % kWidth, y % kHeight), 2, r);
         if (spec.pngRaw)
         {
             const uint8_t png[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
@@ -910,6 +963,356 @@ namespace
         EXPECT_NE(message.find("No thermal calibration"), std::string::npos) << message;
         EXPECT_NE(message.find("colours of its preview"), std::string::npos) << message;
         EXPECT_EQ(message.find("DJI"), std::string::npos) << message;
+    }
+
+    // ---------------------------------------------------------------- FLIR: the PNG image of a RawData record
+
+    // The PNG images of the RawData records are written here byte by byte, without zlib: the CRC-32 of the chunks, the
+    // zlib stream (stored blocks, or fixed Huffman codes for a long run of zeros) and the five row filters of the PNG
+    // format, so that the decoder is checked against an encoder that shares no code with it. The real PNG images of
+    // the FLIR handheld cameras (AX8, FLIR ONE) are read by the integration tests (thermal_test.cpp)
+
+    // A raw count of the PNG images: not a plane, so that the predictors of the filters differ from row to row
+    uint16_t pngRawAt(int x, int y)
+    {
+        return static_cast<uint16_t>(15104 + 100 * x + 20 * y + ((x * 7 + y * 13) % 37) * 3);
+    }
+
+    void putBigEndian32(std::vector<uint8_t> &out, uint32_t value)
+    {
+        for (int i = 3; i >= 0; i--)
+            out.push_back(static_cast<uint8_t>((value >> (8 * i)) & 0xFF));
+    }
+
+    // The CRC-32 of PNG chunks (ISO 3309, the polynomial 0xEDB88320, bit by bit)
+    uint32_t crc32Of(const std::vector<uint8_t> &data)
+    {
+        uint32_t crc = 0xFFFFFFFFu;
+        for (const uint8_t byte : data)
+        {
+            crc ^= byte;
+            for (int k = 0; k < 8; k++)
+                crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+        return crc ^ 0xFFFFFFFFu;
+    }
+
+    uint32_t adler32Of(const std::vector<uint8_t> &data)
+    {
+        uint32_t a = 1;
+        uint32_t b = 0;
+        for (const uint8_t byte : data)
+        {
+            a = (a + byte) % 65521;
+            b = (b + a) % 65521;
+        }
+        return (b << 16) | a;
+    }
+
+    // A zlib stream of the data in stored blocks (no compression)
+    std::vector<uint8_t> zlibStored(const std::vector<uint8_t> &data)
+    {
+        std::vector<uint8_t> out = {0x78, 0x01};
+        size_t at = 0;
+        do
+        {
+            const size_t n = std::min<size_t>(65535, data.size() - at);
+            out.push_back(at + n == data.size() ? 1 : 0); // BFINAL, BTYPE 00
+            out.push_back(static_cast<uint8_t>(n & 0xFF));
+            out.push_back(static_cast<uint8_t>(n >> 8));
+            out.push_back(static_cast<uint8_t>(~n & 0xFF));
+            out.push_back(static_cast<uint8_t>((~n >> 8) & 0xFF));
+            out.insert(out.end(), data.begin() + static_cast<std::ptrdiff_t>(at),
+                       data.begin() + static_cast<std::ptrdiff_t>(at + n));
+            at += n;
+        } while (at < data.size());
+        putBigEndian32(out, adler32Of(data));
+        return out;
+    }
+
+    // A zlib stream of count zero bytes, small: one block of fixed Huffman codes, a literal 0 then matches of 258 bytes
+    // at the distance 1 (13 bits each), as a file that declares a large image with little data would hold
+    std::vector<uint8_t> zlibZeros(size_t count)
+    {
+        std::vector<uint8_t> out = {0x78, 0x01};
+        uint32_t pending = 0;
+        int used = 0;
+        const auto bit = [&](uint32_t b) {
+            pending |= (b & 1u) << used;
+            if (++used == 8)
+            {
+                out.push_back(static_cast<uint8_t>(pending));
+                pending = 0;
+                used = 0;
+            }
+        };
+        // A Huffman code goes most significant bit first
+        const auto code = [&](uint32_t c, int length) {
+            for (int i = length - 1; i >= 0; i--)
+                bit(c >> i);
+        };
+        bit(1); // BFINAL
+        bit(1); // BTYPE 01 (fixed codes), least significant bit first
+        bit(0);
+        size_t left = count;
+        if (left > 0)
+        {
+            code(0x30, 8); // the literal 0
+            left--;
+        }
+        for (; left >= 258; left -= 258)
+        {
+            code(0xC5, 8); // the length 258 (code 285)
+            code(0, 5);    // the distance 1 (code 0)
+        }
+        for (; left > 0; left--)
+            code(0x30, 8);
+        code(0, 7); // the end of the block (256)
+        if (used > 0)
+            out.push_back(static_cast<uint8_t>(pending));
+        // The Adler-32 of zeros: a = 1, b = count
+        putBigEndian32(out, static_cast<uint32_t>((count % 65521) << 16) | 1u);
+        return out;
+    }
+
+    struct PngChunk
+    {
+        std::string type;
+        std::vector<uint8_t> data;
+        bool goodCrc = true;
+    };
+
+    // A PNG image: the signature, then the chunks with their length and their CRC
+    std::vector<uint8_t> pngOf(const std::vector<PngChunk> &chunks)
+    {
+        std::vector<uint8_t> png = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+        for (const PngChunk &chunk : chunks)
+        {
+            putBigEndian32(png, static_cast<uint32_t>(chunk.data.size()));
+            std::vector<uint8_t> typed(chunk.type.begin(), chunk.type.end());
+            typed.insert(typed.end(), chunk.data.begin(), chunk.data.end());
+            png.insert(png.end(), typed.begin(), typed.end());
+            putBigEndian32(png, crc32Of(typed) ^ (chunk.goodCrc ? 0u : 1u));
+        }
+        return png;
+    }
+
+    // IHDR: the size, the bit depth, the colour type (0: greyscale), then compression, filter and interlace
+    std::vector<uint8_t> ihdrOf(uint32_t width, uint32_t height, uint8_t depth = 16, uint8_t colourType = 0,
+                                uint8_t interlace = 0)
+    {
+        std::vector<uint8_t> data;
+        putBigEndian32(data, width);
+        putBigEndian32(data, height);
+        data.insert(data.end(), {depth, colourType, 0, 0, interlace});
+        return data;
+    }
+
+    // The rows of the raw image pngRawAt as a PNG encoder writes them: the filter of the row y is y % 5 (None, Sub, Up,
+    // Average, Paeth; PNG 9.2), the samples in the byte order of the record
+    std::vector<uint8_t> filteredRows(int width, int height, bool bigEndian)
+    {
+        const size_t rowBytes = static_cast<size_t>(width) * 2;
+        std::vector<uint8_t> previous(rowBytes, 0);
+        std::vector<uint8_t> out;
+        for (int y = 0; y < height; y++)
+        {
+            std::vector<uint8_t> line(rowBytes);
+            for (int x = 0; x < width; x++)
+            {
+                const uint16_t v = pngRawAt(x, y);
+                line[static_cast<size_t>(x) * 2] = static_cast<uint8_t>(bigEndian ? v >> 8 : v & 0xFF);
+                line[static_cast<size_t>(x) * 2 + 1] = static_cast<uint8_t>(bigEndian ? v & 0xFF : v >> 8);
+            }
+            const int filter = y % 5;
+            out.push_back(static_cast<uint8_t>(filter));
+            for (size_t i = 0; i < rowBytes; i++)
+            {
+                const int a = i >= 2 ? line[i - 2] : 0; // left
+                const int b = previous[i];              // up
+                const int c = i >= 2 ? previous[i - 2] : 0; // up left
+                int predictor = 0;
+                if (filter == 1)
+                    predictor = a;
+                else if (filter == 2)
+                    predictor = b;
+                else if (filter == 3)
+                    predictor = (a + b) / 2;
+                else if (filter == 4)
+                {
+                    const int p = a + b - c;
+                    const int pa = std::abs(p - a);
+                    const int pb = std::abs(p - b);
+                    const int pc = std::abs(p - c);
+                    predictor = (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+                }
+                out.push_back(static_cast<uint8_t>(line[i] - predictor));
+            }
+            previous = line;
+        }
+        return out;
+    }
+
+    // A FLIR picture whose RawData record (rawWidth x rawHeight, in its byte order) holds the PNG image
+    fs::path writeFlirPngPicture(const fs::path &path, const std::vector<uint8_t> &png, bool bigEndian = false,
+                                 int rawWidth = kWidth, int rawHeight = kHeight)
+    {
+        FffSpec spec;
+        spec.rawBigEndian = bigEndian;
+        spec.rawImage = png;
+        spec.rawWidth = rawWidth;
+        spec.rawHeight = rawHeight;
+        spec.segment = 60000;
+        return writeFlirFffPicture(path, spec);
+    }
+
+    TEST(RJpegThermal, theRawImageOfAFlirPngIsDecodedWithEveryRowFilterInTheByteOrderOfTheRecord)
+    {
+        TestArea ta(TEST_NAME);
+        // A little-endian record (the handheld cameras: the samples byte-swapped in the PNG image) in one IDAT chunk, a
+        // big-endian one (the old ThermaCAM: the samples in PNG order, not swapped) in two
+        for (const bool bigEndian : {false, true})
+        {
+            SCOPED_TRACE(bigEndian ? "big-endian record" : "little-endian record");
+            const auto stream = zlibStored(filteredRows(kWidth, kHeight, bigEndian));
+            std::vector<PngChunk> chunks = {{"IHDR", ihdrOf(kWidth, kHeight)}};
+            if (bigEndian)
+            {
+                const size_t half = stream.size() / 2;
+                chunks.push_back({"IDAT", std::vector<uint8_t>(stream.begin(), stream.begin() + half)});
+                chunks.push_back({"IDAT", std::vector<uint8_t>(stream.begin() + half, stream.end())});
+            }
+            else
+            {
+                chunks.push_back({"IDAT", stream});
+            }
+            chunks.push_back({"IEND", {}});
+            const auto path =
+                writeFlirPngPicture(ta.getPath(bigEndian ? "FLIR_PNG_BE.JPG" : "FLIR_PNG_LE.JPG"), pngOf(chunks), bigEndian);
+
+            const RawThermalData raw = extractRawThermalData(path.string());
+            ASSERT_TRUE(raw.valid);
+            EXPECT_EQ(raw.width, kWidth);
+            EXPECT_EQ(raw.height, kHeight);
+            ASSERT_EQ(raw.data.size(), static_cast<size_t>(kWidth) * kHeight);
+            int wrong = 0;
+            for (int y = 0; y < kHeight; y++)
+                for (int x = 0; x < kWidth; x++)
+                    if (raw.data[static_cast<size_t>(y) * kWidth + x] != pngRawAt(x, y) && wrong++ < 5)
+                        ADD_FAILURE() << "the pixel (" << x << ", " << y << ") of a row with the filter " << y % 5
+                                      << " is " << raw.data[static_cast<size_t>(y) * kWidth + x] << ", not "
+                                      << pngRawAt(x, y);
+            EXPECT_EQ(wrong, 0);
+            // The raster API reads the same counts
+            EXPECT_EQ(pointOf(path, 10, 9)["rawValue"], pngRawAt(10, 9));
+        }
+    }
+
+    TEST(RJpegThermal, aFlirPngThatIsNotTheImageFlirWritesIsNoRawImage)
+    {
+        TestArea ta(TEST_NAME);
+        const std::vector<uint8_t> rows = filteredRows(kWidth, kHeight, false);
+        const std::vector<uint8_t> stream = zlibStored(rows);
+        const PngChunk ihdr = {"IHDR", ihdrOf(kWidth, kHeight)};
+        const PngChunk idat = {"IDAT", stream};
+        const PngChunk iend = {"IEND", {}};
+
+        // The image itself is read: what the cases below change is what makes them no raw image
+        const auto good = writeFlirPngPicture(ta.getPath("FLIR_PNG_GOOD.JPG"), pngOf({ihdr, idat, iend}));
+        ASSERT_TRUE(extractRawThermalData(good.string()).valid);
+
+        std::vector<uint8_t> moreRows = rows;
+        moreRows.insert(moreRows.end(), rows.begin(), rows.begin() + 1 + kWidth * 2); // one row too many
+        const std::vector<uint8_t> truncated(stream.begin(), stream.end() - 8);       // the end of the data is missing
+        const std::vector<uint8_t> shortRows(rows.begin(), rows.end() - (1 + kWidth * 2));
+
+        struct Case
+        {
+            const char *name;
+            std::vector<PngChunk> chunks;
+            int rawHeight = kHeight;
+        };
+        const std::vector<Case> cases = {
+            {"a chunk with a wrong CRC", {ihdr, {"IDAT", stream, false}, iend}},
+            {"a truncated IDAT", {ihdr, {"IDAT", truncated}, iend}},
+            {"IDAT data that inflates to more than the rows", {ihdr, {"IDAT", zlibStored(moreRows)}, iend}},
+            {"IDAT data far too short for its rows (deflate gives at most 1032 bytes a byte)",
+             {ihdr, {"IDAT", {0x78, 0x01, 0x03, 0x00}}, iend}},
+            {"IHDR after IDAT", {idat, ihdr, iend}},
+            {"two IHDR", {ihdr, ihdr, idat, iend}},
+            {"no IEND", {ihdr, idat}},
+            {"a PLTE chunk", {ihdr, {"PLTE", {0, 0, 0, 255, 255, 255}}, idat, iend}},
+            {"an 8-bit image", {{"IHDR", ihdrOf(kWidth, kHeight, 8)}, idat, iend}},
+            {"a colour image", {{"IHDR", ihdrOf(kWidth, kHeight, 16, 2)}, idat, iend}},
+            {"an interlaced image", {{"IHDR", ihdrOf(kWidth, kHeight, 16, 0, 1)}, idat, iend}},
+            {"an image of another size than the record", {{"IHDR", ihdrOf(kWidth, kHeight - 1)},
+                                                          {"IDAT", zlibStored(shortRows)}, iend}},
+            {"a record of another size than the image", {ihdr, idat, iend}, kHeight + 1},
+        };
+        int n = 0;
+        for (const Case &c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            const auto path = writeFlirPngPicture(ta.getPath("FLIR_PNG_" + std::to_string(n++) + ".JPG"),
+                                                  pngOf(c.chunks), false, kWidth, c.rawHeight);
+            // No raw count from the PNG image, nor from the bytes of the record or of the APP1 segments
+            EXPECT_TRUE(isThermalImage(path.string()));
+            EXPECT_FALSE(extractRawThermalData(path.string()).valid);
+            EXPECT_FALSE(readRJpegThermal(path.string()).has_value());
+        }
+    }
+
+    // A small file must not make a request allocate gigabytes: the size a RawData record declares is checked against
+    // kMaxRawThermalPixels (4 MP, over three times the 1280 x 1024 of the largest radiometric sensors) before anything is
+    // allocated for it, whether the record holds int16u counts or a PNG image. A PNG image of zeros at the bound is some
+    // 50 KB: one pixel row more is refused, at the bound it is read
+    TEST(RJpegThermal, theRawImageOfAFlirRecordIsReadUpToFourMegapixels)
+    {
+        TestArea ta(TEST_NAME);
+        static_assert(kMaxRawThermalPixels == static_cast<size_t>(2048) * 2048, "the bound of a raw thermal image");
+        EXPECT_GE(kMaxRawThermalPixels, static_cast<size_t>(1280) * 1024);
+        EXPECT_GE(kMaxRawThermalPixels, static_cast<size_t>(2048) * 1536);
+
+        for (const int height : {2048, 2049})
+        {
+            SCOPED_TRACE(height);
+            const bool fits = static_cast<size_t>(2048) * height <= kMaxRawThermalPixels;
+            EXPECT_EQ(fits, height == 2048);
+
+            // A PNG image of zeros (the filter byte of each row is 0, None)
+            const size_t rowsSize = static_cast<size_t>(height) * (1 + 2048 * 2);
+            const auto png = pngOf({{"IHDR", ihdrOf(2048, static_cast<uint32_t>(height))},
+                                    {"IDAT", zlibZeros(rowsSize)},
+                                    {"IEND", {}}});
+            EXPECT_LT(png.size(), static_cast<size_t>(60000));
+            const auto pngPath =
+                writeFlirPngPicture(ta.getPath("FLIR_PNG_" + std::to_string(height) + ".JPG"), png, false, 2048, height);
+            const RawThermalData fromPng = extractRawThermalData(pngPath.string());
+            EXPECT_EQ(fromPng.valid, fits);
+            if (fits)
+            {
+                EXPECT_EQ(fromPng.width, 2048);
+                EXPECT_EQ(fromPng.height, height);
+                ASSERT_EQ(fromPng.data.size(), kMaxRawThermalPixels);
+                EXPECT_EQ(fromPng.data.front(), 0);
+                EXPECT_EQ(fromPng.data.back(), 0);
+            }
+
+            // The int16u counts of the same size, whole in the record
+            FffSpec spec;
+            spec.rawWidth = 2048;
+            spec.rawHeight = height;
+            spec.segment = 65000;
+            const auto countsPath = writeFlirFffPicture(ta.getPath("FLIR_RAW_" + std::to_string(height) + ".JPG"), spec);
+            const RawThermalData fromCounts = extractRawThermalData(countsPath.string());
+            EXPECT_EQ(fromCounts.valid, fits);
+            if (fits)
+            {
+                ASSERT_EQ(fromCounts.data.size(), kMaxRawThermalPixels);
+                EXPECT_EQ(fromCounts.data[0], 15104);
+                EXPECT_EQ(fromCounts.data[10 + 5 * 2048], 16204);
+            }
+        }
     }
 
     // ---------------------------------------------------------------- FR-RAS-15: the thumbnail colours the temperatures

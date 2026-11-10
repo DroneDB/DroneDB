@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <cstddef>
 #include <cstdint>
 #include "json_fwd.h"
 
@@ -17,7 +18,11 @@ namespace ddb {
 // CameraInfo record of its FFF data, else its XMP tags), never a default: a calibration is valid only when the five
 // Planck constants were read, and a measurement field the file does not have is empty (the raster API reports only
 // the fields that are set). From the CameraInfo record, the temperatures are in degrees Celsius (the record has them in
-// K), the distance in metres and the humidity a fraction (0 to 1); from the XMP, as the tags say them.
+// K), the distance in metres and the humidity a fraction (0 to 1); from the XMP, the Planck constants, the emissivity,
+// the distance, the humidity (a fraction) and the window transmission. The XMP temperatures (Xmp.FLIR.
+// ReflectedApparentTemperature, AtmosphericTemperature, IRWindowTemperature) are not read: no real file has them (the
+// FLIR XMP of the Vue Pro R, Duo Pro R and Zenmuse XT, XT R and XT2 has none), so their unit is not known, and a term
+// whose temperature is not read is left out (rawToTemperature).
 struct ThermalCalibration {
     double planckR1 = 0.0;
     double planckB = 0.0;
@@ -39,6 +44,15 @@ struct ThermalCalibration {
     std::optional<double> atmosphericTransX;
     bool valid = false; // the Planck constants were read from the file: the raw counts are temperatures
 };
+
+// The most pixels the raw thermal image of a FLIR R-JPEG is read with (the RawData record of its FFF data, int16u or a
+// PNG image, and the raw block of an APP1 segment without FFF records), checked on the size the file declares before
+// anything is allocated for it: 4 MP (2048 x 2048). The largest radiometric sensors are 1280 x 1024 (FLIR A8580 and
+// X8580, DJI Zenmuse H30T); 4 MP is over three times that and holds twice the side of a 1024 x 768 sensor (2048 x 1536).
+// A larger declaration is no raw thermal image: a small file must not make a request allocate gigabytes (a PNG image
+// declaring 10000 x 10000 pixels inflates from some 200 KB to 200 MB of rows), while at this bound the counts, the rows
+// of a PNG image and the temperatures of a picture take some 32 MB.
+constexpr std::size_t kMaxRawThermalPixels = static_cast<std::size_t>(2048) * 2048;
 
 // R-JPEG raw thermal data extracted from FLIR APP1 segment
 struct RawThermalData {

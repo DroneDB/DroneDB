@@ -155,8 +155,15 @@ static void findRawDimensions(const FlirTags &tags, size_t remainingData, FlirSe
             auto rawHeightIt = parser->findXmpKey({"Xmp.FLIR.RawThermalImageHeight"});
 
             if (rawWidthIt && rawHeightIt) {
-                info.rawWidth = rawWidthIt->toInt64();
-                info.rawHeight = rawHeightIt->toInt64();
+                // A size that is no raw thermal image (not positive, over kMaxRawThermalPixels) is not the file's
+                const int64_t width = rawWidthIt->toInt64();
+                const int64_t height = rawHeightIt->toInt64();
+                if (width > 0 && height > 0 && width <= std::numeric_limits<int>::max() &&
+                    height <= std::numeric_limits<int>::max() &&
+                    static_cast<uint64_t>(width) * static_cast<uint64_t>(height) <= kMaxRawThermalPixels) {
+                    info.rawWidth = static_cast<int>(width);
+                    info.rawHeight = static_cast<int>(height);
+                }
             }
         } catch (const std::exception &e) {
             LOGD << "Could not read FLIR XMP dimensions: " << e.what();
@@ -261,17 +268,6 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath, const FlirTa
 
 namespace {
 
-// The bytes of a JPEG file; empty when the file does not start as a JPEG (SOI), so that no other raster is read whole
-std::vector<uint8_t> readJpegBytes(const std::string &filePath) {
-    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
-    if (!file.is_open()) return {};
-    uint8_t soi[2] = {};
-    file.read(reinterpret_cast<char *>(soi), 2);
-    if (file.gcount() != 2 || soi[0] != 0xFF || soi[1] != 0xD8) return {};
-    file.seekg(0);
-    return std::vector<uint8_t>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-}
-
 uint16_t get16(const std::vector<uint8_t> &d, size_t at, bool bigEndian) {
     return bigEndian ? static_cast<uint16_t>((d[at] << 8) | d[at + 1])
                      : static_cast<uint16_t>(d[at] | (d[at + 1] << 8));
@@ -293,22 +289,38 @@ float getFloat(const std::vector<uint8_t> &d, size_t at, bool bigEndian) {
     return value;
 }
 
-// The FFF data of the FLIR APP1 segments of a JPEG (the bytes of the file), in the order of their index: empty when the
-// file has none, or when a segment is missing
-std::vector<uint8_t> flirFffData(const std::vector<uint8_t> &file) {
-    if (file.size() < 4 || file[0] != 0xFF || file[1] != 0xD8) return {};
+// The FFF data of the FLIR APP1 segments of a JPEG file, in the order of their index: empty when the file is no JPEG,
+// has none, or when a segment is missing. The markers are walked with seeks up to the scan and only the payloads of the
+// FLIR APP1 segments are read (at most 256 of 64 KB): the scan of a dataset asks this of every DJI picture
+// (isThermalPicture), which is not read whole
+std::vector<uint8_t> readFlirFffData(const std::string &filePath) {
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    if (!file.is_open()) return {};
+    file.seekg(0, std::ios::end);
+    const std::streamoff fileSize = file.tellg();
+    if (fileSize < 4) return {};
+
+    uint8_t header[8] = {};
+    file.seekg(0);
+    file.read(reinterpret_cast<char *>(header), 2);
+    if (file.gcount() != 2 || header[0] != 0xFF || header[1] != 0xD8) return {};
 
     struct Part {
-        size_t offset = 0;
+        std::streamoff offset = 0;
         size_t size = 0;
         bool present = false;
     };
     std::vector<Part> parts;
     int last = -1;
 
-    size_t pos = 2;
-    while (pos + 4 <= file.size() && file[pos] == 0xFF) {
-        const uint8_t marker = file[pos + 1];
+    std::streamoff pos = 2;
+    while (pos + 4 <= fileSize) {
+        file.clear();
+        file.seekg(pos);
+        file.read(reinterpret_cast<char *>(header), 4);
+        if (file.gcount() != 4 || header[0] != 0xFF) break;
+
+        const uint8_t marker = header[1];
         if (marker == 0xFF) { // a fill byte
             pos++;
             continue;
@@ -318,30 +330,41 @@ std::vector<uint8_t> flirFffData(const std::vector<uint8_t> &file) {
             pos += 2;
             continue;
         }
-        const size_t length = static_cast<size_t>(file[pos + 2]) * 256 + file[pos + 3];
-        if (length < 2 || pos + 2 + length > file.size()) break;
-        const size_t payload = pos + 4;
-        const size_t size = length - 2;
+        const std::streamoff length = static_cast<std::streamoff>(header[2]) * 256 + header[3];
+        if (length < 2 || pos + 2 + length > fileSize) break;
+        const size_t size = static_cast<size_t>(length) - 2;
 
-        if (marker == 0xE1 && size >= 8 && std::memcmp(&file[payload], "FLIR\0", 5) == 0) {
-            const int index = file[payload + 6];
-            const int lastIndex = file[payload + 7];
-            if (last < 0) {
-                last = lastIndex;
-                parts.resize(static_cast<size_t>(last) + 1);
+        if (marker == 0xE1 && size >= 8) {
+            // "FLIR\0", a byte, the index of the segment and the index of the last one
+            file.read(reinterpret_cast<char *>(header), 8);
+            if (file.gcount() == 8 && std::memcmp(header, "FLIR\0", 5) == 0) {
+                const int index = header[6];
+                const int lastIndex = header[7];
+                if (last < 0) {
+                    last = lastIndex;
+                    parts.resize(static_cast<size_t>(last) + 1);
+                }
+                // A segment of another FFF file (another last index), or one seen twice, is not part of this one
+                if (lastIndex == last && index <= last && !parts[static_cast<size_t>(index)].present)
+                    parts[static_cast<size_t>(index)] = {pos + 4 + 8, size - 8, true};
             }
-            // A segment of another FFF file (another last index), or one seen twice, is not part of this one
-            if (lastIndex == last && index <= last && !parts[index].present)
-                parts[index] = {payload + 8, size - 8, true};
         }
         pos += 2 + length;
     }
 
-    std::vector<uint8_t> fff;
+    size_t total = 0;
     for (const Part &part : parts) {
         if (!part.present) return {};
-        fff.insert(fff.end(), file.begin() + static_cast<std::ptrdiff_t>(part.offset),
-                   file.begin() + static_cast<std::ptrdiff_t>(part.offset + part.size));
+        total += part.size;
+    }
+    std::vector<uint8_t> fff(total);
+    size_t at = 0;
+    for (const Part &part : parts) {
+        file.clear();
+        file.seekg(part.offset);
+        file.read(reinterpret_cast<char *>(fff.data() + at), static_cast<std::streamsize>(part.size));
+        if (static_cast<size_t>(file.gcount()) != part.size) return {};
+        at += part.size;
     }
     return fff;
 }
@@ -409,7 +432,7 @@ struct FlirFff {
 
 std::optional<FlirFff> readFlirFff(const std::string &filePath) {
     FlirFff result;
-    result.data = flirFffData(readJpegBytes(filePath));
+    result.data = readFlirFffData(filePath);
     const auto records = fffRecords(result.data);
     if (!records) return std::nullopt;
     result.records = *records;
@@ -420,10 +443,6 @@ bool hasFlirRawData(const std::string &filePath) {
     const auto fff = readFlirFff(filePath);
     return fff && fff->records.rawData;
 }
-
-// The most pixels a raw thermal image is read with: the sensors are at most 1280 x 1024, and a bad record must not make
-// a large allocation (the bound of the DJI segments)
-constexpr size_t kMaxRawThermalPixels = static_cast<size_t>(10000) * 10000;
 
 uint32_t bigEndian32(const uint8_t *p) {
     return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
@@ -436,11 +455,14 @@ uint32_t bigEndian32(const uint8_t *p) {
 // samples are taken in the byte order of the record, not in the big-endian order of the PNG format: the cameras whose
 // records are little-endian write them byte-swapped (as ExifTool and Thermimage read them), the old ThermaCAM ones
 // (P20, S65, E45, E65, EX320), whose records are big-endian, in the order of the format. Decoded here with zlib: the
-// host never opens the data of a user with GDAL (gdal_open_policy.h), and this is read on the host.
+// host never opens the data of a user with GDAL (gdal_open_policy.h), and this is read on the host. The size is at
+// most kMaxRawThermalPixels, and the IDAT data must be able to inflate to the rows, before they are allocated.
 std::optional<std::vector<uint16_t>> decodeFlirPng(const uint8_t *png, size_t size, int width, int height,
                                                    bool bigEndian) {
     static const uint8_t signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
     if (size < 8 || std::memcmp(png, signature, 8) != 0) return std::nullopt;
+    if (width <= 0 || height <= 0 || static_cast<size_t>(width) * static_cast<size_t>(height) > kMaxRawThermalPixels)
+        return std::nullopt;
 
     const size_t rowBytes = static_cast<size_t>(width) * 2;
     std::vector<uint8_t> idat;
@@ -484,8 +506,16 @@ std::optional<std::vector<uint16_t>> decodeFlirPng(const uint8_t *png, size_t si
     }
     if (!header || !ended || idat.empty()) return std::nullopt;
 
-    // The rows, each with its filter byte: exactly height * (1 + width * 2) bytes
-    std::vector<uint8_t> rows(static_cast<size_t>(height) * (rowBytes + 1));
+    // The rows, each with its filter byte: exactly height * (1 + width * 2) bytes. Deflate gives at most 1032 bytes a
+    // byte (a match of 258 bytes in 2 bits): IDAT data shorter than the rows / 1032 cannot inflate to them
+    const size_t rowsSize = static_cast<size_t>(height) * (rowBytes + 1);
+    constexpr uint64_t kMaxDeflateRatio = 1032;
+    if (static_cast<uint64_t>(idat.size()) * kMaxDeflateRatio < static_cast<uint64_t>(rowsSize)) {
+        LOGD << "The PNG raw thermal image has " << idat.size() << " bytes of IDAT data, too few for its " << rowsSize
+             << " bytes of rows";
+        return std::nullopt;
+    }
+    std::vector<uint8_t> rows(rowsSize);
     z_stream stream{};
     if (inflateInit(&stream) != Z_OK) return std::nullopt;
     stream.next_in = idat.data();
@@ -540,7 +570,8 @@ std::optional<std::vector<uint16_t>> decodeFlirPng(const uint8_t *png, size_t si
 
 // The raw thermal image of the RawData record: its width (int16u at 0x02) and height (int16u at 0x04), and the raw
 // counts from 0x20 on: int16u in the byte order of the record, or a PNG image (decodeFlirPng). The size is the one of
-// the raw image, not of the picture: a portrait image (240 x 320, 120 x 160) stays one.
+// the raw image, not of the picture: a portrait image (240 x 320, 120 x 160) stays one. A size over
+// kMaxRawThermalPixels is no raw image, whatever the record holds: nothing is allocated for it.
 std::optional<RawThermalData> fffRawThermal(const std::vector<uint8_t> &fff, const FffRecord &record) {
     if (record.length < 0x20) return std::nullopt;
     const int width = get16(fff, record.offset + 0x02, record.bigEndian);
@@ -880,13 +911,14 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
             return std::nullopt;
         };
 
-        // FLIR XMP: what the camera was set to for the measurement
+        // FLIR XMP: what the camera was set to for the measurement. Not its temperatures (Xmp.FLIR.
+        // ReflectedApparentTemperature, AtmosphericTemperature, IRWindowTemperature): no real file has them (the FLIR
+        // XMP of the Vue Pro R, Duo Pro R and Zenmuse XT, XT R and XT2 holds none of them), so their unit (the
+        // CameraInfo record has K) is not known, and a temperature off by 273.15 would move every pixel. Not read, the
+        // terms of the reflection, the atmosphere and the window are left out, as for a file that does not say them
         cal.emissivity = xmpNumber({"Xmp.FLIR.Emissivity"});
         cal.objectDistance = xmpNumber({"Xmp.FLIR.ObjectDistance", "Xmp.FLIR.SubjectDistance"});
-        cal.reflectedApparentTemperature = xmpNumber({"Xmp.FLIR.ReflectedApparentTemperature"});
-        cal.atmosphericTemperature = xmpNumber({"Xmp.FLIR.AtmosphericTemperature"});
         cal.relativeHumidity = humidityFraction(xmpNumber({"Xmp.FLIR.RelativeHumidity"}));
-        cal.irWindowTemperature = xmpNumber({"Xmp.FLIR.IRWindowTemperature"});
         cal.irWindowTransmission = xmpNumber({"Xmp.FLIR.IRWindowTransmission"});
 
         // FLIR XMP: the Planck constants. The calibration is valid only with the five of them: the defaults of no
@@ -911,10 +943,8 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
         // those of the Planck formula: only DJI's conversion turns them into temperatures (djiRawToTemperatureMap)
         if (!cal.emissivity) cal.emissivity = xmpNumber({"Xmp.drone-dji.ThermalObjectEmissivity"});
         if (!cal.objectDistance) cal.objectDistance = xmpNumber({"Xmp.drone-dji.ThermalObjectDistance"});
-        if (!cal.reflectedApparentTemperature)
-            cal.reflectedApparentTemperature = xmpNumber({"Xmp.drone-dji.ThermalReflection"});
-        if (!cal.atmosphericTemperature)
-            cal.atmosphericTemperature = xmpNumber({"Xmp.drone-dji.ThermalAtmosphericTemperature"});
+        cal.reflectedApparentTemperature = xmpNumber({"Xmp.drone-dji.ThermalReflection"});
+        cal.atmosphericTemperature = xmpNumber({"Xmp.drone-dji.ThermalAtmosphericTemperature"});
         LOGD << "No thermal calibration (Planck constants) in the tags of " << filePath;
     } catch (const std::exception &e) {
         LOGD << "Error reading thermal calibration: " << e.what();
@@ -1331,14 +1361,14 @@ TemperatureData readTemperatureData(const std::string &filePath) {
     td.temperatures.clear();
 
     // Try R-JPEG extraction
-    if (const auto rjpeg = readRJpegThermal(filePath)) {
+    if (auto rjpeg = readRJpegThermal(filePath)) {
         if (rjpeg->grid.temperatures.empty()) {
             // The raw counts of the camera have no calibration: they are not temperatures (FR-RAS-14)
             LOGD << "No valid thermal calibration for " << filePath << ", the R-JPEG has no temperatures";
             td.width = rjpeg->raw.width;
             td.height = rjpeg->raw.height;
         } else {
-            td = rjpeg->grid;
+            td = std::move(rjpeg->grid);
         }
         return td;
     }
