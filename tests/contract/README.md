@@ -559,3 +559,9 @@ Registry has to adopt first.
   value info (`valueMin`, `valueMax`, `unit`, `stretch`), point, area, profile and contours give their values in the
   unit of the formula, and the thermal formulas of a tile, a thumbnail and an export too. No export is added or
   changed.
+* 2026-11-10: `capabilities` lists `DDBGenerateContoursEx2` (new in 2.3, U-413, FR-RAS-11), also in
+  `cancellable`: `DDBGenerateContoursEx` with a progress callback (fraction, phase "statistics", "levels" or
+  "lines"; a non-zero return cancels). The contour result gains `truncated` (true when the lines were cut at the
+  cap) and `featureCap` (the cap, 100000 lines); both are in the output of `DDBGenerateContours`,
+  `DDBGenerateContoursEx` and `DDBGenerateContoursEx2`. A host that calls the new export checks
+  `DDBGetAbiVersion()` for 2.3 or later. No fixture lists a contour result.

@@ -13,6 +13,7 @@
 #include "json.h"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -214,6 +215,166 @@ TEST(contour, cApiInvalidArgsReturnsError) {
                                      &out);
     EXPECT_EQ(err, DDBERR_EXCEPTION);
     if (out) DDBFree(out);
+}
+
+// ---- The cap, progress and cancel (FR-RAS-11) -------------------------------
+
+// A DEM of pseudo-random noise (a fixed generator, the same values on every run): every pixel is a
+// different level, so the contours are many short lines
+fs::path createNoisyDem(const fs::path &rasterPath, int w, int h) {
+    GDALDriverH drv = GDALGetDriverByName("GTiff");
+    GDALDatasetH hDs = GDALCreate(drv, rasterPath.string().c_str(), w, h, 1, GDT_Float32, nullptr);
+    if (!hDs) throw std::runtime_error("Cannot create DEM");
+    double gt[6] = {10.0, 0.0001, 0.0, 45.0, 0.0, -0.0001};
+    GDALSetGeoTransform(hDs, gt);
+    OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
+    OSRImportFromEPSG(srs, 4326);
+    char *wkt = nullptr;
+    OSRExportToWkt(srs, &wkt);
+    GDALSetProjection(hDs, wkt);
+    CPLFree(wkt);
+    OSRDestroySpatialReference(srs);
+
+    std::vector<float> row(w);
+    GDALRasterBandH band = GDALGetRasterBand(hDs, 1);
+    uint32_t state = 12345;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            state = state * 1664525u + 1013904223u;
+            row[x] = static_cast<float>((state >> 8) % 1000) / 10.0f; // 0.0 .. 99.9
+        }
+        if (GDALRasterIO(band, GF_Write, 0, y, w, 1, row.data(), w, 1, GDT_Float32, 0, 0) != CE_None)
+            throw std::runtime_error("Cannot write DEM");
+    }
+    GDALFlushCache(hDs);
+    GDALClose(hDs);
+    return rasterPath;
+}
+
+TEST(contour, aNoisyRasterThatHitsTheCapIsTruncated) {
+    TestArea ta(TEST_NAME);
+    fs::path dem = createNoisyDem(ta.getPath("dem_noise.tif"), 120, 120);
+
+    ContourOptions o;
+    o.interval = 1.0;
+    o.maxFeatures = 50;
+
+    auto j = json::parse(generateContoursJson(dem.string(), o));
+    EXPECT_TRUE(j["truncated"].get<bool>());
+    EXPECT_EQ(j["featureCap"].get<int>(), 50);
+    EXPECT_EQ(j["featureCount"].get<int>(), 50);
+    EXPECT_EQ(j["features"].size(), 50u);
+}
+
+TEST(contour, aResultWithinTheCapIsNotTruncated) {
+    TestArea ta(TEST_NAME);
+    fs::path dem = createGradientDem(ta.getPath("dem_cap_ok.tif"), 100, 50);
+
+    ContourOptions o;
+    o.interval = 10.0;
+
+    auto j = json::parse(generateContoursJson(dem.string(), o));
+    EXPECT_FALSE(j["truncated"].get<bool>());
+    // The cap of a result is 100000 lines
+    EXPECT_EQ(j["featureCap"].get<int>(), 100000);
+    EXPECT_EQ(j["featureCount"].get<int>(), 9);
+}
+
+TEST(contour, aResultOfExactlyTheCapIsNotTruncated) {
+    TestArea ta(TEST_NAME);
+    fs::path dem = createGradientDem(ta.getPath("dem_cap_edge.tif"), 100, 50);
+
+    ContourOptions o;
+    o.interval = 10.0; // the levels 10, 20 .. 90: nine lines
+    o.maxFeatures = 9;
+    auto exact = json::parse(generateContoursJson(dem.string(), o));
+    EXPECT_FALSE(exact["truncated"].get<bool>());
+    EXPECT_EQ(exact["featureCount"].get<int>(), 9);
+
+    o.maxFeatures = 8;
+    auto cut = json::parse(generateContoursJson(dem.string(), o));
+    EXPECT_TRUE(cut["truncated"].get<bool>());
+    EXPECT_EQ(cut["featureCap"].get<int>(), 8);
+    EXPECT_EQ(cut["featureCount"].get<int>(), 8);
+}
+
+TEST(contour, progressGoesFromTheStatisticsToTheLinesAndNeverBack) {
+    TestArea ta(TEST_NAME);
+    fs::path dem = createNoisyDem(ta.getPath("dem_progress.tif"), 120, 120);
+
+    std::vector<double> fractions;
+    std::vector<std::string> phases;
+    ContourOptions o;
+    o.interval = 1.0;
+    o.progress = [&](double fraction, const char *phase) {
+        fractions.push_back(fraction);
+        if (phases.empty() || phases.back() != phase) phases.push_back(phase);
+        return false;
+    };
+    auto j = json::parse(generateContoursJson(dem.string(), o));
+    EXPECT_FALSE(j["truncated"].get<bool>());
+
+    ASSERT_GE(fractions.size(), 4u);
+    EXPECT_DOUBLE_EQ(fractions.front(), 0.0);
+    EXPECT_DOUBLE_EQ(fractions.back(), 1.0);
+    for (size_t i = 1; i < fractions.size(); i++) EXPECT_GE(fractions[i], fractions[i - 1]) << i;
+    EXPECT_EQ(phases, (std::vector<std::string>{"statistics", "levels", "lines"}));
+}
+
+TEST(contour, aProgressCallbackThatAsksToStopCancelsTheGeneration) {
+    TestArea ta(TEST_NAME);
+    fs::path dem = createNoisyDem(ta.getPath("dem_stop.tif"), 120, 120);
+
+    ContourOptions o;
+    o.interval = 1.0;
+    int calls = 0;
+    o.progress = [&](double, const char *phase) {
+        calls++;
+        return std::string(phase) == "levels"; // stop at the first report of the generator
+    };
+    EXPECT_THROW(generateContoursJson(dem.string(), o), CanceledException);
+    EXPECT_LT(calls, 10);
+}
+
+TEST(contour, cApiProgressAndCancel) {
+    TestArea ta(TEST_NAME);
+    fs::path dem = createNoisyDem(ta.getPath("dem_capi2.tif"), 120, 120);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    struct Seen {
+        int calls = 0;
+        double last = -1;
+        bool stop = false;
+    } seen;
+    auto callback = [](double fraction, const char *, void *user) -> int {
+        auto *s = static_cast<Seen *>(user);
+        s->calls++;
+        s->last = fraction;
+        return s->stop ? 1 : 0;
+    };
+
+    char *out = nullptr;
+    ASSERT_EQ(DDBGenerateContoursEx2(dem.string().c_str(), 1.0, 0, 0.0, nan, nan, 0.0, 1, nullptr, callback, &seen, &out),
+              DDBERR_NONE);
+    ASSERT_NE(out, nullptr);
+    auto j = json::parse(std::string(out));
+    DDBFree(out);
+    EXPECT_FALSE(j["truncated"].get<bool>());
+    EXPECT_EQ(j["featureCap"].get<int>(), 100000);
+    EXPECT_GT(seen.calls, 3);
+    EXPECT_DOUBLE_EQ(seen.last, 1.0);
+
+    seen = Seen{};
+    seen.stop = true;
+    out = nullptr;
+    EXPECT_EQ(DDBGenerateContoursEx2(dem.string().c_str(), 1.0, 0, 0.0, nan, nan, 0.0, 1, nullptr, callback, &seen, &out),
+              DDBERR_CANCELED);
+    EXPECT_EQ(out, nullptr);
+
+    // No callback: the plain call
+    ASSERT_EQ(DDBGenerateContoursEx2(dem.string().c_str(), 1.0, 0, 0.0, nan, nan, 0.0, 1, nullptr, nullptr, nullptr, &out),
+              DDBERR_NONE);
+    DDBFree(out);
 }
 
 } // namespace

@@ -4,10 +4,14 @@
 #ifndef CONTOUR_H
 #define CONTOUR_H
 
+#include <functional>
 #include <optional>
 #include <string>
 
 namespace ddb {
+
+// The most lines of one contour result (ContourOptions::maxFeatures by default)
+constexpr int kMaxContourFeatures = 100000;
 
 /**
  * Options for contour line generation.
@@ -28,7 +32,14 @@ struct ContourOptions {
     std::string           formula;      // a thermal formula (CELSIUS, KELVIN, FAHRENHEIT): the levels, the options below and
                                         // the output are in its unit, converted from the unit of the band (D-022); "" = the band's.
                                         // Any other formula (an index) is ignored, as in 2.2; one that does not exist is refused
+    // The most lines the output holds (kMaxContourFeatures): a result with more is cut there and says so
+    // (truncated, featureCap). Lower only to test the cap; the C API leaves it as it is
+    int                   maxFeatures = kMaxContourFeatures;
+    // Called with the fraction done in [0,1] and a short phase label ("statistics", "levels", "lines"); returns
+    // true to cancel the generation (it stops at its next checkpoint, as a canceled token does). New in 2.3
+    std::function<bool(double fraction, const char *phase)> progress;
 };
+
 
 /**
  * Generate contour lines from a single-band raster (DEM/DSM/DTM).
@@ -49,7 +60,9 @@ struct ContourOptions {
  *   "min": <double>,
  *   "max": <double>,
  *   "featureCount": <int>,
- *   "unit": <string>
+ *   "unit": <string>,
+ *   "truncated": <bool>,      // true when the lines were cut at "featureCap" (new in 2.3)
+ *   "featureCap": <int>       // the most lines a result holds (new in 2.3)
  * }
  *
  * @throws InvalidArgsException when neither interval nor count is supplied,

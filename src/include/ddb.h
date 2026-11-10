@@ -1669,6 +1669,17 @@ extern "C"
                                          double minElev, double maxElev, double simplifyTolerance, int bandIndex,
                                          const DDBRasterOptions *options, char **output);
 
+    /** DDBGenerateContoursEx with progress (new in 2.3): the output says when the lines were cut at the most a
+     * result holds ("truncated": true, "featureCap": the number of lines; both new in 2.3, and also in the output of
+     * DDBGenerateContours and DDBGenerateContoursEx).
+     * @param progress Called with the fraction done in [0,1] and the phase ("statistics", "levels", "lines"); a
+     *                 non-zero return cancels the call (DDBERR_CANCELED). NULL: no progress.
+     * @param progressUserData Passed to progress */
+    DDB_DLL DDBErr DDBGenerateContoursEx2(const char *rasterPath, double interval, int count, double baseOffset,
+                                          double minElev, double maxElev, double simplifyTolerance, int bandIndex,
+                                          const DDBRasterOptions *options, DDBProgressCallback progress,
+                                          void *progressUserData, char **output);
+
     /** DDBGenerateMemoryThumbnailEx with options (new in 2.2): the NoData value of the options replaces the one
      * of the bands (a pixel equal to it is transparent and out of the stretch). */
     DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx2(const char *filePath, int size,

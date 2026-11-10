@@ -47,6 +47,7 @@ DDBFree
 DDBFreeCancelToken
 DDBGenerateContours
 DDBGenerateContoursEx
+DDBGenerateContoursEx2
 DDBGenerateMemoryThumbnail
 DDBGenerateMemoryThumbnailEx
 DDBGenerateMemoryThumbnailEx2
