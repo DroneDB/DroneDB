@@ -202,25 +202,21 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath, std
     if (det.detected && !det.bands.empty()) {
         BandFilter bf;
         bf.id = "";
-        // Map band names to filter
+        // Map band names to filter, by the names the presets of a generic profile read (bandSymbolOf: "R", "NIR", ...)
         for (const auto &bi : det.bands) {
             std::string nameLC = bi.name;
             str::toLower(nameLC);
-
-            if (nameLC.find("red edge") != std::string::npos ||
-                nameLC.find("rededge") != std::string::npos) {
-                if (bf.Re < 0) bf.Re = bi.index - 1; // 0-based
-            } else if (nameLC.starts_with("red")) {
-                if (bf.R < 0) bf.R = bi.index - 1;
-            } else if (nameLC.starts_with("green")) {
-                if (bf.G < 0) bf.G = bi.index - 1;
-            } else if (nameLC.starts_with("blue")) {
-                if (bf.B < 0) bf.B = bi.index - 1;
-            } else if (nameLC.starts_with("nir")) {
-                if (bf.N < 0) bf.N = bi.index - 1;
-            } else if (nameLC == "lwir" || nameLC.find("thermal") != std::string::npos) {
-                if (bf.T < 0) bf.T = bi.index - 1;
+            int *slot = nullptr;
+            switch (bandSymbolOf(bi.name)) {
+            case 'e': slot = &bf.Re; break;
+            case 'R': slot = &bf.R; break;
+            case 'G': slot = &bf.G; break;
+            case 'B': slot = &bf.B; break;
+            case 'N': slot = &bf.N; break;
+            default:
+                if (nameLC == "lwir" || nameLC.find("thermal") != std::string::npos) slot = &bf.T;
             }
+            if (slot != nullptr && *slot < 0) *slot = bi.index - 1; // 0-based
         }
 
         // Build filter string

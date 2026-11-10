@@ -202,6 +202,20 @@ uint64_t SensorProfileManager::uncachedDetections() const {
     return uncachedDetections_;
 }
 
+char bandSymbolOf(const std::string &name) {
+    std::string n = str::toLowerCopy(str::trimView(name));
+    for (auto &c : n)
+        if (c == '-' || c == '_') c = ' ';
+    if (n == "re" || n.find("red edge") != std::string::npos || n.find("rededge") != std::string::npos) return 'e';
+    if (n == "r" || n.starts_with("red")) return 'R';
+    if (n == "g" || n.starts_with("green")) return 'G';
+    if (n == "b" || n.starts_with("blue")) return 'B';
+    if (n == "n" || n.starts_with("nir") || n.starts_with("near infrared") || n.starts_with("nearinfrared") ||
+        n.starts_with("near ir"))
+        return 'N';
+    return 0;
+}
+
 namespace {
 
 // Every metadata string of the raster the profiles are matched against: the TIFF description and
@@ -211,17 +225,6 @@ std::vector<std::string> collectMatchingMetadata(GDALDatasetH hDataset, int band
     options.datasetItems = {"TIFFTAG_IMAGEDESCRIPTION", "TIFFTAG_SOFTWARE"};
     options.bandCount = bandCount;
     return gdalmeta::collectMetadata(hDataset, options);
-}
-
-// The symbol (R, G, B, N, e for the red edge) of a band by its name, 0 for a band no formula reads
-char bandSymbolOf(std::string name) {
-    str::toLower(name);
-    if (name.find("red edge") != std::string::npos || name.find("rededge") != std::string::npos) return 'e';
-    if (name.starts_with("red")) return 'R';
-    if (name.starts_with("green")) return 'G';
-    if (name.starts_with("blue")) return 'B';
-    if (name.starts_with("nir")) return 'N';
-    return 0;
 }
 
 // The presets of a generic profile (its bands are placeholders until GDAL's band descriptions replace them) built from
@@ -278,17 +281,25 @@ void describeMatch(SensorDetectionResult &result, const SensorProfile &profile, 
     // alone but whose actual band order differs (e.g. ODM multispectral
     // orthophoto with Red/Green/NIR/Rededge would otherwise be shown as
     // Blue/Green/Red/NIR from generic-4band).
+    // When no description names a band a formula reads ("Band 1", ...), the descriptions do not tell the order of the
+    // bands: the profile's bands and presets stand, as for a raster without descriptions (FR-RAS-18)
     if (profile.detection.metadataPatterns.empty()) {
-        for (auto &bi : result.bands) {
+        std::vector<BandInfo> described = profile.bands;
+        bool named = false;
+        for (auto &bi : described) {
             if (bi.index < 1 || bi.index > bandCount) continue;
             GDALRasterBandH hB = GDALGetRasterBand(hDataset, bi.index);
             const char *d = GDALGetDescription(hB);
             if (d != nullptr && *d != '\0') {
                 bi.name = d;
+                if (bandSymbolOf(bi.name) != 0) named = true;
             }
         }
-        // Its presets map the bands the raster has, not those the profile assumed
-        result.presets = presetsOfBands(profile.presets, result.bands);
+        if (named) {
+            result.bands = described;
+            // Its presets map the bands the raster has, not those the profile assumed
+            result.presets = presetsOfBands(profile.presets, result.bands);
+        }
     }
 
     // Find default preset
@@ -385,6 +396,11 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
 
         if (matchesProfile(profile, bandCount, dataType, allMetadata, lastBandIsAlpha)) {
             describeMatch(result, profile, hDataset, bandCount);
+            // No band preset is left (the raster lacks the bands of each): the mapping of the colour interpretations
+            if (result.defaultPresetId.empty()) {
+                dataset.reset();
+                result.defaultBandMapping = getFallbackMapping(rasterPath, bandCount);
+            }
             return result;
         }
     }

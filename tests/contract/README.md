@@ -559,6 +559,8 @@ Registry has to adopt first.
   (absent when no profile matched). For a raster of a generic profile (`generic-4band`) the
   `availablePresets` are built from the bands the raster has: a True Color or Color Infrared preset maps the
   bands by their names and is left out when a band is missing, an index preset is left out when a band its
-  formula reads is missing. A raster of fewer than three data bands that is not thermal has no band filter, so
+  formula reads is missing. The bands are read by their usual names, whatever their case (`R`, `G`, `B`, `N`,
+  `NIR`, `Near Infrared`, `RedEdge`, `Red Edge`, `RE`); when no description names one (`Band 1`, ...), the
+  profile's presets stand. The generic profile is named `Generic 4-band`. A raster of fewer than three data bands that is not thermal has no band filter, so
   every formula that needs bands is listed disabled with "Requires bands: ...". `raster-metadata.schema.json`
   and `raster-info.schema.json` changed; the two `raster-metadata` fixtures changed, `raster-info` did not.
