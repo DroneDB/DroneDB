@@ -391,8 +391,8 @@
     },
     {
       "id": "generic-4band",
-      "name": "Generic 4-Band (BGRN)",
-      "description": "Generic 4-band imagery assumed as Blue, Green, Red, NIR. Low priority fallback for unrecognized 4-band UInt16 rasters.",
+      "name": "Generic 4-band",
+      "description": "Generic 4-band imagery. Its bands are read by their descriptions (Red, Green, Blue, NIR, Red Edge and their synonyms), else assumed as Blue, Green, Red, NIR. Low priority fallback for unrecognized 4-band UInt16 rasters.",
       "sensorCategory": "multispectral",
       "detection": {
         "bandCount": 4,

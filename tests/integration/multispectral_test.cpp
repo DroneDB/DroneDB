@@ -25,6 +25,8 @@
 #include "entry_types.h"
 
 #include <fstream>
+#include <map>
+#include <vector>
 #include <cstring>
 #include <utility>
 
@@ -151,6 +153,145 @@ TEST(multispectral, detectSensorFallbackPopulatesBands) {
     EXPECT_EQ(info["bandCount"].get<int>(), 5);
     ASSERT_TRUE(info.contains("bands"));
     EXPECT_EQ(info["bands"].size(), 4u);
+}
+
+// Creates a 4-band UInt16 raster whose bands have the given GDAL descriptions, which no profile names but the generic 4-band
+fs::path fourBandRaster(const fs::path &path, const std::vector<std::string> &names) {
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    GDALDatasetH hDs = GDALCreate(tifDrv, path.string().c_str(), 32, 32, 4, GDT_UInt16, nullptr);
+    EXPECT_NE(hDs, nullptr);
+    for (size_t i = 0; i < names.size(); i++) GDALSetDescription(GDALGetRasterBand(hDs, static_cast<int>(i) + 1), names[i].c_str());
+    GDALClose(hDs);
+    return path;
+}
+
+// The presets of a raster of the generic 4-band profile map the bands the raster has (FR-RAS-18): Green/Red/NIR/RedEdge
+// has no Blue band, so no True Color preset that would show NIR as red; its Color Infrared preset maps NIR, Red and Green
+TEST(multispectral, aGenericProfileHasNoTrueColorWithoutABlueBand) {
+    TestArea ta(TEST_NAME);
+    const fs::path raster = fourBandRaster(ta.getPath("grnr.tif"), {"Green", "Red", "NIR", "Rededge"});
+
+    const auto info = json::parse(SensorProfileManager::instance().getRasterInfoJson(raster.string()));
+    EXPECT_EQ(info["detectedSensor"], "generic-4band");
+    // A neutral name: the profile does not tell the order of the bands, the descriptions do
+    EXPECT_EQ(info["detectedSensorName"], "Generic 4-band");
+
+    std::map<std::string, json> presets;
+    for (const auto &p : info["availablePresets"]) presets[p["id"]] = p;
+    EXPECT_EQ(presets.count("true-color"), 0u);
+    ASSERT_EQ(presets.count("false-color-ir"), 1u);
+    EXPECT_EQ(presets["false-color-ir"]["bandMapping"], json({{"r", 3}, {"g", 2}, {"b", 1}}));
+    // Indices over the bands the raster has stay; NDWI and GNDVI read Green and NIR, NDVI Red and NIR
+    EXPECT_EQ(presets.count("ndvi"), 1u);
+    EXPECT_EQ(presets.count("gndvi"), 1u);
+    // The default preset is one that exists, so the tiles do not map NIR to red
+    EXPECT_EQ(info["defaultPreset"], "false-color-ir");
+}
+
+TEST(multispectral, aGenericProfileMapsItsPresetsByTheBandNames) {
+    TestArea ta(TEST_NAME);
+    // Blue, Green, Red, NIR in this order (what the profile assumes) and the same bands in another order
+    const auto presetsOf = [&](const char *file, const std::vector<std::string> &names) {
+        const auto info = json::parse(SensorProfileManager::instance().getRasterInfoJson(fourBandRaster(ta.getPath(file), names).string()));
+        std::map<std::string, json> presets;
+        for (const auto &p : info["availablePresets"]) presets[p["id"]] = p;
+        return presets;
+    };
+
+    auto bgrn = presetsOf("bgrn.tif", {"Blue", "Green", "Red", "NIR"});
+    EXPECT_EQ(bgrn["true-color"]["bandMapping"], json({{"r", 3}, {"g", 2}, {"b", 1}}));
+    EXPECT_EQ(bgrn["false-color-ir"]["bandMapping"], json({{"r", 4}, {"g", 3}, {"b", 2}}));
+
+    auto rgnb = presetsOf("nrgb.tif", {"NIR", "Red", "Green", "Blue"});
+    EXPECT_EQ(rgnb["true-color"]["bandMapping"], json({{"r", 2}, {"g", 3}, {"b", 4}}));
+    EXPECT_EQ(rgnb["false-color-ir"]["bandMapping"], json({{"r", 1}, {"g", 2}, {"b", 3}}));
+
+    // Without descriptions the bands are the profile's, and so are its presets
+    auto plain = presetsOf("plain.tif", {});
+    EXPECT_EQ(plain["true-color"]["bandMapping"], json({{"r", 3}, {"g", 2}, {"b", 1}}));
+}
+
+// The bands of a generic profile are read by the usual names of the bands, whatever their case (FR-RAS-18)
+TEST(multispectral, theBandSymbolsKnowTheUsualSynonyms) {
+    EXPECT_EQ(bandSymbolOf("R"), 'R');
+    EXPECT_EQ(bandSymbolOf("red"), 'R');
+    EXPECT_EQ(bandSymbolOf("G"), 'G');
+    EXPECT_EQ(bandSymbolOf("Green"), 'G');
+    EXPECT_EQ(bandSymbolOf("b"), 'B');
+    EXPECT_EQ(bandSymbolOf("BLUE"), 'B');
+    EXPECT_EQ(bandSymbolOf("N"), 'N');
+    EXPECT_EQ(bandSymbolOf("nir"), 'N');
+    EXPECT_EQ(bandSymbolOf("Near Infrared"), 'N');
+    EXPECT_EQ(bandSymbolOf("near-infrared"), 'N');
+    EXPECT_EQ(bandSymbolOf("RedEdge"), 'e');
+    EXPECT_EQ(bandSymbolOf("Red Edge"), 'e');
+    EXPECT_EQ(bandSymbolOf("red_edge"), 'e');
+    EXPECT_EQ(bandSymbolOf("RE"), 'e');
+    EXPECT_EQ(bandSymbolOf("Rededge"), 'e');
+    // A name that names no band a formula reads
+    EXPECT_EQ(bandSymbolOf("Band 1"), 0);
+    EXPECT_EQ(bandSymbolOf("Brightness"), 0);
+    EXPECT_EQ(bandSymbolOf("LWIR"), 0);
+    EXPECT_EQ(bandSymbolOf(""), 0);
+}
+
+// Short or spelled-out band names map the presets and the formulas like Red/Green/Blue/NIR (FR-RAS-18)
+TEST(multispectral, aGenericProfileReadsTheSynonymsOfTheBandNames) {
+    TestArea ta(TEST_NAME);
+    const fs::path raster = fourBandRaster(ta.getPath("rgbn_short.tif"), {"R", "G", "B", "NIR"});
+    const auto info = json::parse(SensorProfileManager::instance().getRasterInfoJson(raster.string()));
+    std::map<std::string, json> presets;
+    for (const auto &p : info["availablePresets"]) presets[p["id"]] = p;
+    ASSERT_EQ(presets.count("true-color"), 1u);
+    EXPECT_EQ(presets["true-color"]["bandMapping"], json({{"r", 1}, {"g", 2}, {"b", 3}}));
+    EXPECT_EQ(presets["false-color-ir"]["bandMapping"], json({{"r", 4}, {"g", 1}, {"b", 2}}));
+    EXPECT_EQ(presets.count("ndvi"), 1u);
+    EXPECT_EQ(info["defaultPreset"], "true-color");
+    // The formulas read the same bands: NDVI can be computed
+    const auto bf = VegetationEngine::instance().autoDetectFilter(raster.string());
+    EXPECT_EQ(bf.id, "RGBN");
+    EXPECT_EQ(bf.N, 3);
+
+    const fs::path spelled = fourBandRaster(ta.getPath("bgrn_spelled.tif"), {"blue", "GREEN", "Red", "Near Infrared"});
+    const auto det = SensorProfileManager::instance().detectSensor(spelled.string());
+    EXPECT_EQ(det.defaultPresetId, "true-color");
+    EXPECT_EQ(det.defaultBandMapping, (BandMapping{3, 2, 1}));
+    EXPECT_EQ(VegetationEngine::instance().autoDetectFilter(spelled.string()).id, "RGBN");
+}
+
+// Descriptions that name no band ("Band 1", ...) do not tell the order of the bands: the profile's presets stand, so
+// the default stays True Color 3,2,1 and not the 1,2,3 of a raster without presets (FR-RAS-18)
+TEST(multispectral, aGenericProfileKeepsItsPresetsWhenNoDescriptionNamesABand) {
+    TestArea ta(TEST_NAME);
+    const fs::path raster = fourBandRaster(ta.getPath("numbered.tif"), {"Band 1", "Band 2", "Band 3", "Band 4"});
+    const auto det = SensorProfileManager::instance().detectSensor(raster.string());
+    EXPECT_EQ(det.sensorId, "generic-4band");
+    EXPECT_EQ(det.defaultPresetId, "true-color");
+    EXPECT_EQ(det.defaultBandMapping, (BandMapping{3, 2, 1}));
+    std::vector<std::string> ids;
+    for (const auto &p : det.presets) ids.push_back(p.id);
+    EXPECT_EQ(ids, (std::vector<std::string>{"true-color", "false-color-ir", "ndvi", "ndwi", "gndvi"}));
+    // The formulas read the bands the presets assume
+    EXPECT_EQ(VegetationEngine::instance().autoDetectFilter(raster.string()).id, "RGBN");
+}
+
+// A generic raster whose named bands leave no band preset gets the mapping of its colour interpretations, not 1,2,3
+TEST(multispectral, aGenericProfileWithoutABandPresetFallsBackToTheColourInterpretations) {
+    TestArea ta(TEST_NAME);
+    const fs::path path = ta.getPath("nir_ci.tif");
+    GDALDatasetH hDs = GDALCreate(GDALGetDriverByName("GTiff"), path.string().c_str(), 32, 32, 4, GDT_UInt16, nullptr);
+    ASSERT_NE(hDs, nullptr);
+    const GDALColorInterp interps[] = {GCI_GrayIndex, GCI_BlueBand, GCI_GreenBand, GCI_RedBand};
+    for (int b = 1; b <= 4; b++) GDALSetRasterColorInterpretation(GDALGetRasterBand(hDs, b), interps[b - 1]);
+    // Only NIR is named: no True Color, no Color Infrared, no index
+    const char *names[] = {"NIR", "Band 2", "Band 3", "Band 4"};
+    for (int b = 1; b <= 4; b++) GDALSetDescription(GDALGetRasterBand(hDs, b), names[b - 1]);
+    GDALClose(hDs);
+
+    const auto det = SensorProfileManager::instance().detectSensor(path.string());
+    EXPECT_EQ(det.sensorId, "generic-4band");
+    EXPECT_TRUE(det.defaultPresetId.empty());
+    EXPECT_EQ(det.defaultBandMapping, (BandMapping{4, 3, 2}));
 }
 
 TEST(multispectral, defaultBandMappingFallback) {

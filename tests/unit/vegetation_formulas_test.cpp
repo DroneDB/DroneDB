@@ -611,7 +611,7 @@ namespace
 
     // CELSIUS and KELVIN read the first band of the raster whatever the band filter maps, so a
     // render plans them over a single-band Float32 raster that is not thermal (a DEM, which the
-    // Hub colourises with CELSIUS), whose detected filter is RGB: no "Requires bands: T". The list
+    // Hub colourises with CELSIUS), whose detected filter is empty: no "Requires bands: T". The list
     // of formulas keeps them disabled there, and NDVI over RGB is still refused
     TEST_F(VegetationFormulas, theThermalPassthroughsRenderTheFirstBandOfANonThermalRaster)
     {
@@ -623,7 +623,9 @@ namespace
         spec.type = GDT_Float32;
         spec.value = [](int, int x, int y) { return 120.0 + 0.5 * x + 0.25 * y; };
         const std::string dem = testutils::createGeoRaster(ta.getPath("dem.tif"), spec).string();
-        ASSERT_EQ(VegetationEngine::instance().autoDetectFilter(dem).id, "RGB");
+        // A raster of one band has no red, green and blue to map (FR-RAS-19): its filter is empty, and the passthroughs
+        // still plan, as they read the first band whatever the filter maps
+        ASSERT_EQ(VegetationEngine::instance().autoDetectFilter(dem).id, "");
 
         {
             std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(dem.c_str(), GA_ReadOnly)));
@@ -676,5 +678,106 @@ namespace
         const std::string rgb = testutils::createGeoRaster(ta.getPath("rgb.tif"), spec).string();
         EXPECT_EQ(DDBGetRasterMetadata(rgb.c_str(), "NDVI", nullptr, &text), DDBERR_INVALIDARGS);
         EXPECT_EQ(std::string(DDBGetLastError()), "Requires bands: RN");
+    }
+
+    // A raster of one data band has no red, green and blue (FR-RAS-19): the RGB indices are listed disabled, each with
+    // the bands it needs, and a render of one is refused with the same reason instead of an image of nothing; a raster
+    // of three bands keeps them
+    TEST_F(VegetationFormulas, theRgbIndicesAreDisabledOnASingleBandRaster)
+    {
+        TestArea ta(TEST_NAME, true);
+        testutils::GeoRasterSpec spec;
+        spec.width = 16;
+        spec.height = 16;
+        spec.bands = 1;
+        spec.type = GDT_UInt16;
+        spec.value = [](int, int x, int y) { return 100.0 + x + y; };
+        const std::string single = testutils::createGeoRaster(ta.getPath("single.tif"), spec).string();
+        EXPECT_EQ(VegetationEngine::instance().autoDetectFilter(single).id, "");
+
+        const auto reasons = [](const std::string &path) {
+            char *text = nullptr;
+            EXPECT_EQ(DDBGetRasterMetadata(path.c_str(), nullptr, nullptr, &text), DDBERR_NONE) << DDBGetLastError();
+            const json metadata = json::parse(text);
+            DDBFree(text);
+            std::map<std::string, std::string> result;
+            for (const json &algorithm : metadata["algorithms"])
+                result[algorithm["id"]] = algorithm.value("disabledReason", "");
+            return result;
+        };
+
+        const auto one = reasons(single);
+        const std::map<std::string, std::string> expected = {{"VARI", "Requires bands: RGB"},  {"EXG", "Requires bands: RGB"},
+                                                             {"GLI", "Requires bands: RGB"},   {"vNDVI", "Requires bands: RGB"},
+                                                             {"NDYI", "Requires bands: GB"},   {"MPRI", "Requires bands: RG"},
+                                                             {"NDVI", "Requires bands: RN"}};
+        for (const auto &[id, reason] : expected)
+            EXPECT_EQ(one.at(id), reason) << id;
+
+        // The render of one is refused, with that reason
+        std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(single.c_str(), GA_ReadOnly)));
+        ASSERT_NE(ds, nullptr);
+        try
+        {
+            planFormula(GDALDataset::ToHandle(ds.get()), single, "VARI", "", "", true);
+            ADD_FAILURE() << "VARI planned over a single band";
+        }
+        catch (const InvalidArgsException &e)
+        {
+            EXPECT_EQ(std::string(e.what()), "Requires bands: RGB");
+        }
+        ds.reset();
+
+        spec.bands = 3;
+        spec.type = GDT_Byte;
+        const auto three = reasons(testutils::createGeoRaster(ta.getPath("three.tif"), spec).string());
+        EXPECT_EQ(three.at("VARI"), "");
+        EXPECT_EQ(three.at("EXG"), "");
+        EXPECT_EQ(three.at("NDVI"), "Requires bands: RN");
+    }
+
+    // The algorithm list carries what a client needs without parsing a symbol string (FR-RAS-32, FR-RAS-33): the names of
+    // the bands the formula reads, and the kind of raster it is for
+    TEST_F(VegetationFormulas, theAlgorithmListGivesTheRequiredBandsAndTheCategory)
+    {
+        TestArea ta(TEST_NAME, true);
+        testutils::GeoRasterSpec spec;
+        spec.width = 8;
+        spec.height = 8;
+        spec.bands = 3;
+        spec.type = GDT_Byte;
+        const std::string path = testutils::createGeoRaster(ta.getPath("rgb.tif"), spec).string();
+        char *text = nullptr;
+        ASSERT_EQ(DDBGetRasterMetadata(path.c_str(), nullptr, nullptr, &text), DDBERR_NONE) << DDBGetLastError();
+        const json metadata = json::parse(text);
+        DDBFree(text);
+
+        std::map<std::string, json> byId;
+        for (const json &algorithm : metadata["algorithms"])
+        {
+            // Every formula has both, never empty
+            ASSERT_TRUE(algorithm["requiredBands"].is_array()) << algorithm["id"];
+            EXPECT_FALSE(algorithm["requiredBands"].empty()) << algorithm["id"];
+            ASSERT_TRUE(algorithm["category"].is_string()) << algorithm["id"];
+            byId[algorithm["id"]] = algorithm;
+        }
+        EXPECT_EQ(byId.size(), 18u);
+
+        const auto bands = [&](const char *id) { return byId.at(id)["requiredBands"]; };
+        const auto category = [&](const char *id) { return byId.at(id)["category"].get<std::string>(); };
+        EXPECT_EQ(bands("VARI"), json::array({"Red", "Green", "Blue"}));
+        EXPECT_EQ(category("VARI"), "rgb");
+        EXPECT_EQ(bands("NDVI"), json::array({"Red", "NIR"}));
+        EXPECT_EQ(category("NDVI"), "multispectral");
+        EXPECT_EQ(bands("NDRE"), json::array({"NIR", "Red edge"}));
+        EXPECT_EQ(category("NDRE"), "multispectral");
+        EXPECT_EQ(bands("ENDVI"), json::array({"Green", "Blue", "NIR"}));
+        EXPECT_EQ(bands("NDYI"), json::array({"Green", "Blue"}));
+        EXPECT_EQ(category("NDYI"), "rgb");
+        EXPECT_EQ(bands("CELSIUS"), json::array({"Thermal"}));
+        EXPECT_EQ(category("CELSIUS"), "thermal");
+        EXPECT_EQ(category("KELVIN"), "thermal");
+        // The reason keeps its text
+        EXPECT_EQ(byId.at("NDVI")["disabledReason"], "Requires bands: RN");
     }
 }

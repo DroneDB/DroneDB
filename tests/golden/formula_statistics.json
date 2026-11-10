@@ -2,6 +2,7 @@
  "gli_alpha": {
   "algorithms": [
    {
+    "category": "rgb",
     "expr": "(G - R) / (G + R - B)",
     "help": "Areas of green vegetation on RGB images",
     "id": "VARI",
@@ -9,15 +10,27 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(2 * G) - (R + B)",
     "help": "Emphasizes green foliage",
     "id": "EXG",
-    "name": "Excess Green Index"
+    "name": "Excess Green Index",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "rgb",
     "expr": "((G * 2) - R - B) / ((G * 2) + R + B)",
     "help": "Green leaves and stems",
     "id": "GLI",
@@ -25,15 +38,27 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "0.5268 * (R^-0.1294 * G^0.3389 * B^-0.3118)",
     "help": "Approximated NDVI for RGB sensors",
     "id": "vNDVI",
-    "name": "Visible NDVI"
+    "name": "Visible NDVI",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(N - R) / (N + R)",
@@ -43,9 +68,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "(G - N) / (G + N)",
@@ -55,9 +85,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "(N - G) / (N + G)",
@@ -67,9 +102,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(1.5 * (N - R)) / (N + R + 0.5)",
@@ -79,9 +119,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RBN",
     "expr": "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)",
@@ -91,9 +136,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: NRe",
     "expr": "(N - Re) / (N + Re)",
@@ -103,9 +154,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "NIR",
+     "Red edge"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(G - B) / (G + B)",
     "help": "Yellowness detection",
     "id": "NDYI",
@@ -113,9 +169,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(G - R) / (G + R)",
     "help": "Photochemical reflectance",
     "id": "MPRI",
@@ -123,9 +184,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(N - R) / (N + R + 0.16)",
@@ -135,25 +201,41 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "N / G",
     "help": "Green ratio",
     "id": "GRVI",
-    "name": "Green Ratio Vegetation Index"
+    "name": "Green Ratio Vegetation Index",
+    "requiredBands": [
+     "Green",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GBN",
     "expr": "((N + G) - (2*B)) / ((N + G) + (2*B))",
     "help": "Enhanced NDVI",
     "id": "ENDVI",
-    "name": "Enhanced NDVI"
+    "name": "Enhanced NDVI",
+    "requiredBands": [
+     "Green",
+     "Blue",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RBN",
     "expr": "(N - (2*R) + B) / (N + (2*R) + B)",
@@ -163,9 +245,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in degrees Celsius (converted from the unit of the band)",
@@ -175,9 +263,13 @@
     "range": [
      -40.0,
      150.0
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in K (converted from the unit of the band)",
@@ -187,6 +279,9 @@
     "range": [
      233.15,
      423.15
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
@@ -949,6 +1044,7 @@
  "ndvi": {
   "algorithms": [
    {
+    "category": "rgb",
     "expr": "(G - R) / (G + R - B)",
     "help": "Areas of green vegetation on RGB images",
     "id": "VARI",
@@ -956,15 +1052,27 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(2 * G) - (R + B)",
     "help": "Emphasizes green foliage",
     "id": "EXG",
-    "name": "Excess Green Index"
+    "name": "Excess Green Index",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "rgb",
     "expr": "((G * 2) - R - B) / ((G * 2) + R + B)",
     "help": "Green leaves and stems",
     "id": "GLI",
@@ -972,15 +1080,27 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "0.5268 * (R^-0.1294 * G^0.3389 * B^-0.3118)",
     "help": "Approximated NDVI for RGB sensors",
     "id": "vNDVI",
-    "name": "Visible NDVI"
+    "name": "Visible NDVI",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - R) / (N + R)",
     "help": "Amount of green vegetation",
     "id": "NDVI",
@@ -988,9 +1108,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(G - N) / (G + N)",
     "help": "Water content",
     "id": "NDWI",
@@ -998,9 +1123,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - G) / (N + G)",
     "help": "NDVI on green spectrum",
     "id": "GNDVI",
@@ -1008,9 +1138,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(1.5 * (N - R)) / (N + R + 0.5)",
     "help": "NDVI with soil correction",
     "id": "SAVI",
@@ -1018,9 +1153,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)",
     "help": "Better where NDVI saturates",
     "id": "EVI",
@@ -1028,9 +1168,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - Re) / (N + Re)",
     "help": "Green vegetation in mature crops",
     "id": "NDRE",
@@ -1038,9 +1184,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "NIR",
+     "Red edge"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(G - B) / (G + B)",
     "help": "Yellowness detection",
     "id": "NDYI",
@@ -1048,9 +1199,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(G - R) / (G + R)",
     "help": "Photochemical reflectance",
     "id": "MPRI",
@@ -1058,9 +1214,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - R) / (N + R + 0.16)",
     "help": "Optimized for sparse vegetation",
     "id": "OSAVI",
@@ -1068,21 +1229,37 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "N / G",
     "help": "Green ratio",
     "id": "GRVI",
-    "name": "Green Ratio Vegetation Index"
+    "name": "Green Ratio Vegetation Index",
+    "requiredBands": [
+     "Green",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "expr": "((N + G) - (2*B)) / ((N + G) + (2*B))",
     "help": "Enhanced NDVI",
     "id": "ENDVI",
-    "name": "Enhanced NDVI"
+    "name": "Enhanced NDVI",
+    "requiredBands": [
+     "Green",
+     "Blue",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - (2*R) + B) / (N + (2*R) + B)",
     "help": "Corrects atmospheric effects",
     "id": "ARVI",
@@ -1090,9 +1267,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in degrees Celsius (converted from the unit of the band)",
@@ -1102,9 +1285,13 @@
     "range": [
      -40.0,
      150.0
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in K (converted from the unit of the band)",
@@ -1114,6 +1301,9 @@
     "range": [
      233.15,
      423.15
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
@@ -1876,6 +2066,7 @@
  "plain": {
   "algorithms": [
    {
+    "category": "rgb",
     "disabled": true,
     "disabledReason": "Requires bands: RGB",
     "expr": "(G - R) / (G + R - B)",
@@ -1885,17 +2076,29 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "disabled": true,
     "disabledReason": "Requires bands: RGB",
     "expr": "(2 * G) - (R + B)",
     "help": "Emphasizes green foliage",
     "id": "EXG",
-    "name": "Excess Green Index"
+    "name": "Excess Green Index",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "rgb",
     "disabled": true,
     "disabledReason": "Requires bands: RGB",
     "expr": "((G * 2) - R - B) / ((G * 2) + R + B)",
@@ -1905,17 +2108,29 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "disabled": true,
     "disabledReason": "Requires bands: RGB",
     "expr": "0.5268 * (R^-0.1294 * G^0.3389 * B^-0.3118)",
     "help": "Approximated NDVI for RGB sensors",
     "id": "vNDVI",
-    "name": "Visible NDVI"
+    "name": "Visible NDVI",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(N - R) / (N + R)",
@@ -1925,9 +2140,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "(G - N) / (G + N)",
@@ -1937,9 +2157,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "(N - G) / (N + G)",
@@ -1949,9 +2174,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(1.5 * (N - R)) / (N + R + 0.5)",
@@ -1961,9 +2191,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RBN",
     "expr": "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)",
@@ -1973,9 +2208,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: NRe",
     "expr": "(N - Re) / (N + Re)",
@@ -1985,9 +2226,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "NIR",
+     "Red edge"
     ]
    },
    {
+    "category": "rgb",
     "disabled": true,
     "disabledReason": "Requires bands: GB",
     "expr": "(G - B) / (G + B)",
@@ -1997,9 +2243,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "disabled": true,
     "disabledReason": "Requires bands: RG",
     "expr": "(G - R) / (G + R)",
@@ -2009,9 +2260,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(N - R) / (N + R + 0.16)",
@@ -2021,25 +2277,41 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "N / G",
     "help": "Green ratio",
     "id": "GRVI",
-    "name": "Green Ratio Vegetation Index"
+    "name": "Green Ratio Vegetation Index",
+    "requiredBands": [
+     "Green",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GBN",
     "expr": "((N + G) - (2*B)) / ((N + G) + (2*B))",
     "help": "Enhanced NDVI",
     "id": "ENDVI",
-    "name": "Enhanced NDVI"
+    "name": "Enhanced NDVI",
+    "requiredBands": [
+     "Green",
+     "Blue",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RBN",
     "expr": "(N - (2*R) + B) / (N + (2*R) + B)",
@@ -2049,9 +2321,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in degrees Celsius (converted from the unit of the band)",
@@ -2061,9 +2339,13 @@
     "range": [
      -40.0,
      150.0
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in K (converted from the unit of the band)",
@@ -2073,6 +2355,9 @@
     "range": [
      233.15,
      423.15
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
@@ -2355,6 +2640,7 @@
  "savi": {
   "algorithms": [
    {
+    "category": "rgb",
     "expr": "(G - R) / (G + R - B)",
     "help": "Areas of green vegetation on RGB images",
     "id": "VARI",
@@ -2362,15 +2648,27 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(2 * G) - (R + B)",
     "help": "Emphasizes green foliage",
     "id": "EXG",
-    "name": "Excess Green Index"
+    "name": "Excess Green Index",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "rgb",
     "expr": "((G * 2) - R - B) / ((G * 2) + R + B)",
     "help": "Green leaves and stems",
     "id": "GLI",
@@ -2378,15 +2676,27 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "0.5268 * (R^-0.1294 * G^0.3389 * B^-0.3118)",
     "help": "Approximated NDVI for RGB sensors",
     "id": "vNDVI",
-    "name": "Visible NDVI"
+    "name": "Visible NDVI",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - R) / (N + R)",
     "help": "Amount of green vegetation",
     "id": "NDVI",
@@ -2394,9 +2704,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(G - N) / (G + N)",
     "help": "Water content",
     "id": "NDWI",
@@ -2404,9 +2719,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - G) / (N + G)",
     "help": "NDVI on green spectrum",
     "id": "GNDVI",
@@ -2414,9 +2734,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(1.5 * (N - R)) / (N + R + 0.5)",
     "help": "NDVI with soil correction",
     "id": "SAVI",
@@ -2424,9 +2749,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)",
     "help": "Better where NDVI saturates",
     "id": "EVI",
@@ -2434,9 +2764,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - Re) / (N + Re)",
     "help": "Green vegetation in mature crops",
     "id": "NDRE",
@@ -2444,9 +2780,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "NIR",
+     "Red edge"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(G - B) / (G + B)",
     "help": "Yellowness detection",
     "id": "NDYI",
@@ -2454,9 +2795,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(G - R) / (G + R)",
     "help": "Photochemical reflectance",
     "id": "MPRI",
@@ -2464,9 +2810,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - R) / (N + R + 0.16)",
     "help": "Optimized for sparse vegetation",
     "id": "OSAVI",
@@ -2474,21 +2825,37 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "expr": "N / G",
     "help": "Green ratio",
     "id": "GRVI",
-    "name": "Green Ratio Vegetation Index"
+    "name": "Green Ratio Vegetation Index",
+    "requiredBands": [
+     "Green",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "expr": "((N + G) - (2*B)) / ((N + G) + (2*B))",
     "help": "Enhanced NDVI",
     "id": "ENDVI",
-    "name": "Enhanced NDVI"
+    "name": "Enhanced NDVI",
+    "requiredBands": [
+     "Green",
+     "Blue",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "expr": "(N - (2*R) + B) / (N + (2*R) + B)",
     "help": "Corrects atmospheric effects",
     "id": "ARVI",
@@ -2496,9 +2863,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in degrees Celsius (converted from the unit of the band)",
@@ -2508,9 +2881,13 @@
     "range": [
      -40.0,
      150.0
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in K (converted from the unit of the band)",
@@ -2520,6 +2897,9 @@
     "range": [
      233.15,
      423.15
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
@@ -3282,6 +3662,7 @@
  "vari_alpha": {
   "algorithms": [
    {
+    "category": "rgb",
     "expr": "(G - R) / (G + R - B)",
     "help": "Areas of green vegetation on RGB images",
     "id": "VARI",
@@ -3289,15 +3670,27 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(2 * G) - (R + B)",
     "help": "Emphasizes green foliage",
     "id": "EXG",
-    "name": "Excess Green Index"
+    "name": "Excess Green Index",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "rgb",
     "expr": "((G * 2) - R - B) / ((G * 2) + R + B)",
     "help": "Green leaves and stems",
     "id": "GLI",
@@ -3305,15 +3698,27 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "0.5268 * (R^-0.1294 * G^0.3389 * B^-0.3118)",
     "help": "Approximated NDVI for RGB sensors",
     "id": "vNDVI",
-    "name": "Visible NDVI"
+    "name": "Visible NDVI",
+    "requiredBands": [
+     "Red",
+     "Green",
+     "Blue"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(N - R) / (N + R)",
@@ -3323,9 +3728,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "(G - N) / (G + N)",
@@ -3335,9 +3745,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "(N - G) / (N + G)",
@@ -3347,9 +3762,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(1.5 * (N - R)) / (N + R + 0.5)",
@@ -3359,9 +3779,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RBN",
     "expr": "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)",
@@ -3371,9 +3796,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: NRe",
     "expr": "(N - Re) / (N + Re)",
@@ -3383,9 +3814,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "NIR",
+     "Red edge"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(G - B) / (G + B)",
     "help": "Yellowness detection",
     "id": "NDYI",
@@ -3393,9 +3829,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Green",
+     "Blue"
     ]
    },
    {
+    "category": "rgb",
     "expr": "(G - R) / (G + R)",
     "help": "Photochemical reflectance",
     "id": "MPRI",
@@ -3403,9 +3844,14 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Green"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RN",
     "expr": "(N - R) / (N + R + 0.16)",
@@ -3415,25 +3861,41 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "NIR"
     ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GN",
     "expr": "N / G",
     "help": "Green ratio",
     "id": "GRVI",
-    "name": "Green Ratio Vegetation Index"
+    "name": "Green Ratio Vegetation Index",
+    "requiredBands": [
+     "Green",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: GBN",
     "expr": "((N + G) - (2*B)) / ((N + G) + (2*B))",
     "help": "Enhanced NDVI",
     "id": "ENDVI",
-    "name": "Enhanced NDVI"
+    "name": "Enhanced NDVI",
+    "requiredBands": [
+     "Green",
+     "Blue",
+     "NIR"
+    ]
    },
    {
+    "category": "multispectral",
     "disabled": true,
     "disabledReason": "Requires bands: RBN",
     "expr": "(N - (2*R) + B) / (N + (2*R) + B)",
@@ -3443,9 +3905,15 @@
     "range": [
      -1.0,
      1.0
+    ],
+    "requiredBands": [
+     "Red",
+     "Blue",
+     "NIR"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in degrees Celsius (converted from the unit of the band)",
@@ -3455,9 +3923,13 @@
     "range": [
      -40.0,
      150.0
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {
+    "category": "thermal",
     "disabled": true,
     "disabledReason": "Requires bands: T",
     "expr": "pixel in K (converted from the unit of the band)",
@@ -3467,6 +3939,9 @@
     "range": [
      233.15,
      423.15
+    ],
+    "requiredBands": [
+     "Thermal"
     ]
    },
    {

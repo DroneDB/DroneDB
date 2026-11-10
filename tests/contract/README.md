@@ -565,3 +565,15 @@ Registry has to adopt first.
   cap) and `featureCap` (the cap, 100000 lines); both are in the output of `DDBGenerateContours`,
   `DDBGenerateContoursEx` and `DDBGenerateContoursEx2`. A host that calls the new export checks
   `DDBGetAbiVersion()` for 2.3 or later. No fixture lists a contour result.
+* 2026-11-10: the raster panels (U-415, additive, new in 2.3). Each item of the `algorithms` of
+  `DDBGetRasterMetadata` carries `requiredBands` (the names of the bands the formula reads, for example
+  `["Red", "NIR"]`) and `category` (`rgb`, `multispectral` or `thermal`), next to `disabledReason`, whose text
+  is unchanged. `DDBGetRasterInfo` adds `detectedSensorName`, the name of the sensor profile next to its id
+  (absent when no profile matched). For a raster of a generic profile (`generic-4band`) the
+  `availablePresets` are built from the bands the raster has: a True Color or Color Infrared preset maps the
+  bands by their names and is left out when a band is missing, an index preset is left out when a band its
+  formula reads is missing. The bands are read by their usual names, whatever their case (`R`, `G`, `B`, `N`,
+  `NIR`, `Near Infrared`, `RedEdge`, `Red Edge`, `RE`); when no description names one (`Band 1`, ...), the
+  profile's presets stand. The generic profile is named `Generic 4-band`. A raster of fewer than three data bands that is not thermal has no band filter, so
+  every formula that needs bands is listed disabled with "Requires bands: ...". `raster-metadata.schema.json`
+  and `raster-info.schema.json` changed; the two `raster-metadata` fixtures changed, `raster-info` did not.

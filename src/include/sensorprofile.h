@@ -65,6 +65,7 @@ struct SensorProfile {
 struct SensorDetectionResult {
     bool detected = false;
     std::string sensorId;
+    std::string sensorName; // the profile's name next to its id ("Generic 4-band")
     std::string sensorCategory;
     BandMapping defaultBandMapping;
     std::vector<BandInfo> bands;
@@ -115,6 +116,11 @@ private:
 
     void ensureLoaded() const;
 };
+
+// The symbol of a band by its name (FR-RAS-18): 'R', 'G', 'B', 'N' (near infrared) or 'e' (red edge), 0 for a band no
+// formula reads; case-insensitive, with the usual synonyms ("R", "G", "B", "N", "NIR", "Near Infrared", "RedEdge",
+// "Red Edge", "RE"). The presets of a generic profile and the band filter of the formulas read bands by it
+char bandSymbolOf(const std::string &name);
 
 // JSON serialization
 void to_json(json &j, const BandMapping &bm);

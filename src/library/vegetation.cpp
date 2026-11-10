@@ -165,6 +165,21 @@ const char *VegetationEngine::symbolName(char symbol) {
     }
 }
 
+std::vector<std::string> VegetationEngine::requiredBandNames(const VegetationFormula &formula) {
+    std::vector<std::string> names;
+    for (const char symbol : requiredSymbols(formula)) names.emplace_back(symbolName(symbol));
+    return names;
+}
+
+const char *VegetationEngine::formulaCategory(const VegetationFormula &formula) {
+    bool multispectral = false;
+    for (const char symbol : requiredSymbols(formula)) {
+        if (symbol == 'T') return "thermal";
+        if (symbol == 'N' || symbol == 'e') multispectral = true;
+    }
+    return multispectral ? "multispectral" : "rgb";
+}
+
 std::string VegetationEngine::dataRefusal(const VegetationFormula &formula, const RasterDataKind &data) {
     if (!formula.needsReflectance || data.floatingPoint) return "";
     return formula.id + " needs reflectance values (0 to 1, a floating-point raster): the raster is " +
@@ -189,25 +204,21 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath, std
     if (det.detected && !det.bands.empty()) {
         BandFilter bf;
         bf.id = "";
-        // Map band names to filter
+        // Map band names to filter, by the names the presets of a generic profile read (bandSymbolOf: "R", "NIR", ...)
         for (const auto &bi : det.bands) {
             std::string nameLC = bi.name;
             str::toLower(nameLC);
-
-            if (nameLC.find("red edge") != std::string::npos ||
-                nameLC.find("rededge") != std::string::npos) {
-                if (bf.Re < 0) bf.Re = bi.index - 1; // 0-based
-            } else if (nameLC.starts_with("red")) {
-                if (bf.R < 0) bf.R = bi.index - 1;
-            } else if (nameLC.starts_with("green")) {
-                if (bf.G < 0) bf.G = bi.index - 1;
-            } else if (nameLC.starts_with("blue")) {
-                if (bf.B < 0) bf.B = bi.index - 1;
-            } else if (nameLC.starts_with("nir")) {
-                if (bf.N < 0) bf.N = bi.index - 1;
-            } else if (nameLC == "lwir" || nameLC.find("thermal") != std::string::npos) {
-                if (bf.T < 0) bf.T = bi.index - 1;
+            int *slot = nullptr;
+            switch (bandSymbolOf(bi.name)) {
+            case 'e': slot = &bf.Re; break;
+            case 'R': slot = &bf.R; break;
+            case 'G': slot = &bf.G; break;
+            case 'B': slot = &bf.B; break;
+            case 'N': slot = &bf.N; break;
+            default:
+                if (nameLC == "lwir" || nameLC.find("thermal") != std::string::npos) slot = &bf.T;
             }
+            if (slot != nullptr && *slot < 0) *slot = bi.index - 1; // 0-based
         }
 
         // Build filter string
@@ -226,9 +237,12 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath, std
     // Fallback for undetected sensors
     BandFilter bf;
 
-    // Check if single-band thermal raster
+    // The data bands of the raster (the alpha band is not one) and whether it is a single-band thermal raster
+    int dataBands = 0;
     if (auto dataset = raster::openInputRaster(rasterPath)) {
         const int nBands = dataset->GetRasterCount();
+        for (int b = 1; b <= nBands; b++)
+            if (dataset->GetRasterBand(b)->GetColorInterpretation() != GCI_AlphaBand) dataBands++;
         dataset.reset();
         if (nBands == 1 && isThermalImage(rasterPath, thermalTags)) {
             bf.id = "T";
@@ -236,6 +250,10 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath, std
             return bf;
         }
     }
+
+    // A raster of fewer than three data bands has no red, green and blue to map: an empty filter, so that every
+    // formula that needs bands is disabled with "Requires bands: ..." and a render of one is refused (FR-RAS-19)
+    if (dataBands < 3) return bf;
 
     bf.id = "RGB";
     bf.R = 0;

@@ -768,7 +768,10 @@ json algorithmList(const VegetationEngine &ve, GDALDatasetH hDs, const BandFilte
     for (const auto &f : ve.getAllFormulas()) {
         json fj = {
             {"id", f.id}, {"name", f.name}, {"expr", f.expr},
-            {"help", f.help}
+            {"help", f.help},
+            // Structured next to disabledReason (new in 2.3): the bands the formula reads and the kind of raster it is for
+            {"requiredBands", VegetationEngine::requiredBandNames(f)},
+            {"category", VegetationEngine::formulaCategory(f)}
         };
         if (f.hasRange) {
             fj["range"] = {f.rangeMin, f.rangeMax};
