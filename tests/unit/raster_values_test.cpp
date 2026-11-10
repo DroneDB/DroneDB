@@ -26,6 +26,7 @@
 #include "contour.h"
 #include "cog.h"
 #include "gdaltiler.h"
+#include "raster_artefacts.h"
 #include "raster_stats.h"
 #include "tilerhelper.h"
 #include "raster_test_utils.h"
@@ -1125,13 +1126,37 @@ namespace
         int z, x, y;
     };
 
+    // The artefacts this process still holds open after they were replaced (Linux lists them in /proc/self/fd as
+    // "<path> (deleted)"; elsewhere none are reported). Windows replaces no file a process holds open: there the
+    // request that replaced it fails, so a replaced artefact held open here is a tile request that fails there.
+    std::vector<std::string> replacedArtefactsHeldOpen()
+    {
+        std::vector<std::string> held;
+#ifdef __linux__
+        const std::string prefix = fs::weakly_canonical(raster::artefactsDir()).string() + "/";
+        std::error_code ec;
+        for (const auto &fd : fs::directory_iterator("/proc/self/fd", ec))
+        {
+            std::error_code linkError;
+            const std::string target = fs::read_symlink(fd.path(), linkError).string();
+            if (!linkError && target.starts_with(prefix) && target.ends_with(" (deleted)"))
+                held.push_back(target);
+        }
+#endif
+        return held;
+    }
+
+    // A tile in memory, with the COG of the raster built again (forceRecreate), as a viewer that asks for a
+    // fresh tile does
     testutils::DecodedImage tileOf(const std::string &path, const TileAt &tile, const DDBRasterOptions *options)
     {
         uint8_t *buffer = nullptr;
         int size = 0;
         const DDBErr err = DDBMemoryTileEx2(path.c_str(), tile.z, tile.x, tile.y, 256, false, true, nullptr, nullptr,
                                             nullptr, nullptr, nullptr, nullptr, nullptr, options, &buffer, &size);
-        EXPECT_EQ(err, DDBERR_NONE);
+        EXPECT_EQ(err, DDBERR_NONE) << DDBGetLastError();
+        EXPECT_EQ(replacedArtefactsHeldOpen(), std::vector<std::string>{})
+            << "the COG was replaced under a reader: Windows refuses to replace it";
         const auto image = testutils::decodeImage(buffer, static_cast<size_t>(size));
         DDBVSIFree(buffer);
         return image;
@@ -1144,12 +1169,17 @@ namespace
         return static_cast<size_t>(std::count_if(image.alpha().begin(), image.alpha().end(), [](uint8_t a) { return a > 0; }));
     }
 
-    // The tile of the deepest zoom that the raster covers most
+    // The tile of the deepest zoom that the raster covers most. Its tiler is closed before the tiles are asked for:
+    // each request builds the COG again, and Windows replaces no file a process holds open.
     TileAt fullestTile(const fs::path &raster)
     {
-        GDALTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
-        const int z = t.getMinMaxZ().max;
-        const auto b = t.getMinMaxCoordsForZ(z);
+        int z = 0;
+        BoundingBox<Projected2Di> b;
+        {
+            GDALTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
+            z = t.getMinMaxZ().max;
+            b = t.getMinMaxCoordsForZ(z);
+        }
         TileAt best{z, b.min.x, b.min.y};
         size_t bestCount = 0;
         for (int x = b.min.x; x <= b.max.x; x++)
@@ -1163,6 +1193,32 @@ namespace
                 }
             }
         return best;
+    }
+
+    // A tile asked for again with forceRecreate builds the COG again and replaces the one the tiler of the previous
+    // tile read: the cache closes that tiler first, so the replacement works on Windows too. A COG replaced under a
+    // reader shows in tileOf (Linux); Windows failed the request (DDBERR_EXCEPTION) when the tests held one open.
+    TEST(RasterValues, aTileAskedForAgainReplacesNoCogThatIsStillOpen)
+    {
+        TestArea ta(TEST_NAME, true);
+        ValueRasterSpec spec;
+        spec.epsg = 3857;
+        spec.originX = 1670000.0;
+        spec.originY = 5645600.0;
+        spec.pixel = 4.0;
+        spec.value = [](int x, int) { return 1000.0 + x * 10.0; };
+        const auto raster = makeValueRaster(ta.getPath("again.tif"), spec);
+        const TileAt tile = fullestTile(raster);
+
+        DDBRasterOptions options = {};
+        options.structSize = sizeof(options);
+        options.flags = DDB_RASTER_OPT_NODATA;
+        options.nodata = 0.0;
+        const auto first = tileOf(raster.string(), tile, &options);
+        const auto second = tileOf(raster.string(), tile, &options);
+        EXPECT_GT(countOpaque(first), 0u);
+        EXPECT_EQ(countOpaque(second), countOpaque(first));
+        EXPECT_EQ(replacedArtefactsHeldOpen(), std::vector<std::string>{});
     }
 
     // 16-bit data with a zero background and no NoData value: the background is data until the override says it
