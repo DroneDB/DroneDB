@@ -12,6 +12,7 @@
 //  - a callback that returns non-zero cancels the build with DDBERR_CANCELED and a message that names it,
 //    and the entry keeps no build.
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -19,10 +20,14 @@
 #include <utility>
 #include <vector>
 
+#include "build_layout.h"
 #include "cog_utils.h"
+#include "dbops.h"
 #include "ddb.h"
+#include "entry_handler.h"
 #include "gtest/gtest.h"
 #include "json.h"
+#include "raster_helper.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
@@ -44,13 +49,16 @@ struct Recorder {
     std::vector<Report> reports;
     // Non-zero: the callback returns 1 from the first report whose fraction is at least this one
     double cancelFrom = -2.0;
+    // Non-empty: the callback returns 1 from the first report of this phase
+    std::string cancelAtPhase;
     bool canceled = false;
 };
 
 int record(double fraction, const char* phase, void* userData) {
     auto* recorder = static_cast<Recorder*>(userData);
     recorder->reports.push_back({fraction, phase != nullptr ? phase : "<null>"});
-    if (recorder->cancelFrom > -2.0 && fraction >= recorder->cancelFrom) {
+    if ((recorder->cancelFrom > -2.0 && fraction >= recorder->cancelFrom) ||
+        (!recorder->cancelAtPhase.empty() && recorder->cancelAtPhase == (phase != nullptr ? phase : ""))) {
         recorder->canceled = true;
         return 1;
     }
@@ -82,6 +90,17 @@ struct Dataset {
         const auto file = testutils::createGeoRaster(root / name, spec);
         add(file);
         return file;
+    }
+
+    // The pending marker of an entry, as a build that was interrupted left it (due at once, no file awaited)
+    fs::path writePending(const std::string& entry) {
+        const auto db = ddb::open(root.string(), true);
+        const auto e = getEntry(db.get(), entry);
+        EXPECT_TRUE(e.has_value());
+        const fs::path marker = pendingMarkerPath(db->buildDirectory(), entryHandler(e->type).buildKey(*e), entry);
+        fs::create_directories(marker.parent_path());
+        std::ofstream(marker) << "0\n";
+        return marker;
     }
 
     bool isBuildComplete(const std::string& entry) {
@@ -244,6 +263,185 @@ TEST(DDBBuildEx2, anEntryOfAnotherKindReportsItsTypeUntilItIsBuilt) {
     EXPECT_TRUE(ds.isBuildComplete("area.geojson"));
 }
 
+// Nothing but the end of a build that succeeds is 1: the output is made at the last fraction the build reached
+TEST(DDBBuildEx2, onlyTheEndOfASuccessfulBuildIsOne) {
+    Dataset ds("DDBBuildEx2-end");
+    ds.addRaster("ortho.tif", 256);
+
+    Recorder recorder;
+    ASSERT_DDB_OK(DDBBuildEx2(ds.root.string().c_str(), "ortho.tif", nullptr, true, false, nullptr, &record, &recorder));
+
+    ASSERT_GE(recorder.reports.size(), 3u);
+    EXPECT_EQ(recorder.reports.back().fraction, 1.0);
+    EXPECT_EQ(recorder.reports.back().phase, "<null>");
+    size_t publishing = recorder.reports.size();
+    for (size_t i = 0; i + 1 < recorder.reports.size(); i++) {
+        EXPECT_LT(recorder.reports[i].fraction, 1.0) << "report " << i << " (" << recorder.reports[i].phase << ")";
+        if (recorder.reports[i].phase == "publishing")
+            publishing = i;
+    }
+    ASSERT_LT(publishing, recorder.reports.size()) << "no publishing report";
+    EXPECT_EQ(publishing + 2, recorder.reports.size()) << "the 1 follows the publish";
+    // Not 1, and the last fraction of the build
+    EXPECT_GT(recorder.reports[publishing].fraction, 0.5);
+    EXPECT_LT(recorder.reports[publishing].fraction, 1.0);
+}
+
+// A cancel at the report of the publish stops the build before anything is published, and a pending build
+// stays pending
+TEST(DDBBuildEx2, aCancelWhenTheOutputIsMadePublishesNothingAndKeepsThePending) {
+    Dataset ds("DDBBuildEx2-cancel-publish");
+    ds.addRaster("ortho.tif", 256);
+    const fs::path marker = ds.writePending("ortho.tif");
+    ASSERT_TRUE(fs::exists(marker));
+
+    Recorder recorder;
+    recorder.cancelAtPhase = "publishing";
+    EXPECT_EQ(DDBBuildEx2(ds.root.string().c_str(), "ortho.tif", nullptr, false, false, nullptr, &record, &recorder),
+              DDBERR_CANCELED);
+    EXPECT_TRUE(recorder.canceled);
+    EXPECT_EQ(recorder.reports.back().phase, "publishing") << "nothing is reported after the cancel";
+    EXPECT_LT(recorder.reports.back().fraction, 1.0);
+    const std::string message = DDBGetLastError();
+    EXPECT_NE(message.find("progress callback"), std::string::npos) << message;
+
+    EXPECT_FALSE(ds.isBuildComplete("ortho.tif")) << "the output was published";
+    EXPECT_TRUE(fs::exists(marker)) << "a pending build stays pending";
+    for (const auto& item : fs::recursive_directory_iterator(marker.parent_path()))
+        EXPECT_NE(item.path().filename(), "cog.tif") << "published: " << item.path();
+
+    // The next call builds it and consumes the marker
+    Recorder again;
+    ASSERT_DDB_OK(DDBBuildEx2(ds.root.string().c_str(), "ortho.tif", nullptr, false, false, nullptr, &record, &again));
+    EXPECT_TRUE(ds.isBuildComplete("ortho.tif"));
+    EXPECT_FALSE(fs::exists(marker));
+}
+
+// A raster that is on the grid already is encoded again without a warp: it never reports "warping"
+TEST(DDBBuildEx2, aRasterOnTheGridAlreadyNeverReportsWarping) {
+    // A COG made by a build is on the grid (Web Mercator, tiles, overviews)
+    fs::path onTheGrid;
+    {
+        Dataset source("DDBBuildEx2-grid-source");
+        source.addRaster("source.tif", 1024);
+        ASSERT_DDB_OK(DDBBuildEx2(source.root.string().c_str(), "source.tif", nullptr, true, false, nullptr, nullptr, nullptr));
+        for (const auto& item : fs::recursive_directory_iterator(source.root / ".ddb" / "build"))
+            if (item.path().filename() == "cog.tif")
+                onTheGrid = item.path();
+        ASSERT_FALSE(onTheGrid.empty());
+    }
+    Dataset ds("DDBBuildEx2-grid");
+    const fs::path file = ds.root / "grid.tif";
+    fs::copy_file(onTheGrid, file);
+    ASSERT_TRUE(raster::rasterHelper().probe(file, raster::ProbeParams()).isCog) << "the file is not on the grid";
+    ds.add(file);
+
+    Recorder recorder;
+    ASSERT_DDB_OK(DDBBuildEx2(ds.root.string().c_str(), "grid.tif", nullptr, true, false, nullptr, &record, &recorder));
+
+    expectMonotonic(recorder.reports);
+    EXPECT_EQ(recorder.reports.back().fraction, 1.0);
+    EXPECT_FALSE(hasPhase(recorder.reports, "warping")) << "a raster without a warp reported one";
+    EXPECT_TRUE(hasPhase(recorder.reports, "compressing"));
+    expectPhasesInOrder(recorder.reports, {"georaster", "overviews", "compressing", "publishing"});
+    for (const auto& r : recorder.reports) {
+        if (r.phase == "overviews") {
+            EXPECT_LT(r.fraction, 0.2);
+        } else if (r.phase == "compressing") {
+            EXPECT_GE(r.fraction, 0.2);
+        }
+    }
+    EXPECT_TRUE(ds.isBuildComplete("grid.tif"));
+}
+
+// The pending markers are the slices of the call: the fraction of the markers done plus the one in the build
+TEST(DDBBuildEx2, aBuildOfThePendingOnesReportsTheFractionAcrossTheMarkers) {
+    Dataset ds("DDBBuildEx2-pending");
+    ds.addRaster("a.tif", 256);
+    ds.addRaster("b.tif", 288);
+    const fs::path markerA = ds.writePending("a.tif");
+    const fs::path markerB = ds.writePending("b.tif");
+
+    Recorder recorder;
+    ASSERT_DDB_OK(DDBBuildEx2(ds.root.string().c_str(), nullptr, nullptr, false, true, nullptr, &record, &recorder));
+
+    expectMonotonic(recorder.reports);
+    EXPECT_EQ(recorder.reports.back().fraction, 1.0);
+    // The first marker is half of the work: it ends at 0.5 (no phase), and the second one reports in the upper half
+    size_t half = recorder.reports.size();
+    for (size_t i = 0; i < recorder.reports.size(); i++)
+        if (recorder.reports[i].fraction == 0.5 && recorder.reports[i].phase == "<null>") {
+            half = i;
+            break;
+        }
+    ASSERT_LT(half, recorder.reports.size()) << "no report of the first marker done";
+    for (size_t i = 0; i < half; i++)
+        EXPECT_LE(recorder.reports[i].fraction, 0.5);
+    bool upper = false;
+    for (size_t i = half + 1; i < recorder.reports.size(); i++)
+        upper = upper || (recorder.reports[i].fraction > 0.5 && recorder.reports[i].phase == "compressing");
+    EXPECT_TRUE(upper);
+    EXPECT_TRUE(ds.isBuildComplete("a.tif"));
+    EXPECT_TRUE(ds.isBuildComplete("b.tif"));
+    EXPECT_FALSE(fs::exists(markerA));
+    EXPECT_FALSE(fs::exists(markerB));
+}
+
+// A callback that cancels once the first entry is done stops the call before the next one
+TEST(DDBBuildEx2, aCancelDuringABuildOfSeveralEntriesStopsBeforeTheNext) {
+    Dataset ds("DDBBuildEx2-cancel-several");
+    ds.addRaster("a.tif", 256);
+    ds.addRaster("b.tif", 288);
+
+    Recorder recorder;
+    recorder.cancelFrom = 0.5;  // the first entry is done: half of the work
+    EXPECT_EQ(DDBBuildEx2(ds.root.string().c_str(), nullptr, nullptr, true, false, nullptr, &record, &recorder),
+              DDBERR_CANCELED);
+    EXPECT_TRUE(recorder.canceled);
+    EXPECT_NE(std::string(DDBGetLastError()).find("progress callback"), std::string::npos);
+    EXPECT_NE(ds.isBuildComplete("a.tif"), ds.isBuildComplete("b.tif")) << "exactly the first entry is built";
+    EXPECT_LE(recorder.reports.back().fraction, 0.5);
+}
+
+// A model (a point cloud) reports its type first, like a vector
+TEST(DDBBuildEx2, aModelBuildReportsItsType) {
+    Dataset ds("DDBBuildEx2-model");
+    const auto obj = ds.root / "m.obj";
+    std::ofstream(obj) << "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n";
+    ds.add(obj);
+
+    Recorder recorder;
+    ASSERT_DDB_OK(DDBBuildEx2(ds.root.string().c_str(), "m.obj", nullptr, true, false, nullptr, &record, &recorder));
+
+    ASSERT_GE(recorder.reports.size(), 2u);
+    EXPECT_EQ(recorder.reports.front().fraction, -1.0);
+    EXPECT_EQ(recorder.reports.front().phase, "model");
+    expectMonotonic(recorder.reports);
+    EXPECT_EQ(recorder.reports.back().fraction, 1.0);
+    EXPECT_TRUE(ds.isBuildComplete("m.obj"));
+}
+
+TEST(DDBBuildEx2, aPointCloudBuildReportsItsTypeBeforeAnythingElse) {
+    Dataset ds("DDBBuildEx2-pointcloud");
+    const auto xyz = ds.root / "cloud.xyz";
+    {
+        std::ofstream out(xyz);
+        for (int i = 0; i < 50; i++)
+            out << i % 7 << " " << i % 5 << " " << i % 3 << "\n";
+    }
+    ds.add(xyz);
+
+    // The type is the first report; the callback stops the build there, so the test does not wait for the tools
+    Recorder recorder;
+    recorder.cancelAtPhase = "pointcloud";
+    EXPECT_EQ(DDBBuildEx2(ds.root.string().c_str(), "cloud.xyz", nullptr, true, false, nullptr, &record, &recorder),
+              DDBERR_CANCELED);
+    ASSERT_FALSE(recorder.reports.empty());
+    EXPECT_EQ(recorder.reports.front().fraction, -1.0);
+    EXPECT_EQ(recorder.reports.front().phase, "pointcloud");
+    EXPECT_FALSE(ds.isBuildComplete("cloud.xyz"));
+}
+
 TEST(DDBBuildEx2, refusesWhatDDBBuildExRefuses) {
     Dataset ds("DDBBuildEx2-args");
     Recorder recorder;
@@ -267,12 +465,21 @@ TEST(DDBBuildEx2, refusesWhatDDBBuildExRefuses) {
 
 // The phases of a COG build are those of the fraction GDAL's COG driver is at
 TEST(cogPhaseOfFraction, followsTheWorkOfTheCogDriver) {
-    EXPECT_STREQ(cogPhaseOfFraction(0.0), "warping");
-    EXPECT_STREQ(cogPhaseOfFraction(0.37), "warping");
-    EXPECT_STREQ(cogPhaseOfFraction(0.375), "overviews");
-    EXPECT_STREQ(cogPhaseOfFraction(0.49), "overviews");
-    EXPECT_STREQ(cogPhaseOfFraction(0.5), "compressing");
-    EXPECT_STREQ(cogPhaseOfFraction(1.0), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(0.0, true), "warping");
+    EXPECT_STREQ(cogPhaseOfFraction(0.37, true), "warping");
+    EXPECT_STREQ(cogPhaseOfFraction(0.375, true), "overviews");
+    EXPECT_STREQ(cogPhaseOfFraction(0.49, true), "overviews");
+    EXPECT_STREQ(cogPhaseOfFraction(0.5, true), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(1.0, true), "compressing");
+}
+
+// A raster that is on the grid already is encoded again without a warp: its overviews are 1/5 of the work
+TEST(cogPhaseOfFraction, withoutAWarpThereIsNoWarpingPhase) {
+    EXPECT_STREQ(cogPhaseOfFraction(0.0, false), "overviews");
+    EXPECT_STREQ(cogPhaseOfFraction(0.19, false), "overviews");
+    EXPECT_STREQ(cogPhaseOfFraction(0.2, false), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(0.45, false), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(1.0, false), "compressing");
 }
 
 }  // namespace

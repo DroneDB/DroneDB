@@ -8,10 +8,13 @@
 #include "build.h"
 #include "randomutil.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include "build_internal.h"
@@ -127,6 +130,22 @@ class BuildAttempt {
             ensureSufficientDiskSpace(baseOutputPath_);
             io::assureFolderExists(io::fromUtf8(tempFolder_));
 
+            // What the handler reports goes through here: the last fraction is kept for "publishing",
+            // and a build that is not published yet is never at 1 (the 1 of a COG that GDAL finished
+            // writing is not the end: the output is made after it)
+            BuildOptions handlerOptions = options_;
+            if (options_.progress) {
+                handlerOptions.progress = [this](double fraction, std::string_view phase) {
+                    if (fraction >= 0.0) {
+                        fraction = std::min(fraction, BeforePublishFraction);
+                        double last = lastFraction_.load();
+                        while (fraction > last && !lastFraction_.compare_exchange_weak(last, fraction)) {
+                        }
+                    }
+                    options_.progress(fraction, phase);
+                };
+            }
+
             const BuildContext context{db_,
                                        target_,
                                        db_->rootDirectory() / io::fromUtf8(target_.path),
@@ -135,11 +154,16 @@ class BuildAttempt {
                                        io::fromUtf8(outputFolder_),
                                        io::fromUtf8(tempFolder_),
                                        force_,
-                                       options_};
+                                       handlerOptions};
             // A COG build reports its phases (cog.cpp); the other kinds are done when they are: -1 until then
             options_.reportProgress(-1.0, str::toLowerCopy(handler_.name()));
             handler_.build(context);
-            options_.reportProgress(1.0, "publishing");
+
+            // The output is made at the fraction the build reached, not at 1: a caller that cancels
+            // at this report (the C callback does, through the cancel token of the call) stops the
+            // build before anything is published, and the 1 comes from the caller, after the publish
+            options_.reportProgress(lastFraction_.load(), "publishing");
+            cancel::throwIfCanceled();
 
             publish();
             // Only now, with the new output in place: a failed build keeps the old one
@@ -273,6 +297,10 @@ class BuildAttempt {
     const std::string tempFolder_;
     bool wasPending_ = false;
     std::vector<std::string> pendingDependencies_;
+    // The largest known fraction the handler reported (-1: none), from any thread
+    std::atomic<double> lastFraction_{-1.0};
+    // What a build reports at most until its output is published
+    static constexpr double BeforePublishFraction = 0.999;
 };
 
 }  // namespace

@@ -832,15 +832,29 @@ extern "C"
      *                    the entries, or the pending ones) reports the fraction of the entries done plus the
      *                    fraction of the one it builds. The last call of a build that ends without an error is
      *                    1.
-     *          phase     what the build is doing, NULL when it has no name for it: for a raster (COG) build
-     *                    "warping" (the raster is reprojected to the tile grid), "overviews" (the pyramid)
-     *                    and "compressing" (the tiles are encoded and written), in that order, with the
-     *                    fractions of the work of GDAL's COG driver (a raster that is on the grid already
-     *                    has no warp: its first part is reported as "warping" all the same); for another
-     *                    kind of entry the type of the entry in lower case ("pointcloud", "model", "vector",
-     *                    "gaussiansplat", "tiles3d") with fraction -1 until it is built; "publishing" when
-     *                    a build has made its output and moves it into place.
-     *        A raster build reports at most once per percent.
+     *          phase     what the build is doing, NULL when it has no name for it. Every build of an entry
+     *                    reports, in this order:
+     *                      1. the type of the entry in lower case ("georaster", "pointcloud", "model",
+     *                         "vector", "gaussiansplat" or "tiles3d") with fraction -1 (nothing measured
+     *                         yet), when the build starts;
+     *                      2. for a raster (COG) build, "warping" (the raster is reprojected to the tile
+     *                         grid), "overviews" (the pyramid) and "compressing" (the tiles are encoded
+     *                         and written), in that order, with the fractions of the work of GDAL's COG
+     *                         driver; a raster that is on the tile grid already has no warp and never
+     *                         reports "warping" (its phases are "overviews" and "compressing"); the other
+     *                         kinds report no phase of their own and keep fraction -1 until they are done;
+     *                      3. "publishing" with the last fraction reported (never 1) when the output is
+     *                         made and moves into place: a cancel at this report stops the build before
+     *                         anything is published;
+     *                      4. when the output is in place, the fraction 1 with phase NULL. This is the
+     *                         last call of a build that ends without an error, and no report before it
+     *                         is 1.
+     *                    A build of several entries repeats this for each entry, with the fractions mapped
+     *                    to its share of the whole, and ends with one report of 1. A raster build reports at
+     *                    most once per percent.
+     * The callback must not throw: it is called from a C++ frame that cannot propagate it, so an exception
+     * would terminate the process. It may be called from a thread other than the caller's (a worker of the
+     * build), never at the same time as itself, and only while DDBBuildEx2 has not returned.
      * @param progressUserData opaque pointer forwarded to the progress callback
      * @return as DDBBuildEx, with the codes of the exports added in 2.0 (DDBERR_INVALIDARGS for a refused
      *         option, DDBERR_RETRYABLE, DDBERR_NOTFOUND), and DDBERR_CANCELED when the callback cancels or

@@ -19,10 +19,14 @@ namespace ddb
         return isOptimizedCogDataset(datasetHandle(dataset));
     }
 
-    const char* cogPhaseOfFraction(double fraction)
+    const char* cogPhaseOfFraction(double fraction, bool hasWarp)
     {
-        if (fraction < 3.0 / 8.0) return "warping";
-        if (fraction < 0.5) return "overviews";
+        // The work of the COG driver in units of the pixels of the raster: the warp 1, the overviews 1/3,
+        // the final write 4/3. Without the warp the overviews are 1/5 of the work and no fraction is warping
+        const double overviewsStart = hasWarp ? 3.0 / 8.0 : 0.0;
+        const double compressingStart = hasWarp ? 0.5 : 0.2;
+        if (fraction < overviewsStart) return "warping";
+        if (fraction < compressingStart) return "overviews";
         return "compressing";
     }
 
