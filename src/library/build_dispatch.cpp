@@ -8,10 +8,13 @@
 #include "build.h"
 #include "randomutil.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include "build_internal.h"
@@ -25,6 +28,7 @@
 #include "index_sql.h"
 #include "mio.h"
 #include "process_config.h"
+#include "stringutil.h"
 #include "raster_cache.h"
 
 namespace ddb {
@@ -126,6 +130,22 @@ class BuildAttempt {
             ensureSufficientDiskSpace(baseOutputPath_);
             io::assureFolderExists(io::fromUtf8(tempFolder_));
 
+            // What the handler reports goes through here: the last fraction is kept for "publishing",
+            // and a build that is not published yet is never at 1 (the 1 of a COG that GDAL finished
+            // writing is not the end: the output is made after it)
+            BuildOptions handlerOptions = options_;
+            if (options_.progress) {
+                handlerOptions.progress = [this](double fraction, std::string_view phase) {
+                    if (fraction >= 0.0) {
+                        fraction = std::min(fraction, BeforePublishFraction);
+                        double last = lastFraction_.load();
+                        while (fraction > last && !lastFraction_.compare_exchange_weak(last, fraction)) {
+                        }
+                    }
+                    options_.progress(fraction, phase);
+                };
+            }
+
             const BuildContext context{db_,
                                        target_,
                                        db_->rootDirectory() / io::fromUtf8(target_.path),
@@ -134,8 +154,16 @@ class BuildAttempt {
                                        io::fromUtf8(outputFolder_),
                                        io::fromUtf8(tempFolder_),
                                        force_,
-                                       options_};
+                                       handlerOptions};
+            // A COG build reports its phases (cog.cpp); the other kinds are done when they are: -1 until then
+            options_.reportProgress(-1.0, str::toLowerCopy(handler_.name()));
             handler_.build(context);
+
+            // The output is made at the fraction the build reached, not at 1: a caller that cancels
+            // at this report (the C callback does, through the cancel token of the call) stops the
+            // build before anything is published, and the 1 comes from the caller, after the publish
+            options_.reportProgress(lastFraction_.load(), "publishing");
+            cancel::throwIfCanceled();
 
             publish();
             // Only now, with the new output in place: a failed build keeps the old one
@@ -269,6 +297,10 @@ class BuildAttempt {
     const std::string tempFolder_;
     bool wasPending_ = false;
     std::vector<std::string> pendingDependencies_;
+    // The largest known fraction the handler reported (-1: none), from any thread
+    std::atomic<double> lastFraction_{-1.0};
+    // What a build reports at most until its output is published
+    static constexpr double BeforePublishFraction = 0.999;
 };
 
 }  // namespace
@@ -345,25 +377,42 @@ void buildAll(Database* db, const std::string& outputPath, bool force, const Bui
 
     // List all entries of the buildable types in DB
     const std::vector<EntryType> types = buildableEntryTypes();
-    if (types.empty())
+    if (types.empty()) {
+        options.reportProgress(1.0);
         return;
+    }
+    // The progress of the call is the fraction of the entries done plus the fraction of the one in the build
+    size_t total = 0;
+    if (options.progress) {
+        auto countQ = db->query("SELECT COUNT(*) FROM entries e WHERE e.type IN " + inListSql(types.size()));
+        bindEntryTypes(*countQ, 1, types);
+        if (countQ->fetch())
+            total = static_cast<size_t>(countQ->getInt64(0));
+    }
+
     auto q = db->query(selectEntries(EntryColumns::Properties) + " WHERE e.type IN " + inListSql(types.size()));
     bindEntryTypes(*q, 1, types);
 
+    size_t done = 0;
     while (q->fetch()) {
         Entry e;
         readEntry(*q, EntryColumns::Properties, e);
 
         // Call build on each of them; a canceled call stops before the next one
         cancel::throwIfCanceled();
+        const double begin = total > 0 ? static_cast<double>(done) / static_cast<double>(total) : 0.0;
+        const double end = total > 0 ? static_cast<double>(done + 1) / static_cast<double>(total) : 1.0;
         try {
-            buildInternal(db, e, outPath, force, options);
+            buildInternal(db, e, outPath, force, options.forSlice(begin, end));
         } catch (const CanceledException&) {
             throw;
         } catch (const AppException& err) {
             LOGD << "Cannot build " << e.path << ": " << err.what();
         }
+        done++;
+        options.reportProgress(end);
     }
+    options.reportProgress(1.0);
 }
 
 void build(Database* db, const std::string& path, const std::string& outputPath, bool force,
@@ -375,6 +424,7 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
         throw InvalidArgsException(path + " is not a valid path in the database.");
 
     buildInternal(db, *e, outputPath, force, options);
+    options.reportProgress(1.0);
 }
 
 }  // namespace ddb

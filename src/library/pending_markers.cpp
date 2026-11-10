@@ -317,8 +317,10 @@ void migrateLegacyPendingMarker(Database* db, const fs::path& buildRoot, const s
 void buildPending(Database* db, const std::string& outputPath, bool force, const BuildOptions& options) {
     const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : io::fromUtf8(outputPath);
     std::error_code ec;
-    if (!fs::exists(buildDir, ec) || ec)
+    if (!fs::exists(buildDir, ec) || ec) {
+        options.reportProgress(1.0);
         return;
+    }
 
     const std::string outPath = io::toUtf8(buildDir);
 
@@ -329,16 +331,25 @@ void buildPending(Database* db, const std::string& outputPath, bool force, const
     // must not happen under a live directory iterator.
     const std::vector<fs::path> pendingFiles = collectPendingFiles(buildDir);
 
+    // The progress of the call is the fraction of the markers done plus the fraction of the one in the build
+    const double markers = static_cast<double>(pendingFiles.size());
+    size_t markerIndex = 0;
     for (const auto& pendingPath : pendingFiles) {
+        const double begin = static_cast<double>(markerIndex) / markers;
+        const double end = static_cast<double>(markerIndex + 1) / markers;
+        markerIndex++;
         const auto markerName = io::toUtf8(pendingPath.filename());
         const auto name = parsePendingMarkerName(markerName);
-        if (!name)
+        if (!name) {
+            options.reportProgress(end);
             continue;
+        }
         const PendingMarker pending = parsePendingFile(pendingPath);
 
         if (!force && pending.awaitsFiles()) {
             LOGD << "Skipping build attempt for " << markerName << " (awaits "
                  << pending.missingDependencies.size() << " missing file(s))";
+            options.reportProgress(end);
             continue;
         }
 
@@ -347,6 +358,7 @@ void buildPending(Database* db, const std::string& outputPath, bool force, const
         if (!force && now < retryAfter) {
             LOGD << "Skipping build attempt for " << markerName << " (last attempt "
                  << now - pending.lastAttempt << " seconds ago, retry after " << retryAfter << ")";
+            options.reportProgress(end);
             continue;
         }
 
@@ -356,15 +368,20 @@ void buildPending(Database* db, const std::string& outputPath, bool force, const
             // Entry no longer indexed: nothing to retry (cleanupBuild garbage collects it too)
             LOGD << "Removing pending file " << markerName << " of an entry that is not indexed";
             io::assureIsRemoved(pendingPath);
+            options.reportProgress(end);
             continue;
         }
 
+        size_t entryIndex = 0;
         for (const auto& e : entries) {
             // A canceled call stops before the next build
             cancel::throwIfCanceled();
+            const double entryBegin = begin + (end - begin) * static_cast<double>(entryIndex) / static_cast<double>(entries.size());
+            entryIndex++;
+            const double entryEnd = begin + (end - begin) * static_cast<double>(entryIndex) / static_cast<double>(entries.size());
             try {
                 LOGD << "Retrying pending build for " << e.path;
-                buildInternal(db, e, outPath, force, options);
+                buildInternal(db, e, outPath, force, options.forSlice(entryBegin, entryEnd));
             } catch (const CanceledException&) {
                 throw;
             } catch (const BuildDepMissingException& err) {
@@ -374,8 +391,10 @@ void buildPending(Database* db, const std::string& outputPath, bool force, const
             } catch (const std::exception& err) {
                 LOGW << "Pending build of " << e.path << " failed: " << err.what();
             }
+            options.reportProgress(entryEnd);
         }
     }
+    options.reportProgress(1.0);
 }
 
 // Same marker set as buildPending(): top-level marker files only, and only those a

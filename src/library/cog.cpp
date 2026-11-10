@@ -424,8 +424,24 @@ namespace ddb
         raster::CogParams params;
         params.threads = static_cast<int>(cpu.threads());
 
+        // The phases of the work depend on whether the helper warps the raster: an optimized COG is
+        // encoded again at its own grid (cogOwnGridArgs) and has none. The helper says which in its
+        // probe (isCog is the check it makes itself), and only a caller that listens needs it.
+        bool hasWarp = true;
+        if (options.progress) {
+            try {
+                hasWarp = !raster::rasterHelper().probe(io::fromUtf8(input), raster::ProbeParams()).isCog;
+            } catch (const CanceledException&) {
+                throw;
+            } catch (const std::exception& e) {
+                // The build that follows reports what is wrong with the file
+                LOGD << "Cannot probe " << input << " for the phases of its COG build: " << e.what();
+            }
+        }
+
         std::atomic<int> lastPct{0};
-        const raster::ProgressCallback logProgress = [&lastPct](double fraction) {
+        const raster::ProgressCallback logProgress = [&lastPct, &options, hasWarp](double fraction) {
+            options.reportProgress(fraction, cogPhaseOfFraction(fraction, hasWarp));
             const int pct = static_cast<int>(fraction * 100.0);
             int prev = lastPct.load();
             if (pct / 5 != prev / 5 && lastPct.compare_exchange_strong(prev, pct)) {

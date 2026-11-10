@@ -139,4 +139,11 @@ namespace ddb
         return Geographic2D(geoX, geoY);
     }
 
+    bool isWgs84Envelope(double minX, double minY, double maxX, double maxY)
+    {
+        return std::isfinite(minX) && std::isfinite(minY) && std::isfinite(maxX) && std::isfinite(maxY) &&
+               minX >= -180.0 && maxX <= 180.0 && minY >= -90.0 && maxY <= 90.0 &&
+               minX <= maxX && minY <= maxY;
+    }
+
 }

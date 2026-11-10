@@ -15,6 +15,7 @@
 #include "entry_filters.h"
 
 #include <algorithm>
+#include <array>
 #include <fstream>
 
 namespace
@@ -297,6 +298,97 @@ namespace
 
         // Hash should remain the same (file content unchanged)
         EXPECT_EQ(beforeEntry.hash, afterEntry.hash);
+    }
+
+    // FR-SHR-03, D-050: an index written before the fix holds the vector footprint in UTM metres; the
+    // rescan of the vector entries writes it in WGS 84
+    TEST(rescanIndex, aVectorFootprintInMetresBecomesWgs84)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto src = ta.getFolder() / "utm.geojson";
+        std::ofstream(src)
+            << R"({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:EPSG::32615"}},)"
+               R"("features":[{"type":"Feature","properties":{},"geometry":{"type":"Polygon","coordinates":)"
+               R"([[[576764.77,5188207.22],[576864.77,5188207.22],[576864.77,5188307.22],[576764.77,5188207.22]]]}}]})";
+
+        ddb::initIndex(ta.getFolder().string());
+        auto db = ddb::open(ta.getFolder().string(), true);
+        ddb::addToIndex(db.get(), {src.string()});
+
+        // What the release before the fix wrote: the envelope of the layer as it is, in metres
+        auto write = db->query(
+            "UPDATE entries SET "
+            "point_geom = GeomFromText('POINTZ (576814.77 5188257.22 0)', 4326), "
+            "polygon_geom = GeomFromText('POLYGONZ ((576764.77 5188207.22 0, 576864.77 5188207.22 0, "
+            "576864.77 5188307.22 0, 576764.77 5188307.22 0, 576764.77 5188207.22 0))', 4326) "
+            "WHERE path = 'utm.geojson'");
+        write->execute();
+
+        const auto footprint = [&] {
+            auto q = db->query("SELECT MbrMinX(polygon_geom), MbrMinY(polygon_geom), MbrMaxX(polygon_geom), "
+                               "MbrMaxY(polygon_geom) FROM entries WHERE path = 'utm.geojson'");
+            EXPECT_TRUE(q->fetch());
+            return std::array<double, 4>{q->getDouble(0), q->getDouble(1), q->getDouble(2), q->getDouble(3)};
+        };
+        EXPECT_DOUBLE_EQ(footprint()[0], 576764.77);
+
+        int rescanned = 0;
+        ddb::rescanIndex(db.get(), {EntryType::Vector}, {}, true,
+                         [&rescanned](const Entry &, bool success, const std::string &) {
+                             if (success) rescanned++;
+                             return true;
+                         });
+        EXPECT_EQ(rescanned, 1);
+
+        const auto after = footprint();
+        EXPECT_NEAR(after[0], -91.9932194933515, 1e-7);
+        EXPECT_NEAR(after[1], 46.8429676951816, 1e-7);
+        EXPECT_NEAR(after[2], -91.9918913544162, 1e-7);
+        EXPECT_NEAR(after[3], 46.8438789991937, 1e-7);
+    }
+
+    // FR-SHR-03, D-050: a GeoJSON without a crs member is WGS 84 for GDAL, so one whose coordinates are metres
+    // has no footprint now: the rescan removes the footprint in metres that an old index holds, it does not
+    // keep it
+    TEST(rescanIndex, aVectorWithoutCrsWhoseFootprintWasInMetresHasNoFootprintAfterTheRescan)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto src = ta.getFolder() / "metres.geojson";
+        std::ofstream(src)
+            << R"({"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":)"
+               R"({"type":"Polygon","coordinates":)"
+               R"([[[576764.77,5188207.22],[576864.77,5188207.22],[576864.77,5188307.22],[576764.77,5188207.22]]]}}]})";
+
+        ddb::initIndex(ta.getFolder().string());
+        auto db = ddb::open(ta.getFolder().string(), true);
+        ddb::addToIndex(db.get(), {src.string()});
+
+        const auto geometryIsNull = [&](const char *column) {
+            auto q = db->query(std::string("SELECT ") + column + " IS NULL FROM entries WHERE path = 'metres.geojson'");
+            EXPECT_TRUE(q->fetch());
+            return q->getInt(0) != 0;
+        };
+        EXPECT_TRUE(geometryIsNull("polygon_geom")) << "no footprint at index time";
+
+        // What the release before the fix wrote: the envelope of the layer as it is, in metres
+        auto write = db->query(
+            "UPDATE entries SET "
+            "point_geom = GeomFromText('POINTZ (576814.77 5188257.22 0)', 4326), "
+            "polygon_geom = GeomFromText('POLYGONZ ((576764.77 5188207.22 0, 576864.77 5188207.22 0, "
+            "576864.77 5188307.22 0, 576764.77 5188307.22 0, 576764.77 5188207.22 0))', 4326) "
+            "WHERE path = 'metres.geojson'");
+        write->execute();
+        ASSERT_FALSE(geometryIsNull("polygon_geom"));
+
+        int rescanned = 0;
+        ddb::rescanIndex(db.get(), {EntryType::Vector}, {}, true,
+                         [&rescanned](const Entry &, bool success, const std::string &) {
+                             if (success) rescanned++;
+                             return true;
+                         });
+        EXPECT_EQ(rescanned, 1);
+        EXPECT_TRUE(geometryIsNull("polygon_geom"));
+        EXPECT_TRUE(geometryIsNull("point_geom"));
     }
 
     TEST(rescanIndex, invalidPath)

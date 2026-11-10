@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <system_error>
 #include <vector>
 
@@ -21,6 +22,7 @@
 #include "gdal_open_policy.h"
 #include "gdal_priv.h"
 #include "gdal_raii.h"
+#include "geo.h"
 #include "logger.h"
 #include "mio.h"
 #include "ogr_api.h"
@@ -233,28 +235,55 @@ json describeLocalCad(GDALDatasetH hDS, const cad::CadCrs &crs, const json &cadJ
     return vector;
 }
 
-// The extent of a layer in WGS84. The layer's own SRS (or the one of its CAD drawing) decides
-// whether the corners need a reprojection; wgs84 is made on first use.
-OGREnvelope layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGREnvelope &env, OGRSpatialReferenceH fallbackSrs,
-                               SrsPtr &wgs84)
+// The extent of a layer in WGS84 (longitude/latitude degrees), or nothing when the layer has no
+// footprint that can be trusted as such (FR-SHR-03, D-050): a layer without an SRS whose extent is not
+// a WGS84 envelope (projected metres without a crs member), an SRS that cannot be reprojected to WGS84
+// (no transformation, or a failing one), a result outside the WGS84 range. The layer's own SRS (or the
+// one of its CAD drawing) decides whether the corners need a reprojection; wgs84 is made on first use.
+std::optional<OGREnvelope> layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGREnvelope &env,
+                                              OGRSpatialReferenceH fallbackSrs, SrsPtr &wgs84)
 {
+    const auto asWgs84 = [](const OGREnvelope &e) -> std::optional<OGREnvelope>
+    {
+        if (!isWgs84Envelope(e.MinX, e.MinY, e.MaxX, e.MaxY)) return std::nullopt;
+        return e;
+    };
+
     OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
     if (hSrs == nullptr) hSrs = fallbackSrs; // CAD layers carry no SRS
-    OGREnvelope envWgs84 = env;
 
     if (hSrs == nullptr)
     {
-        LOGD << "Vector parse: layer " << i << " has no SRS, assuming WGS84";
-        return envWgs84;
+        // Without an SRS the extent is WGS84 only when it can be (a GeoJSON without a crs member is
+        // WGS84 by its specification, but GDAL gives it its SRS: this is for the other drivers)
+        const auto direct = asWgs84(env);
+        if (!direct)
+        {
+            LOGD << "Vector parse: layer " << i << " has no SRS and its extent is not a WGS84 one: no footprint";
+        }
+        else
+        {
+            LOGD << "Vector parse: layer " << i << " has no SRS, its extent fits WGS84";
+        }
+        return direct;
     }
 
-    // Check if reprojection is needed (skip if already WGS84).
+    // Check if reprojection is needed (skip if already WGS84): the extent still has to be one, an
+    // SRS that says WGS84 does not make the coordinates degrees
     const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
     const char *authName = OSRGetAuthorityName(hSrs, nullptr);
     bool isWgs84 = (authName && authCode &&
                     std::string(authName) == "EPSG" &&
                     std::string(authCode) == "4326");
-    if (isWgs84) return envWgs84;
+    if (isWgs84)
+    {
+        const auto direct = asWgs84(env);
+        if (!direct)
+        {
+            LOGD << "Vector parse: layer " << i << " says EPSG:4326 but its extent is not a WGS84 one: no footprint";
+        }
+        return direct;
+    }
 
     if (!wgs84)
     {
@@ -262,30 +291,39 @@ OGREnvelope layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGREnvelope &env, 
         if (!wgs84)
         {
             LOGD << "Vector parse: failed to import EPSG:4326";
+            return std::nullopt;
         }
     }
-    if (!wgs84) return envWgs84;
 
     const auto toWgs84 =
         CoordsTransformer::tryCreate(*OGRSpatialReference::FromHandle(hSrs), srsOf(wgs84));
-    if (!toWgs84) return envWgs84;
+    if (!toWgs84)
+    {
+        LOGD << "Vector parse: layer " << i << " cannot be reprojected to WGS84: no footprint";
+        return std::nullopt;
+    }
 
     // Transform all 4 corners (a single rectangle in src
     // CRS can become a curved quadrilateral in WGS84).
     double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
     double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
-    if (toWgs84->tryTransform(4, xs, ys))
+    if (!toWgs84->tryTransform(4, xs, ys))
     {
-        envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
-        envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
-        envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
-        envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
+        LOGD << "Vector parse: layer " << i << " transform failed: no footprint";
+        return std::nullopt;
     }
-    else
+
+    OGREnvelope envWgs84;
+    envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
+    envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
+    envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
+    envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
+    const auto result = asWgs84(envWgs84);
+    if (!result)
     {
-        LOGD << "Vector parse: layer " << i << " transform failed";
+        LOGD << "Vector parse: layer " << i << " reprojects outside the WGS84 range: no footprint";
     }
-    return envWgs84;
+    return result;
 }
 
 // The layers of the dataset, and the envelope of them all in WGS84 (when any has an extent)
@@ -318,10 +356,17 @@ VectorLayers describeLayers(GDALDatasetH hDS, OGRSpatialReferenceH fallbackSrs)
             continue;
         }
 
-        const OGREnvelope envWgs84 = layerEnvelopeWgs84(hLayer, i, env, fallbackSrs, wgs84);
+        const auto layerEnv = layerEnvelopeWgs84(hLayer, i, env, fallbackSrs, wgs84);
 
-        // Per-layer metadata
+        // Per-layer metadata: a layer without a WGS84 envelope is listed without an extent and stays out
+        // of the total
         auto layerJson = layerSummary(hLayer, i);
+        if (!layerEnv)
+        {
+            out.layers.push_back(layerJson);
+            continue;
+        }
+        const OGREnvelope &envWgs84 = *layerEnv;
         layerJson["extent"] = {envWgs84.MinX, envWgs84.MinY, envWgs84.MaxX, envWgs84.MaxY};
         out.layers.push_back(layerJson);
 

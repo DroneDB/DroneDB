@@ -11,6 +11,9 @@
 #include "testarea.h"
 #include "testfs.h"
 
+#include <cmath>
+#include <fstream>
+
 namespace
 {
 
@@ -580,6 +583,81 @@ namespace
         auto j = generateStac(ta.getFolder().string(), "ortho.jp2");
         ASSERT_TRUE(j["assets"].contains("ortho.jp2")) << j.dump();
         EXPECT_EQ(j["assets"]["ortho.jp2"]["type"], "image/jp2");
+    }
+
+    // The files of a user keep the type of their extension, whatever the folders they are in are called: the
+    // declared types of the build artifacts are for the files of a build folder
+    TEST(StacMediaType, theAssetOfAUserFileInAFolderNamedLikeAnArtifactIsTheTypeOfItsExtension)
+    {
+        TestArea ta(TEST_NAME, true);
+        fs::create_directories(ta.getFolder() / "ortho" / "cog");
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 32;
+        testutils::createGeoRaster(ta.getFolder() / "ortho" / "cog" / "cog.tif", spec);
+        ddb::initIndex(ta.getFolder().string());
+        auto db = ddb::open(ta.getFolder().string(), true);
+        ddb::addToIndex(db.get(), {(ta.getFolder() / "ortho" / "cog" / "cog.tif").string()});
+
+        auto j = generateStac(ta.getFolder().string(), "ortho/cog/cog.tif");
+        ASSERT_TRUE(j["assets"].contains("ortho/cog/cog.tif")) << j.dump();
+        EXPECT_EQ(j["assets"]["ortho/cog/cog.tif"]["type"], "image/tiff");
+    }
+
+    // AC-017 (FR-SHR-03): a dataset with an orthophoto in UTM 15N and vectors in the same UTM zone has
+    // a collection extent in degrees, whatever the vectors say about their coordinate system
+    TEST(StacExtent, aUtmDatasetHasADegreesExtentWhateverItsVectorsSay)
+    {
+        TestArea ta(TEST_NAME, true);
+
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 64;
+        spec.epsg = 32615;
+        spec.originX = 576700.0;
+        spec.originY = 5188400.0;
+        testutils::createGeoRaster(ta.getFolder() / "ortho.tif", spec);
+
+        const auto polygon = [](const char *crs) {
+            std::string crsMember = crs != nullptr
+                                        ? std::string(R"("crs":{"type":"name","properties":{"name":")") + crs + R"("}},)"
+                                        : std::string();
+            return std::string(R"({"type":"FeatureCollection",)") + crsMember +
+                   R"("features":[{"type":"Feature","properties":{},"geometry":{"type":"Polygon","coordinates":)"
+                   R"([[[576764.77,5188207.22],[576864.77,5188207.22],[576864.77,5188307.22],[576764.77,5188207.22]]]}}]})";
+        };
+        std::ofstream(ta.getFolder() / "with_crs.geojson") << polygon("urn:ogc:def:crs:EPSG::32615");
+        std::ofstream(ta.getFolder() / "without_crs.geojson") << polygon(nullptr);
+
+        ddb::initIndex(ta.getFolder().string());
+        auto db = ddb::open(ta.getFolder().string(), true);
+        ddb::addToIndex(db.get(), {(ta.getFolder() / "ortho.tif").string(), (ta.getFolder() / "with_crs.geojson").string(),
+                                   (ta.getFolder() / "without_crs.geojson").string()});
+
+        const auto collection = generateStac(ta.getFolder().string());
+        const auto bbox = collection["extent"]["spatial"]["bbox"];
+        ASSERT_EQ(bbox.size(), 1u) << collection.dump();
+        ASSERT_EQ(bbox[0].size(), 4u) << collection.dump();
+        for (size_t i = 0; i < 4; i++)
+        {
+            const double v = bbox[0][i].get<double>();
+            const double limit = i % 2 == 0 ? 180.0 : 90.0; // [minX, minY, maxX, maxY]
+            EXPECT_GE(v, -limit) << "bbox[" << i << "] of " << collection.dump();
+            EXPECT_LE(v, limit) << "bbox[" << i << "] of " << collection.dump();
+        }
+
+        // The extent is the one of the orthophoto and the vector in degrees: 4 values, around
+        // (-91.99, 46.84), spanning less than 0.01 degrees
+        EXPECT_NEAR(bbox[0][0].get<double>(), -91.99, 0.01);
+        EXPECT_NEAR(bbox[0][1].get<double>(), 46.84, 0.01);
+        EXPECT_NEAR(bbox[0][2].get<double>(), -91.99, 0.01);
+        EXPECT_NEAR(bbox[0][3].get<double>(), 46.84, 0.01);
+
+        // The vector entries without a footprint are no items; the orthophoto is
+        const auto items = generateStacItemCollection(ta.getFolder().string());
+        for (const auto &item : items["features"])
+            for (const auto &v : item["bbox"])
+                EXPECT_LE(std::abs(v.get<double>()), 180.0) << item.dump();
+        // The orthophoto and the vector with a crs (reprojected) are items; the vector without one has no footprint
+        EXPECT_EQ(items["numberMatched"].get<int>(), 2) << items.dump();
     }
 
 } // namespace

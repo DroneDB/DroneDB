@@ -16,6 +16,7 @@
 
 #include "exceptions.h"
 #include "gdal_raii.h"
+#include "geo.h"
 #include "logger.h"
 #include "mio.h"
 #include "process_runner.h"
@@ -608,8 +609,7 @@ namespace ddb
             // which only CAD software writes (it stores GEODATA when georeferenced): the
             // DWG drawings that fit in +-180/+-90 were design drawings in drawing units.
             if (!isDwgFile(originalInput) && crs.hasExtent &&
-                crs.extent.MinX >= -180 && crs.extent.MaxX <= 180 &&
-                crs.extent.MinY >= -90 && crs.extent.MaxY <= 90)
+                isWgs84Envelope(crs.extent.MinX, crs.extent.MinY, crs.extent.MaxX, crs.extent.MaxY))
             {
                 crs.georeferenced = true;
                 crs.source = "lonlat";
