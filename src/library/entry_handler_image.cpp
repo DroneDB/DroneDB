@@ -9,8 +9,10 @@
 
 #include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "logger.h"
 #include "mio.h"
 #include "raster_helper.h"
+#include "sog_layout.h"
 #include "thermal.h"
 
 namespace ddb {
@@ -48,6 +50,20 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
 {
     EntryType type = EntryType::Generic;
     io::Path p(path);
+
+    // The textures of an unbundled SOG splat (FR-UPL-09, sog_layout.h) are not photos (a
+    // panorama is a photo twice as wide as high): plain files, like every file of a layout
+    // DroneDB does not read
+    if (!ctx.rootDirectory.empty() && isSogTextureName(path))
+    {
+        if (!ctx.sogFolders)
+            ctx.sogFolders = std::make_shared<SogFolderCache>();
+        if (isUnbundledSogTexture(path, ctx.rootDirectory, *ctx.sogFolders))
+        {
+            LOGD << "Not an image: a texture of an unbundled SOG splat " << io::toUtf8(path);
+            return EntryType::Generic;
+        }
+    }
 
     bool gdalRaster = isGdalRaster(p);
     bool video = isVideo(p);

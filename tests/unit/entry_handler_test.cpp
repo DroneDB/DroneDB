@@ -455,6 +455,220 @@ TEST(entryHandler, ExtensionsArePinned) {
     EXPECT_EQ(findEntryHandlerByExtension("archive.zip"), nullptr);
 }
 
+// The textures of an unbundled SOG splat are plain files, not photos or panoramas (FR-UPL-09)
+TEST(entryHandler, TexturesOfAnUnbundledSogFolderAreGeneric) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path root = ta.getFolder();
+    const auto typeOf = [&](const std::string& name) {
+        Entry e;
+        parseEntry(root / name, root, e, false);
+        return e.type;
+    };
+
+    // The level-of-detail layout: lod-meta.json at the top, the textures in the folders below it
+    writeFile(root / "hotel-oldmill" / "lod-meta.json", "{\"lodLevels\": 3}");
+    writeFile(root / "hotel-oldmill" / "means_l.webp", "x");
+    writeFile(root / "hotel-oldmill" / "2_8" / "means_l.webp", "x");
+    writeFile(root / "hotel-oldmill" / "2_8" / "deeper" / "sh0.webp", "x");
+    EXPECT_EQ(typeOf("hotel-oldmill/means_l.webp"), EntryType::Generic);
+    EXPECT_EQ(typeOf("hotel-oldmill/2_8/means_l.webp"), EntryType::Generic);
+    EXPECT_EQ(typeOf("hotel-oldmill/2_8/deeper/sh0.webp"), EntryType::Generic);
+    // lod-meta.json itself is a plain file too
+    EXPECT_EQ(typeOf("hotel-oldmill/lod-meta.json"), EntryType::Generic);
+
+    // A photo of the same format elsewhere stays an image (unreadable content falls back to Image)
+    writeFile(root / "photos" / "a.webp", "x");
+    EXPECT_EQ(typeOf("photos/a.webp"), EntryType::Image);
+    // ... and so does a photo of another format in the folder of the splat
+    writeFile(root / "hotel-oldmill" / "preview.png", "x");
+    EXPECT_EQ(typeOf("hotel-oldmill/preview.png"), EntryType::Image);
+
+    // One chunk: a meta.json of the SOG schema next to the textures
+    writeFile(root / "chunk" / "meta.json",
+              "{\"version\": 2, \"count\": 10, \"means\": {\"files\": [\"means_l.webp\", \"means_u.webp\"]}, "
+              "\"scales\": {\"files\": [\"scales.webp\"]}, \"quats\": {\"files\": [\"quats.webp\"]}, "
+              "\"sh0\": {\"files\": [\"sh0.webp\"]}}");
+    writeFile(root / "chunk" / "means_l.webp", "x");
+    EXPECT_EQ(typeOf("chunk/means_l.webp"), EntryType::Generic);
+    // ... also a meta.json of version 1 (no count)
+    writeFile(root / "chunk1" / "meta.json",
+              "{\"means\": {\"files\": [\"means_l.webp\", \"means_u.webp\"]}, \"scales\": {\"files\": "
+              "[\"scales.webp\"]}, \"quats\": {\"files\": [\"quats.webp\"]}, \"sh0\": {\"files\": [\"sh0.webp\"]}}");
+    writeFile(root / "chunk1" / "shN_labels.webp", "x");
+    EXPECT_EQ(typeOf("chunk1/shN_labels.webp"), EntryType::Generic);
+
+    // Any other meta.json is not a SOG: its folder keeps its images
+    writeFile(root / "other" / "meta.json", "{\"title\": \"holiday\"}");
+    writeFile(root / "other" / "b.webp", "x");
+    EXPECT_EQ(typeOf("other/b.webp"), EntryType::Image);
+    writeFile(root / "broken" / "meta.json", "not json");
+    writeFile(root / "broken" / "c.webp", "x");
+    EXPECT_EQ(typeOf("broken/c.webp"), EntryType::Image);
+}
+
+// Only a file named like a SOG texture is one, and only next to a SOG meta.json or below a
+// lod-meta.json of the LOD layout (FR-UPL-09)
+TEST(entryHandler, OnlyTheTexturesOfASogFolderAreGeneric) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path root = ta.getFolder();
+    const auto typeOf = [&](const std::string& name) {
+        Entry e;
+        parseEntry(root / name, root, e, false);
+        return e.type;
+    };
+
+    // A lod-meta.json at the root of the index: the photos below it stay images
+    writeFile(root / "lod-meta.json", "{\"lodLevels\": 2, \"filenames\": [\"0_0/meta.json\"]}");
+    writeFile(root / "photos" / "x.webp", "x");
+    EXPECT_EQ(typeOf("photos/x.webp"), EntryType::Image);
+    writeFile(root / "photos" / "means.webp", "x");
+    EXPECT_EQ(typeOf("photos/means.webp"), EntryType::Image);
+    // ... and the files named like the textures of a SOG are its textures, in every folder below it
+    for (const char* name : {"means_l", "means_u", "scales", "quats", "sh0", "shN_centroids", "shN_labels"}) {
+        writeFile(root / "0_0" / (std::string(name) + ".webp"), "x");
+        EXPECT_EQ(typeOf("0_0/" + std::string(name) + ".webp"), EntryType::Generic) << name;
+    }
+    // Another format with a texture name is not a texture
+    writeFile(root / "0_0" / "sh0.png", "x");
+    EXPECT_EQ(typeOf("0_0/sh0.png"), EntryType::Image);
+
+    // A meta.json that is not a SOG changes nothing
+    const fs::path other = ta.getFolder("other");
+    const auto otherTypeOf = [&](const std::string& name) {
+        Entry e;
+        parseEntry(other / name, other, e, false);
+        return e.type;
+    };
+    writeFile(other / "a" / "meta.json", "{\"title\": \"holiday\", \"means\": \"x\", \"scales\": {}}");
+    writeFile(other / "a" / "means_l.webp", "x");
+    EXPECT_EQ(otherTypeOf("a/means_l.webp"), EntryType::Image);
+    // ... nor does a lod-meta.json that is not a JSON object, or not one of the LOD layout
+    writeFile(other / "b" / "lod-meta.json", "[\"lodLevels\"]");
+    writeFile(other / "b" / "0_0" / "sh0.webp", "x");
+    EXPECT_EQ(otherTypeOf("b/0_0/sh0.webp"), EntryType::Image);
+    writeFile(other / "c" / "lod-meta.json", "not json");
+    writeFile(other / "c" / "0_0" / "sh0.webp", "x");
+    EXPECT_EQ(otherTypeOf("c/0_0/sh0.webp"), EntryType::Image);
+    writeFile(other / "d" / "lod-meta.json", "{\"title\": \"lodLevels\"}");
+    writeFile(other / "d" / "0_0" / "sh0.webp", "x");
+    EXPECT_EQ(otherTypeOf("d/0_0/sh0.webp"), EntryType::Image);
+
+    // A texture seen alone (not under the root it is parsed with) keeps the old detection
+    Entry alone;
+    parseEntry(root / "0_0" / "sh0.webp", other, alone, false);
+    EXPECT_EQ(alone.type, EntryType::Image);
+}
+
+// The type of a file is decided when it is indexed: the textures of an unbundled SOG folder that
+// were indexed before their lod-meta.json or meta.json (a folder uploaded file by file) become
+// files when the marker is added, and lose their pending markers (FR-UPL-09)
+TEST(entryHandler, SogTexturesIndexedBeforeTheirMarkerBecomeFiles) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path root = ta.getFolder("ds");
+    initIndex(root.string());
+    auto db = ddb::open(root.string(), true);
+    const auto typeOf = [&](const std::string& path) {
+        const auto e = getEntry(db.get(), path);
+        return e ? e->type : EntryType::Undefined;
+    };
+    const auto add = [&](const std::vector<std::string>& paths) {
+        std::vector<std::string> abs;
+        for (const auto& p : paths)
+            abs.push_back((root / p).string());
+        addToIndex(db.get(), abs);
+    };
+
+    // The LOD layout, textures first (they sort before the markers)
+    writeFile(root / "hotel" / "0_0" / "means_l.webp", "x");
+    writeFile(root / "hotel" / "2_8" / "shN_labels.webp", "y");
+    writeFile(root / "hotel" / "2_8" / "preview.webp", "z");
+    writeFile(root / "photos" / "means_l.webp", "w");
+    add({"hotel/0_0/means_l.webp", "hotel/2_8/shN_labels.webp", "hotel/2_8/preview.webp", "photos/means_l.webp"});
+    ASSERT_EQ(typeOf("hotel/0_0/means_l.webp"), EntryType::Image);
+    ASSERT_EQ(typeOf("hotel/2_8/shN_labels.webp"), EntryType::Image);
+
+    // A build waiting for the texture (not one of an image; it must go with the type)
+    const auto texture = getEntry(db.get(), "hotel/0_0/means_l.webp");
+    ASSERT_TRUE(texture.has_value());
+    const fs::path marker = pendingMarkerPath(db->buildDirectory(), texture->hash, "hotel/0_0/means_l.webp");
+    writeFile(marker, "");
+
+    writeFile(root / "hotel" / "lod-meta.json", "{\"lodLevels\": 3, \"filenames\": [\"0_0/meta.json\"]}");
+    add({"hotel/lod-meta.json"});
+    EXPECT_EQ(typeOf("hotel/0_0/means_l.webp"), EntryType::Generic);
+    EXPECT_EQ(typeOf("hotel/2_8/shN_labels.webp"), EntryType::Generic);
+    EXPECT_FALSE(fs::exists(marker));
+    // The other files stay images: not a texture name, not under the lod-meta.json
+    EXPECT_EQ(typeOf("hotel/2_8/preview.webp"), EntryType::Image);
+    EXPECT_EQ(typeOf("photos/means_l.webp"), EntryType::Image);
+    // The content did not change
+    const auto retyped = getEntry(db.get(), "hotel/0_0/means_l.webp");
+    ASSERT_TRUE(retyped.has_value());
+    EXPECT_EQ(retyped->hash, texture->hash);
+    EXPECT_EQ(retyped->size, std::uintmax_t{1});
+
+    // One chunk: the textures, then its meta.json (addToIndexEx)
+    writeFile(root / "chunk" / "sh0.webp", "v");
+    writeFile(root / "chunk" / "quats.webp", "u");
+    add({"chunk/sh0.webp", "chunk/quats.webp"});
+    ASSERT_EQ(typeOf("chunk/sh0.webp"), EntryType::Image);
+    writeFile(root / "chunk" / "meta.json",
+              "{\"version\": 2, \"count\": 10, \"means\": {\"files\": []}, \"scales\": {\"files\": []}, "
+              "\"quats\": {\"files\": []}, \"sh0\": {\"files\": []}}");
+    AddOptions opts;
+    AddResult result;
+    addToIndexEx(db.get(), {(root / "chunk" / "meta.json").string()}, opts, result);
+    EXPECT_EQ(typeOf("chunk/sh0.webp"), EntryType::Generic);
+    EXPECT_EQ(typeOf("chunk/quats.webp"), EntryType::Generic);
+
+    // A meta.json that is not a SOG changes nothing
+    writeFile(root / "photos" / "meta.json", "{\"title\": \"holiday\"}");
+    add({"photos/meta.json"});
+    EXPECT_EQ(typeOf("photos/means_l.webp"), EntryType::Image);
+}
+
+// The reverse order: the marker first, then its textures (FR-UPL-09)
+TEST(entryHandler, SogTexturesIndexedAfterTheirMarkerAreFiles) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path root = ta.getFolder("ds");
+    initIndex(root.string());
+    auto db = ddb::open(root.string(), true);
+    const auto typeOf = [&](const std::string& path) {
+        const auto e = getEntry(db.get(), path);
+        return e ? e->type : EntryType::Undefined;
+    };
+
+    writeFile(root / "hotel" / "lod-meta.json", "{\"lodLevels\": 3}");
+    addToIndex(db.get(), {(root / "hotel" / "lod-meta.json").string()});
+    writeFile(root / "hotel" / "0_0" / "means_u.webp", "x");
+    writeFile(root / "hotel" / "0_0" / "photo.webp", "y");
+    AddOptions opts;
+    AddResult result;
+    addToIndexEx(db.get(), {(root / "hotel" / "0_0" / "means_u.webp").string(),
+                            (root / "hotel" / "0_0" / "photo.webp").string()}, opts, result);
+    EXPECT_EQ(typeOf("hotel/0_0/means_u.webp"), EntryType::Generic);
+    EXPECT_EQ(typeOf("hotel/0_0/photo.webp"), EntryType::Image);
+    std::map<std::string, EntryType> reported;
+    for (const auto& [e, updated] : result.entries)
+        reported[e.path] = e.type;
+    EXPECT_EQ(reported["hotel/0_0/means_u.webp"], EntryType::Generic);
+
+    // The marker arrives while a texture is being added (concurrent uploads): it is on disk after
+    // the texture was read, before its add ends. The add reports and keeps a file.
+    writeFile(root / "late" / "scales.webp", "z");
+    AddResult late;
+    addToIndexEx(db.get(), {(root / "late" / "scales.webp").string()}, opts, late,
+                 [&](const Entry&, bool) {
+                     writeFile(root / "late" / "lod-meta.json", "{\"filenames\": []}");
+                     return true;
+                 });
+    EXPECT_EQ(typeOf("late/scales.webp"), EntryType::Generic);
+    reported.clear();
+    for (const auto& [e, updated] : late.entries)
+        reported[e.path] = e.type;
+    EXPECT_EQ(reported["late/scales.webp"], EntryType::Generic);
+}
+
 // Content-free detection through the registry (files that need no reading)
 TEST(entryHandler, FingerprintByExtension) {
     TestArea ta(TEST_NAME, true);

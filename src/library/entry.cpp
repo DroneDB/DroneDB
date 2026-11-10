@@ -90,6 +90,7 @@ namespace ddb
             }
 
             entry.size = p.getSize();
+            ctx.rootDirectory = rootDirectory;
             entry.type = fingerprint(p.get(), ctx);
 
             entryHandler(entry.type).parseMetadata(path, entry, ctx);
