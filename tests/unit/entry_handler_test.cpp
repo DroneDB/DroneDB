@@ -455,6 +455,49 @@ TEST(entryHandler, ExtensionsArePinned) {
     EXPECT_EQ(findEntryHandlerByExtension("archive.zip"), nullptr);
 }
 
+// The textures of an unbundled SOG splat are plain files, not photos or panoramas (FR-UPL-09)
+TEST(entryHandler, TexturesOfAnUnbundledSogFolderAreGeneric) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path root = ta.getFolder();
+    const auto typeOf = [&](const std::string& name) {
+        Entry e;
+        parseEntry(root / name, root, e, false);
+        return e.type;
+    };
+
+    // The level-of-detail layout: lod-meta.json at the top, the textures in the folders below it
+    writeFile(root / "hotel-oldmill" / "lod-meta.json", "{\"lodLevels\": 3}");
+    writeFile(root / "hotel-oldmill" / "means_l.webp", "x");
+    writeFile(root / "hotel-oldmill" / "2_8" / "means_l.webp", "x");
+    writeFile(root / "hotel-oldmill" / "2_8" / "deeper" / "sh0.webp", "x");
+    EXPECT_EQ(typeOf("hotel-oldmill/means_l.webp"), EntryType::Generic);
+    EXPECT_EQ(typeOf("hotel-oldmill/2_8/means_l.webp"), EntryType::Generic);
+    EXPECT_EQ(typeOf("hotel-oldmill/2_8/deeper/sh0.webp"), EntryType::Generic);
+    // lod-meta.json itself is a plain file too
+    EXPECT_EQ(typeOf("hotel-oldmill/lod-meta.json"), EntryType::Generic);
+
+    // A photo of the same format elsewhere stays an image (unreadable content falls back to Image)
+    writeFile(root / "photos" / "a.webp", "x");
+    EXPECT_EQ(typeOf("photos/a.webp"), EntryType::Image);
+    // ... and so does a photo of another format in the folder of the splat
+    writeFile(root / "hotel-oldmill" / "preview.png", "x");
+    EXPECT_EQ(typeOf("hotel-oldmill/preview.png"), EntryType::Image);
+
+    // One chunk: a meta.json of the SOG schema next to the textures
+    writeFile(root / "chunk" / "meta.json",
+              "{\"version\": 2, \"count\": 10, \"means\": {}, \"scales\": {}, \"quats\": {}, \"sh0\": {}}");
+    writeFile(root / "chunk" / "means_l.webp", "x");
+    EXPECT_EQ(typeOf("chunk/means_l.webp"), EntryType::Generic);
+
+    // Any other meta.json is not a SOG: its folder keeps its images
+    writeFile(root / "other" / "meta.json", "{\"title\": \"holiday\"}");
+    writeFile(root / "other" / "b.webp", "x");
+    EXPECT_EQ(typeOf("other/b.webp"), EntryType::Image);
+    writeFile(root / "broken" / "meta.json", "not json");
+    writeFile(root / "broken" / "c.webp", "x");
+    EXPECT_EQ(typeOf("broken/c.webp"), EntryType::Image);
+}
+
 // Content-free detection through the registry (files that need no reading)
 TEST(entryHandler, FingerprintByExtension) {
     TestArea ta(TEST_NAME, true);

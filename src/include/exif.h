@@ -238,6 +238,11 @@ namespace ddb
         // entry and its metadata step both need it. Null when the file was not probed in this
         // pass.
         std::shared_ptr<const raster::ProbeOutcome> probe;
+        // The folder the index is built on, when the file is fingerprinted as an entry of it
+        // (parseEntry): detection that depends on the folders around the file (the textures of
+        // an unbundled SOG splat) looks up to it. Empty for a file seen alone: that detection is
+        // off.
+        fs::path rootDirectory;
 
         FingerprintContext() = default;
 
