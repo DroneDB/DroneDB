@@ -351,6 +351,101 @@ TEST_F(StyledBandRender, theThumbnailOfADemWithAColormapIsTheColouredPictureOfTh
     }
 }
 
+// A tile of the raster's zoom that the raster does not cover (the raster is one tile of its zoom)
+DDBErr tileOutside(const fs::path& raster, const char* colormap, const char* bands, std::vector<uint8_t>* bytes) {
+    uint8_t* buffer = nullptr;
+    int size = 0;
+    const DDBErr err = DDBMemoryTileEx2(raster.string().c_str(), kZoom, kTx + 10, kTy, kSize, false, false, nullptr,
+                                        nullptr, bands, nullptr, nullptr, colormap, nullptr, nullptr, &buffer, &size);
+    *bytes = testutils::takeBuffer(buffer, size);
+    return err;
+}
+
+// The tile out of the raster keeps the contract of 2.3.0: visualisation parameters (bands) refuse it ("Out of
+// bounds", before any statistics are read), and a colormap alone, which 2.3.0 drew as the plain tile, is the plain
+// tile: transparent
+TEST_F(StyledBandRender, aTileOutsideTheRasterIsRefusedWithBandsAndTransparentWithAColormapAlone) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path dem = makeDem(ta.getPath("dem.tif"));
+
+    std::vector<uint8_t> bytes;
+    EXPECT_NE(tileOutside(dem, "viridis", "1", &bytes), DDBERR_NONE);
+    EXPECT_TRUE(bytes.empty());
+    EXPECT_NE(std::string(DDBGetLastError()).find("Out of bounds"), std::string::npos) << DDBGetLastError();
+    // No statistics were read for it: the sidecar of the raster is not written
+    EXPECT_FALSE(fs::exists(statsSidecarOf(dem)));
+
+    ASSERT_EQ(tileOutside(dem, "viridis", nullptr, &bytes), DDBERR_NONE) << DDBGetLastError();
+    const Picture outside = pictureOf(testutils::decodeImage(bytes));
+    ASSERT_GE(outside.bands.size(), 2u) << "the plain tile: grey and alpha";
+    for (const uint8_t alpha : outside.bands.back()) ASSERT_EQ(alpha, 0);
+
+    // The plain tile of the same coordinates is the same picture
+    uint8_t* buffer = nullptr;
+    int size = 0;
+    ASSERT_EQ(DDBMemoryTile(dem.string().c_str(), kZoom, kTx + 10, kTy, &buffer, &size, kSize, false, false, nullptr),
+              DDBERR_NONE)
+        << DDBGetLastError();
+    EXPECT_EQ(bytes, testutils::takeBuffer(buffer, size));
+}
+
+// A band with no pixel that has a value has no range to stretch: its tile, its thumbnail and its export are empty
+// pictures (all transparent), not errors, as 2.3.0 drew them
+void expectAllNodataBandRendersTransparent(const fs::path& raster, const char* bands) {
+    const Picture t = tile(raster, "viridis", nullptr, bands);
+    ASSERT_EQ(t.bands.size(), 4u);
+    for (const uint8_t alpha : t.bands[3]) ASSERT_EQ(alpha, 0);
+
+    uint8_t* buffer = nullptr;
+    int size = 0;
+    ASSERT_EQ(DDBGenerateMemoryThumbnailEx2(raster.string().c_str(), kSize, nullptr, bands, nullptr, nullptr,
+                                            "viridis", nullptr, nullptr, &buffer, &size),
+              DDBERR_NONE)
+        << DDBGetLastError();
+    const Picture thumb = pictureOf(testutils::decodeImage(testutils::takeBuffer(buffer, size)));
+    ASSERT_FALSE(thumb.bands.empty());
+    if (thumb.bands.size() == 4u) {
+        for (const uint8_t alpha : thumb.bands[3]) {
+            ASSERT_EQ(alpha, 0);
+        }
+    }
+
+    const fs::path out = raster.parent_path() / (std::string(bands ? bands : "all") + "-export.tif");
+    ASSERT_EQ(DDBExportRaster3(raster.string().c_str(), out.string().c_str(), nullptr, bands, nullptr, nullptr,
+                               "viridis", nullptr, 0, nullptr, nullptr, nullptr),
+              DDBERR_NONE)
+        << DDBGetLastError();
+    const Picture e = pictureOf(testutils::decodeImageFile(out));
+    ASSERT_EQ(e.bands.size(), 4u);
+    for (const uint8_t alpha : e.bands[3]) ASSERT_EQ(alpha, 0);
+}
+
+TEST_F(StyledBandRender, aFloatBandOfNodataOnlyHasATransparentTileThumbnailAndExport) {
+    TestArea ta(TEST_NAME, true);
+    testutils::GeoRasterSpec spec;
+    spec.bands = 1;
+    spec.type = GDT_Float32;
+    spec.value = [](int, int, int) { return -9999.0; };
+    const fs::path nothing = onTileGrid(ta.getPath("nothing.tif"), spec);
+    setNodata(nothing, -9999.0);
+
+    expectAllNodataBandRendersTransparent(nothing, nullptr);
+    expectAllNodataBandRendersTransparent(nothing, "1");
+}
+
+TEST_F(StyledBandRender, aByteBandOfNodataOnlyHasATransparentTileThumbnailAndExport) {
+    TestArea ta(TEST_NAME, true);
+    testutils::GeoRasterSpec spec;
+    spec.bands = 1;
+    spec.type = GDT_Byte;
+    spec.value = [](int, int, int) { return 0.0; };
+    const fs::path nothing = onTileGrid(ta.getPath("nothing.tif"), spec);
+    setNodata(nothing, 0.0);
+
+    expectAllNodataBandRendersTransparent(nothing, nullptr);
+    expectAllNodataBandRendersTransparent(nothing, "1");
+}
+
 // A raster larger than the budget of the stretch of a thumbnail (D-041): 2304 x 2304 Float32 pixels in blocks of
 // 64 x 64 (36 x 36 blocks), each pixel the column plus the row of its block, but for block (0, 0), which holds 10000.
 // The sample of a thumbnail reads the middle block of every 2 x 2 cell of blocks, so never block (0, 0): its range is

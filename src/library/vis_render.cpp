@@ -13,6 +13,7 @@
 #include "cancellation.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "raster_stats.h"
 #include "raster_utils.h"
 #include "sensorprofile.h"
 #include "vegetation.h"
@@ -450,7 +451,21 @@ namespace ddb
             return plan;
         }
 
-        const auto [lo, hi] = defaultStretch(path, ds, {band}, nodata, source)[0];
+        std::pair<double, double> stretch;
+        try
+        {
+            stretch = defaultStretch(path, ds, {band}, nodata, source)[0];
+        }
+        catch (const NoValidPixelsException &)
+        {
+            // A band with no pixel that has a value (all NoData or masked, or empty under the NoData override) has
+            // no range to stretch, and every pixel of its render is transparent whatever the range is: a nominal
+            // one, so that its tile, thumbnail and export are empty pictures as the plain tile is (not errors)
+            LOGD << "No pixel of band " << band << " of " << path << " has a value: nominal range for the colormap";
+            plan.range = {0.0f, 1.0f};
+            return plan;
+        }
+        const auto [lo, hi] = stretch;
         // The stretch is in the raw values of the band
         int hasScale = FALSE, hasOffset = FALSE;
         const GDALRasterBandH hBand = GDALGetRasterBand(ds, band);

@@ -345,21 +345,31 @@ namespace ddb
     std::string GDALTiler::tile(int tz, int tx, int ty, const ThumbVisParams &visParams, ImageFormat format,
                                 uint8_t **outBuffer, int *outBufferSize)
     {
+        const bool plainParams = visParams.preset.empty() && visParams.bands.empty() && visParams.formula.empty() &&
+                                 !visParams.nodata;
+
+        // A tile out of the bounds of the raster before anything is planned (a plan reads statistics): the tile of
+        // visualisation parameters is refused, as it was in 2.3.0, and the one of none (a colormap alone included,
+        // which 2.3.0 drew as the plain tile) is the plain tile, transparent
+        const int xyzY = tms ? tmsToXYZ(ty, tz) : ty;
+        if (!getMinMaxCoordsForZ(tz).contains(tx, xyzY))
+        {
+            if (!plainParams)
+                throw GDALException("Out of bounds");
+            return tile(tz, tx, ty, format, outBuffer, outBufferSize);
+        }
+
         // One band with a colormap and no formula (FR-RAS-01): the picture the colormap makes of the band, as the
         // export and the thumbnails draw it (planVisBandStyle), over the statistics of the raster file
         if (const auto style = planVisBandStyle(inputPath, datasetHandle(fileDataset), visParams, nBands))
             return styledTile(tz, tx, ty, *style, visParams.nodata, format, outBuffer, outBufferSize);
 
         // If no vis params set, fall through to standard tile
-        if (visParams.preset.empty() && visParams.bands.empty() && visParams.formula.empty() && !visParams.nodata)
+        if (plainParams)
             return tile(tz, tx, ty, format, outBuffer, outBufferSize);
 
         // A NoData override: the tile reads a view of the raster that has it, for this call only
         const NodataOverrideScope nodataScope(*this, visParams.nodata);
-
-        const int xyzY = tms ? tmsToXYZ(ty, tz) : ty;
-        if (!getMinMaxCoordsForZ(tz).contains(tx, xyzY))
-            throw GDALException("Out of bounds");
 
         GQResult g;
         if (!tileWindow(tz, tx, xyzY, g))
