@@ -5,7 +5,8 @@
 // DDBBuildEx2 (new in 2.4, FR-PRC-42): DDBBuildEx with a progress callback.
 //
 //  - the fractions it reports never go down and the last one of a build that succeeds is 1;
-//  - a raster (COG) build reports the phases "warping", "overviews" and "compressing", in that order;
+//  - a raster (COG) build reports the phases "warping", "overviews", "compressing" and "statistics", in that
+//    order;
 //  - another kind of entry reports its type, with the fraction -1 until it is built;
 //  - a build of several entries reports the fraction of the entries done plus the fraction of the one in
 //    the build;
@@ -156,18 +157,28 @@ TEST(DDBBuildEx2, aRasterBuildReportsMonotonicProgressAndItsPhases) {
     EXPECT_EQ(recorder.reports.back().fraction, 1.0);
     EXPECT_TRUE(hasPhase(recorder.reports, "warping")) << "no warping phase";
     EXPECT_TRUE(hasPhase(recorder.reports, "compressing")) << "no compressing phase";
-    expectPhasesInOrder(recorder.reports, {"georaster", "warping", "overviews", "compressing", "publishing"});
+    EXPECT_TRUE(hasPhase(recorder.reports, "statistics")) << "no statistics phase";
+    expectPhasesInOrder(recorder.reports,
+                        {"georaster", "warping", "overviews", "compressing", "statistics", "publishing"});
 
     // The first report is the one of the raster kind with nothing measured yet, and a known fraction
-    // comes with the phase GDAL's progress is in: the first third is the warp
+    // comes with the phase it is in: GDAL's work is scaled to 0 to 0.5 (its first 3/8 the warp, up to
+    // 1/2 the overviews, then the final write), and the statistics of the bands are the rest
     EXPECT_EQ(recorder.reports.front().fraction, -1.0);
     EXPECT_EQ(recorder.reports.front().phase, "georaster");
     for (const auto& r : recorder.reports)
     {
         if (r.phase == "warping" && r.fraction >= 0.0) {
-            EXPECT_LT(r.fraction, 0.375);
+            EXPECT_LT(r.fraction, 0.1875);
+        } else if (r.phase == "overviews") {
+            EXPECT_GE(r.fraction, 0.1875);
+            EXPECT_LT(r.fraction, 0.25);
         } else if (r.phase == "compressing") {
+            EXPECT_GE(r.fraction, 0.25);
+            EXPECT_LT(r.fraction, 0.5);
+        } else if (r.phase == "statistics") {
             EXPECT_GE(r.fraction, 0.5);
+            EXPECT_LT(r.fraction, 1.0) << "the build is done only when its output is published";
         }
     }
 
@@ -189,7 +200,8 @@ TEST(DDBBuildEx2, aRasterBuildAnnouncesTheWarpWhenItStarts) {
     EXPECT_EQ(recorder.reports[1].fraction, 0.0);
     EXPECT_EQ(recorder.reports[1].phase, "warping");
     expectMonotonic(recorder.reports);
-    expectPhasesInOrder(recorder.reports, {"georaster", "warping", "overviews", "compressing", "publishing"});
+    expectPhasesInOrder(recorder.reports,
+                        {"georaster", "warping", "overviews", "compressing", "statistics", "publishing"});
     EXPECT_EQ(recorder.reports.back().fraction, 1.0);
     EXPECT_TRUE(ds.isBuildComplete("small.tif"));
 }
@@ -218,6 +230,31 @@ TEST(DDBBuildEx2, aCallbackThatReturnsNonZeroCancelsTheBuild) {
     // The cancellation is that of the call: the same build then runs to the end
     Recorder again;
     ASSERT_DDB_OK(DDBBuildEx2(ds.root.string().c_str(), "ortho.tif", nullptr, true, false, nullptr, &record, &again));
+    EXPECT_TRUE(ds.isBuildComplete("ortho.tif"));
+}
+
+// The statistics of the bands are computed after GDAL wrote the COG, and a cancel while they are computed still
+// stops the build before anything is published
+TEST(DDBBuildEx2, aCancelDuringTheStatisticsPublishesNothing) {
+    Dataset ds("DDBBuildEx2-cancel-statistics");
+    ds.addRaster("ortho.tif", 1024);
+
+    Recorder recorder;
+    recorder.cancelAtPhase = "statistics";
+    EXPECT_EQ(DDBBuildEx2(ds.root.string().c_str(), "ortho.tif", nullptr, true, false, nullptr, &record, &recorder),
+              DDBERR_CANCELED);
+    EXPECT_TRUE(recorder.canceled) << "the build never reported its statistics";
+    EXPECT_EQ(recorder.reports.back().phase, "statistics") << "nothing is reported after the cancel";
+    EXPECT_GE(recorder.reports.back().fraction, 0.5);
+    EXPECT_LT(recorder.reports.back().fraction, 1.0);
+    EXPECT_FALSE(hasPhase(recorder.reports, "publishing"));
+    const std::string message = DDBGetLastError();
+    EXPECT_NE(message.find("progress callback"), std::string::npos) << message;
+    EXPECT_FALSE(ds.isBuildComplete("ortho.tif")) << "a canceled build must leave no build";
+
+    Recorder again;
+    ASSERT_DDB_OK(DDBBuildEx2(ds.root.string().c_str(), "ortho.tif", nullptr, true, false, nullptr, &record, &again));
+    EXPECT_TRUE(hasPhase(again.reports, "statistics"));
     EXPECT_TRUE(ds.isBuildComplete("ortho.tif"));
 }
 
@@ -363,12 +400,16 @@ TEST(DDBBuildEx2, aRasterOnTheGridAlreadyNeverReportsWarping) {
     EXPECT_EQ(recorder.reports.back().fraction, 1.0);
     EXPECT_FALSE(hasPhase(recorder.reports, "warping")) << "a raster without a warp reported one";
     EXPECT_TRUE(hasPhase(recorder.reports, "compressing"));
-    expectPhasesInOrder(recorder.reports, {"georaster", "overviews", "compressing", "publishing"});
+    EXPECT_TRUE(hasPhase(recorder.reports, "statistics"));
+    expectPhasesInOrder(recorder.reports, {"georaster", "overviews", "compressing", "statistics", "publishing"});
     for (const auto& r : recorder.reports) {
         if (r.phase == "overviews") {
-            EXPECT_LT(r.fraction, 0.2);
+            EXPECT_LT(r.fraction, 0.1);
         } else if (r.phase == "compressing") {
-            EXPECT_GE(r.fraction, 0.2);
+            EXPECT_GE(r.fraction, 0.1);
+            EXPECT_LT(r.fraction, 0.5);
+        } else if (r.phase == "statistics") {
+            EXPECT_GE(r.fraction, 0.5);
         }
     }
     EXPECT_TRUE(ds.isBuildComplete("grid.tif"));
@@ -483,23 +524,28 @@ TEST(DDBBuildEx2, refusesWhatDDBBuildExRefuses) {
     EXPECT_TRUE(recorder.reports.empty());
 }
 
-// The phases of a COG build are those of the fraction GDAL's COG driver is at
-TEST(cogPhaseOfFraction, followsTheWorkOfTheCogDriver) {
+// The phases of a COG build are those of the fraction GDAL's COG driver is at, scaled to 0 to 0.5 (3/8 of its
+// work is the warp, up to 1/2 the overviews), then the statistics of the bands up to 1
+TEST(cogPhaseOfFraction, followsTheWorkOfTheCogDriverThenTheStatistics) {
+    EXPECT_EQ(kCogStatisticsStart, 0.5);
     EXPECT_STREQ(cogPhaseOfFraction(0.0, true), "warping");
-    EXPECT_STREQ(cogPhaseOfFraction(0.37, true), "warping");
-    EXPECT_STREQ(cogPhaseOfFraction(0.375, true), "overviews");
-    EXPECT_STREQ(cogPhaseOfFraction(0.49, true), "overviews");
-    EXPECT_STREQ(cogPhaseOfFraction(0.5, true), "compressing");
-    EXPECT_STREQ(cogPhaseOfFraction(1.0, true), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(0.187, true), "warping");
+    EXPECT_STREQ(cogPhaseOfFraction(0.1875, true), "overviews");
+    EXPECT_STREQ(cogPhaseOfFraction(0.249, true), "overviews");
+    EXPECT_STREQ(cogPhaseOfFraction(0.25, true), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(0.499, true), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(0.5, true), "statistics");
+    EXPECT_STREQ(cogPhaseOfFraction(1.0, true), "statistics");
 }
 
-// A raster that is on the grid already is encoded again without a warp: its overviews are 1/5 of the work
+// A raster that is on the grid already is encoded again without a warp: its overviews are 1/5 of GDAL's work
 TEST(cogPhaseOfFraction, withoutAWarpThereIsNoWarpingPhase) {
     EXPECT_STREQ(cogPhaseOfFraction(0.0, false), "overviews");
-    EXPECT_STREQ(cogPhaseOfFraction(0.19, false), "overviews");
-    EXPECT_STREQ(cogPhaseOfFraction(0.2, false), "compressing");
-    EXPECT_STREQ(cogPhaseOfFraction(0.45, false), "compressing");
-    EXPECT_STREQ(cogPhaseOfFraction(1.0, false), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(0.099, false), "overviews");
+    EXPECT_STREQ(cogPhaseOfFraction(0.1, false), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(0.499, false), "compressing");
+    EXPECT_STREQ(cogPhaseOfFraction(0.5, false), "statistics");
+    EXPECT_STREQ(cogPhaseOfFraction(1.0, false), "statistics");
 }
 
 }  // namespace

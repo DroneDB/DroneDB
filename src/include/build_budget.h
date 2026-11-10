@@ -33,8 +33,8 @@ struct BuildOptions {
 
     // Where the build reports its progress (DDBBuildEx2); empty: nowhere. A build of several entries
     // (buildAll, buildPending) reports the fraction of the entries done plus the fraction of the one it builds
-    // (forSlice); a build of one entry the phases of that entry: a COG build "warping", "overviews" and
-    // "compressing", any other build the type of the entry (-1 until it is done).
+    // (forSlice); a build of one entry the phases of that entry: a COG build "warping", "overviews",
+    // "compressing" and "statistics", any other build the type of the entry (-1 until it is done).
     BuildProgressCallback progress;
 
     // Reports to progress when there is one

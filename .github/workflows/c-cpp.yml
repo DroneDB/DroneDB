@@ -931,9 +931,13 @@ jobs:
           ctest -C Release -L headers --output-on-failure
         shell: pwsh
       - name: Run integration tests
-        # One process for every test (about 9 minutes): still running after 30 minutes, it is
-        # dumped with its thread stacks in this log, then stopped (scripts/ci-hang-watchdog.ps1)
-        timeout-minutes: 45
+        # One process for every test: 27 minutes in 2.3.0 and over 30 in 2.4.0 until a COG build
+        # read the statistics of all its bands in one pass, 20 to 24 of them in
+        # EdgeRasterTest.NodataInfinity52Bands (each of its two COG builds decoded the whole COG
+        # once per band, 53 times; on Linux the test went from about 10 minutes to 2 with the one
+        # pass). Still running after 45 minutes, it is dumped with its thread stacks in this log,
+        # then stopped (scripts/ci-hang-watchdog.ps1); the step stops at 60 minutes, after the dump.
+        timeout-minutes: 60
         env:
           DDB_DWG2DXF_PATH: ${{ github.workspace }}\build\dwg2dxf.exe
           DDB_TEST_CACHE_DIR: ${{ runner.temp }}\ddb-test-cache
@@ -941,7 +945,7 @@ jobs:
           _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
         run: |
           cd build
-          ../scripts/ci-hang-watchdog.ps1 -ProcessName ddbtest -ThresholdSeconds 1800 -Kill `
+          ../scripts/ci-hang-watchdog.ps1 -ProcessName ddbtest -ThresholdSeconds 2700 -Kill `
             -DumpDir "$env:RUNNER_TEMP\ddbtest-dumps" -Command { .\ddbtest.exe --gtest_shuffle }
           $code = $LASTEXITCODE
           # The pwsh step wrapper turns a negative (NTSTATUS) exit code into 1: print the real one

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <ctime>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <map>
@@ -345,8 +346,10 @@ namespace ddb
             return accumulators;
         }
 
-        // Every pixel of the bands of `set`, rows at a time (the pass stops when the call is canceled)
-        void accumulateAll(const BandSet &set, std::vector<BandAccumulator> &accumulators)
+        // Every pixel of the bands of `set`, rows at a time (the pass stops when the call is canceled). `progress`,
+        // when set, is told the fraction of the rows read after each read
+        void accumulateAll(const BandSet &set, std::vector<BandAccumulator> &accumulators,
+                           const std::function<void(double)> &progress = {})
         {
             const size_t rowSamples = std::max<size_t>(1, static_cast<size_t>(set.width) * set.bands.size());
             const int rowsPerRead = std::max(1, static_cast<int>(SamplesPerRead / rowSamples));
@@ -355,8 +358,10 @@ namespace ddb
             for (int y = 0; y < set.height; y += rowsPerRead)
             {
                 cancel::throwIfCanceled();
-                accumulateWindow(set, accumulators, 0, y, set.width, std::min(rowsPerRead, set.height - y), samples,
-                                 mask);
+                const int rows = std::min(rowsPerRead, set.height - y);
+                accumulateWindow(set, accumulators, 0, y, set.width, rows, samples, mask);
+                if (progress)
+                    progress(static_cast<double>(y + rows) / static_cast<double>(set.height));
             }
         }
 
@@ -535,6 +540,86 @@ namespace ddb
             break;
         }
         return s;
+    }
+
+    std::vector<std::optional<BandStatistics>> RasterStatsProvider::getAll(const std::string &path, GDALDatasetH ds,
+                                                                          const std::vector<int> &bands,
+                                                                          const std::optional<double> &nodata,
+                                                                          bool persist,
+                                                                          const std::function<void(double)> &progress)
+    {
+        const auto entry = entryFor(path);
+        std::lock_guard<std::mutex> lock(entry->mutex);
+
+        const std::string file = statsFileOf(path, ds);
+        const auto keyOf = [&nodata](int band) { return std::to_string(band) + "|" + nodataKey(nodata); };
+
+        std::vector<std::optional<BandStatistics>> result(bands.size());
+        std::vector<size_t> missingAt; // the positions in `bands` of the bands that are not known
+        std::vector<int> missing;
+        uint64_t fromSidecar = 0;
+        for (size_t i = 0; i < bands.size(); i++)
+        {
+            const int b = bands[i];
+            if (GDALGetRasterBand(ds, b) == nullptr)
+                throw GDALException("Cannot read band " + std::to_string(b) + " of " + path);
+
+            const auto cached = entry->bands.find(keyOf(b));
+            if (cached != entry->bands.end())
+            {
+                result[i] = cached->second;
+                continue;
+            }
+            BandStatistics s;
+            if (readStatsSidecar(file, b, s, nodata))
+            {
+                entry->bands[keyOf(b)] = s;
+                result[i] = s;
+                fromSidecar++;
+                continue;
+            }
+            missingAt.push_back(i);
+            missing.push_back(b);
+        }
+
+        uint64_t computed = 0;
+        if (!missing.empty())
+        {
+            // The pass of computeBandStatistics, but each band finished on its own: a band without a pixel
+            // that has a value does not lose the statistics of the others
+            const BandSet set = bandSetOf(ds, missing);
+            auto accumulators = accumulatorsOf(set, nodata);
+            accumulateAll(set, accumulators, progress);
+            const uint64_t pixelCount = static_cast<uint64_t>(set.width) * static_cast<uint64_t>(set.height);
+            for (size_t j = 0; j < missing.size(); j++)
+            {
+                const int b = missing[j];
+                BandStatistics s;
+                try
+                {
+                    s = accumulators[j].finish(pixelCount, false);
+                }
+                catch (const NoValidPixelsException &)
+                {
+                    continue; // nullopt, where get() throws
+                }
+                entry->bands[keyOf(b)] = s;
+                result[missingAt[j]] = s;
+                computed++;
+                LOGD << "Computed band " << b << " statistics of " << path << " (" << s.min << ", " << s.max << ")";
+                if (persist || raster::isLibddbArtefact(io::fromUtf8(file)))
+                    writeStatsSidecar(file, b, s, nodata);
+            }
+        }
+        else if (progress)
+        {
+            progress(1.0);
+        }
+
+        std::lock_guard<std::mutex> countersLock(mutex_);
+        counters_.fromSidecar += fromSidecar;
+        counters_.computed += computed;
+        return result;
     }
 
     std::vector<BandStatistics> RasterStatsProvider::getStretchStatistics(const std::string &path, GDALDatasetH ds,

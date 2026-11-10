@@ -159,7 +159,7 @@ TEST_F(ExportStyledBand, aDemWithAColormapAndARescaleIsTheRgbaPictureOfTheColorm
     EXPECT_NEAR(p.gt[1], 0.001, 1e-12);
     EXPECT_NEAR(p.gt[3], 45.0, 1e-12);
 
-    for (const auto [x, y] : std::vector<std::pair<int, int>>{{0, 0}, {20, 10}, {30, 3}, {50, 40}, {63, 47}, {12, 5}}) {
+    for (const auto &[x, y] : std::vector<std::pair<int, int>>{{0, 0}, {20, 10}, {30, 3}, {50, 40}, {63, 47}, {12, 5}}) {
         const ddb::ColormapEntry expected = colourOf("viridis", demValue(x, y), 0.0f, 500.0f);
         EXPECT_EQ(p.at(0, x, y), expected.r) << x << "," << y;
         EXPECT_EQ(p.at(1, x, y), expected.g) << x << "," << y;

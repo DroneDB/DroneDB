@@ -22,12 +22,14 @@ namespace ddb
     const char* cogPhaseOfFraction(double fraction, bool hasWarp)
     {
         // The work of the COG driver in units of the pixels of the raster: the warp 1, the overviews 1/3,
-        // the final write 4/3. Without the warp the overviews are 1/5 of the work and no fraction is warping
-        const double overviewsStart = hasWarp ? 3.0 / 8.0 : 0.0;
-        const double compressingStart = hasWarp ? 0.5 : 0.2;
+        // the final write 4/3. Without the warp the overviews are 1/5 of the work and no fraction is warping.
+        // The driver's work ends at kCogStatisticsStart, where the statistics of the bands begin
+        const double overviewsStart = hasWarp ? kCogStatisticsStart * 3.0 / 8.0 : 0.0;
+        const double compressingStart = hasWarp ? kCogStatisticsStart / 2.0 : kCogStatisticsStart / 5.0;
         if (fraction < overviewsStart) return "warping";
         if (fraction < compressingStart) return "overviews";
-        return "compressing";
+        if (fraction < kCogStatisticsStart) return "compressing";
+        return "statistics";
     }
 
     bool isOptimizedCogDataset(GDALDatasetH hDataset)

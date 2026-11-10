@@ -567,10 +567,10 @@ Registry has to adopt first.
   and `raster-info.schema.json` changed; the two `raster-metadata` fixtures changed, `raster-info` did not.
 * 2026-11-10: `capabilities` lists `DDBBuildEx2` (new in 2.4, FR-PRC-42), also in `cancellable`: `DDBBuildEx`
   with a progress callback (fraction from 0 to 1, or -1 while nothing is measured; the phase: the type of the
-  entry, `warping`, `overviews`, `compressing`, `publishing`; a non-zero return cancels). The STAC asset of a
-  plain `.laz` is `application/vnd.laszip` (only the COPC file of a build is `application/vnd.laszip+copc`) and
-  the footprint of a vector entry is always a WGS 84 envelope (the rescan replaces one in metres); no fixture
-  changed.
+  entry, `warping`, `overviews`, `compressing`, `statistics`, `publishing`; a non-zero return cancels). The STAC
+  asset of a plain `.laz` is `application/vnd.laszip` (only the COPC file of a build is
+  `application/vnd.laszip+copc`) and the footprint of a vector entry is always a WGS 84 envelope (the rescan
+  replaces one in metres); no fixture changed.
 * 2026-11-10: `DDBExportRaster3` exports a window (new in 2.4, U-406, FR-RAS-16): with `DDB_RASTER_OPT_BBOX` the
   bbox of `DDBRasterOptions` is also the part of the raster the export writes. No export, field or fixture
   changed; a 2.0 library ignores the box and exports the whole raster.

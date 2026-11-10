@@ -5,6 +5,7 @@
 #define RASTER_STATS_H
 
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -101,6 +102,20 @@ namespace ddb
         BandStatistics get(const std::string &path, GDALDatasetH ds, int band,
                            const std::optional<double> &nodata = std::nullopt, bool persist = false);
 
+        /// get() for several bands (1-based) of the raster at path, with the same `nodata` and
+        /// `persist`: the statistics of the bands that are not known yet (in memory, in the sidecar) are computed
+        /// in one pass over all of them, as computeBandStatistics reads them (a file whose blocks hold every band,
+        /// pixel interleaving, is decoded once and not once per band), the same to the bit as get() computes
+        /// them band by band (each band takes its pixels in the same order), and kept as get() keeps them. One
+        /// element per band of `bands`; nullopt for a band in which no pixel has a value (get() throws
+        /// NoValidPixelsException for it). `progress`, when set, is told the fraction (0 to 1) of the rows of
+        /// the raster read by that pass (1 at once when every band is known). The call can be canceled.
+        /// @throws GDALException when a band cannot be read (nothing is kept then)
+        std::vector<std::optional<BandStatistics>> getAll(const std::string &path, GDALDatasetH ds,
+                                                          const std::vector<int> &bands,
+                                                          const std::optional<double> &nodata, bool persist,
+                                                          const std::function<void(double)> &progress = {});
+
         /// Statistics for the default stretch (D-041) of a render of `bands` (1-based) of the raster at
         /// path, one per band in the order of `bands`, with a bounded read: the exact statistics when
         /// they are known (in memory, in the sidecar), else read in one pass over all the bands that
@@ -109,8 +124,8 @@ namespace ddb
         /// reads at most `maxPixels` pixels of each band (sampleBandStatistics: an overview, else whole
         /// blocks spread over the raster), and the result, marked sampled, is kept in memory only: never
         /// in the sidecar, never returned by get(). A sample in which no pixel has a value is read once
-        /// more with 16 times the budget (exact when the band fits in it). Value info, contours and the
-        /// build use get().
+        /// more with 16 times the budget (exact when the band fits in it). Value info and contours use
+        /// get(), the build getAll().
         /// @throws NoValidPixelsException (a GDALException) when no pixel of a band has a value: sampled() when
         /// that second read was still a sample (a band of more than 16 times the budget), so the band may have
         /// pixels with a value that the sample missed

@@ -21,6 +21,7 @@
 #include "json.h"
 
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <cerrno>
 #include <cstring>
@@ -31,12 +32,13 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <vector>
 
 namespace ddb
 {
-    // Reports the warp to the caller at every whole percent and logs it every 5%, to aid
-    // diagnostics. Uses an atomic counter to throttle (GDAL may call this very frequently, from
-    // its own threads too).
+    // Reports the build (the work of GDAL, then the statistics) to the caller at every whole percent
+    // and logs it every 5%, to aid diagnostics. Uses an atomic counter to throttle (GDAL may call this
+    // very frequently, from its own threads too).
     static void reportWarpProgress(std::atomic<int>& lastPct, double dfComplete, const raster::ProgressCallback& progress) {
         const int pct = static_cast<int>(dfComplete * 100.0);
         int prev = lastPct.load();
@@ -45,7 +47,7 @@ namespace ddb
         if (progress)
             progress(dfComplete);
         if (pct / 5 != prev / 5) {
-            LOGD << "COG warp progress: " << pct << "%";
+            LOGD << "COG progress: " << pct << "%";
         }
     }
 
@@ -321,10 +323,11 @@ namespace ddb
         const ScopedGdalCacheMax cacheGuard(budget.cacheBytes);
 
         // Progress for diagnostic logging during long warp and encoding operations; they stop
-        // when the build is canceled
+        // when the build is canceled. GDAL's work is the part of the build before its statistics
+        // (kCogStatisticsStart, cogPhaseOfFraction)
         std::atomic<int> warpPct{0};
         cancel::GdalProgress progress([&warpPct, &reportProgress](double fraction) {
-            reportWarpProgress(warpPct, fraction, reportProgress);
+            reportWarpProgress(warpPct, fraction * kCogStatisticsStart, reportProgress);
         });
 
         // Capture the OS write error immediately, before cleanup or logging can
@@ -368,8 +371,11 @@ namespace ddb
             throw GDALException("Failed to close output COG: " + outputCog);
         }
 
-        // Generate stats.json sidecar
-        generateCogStats(outputCog);
+        // Generate stats.json sidecar: the rest of the build, from kCogStatisticsStart to 1
+        generateCogStats(outputCog, [&warpPct, &reportProgress](double fraction) {
+            reportWarpProgress(warpPct, kCogStatisticsStart + fraction * (1.0 - kCogStatisticsStart),
+                               reportProgress);
+        });
     }
 
     } // namespace raster
@@ -464,7 +470,7 @@ namespace ddb
                                 " that cannot be opened");
     }
 
-    void generateCogStats(const std::string &cogPath) {
+    void generateCogStats(const std::string &cogPath, const std::function<void(double)> &progress) {
         auto dataset = raster::reopenWrittenRaster(io::fromUtf8(cogPath));
         if (!dataset) {
             LOGW << "Cannot open COG for stats generation: " << cogPath;
@@ -474,8 +480,27 @@ namespace ddb
 
         // The statistics of the COG come from the provider, as every other statistic of a raster: exact,
         // for every band, and it writes the sidecar (next to the COG, which is still in its private folder
-        // and is not an artefact yet)
+        // and is not an artefact yet). Every band in one pass: the blocks of a COG hold every band (pixel
+        // interleaving), so a pass per band would decode the whole file once for each of them
         const int nBands = GDALGetRasterCount(hDs);
+        std::vector<int> bands;
+        for (int i = 1; i <= nBands; i++)
+            bands.push_back(i);
+        try {
+            const auto stats = RasterStatsProvider::instance().getAll(cogPath, hDs, bands, std::nullopt, true, progress);
+            for (int i = 1; i <= nBands; i++) {
+                if (!stats[static_cast<size_t>(i - 1)]) {
+                    LOGW << "Cannot compute statistics for band " << i << ": no pixel of the band has a value";
+                }
+            }
+            return;
+        } catch (const GDALException &e) {
+            cancel::throwIfCanceled();
+            LOGW << "Cannot read the bands of " << cogPath << " together for their statistics (" << e.what()
+                 << "): band by band";
+        }
+
+        // A band that cannot be read loses its own statistics alone
         for (int i = 1; i <= nBands; i++) {
             try {
                 RasterStatsProvider::instance().get(cogPath, hDs, i, std::nullopt, true);
@@ -483,6 +508,8 @@ namespace ddb
                 cancel::throwIfCanceled();
                 LOGW << "Cannot compute statistics for band " << i << ": " << e.what();
             }
+            if (progress)
+                progress(static_cast<double>(i) / static_cast<double>(nBands));
         }
     }
 

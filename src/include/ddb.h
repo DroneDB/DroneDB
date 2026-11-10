@@ -841,11 +841,14 @@ extern "C"
      *                         "vector", "gaussiansplat" or "tiles3d") with fraction -1 (nothing measured
      *                         yet), when the build starts;
      *                      2. for a raster (COG) build, "warping" (the raster is reprojected to the tile
-     *                         grid), "overviews" (the pyramid) and "compressing" (the tiles are encoded
-     *                         and written), in that order, with the fractions of the work of GDAL's COG
-     *                         driver; a raster that is on the tile grid already has no warp and never
-     *                         reports "warping" (its phases are "overviews" and "compressing"); the other
-     *                         kinds report no phase of their own and keep fraction -1 until they are done;
+     *                         grid), "overviews" (the pyramid), "compressing" (the tiles are encoded and
+     *                         written) and "statistics" (the exact statistics of every band are computed
+     *                         from the COG), in that order: the first three with the fractions of the work
+     *                         of GDAL's COG driver scaled to 0 to 0.5, the statistics from 0.5 with the
+     *                         fraction of the raster read; a raster that is on the tile grid already has no
+     *                         warp and never reports "warping" (its phases are "overviews", "compressing"
+     *                         and "statistics"); the other kinds report no phase of their own and keep
+     *                         fraction -1 until they are done;
      *                      3. "publishing" with the last fraction reported (never 1) when the output is
      *                         made and moves into place: a cancel at this report stops the build before
      *                         anything is published;

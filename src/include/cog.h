@@ -4,6 +4,7 @@
 #ifndef COG_H
 #define COG_H
 
+#include <functional>
 #include <string>
 
 #include "basicgeometry.h"
@@ -38,7 +39,10 @@ void buildCog(const std::string& input, const std::string& outputCog, const Buil
 // a raster.
 void buildCogInPrivateFolder(const std::string& input, const fs::path& produced,
                              const BuildOptions& options = {});
-void generateCogStats(const std::string& cogPath);
+// Writes the exact statistics of every band of the COG at cogPath into its sidecar (statsSidecarOf),
+// read in one pass over all the bands (RasterStatsProvider::getAll); a band in which no pixel has a value
+// has none. `progress`, when set, is told the fraction (0 to 1) of that work done.
+void generateCogStats(const std::string& cogPath, const std::function<void(double)>& progress = {});
 
 }
 
