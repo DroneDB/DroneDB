@@ -139,8 +139,9 @@ namespace
         {"ARVI", 0.27272727f, 0.55555556f},
     };
 
-    // The thermal passthroughs read band 0 (a single-band thermal raster), whatever the filter says: the
-    // value of the pixel in degrees Celsius, and + 273.15 for Kelvin
+    // The thermal formulas read band 0 (a single-band thermal raster), whatever the filter says: the value of
+    // the pixel in degrees Celsius (the unit of a band that says none), + 273.15 for Kelvin, * 1.8 + 32 for
+    // Fahrenheit (the conversions from the other units of a band: thermal_units_test.cpp)
     TEST_F(VegetationFormulas, theThermalFormulasReadBandZero)
     {
         const std::vector<Pixel> pixels = {{25.5f, 0, 0, 0, 0, 0}, {-10.0f, 0, 0, 0, 0, 0}};
@@ -150,6 +151,9 @@ namespace
         const std::vector<float> kelvin = compute("KELVIN", pixels);
         EXPECT_NEAR(kelvin[0], 298.65f, 1e-4f); // 25.5 + 273.15
         EXPECT_NEAR(kelvin[1], 263.15f, 1e-4f); // -10 + 273.15
+        const std::vector<float> fahrenheit = compute("FAHRENHEIT", pixels);
+        EXPECT_NEAR(fahrenheit[0], 77.9f, 1e-3f); // 25.5 * 1.8 + 32
+        EXPECT_NEAR(fahrenheit[1], 14.0f, 1e-3f); // -10 * 1.8 + 32
     }
 
     TEST_F(VegetationFormulas, everyFormulaOfTheTableIsCheckedByHand)
@@ -157,7 +161,7 @@ namespace
         std::map<std::string, bool> covered;
         for (const VegetationFormula &formula : VegetationEngine::instance().getAllFormulas())
             covered[formula.id] = false;
-        covered["CELSIUS"] = covered["KELVIN"] = true; // theThermalFormulasReadBandZero
+        covered["CELSIUS"] = covered["KELVIN"] = covered["FAHRENHEIT"] = true; // theThermalFormulasReadBandZero
         for (const Expected &e : kExpected)
         {
             SCOPED_TRACE(e.id);
@@ -231,8 +235,8 @@ namespace
             EXPECT_EQ(out[0], kNoData);
             EXPECT_TRUE(std::isfinite(out[1])) << "the pixel next to it is a value";
         }
-        // The thermal passthroughs read band 0
-        for (const char *id : {"CELSIUS", "KELVIN"})
+        // The thermal formulas read band 0
+        for (const char *id : {"CELSIUS", "KELVIN", "FAHRENHEIT"})
         {
             SCOPED_TRACE(id);
             EXPECT_EQ(compute(id, {{kNaN, 0, 0, 0, 0, 0}})[0], kNoData);

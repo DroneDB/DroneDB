@@ -25,6 +25,8 @@ struct ContourOptions {
     double                simplifyTolerance = 0.0; // Geometry simplification (in raster CRS units, 0 = none)
     int                   bandIndex = 1;          // 1-based raster band index
     std::optional<double> nodata;       // NoData value that replaces the one of the band (FR-RAS-31)
+    std::string           formula;      // a thermal formula (CELSIUS, KELVIN, FAHRENHEIT): the levels, the options below and
+                                        // the output are in its unit, converted from the unit of the band (D-022); "" = the band's
 };
 
 /**

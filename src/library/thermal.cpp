@@ -11,6 +11,7 @@
 #include "gdal_raii.h"
 #include "logger.h"
 #include "sensorprofile.h"
+#include "vegetation.h"
 #include "mio.h"
 
 #include <functional>
@@ -21,6 +22,7 @@
 #include <ogr_spatialref.h>
 
 #include <fstream>
+#include <cctype>
 #include <cmath>
 #include <algorithm>
 #include <numeric>
@@ -735,5 +737,93 @@ void pixelToGeo(double px, double py, const double geoTransform[6],
 }
 
 
+
+// ---- Temperature units (D-022)
+
+std::optional<TemperatureUnit> parseTemperatureUnit(const std::string &unit) {
+    std::string u;
+    for (const char c : unit)
+        if (std::isalnum(static_cast<unsigned char>(c)))
+            u += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (u == "k" || u == "kelvin" || u == "degk") return TemperatureUnit::Kelvin;
+    if (u == "c" || u == "celsius" || u == "degc" || u == "centigrade") return TemperatureUnit::Celsius;
+    if (u == "f" || u == "fahrenheit" || u == "degf") return TemperatureUnit::Fahrenheit;
+    return std::nullopt;
+}
+
+TemperatureUnit bandTemperatureUnit(const std::string &bandUnit) {
+    return parseTemperatureUnit(bandUnit).value_or(TemperatureUnit::Celsius);
+}
+
+const char *temperatureUnitSymbol(TemperatureUnit unit) {
+    switch (unit) {
+    case TemperatureUnit::Kelvin: return "K";
+    case TemperatureUnit::Fahrenheit: return "\xC2\xB0" "F";
+    case TemperatureUnit::Celsius: break;
+    }
+    return "\xC2\xB0" "C";
+}
+
+std::optional<TemperatureUnit> thermalFormulaUnit(const std::string &formulaId) {
+    if (formulaId == "CELSIUS") return TemperatureUnit::Celsius;
+    if (formulaId == "KELVIN") return TemperatureUnit::Kelvin;
+    if (formulaId == "FAHRENHEIT") return TemperatureUnit::Fahrenheit;
+    return std::nullopt;
+}
+
+namespace {
+
+// The unit as degrees Celsius: celsius = value * scale + offset
+TemperatureConversion toCelsius(TemperatureUnit unit) {
+    switch (unit) {
+    case TemperatureUnit::Kelvin: return {1.0, -273.15};
+    case TemperatureUnit::Fahrenheit: return {5.0 / 9.0, -32.0 * 5.0 / 9.0};
+    case TemperatureUnit::Celsius: break;
+    }
+    return {};
+}
+
+// Degrees Celsius as the unit
+TemperatureConversion fromCelsius(TemperatureUnit unit) {
+    switch (unit) {
+    case TemperatureUnit::Kelvin: return {1.0, 273.15};
+    case TemperatureUnit::Fahrenheit: return {1.8, 32.0};
+    case TemperatureUnit::Celsius: break;
+    }
+    return {};
+}
+
+} // anonymous namespace
+
+TemperatureConversion temperatureConversion(TemperatureUnit from, TemperatureUnit to) {
+    if (from == to) return {};
+    const TemperatureConversion a = toCelsius(from);
+    const TemperatureConversion b = fromCelsius(to);
+    return {a.scale * b.scale, a.offset * b.scale + b.offset};
+}
+
+namespace {
+
+ThermalFormulaConversion thermalFormulaConversionFrom(TemperatureUnit from, const std::string &formulaId) {
+    const auto to = thermalFormulaUnit(formulaId);
+    if (!to) {
+        if (VegetationEngine::instance().getFormula(formulaId) == nullptr)
+            throw RefusedArgumentException("Unknown formula: " + formulaId);
+        throw RefusedArgumentException(
+            "The values of a point, an area, a profile or contours take a thermal formula (CELSIUS, KELVIN, FAHRENHEIT), not " +
+            formulaId);
+    }
+    return {temperatureConversion(from, *to), temperatureUnitSymbol(*to)};
+}
+
+} // anonymous namespace
+
+ThermalFormulaConversion thermalFormulaConversion(const std::string &bandUnit, const std::string &formulaId) {
+    return thermalFormulaConversionFrom(bandTemperatureUnit(bandUnit), formulaId);
+}
+
+ThermalFormulaConversion celsiusFormulaConversion(const std::string &formulaId) {
+    return thermalFormulaConversionFrom(TemperatureUnit::Celsius, formulaId);
+}
 
 } // namespace ddb

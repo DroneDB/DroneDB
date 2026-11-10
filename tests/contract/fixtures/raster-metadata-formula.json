@@ -176,7 +176,7 @@
       {
         "disabled": true,
         "disabledReason": "Requires bands: T",
-        "expr": "pixel value (passthrough)",
+        "expr": "pixel in degrees Celsius (converted from the unit of the band)",
         "help": "Temperature in degrees Celsius",
         "id": "CELSIUS",
         "name": "Celsius Temperature",
@@ -188,13 +188,25 @@
       {
         "disabled": true,
         "disabledReason": "Requires bands: T",
-        "expr": "pixel + 273.15",
+        "expr": "pixel in K (converted from the unit of the band)",
         "help": "Temperature in Kelvin",
         "id": "KELVIN",
         "name": "Kelvin Temperature",
         "range": [
           233.15,
           423.15
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: T",
+        "expr": "pixel in degrees Fahrenheit (converted from the unit of the band)",
+        "help": "Temperature in degrees Fahrenheit",
+        "id": "FAHRENHEIT",
+        "name": "Fahrenheit Temperature",
+        "range": [
+          -40.0,
+          302.0
         ]
       }
     ],

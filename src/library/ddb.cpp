@@ -1488,6 +1488,7 @@ std::vector<int> previewBandList(const char* previewBands) {
 struct RasterOptionsView {
     ddb::RasterValueOptions values;
     std::optional<double> nodata;
+    std::optional<ddb::TemperatureUnit> rescaleUnit; // new in 2.3: the unit of the rescale of a thermal formula
 };
 
 RasterOptionsView rasterOptions(const DDBRasterOptions* options) {
@@ -1509,17 +1510,38 @@ RasterOptionsView rasterOptions(const DDBRasterOptions* options) {
                 throw InvalidArgsException("options->bbox must hold finite numbers");
         view.values.bbox = std::array<double, 4>{opts.bbox[0], opts.bbox[1], opts.bbox[2], opts.bbox[3]};
     }
-    // The formula is a field a caller of a smaller struct does not have
-    if (opts.structSize >= sizeof(DDBRasterOptions))
+    // The formula and the unit of the rescale are fields a caller of a smaller struct does not have
+    if (opts.structSize >= offsetof(DDBRasterOptions, formula) + sizeof(opts.formula))
         view.values.formula = optStr(opts.formula);
+    if (opts.structSize >= offsetof(DDBRasterOptions, rescaleUnit) + sizeof(opts.rescaleUnit) &&
+        opts.rescaleUnit != nullptr && opts.rescaleUnit[0] != '\0') {
+        view.rescaleUnit = ddb::parseTemperatureUnit(opts.rescaleUnit);
+        if (!view.rescaleUnit)
+            throw InvalidArgsException(std::string("options->rescaleUnit is not a temperature unit (K, C or F): ") +
+                                       opts.rescaleUnit);
+    }
     return view;
+}
+
+// The rescale of a render, in the unit of its formula: a rescale given in another unit (options->rescaleUnit) is
+// converted to the unit of a thermal formula (D-022); any other render keeps it. "" for no rescale.
+std::string rescaleOf(const RasterOptionsView& options, const char* formula, const char* rescale) {
+    std::string text = optStr(rescale);
+    if (text.empty() || !options.rescaleUnit)
+        return text;
+    const auto target = ddb::thermalFormulaUnit(optStr(formula));
+    if (!target)
+        return text;
+    return ddb::convertRescale(text, *options.rescaleUnit, *target);
 }
 
 // The visualization parameters with the NoData override of the options
 ddb::ThumbVisParams visParamsWith(const RasterOptionsView& options, const char* preset, const char* bands,
                                   const char* formula, const char* bandFilter, const char* colormap,
                                   const char* rescale) {
-    ddb::ThumbVisParams params = visParams(preset, bands, formula, bandFilter, colormap, rescale);
+    const std::string unitOfFormula = rescaleOf(options, formula, rescale);
+    ddb::ThumbVisParams params =
+        visParams(preset, bands, formula, bandFilter, colormap, rescale != nullptr ? unitOfFormula.c_str() : nullptr);
     params.nodata = options.nodata;
     return params;
 }
@@ -1625,7 +1647,7 @@ DDBErr DDBMemoryTileEx2(const char* inputPath,
         if (formula) vizKey += std::string(",f:") + formula;
         if (bandFilter) vizKey += std::string(",bf:") + bandFilter;
         if (colormap) vizKey += std::string(",cm:") + colormap;
-        if (rescale) vizKey += std::string(",rs:") + rescale;
+        if (rescale) vizKey += ",rs:" + rescaleOf(raster, formula, rescale);
         if (raster.nodata) vizKey += ",nd:" + std::to_string(*raster.nodata);
 
         auto request = tileRequest(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, nullptr);
@@ -1822,8 +1844,10 @@ DDBErr DDBExportRaster3(const char* inputPath, const char* outputPath,
                         const DDBRasterOptions* options) {
     return guarded<kNewExportCodes>([&] {
         const RasterOptionsView raster = rasterOptions(options);
-        exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter, colormap, rescale,
-                         tileSize, progress, progressUserData, raster.nodata);
+        const std::string rescaleInUnitOfFormula = rescaleOf(raster, formula, rescale);
+        exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter, colormap,
+                         rescale != nullptr ? rescaleInUnitOfFormula.c_str() : nullptr, tileSize, progress,
+                         progressUserData, raster.nodata);
     });
 }
 
@@ -1946,7 +1970,9 @@ DDBErr DDBGenerateContoursEx(const char *rasterPath, double interval, int count,
         if (std::isfinite(maxElev)) opts.maxElev = maxElev;
         opts.simplifyTolerance = std::max(0.0, simplifyTolerance);
         opts.bandIndex = (bandIndex > 0) ? bandIndex : 1;
-        opts.nodata = rasterOptions(options).nodata;
+        const RasterOptionsView raster = rasterOptions(options);
+        opts.nodata = raster.nodata;
+        opts.formula = raster.values.formula;
         return ddb::generateContoursJson(std::string(rasterPath), opts);
     });
 }

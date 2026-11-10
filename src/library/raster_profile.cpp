@@ -141,10 +141,11 @@ class ProfileSampler {
     const DemContext &dem;
     const GeoPixelMap pixelMap;
     std::optional<ThermalCalibration> thermal;
+    TemperatureConversion unit; // a thermal formula: the value in the unit of the formula (D-022)
 
     double toValue(double raw) const {
-        if (!thermal) return dem.toPhysical(raw);
-        return rawToTemperature(static_cast<uint16_t>(raw), *thermal);
+        const double value = thermal ? rawToTemperature(static_cast<uint16_t>(raw), *thermal) : dem.toPhysical(raw);
+        return unit.apply(value);
     }
 
 public:
@@ -155,6 +156,9 @@ public:
     void calibrate(const ThermalCalibration &cal) {
         if (cal.valid) thermal = cal;
     }
+
+    // The samples are given in the unit a thermal formula names, converted from the unit of the band
+    void convert(const TemperatureConversion &conversion) { unit = conversion; }
 
     // Nothing when the point is outside the raster, the read fails or a sample has no value
     std::optional<double> valueAt(double smx, double smy) const {
@@ -315,6 +319,14 @@ std::string getRasterProfileJson(const std::string &filePath,
     }
 
     if (unit.empty() && isThermal) unit = "\xC2\xB0\x43"; // UTF-8 "°C"
+
+    // A thermal formula gives the values in its unit, converted from the unit of the band (D-022); any other
+    // formula has no value along a line (a RefusedArgumentException)
+    if (!options.formula.empty()) {
+        const ThermalFormulaConversion converted = thermalFormulaConversion(unit, options.formula);
+        sampler.convert(converted.conversion);
+        unit = converted.unit;
+    }
 
     const ProfilePath path = buildPath(dem, *line);
 

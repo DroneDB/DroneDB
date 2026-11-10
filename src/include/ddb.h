@@ -1524,7 +1524,15 @@ extern "C"
         double nodata;         /* with DDB_RASTER_OPT_NODATA: a finite NoData value that replaces the NoData value of every band */
         double bbox[4];        /* with DDB_RASTER_OPT_BBOX (value info only): minLon, minLat, maxLon, maxLat (WGS84) */
         const char *formula;   /* the formula of the values (an index for the default stretch of value info; a thermal
-                                  formula, CELSIUS or KELVIN, for the unit of a point or an area), or NULL */
+                                  formula, CELSIUS, KELVIN or FAHRENHEIT (new in 2.3), for the unit of the values of
+                                  value info, a point, an area, a profile and contours (all in the unit of the
+                                  formula, converted from the unit of the band, D-022) and of a tile, a thumbnail
+                                  and an export), or NULL */
+        const char *rescaleUnit; /* new in 2.3: with a thermal formula, the unit of the rescale string of a tile,
+                                  thumbnail or export ("K", "C", "F", "degC", "Kelvin"...): ddb converts the
+                                  rescale to the unit of the formula. NULL (or no thermal formula): the rescale is
+                                  in the unit of the formula. A structSize that stops before this field (a 2.2
+                                  caller) leaves it NULL. */
     } DDBRasterOptions;
 
     /** DDBRasterOptions::flags */
@@ -1572,7 +1580,7 @@ extern "C"
 
     /** DDBGetRasterPointValue with options (new in 2.2): the value at a PIXEL of the raster, for a raster that
      * has no map (an R-JPEG: a pixel of its raw thermal grid). The NoData value of the options replaces the one
-     * of the band (a pixel whose raw sample equals it has no value); a thermal formula (CELSIUS, KELVIN) gives
+     * of the band (a pixel whose raw sample equals it has no value); a thermal formula (CELSIUS, KELVIN, FAHRENHEIT) gives
      * the value in its unit, converted from the unit of the band (D-022), and the result says it in "unit".
      * NULL options are DDBGetRasterPointValue (plus "unit"). The bbox of the options is not used.
      * @param filePath Path to the raster
@@ -1598,13 +1606,16 @@ extern "C"
     DDB_DLL DDBErr DDBGetRasterAreaStatsPixelEx(const char *filePath, int x0, int y0, int x1, int y1,
                                                 const DDBRasterOptions *options, char **output);
 
-    /** DDBGetRasterProfile with options (new in 2.2): the NoData value of the options replaces the one of the band. */
+    /** DDBGetRasterProfile with options (new in 2.2): the NoData value of the options replaces the one of the band.
+     * A thermal formula (CELSIUS, KELVIN, FAHRENHEIT) gives the samples, their statistics and "unit" in its unit,
+     * converted from the unit of the band (D-022; new in 2.3). */
     DDB_DLL DDBErr DDBGetRasterProfileEx(const char *filePath, const char *geoJsonLineString, int samples,
                                          const DDBRasterOptions *options, char **output);
 
     /** DDBGenerateContours with options (new in 2.2): the NoData value of the options replaces the one of the
      * band; the levels, the statistics and the elevations of the output are in the units of the band
-     * (raw * scale + offset). */
+     * (raw * scale + offset), or in the unit of a thermal formula of the options (CELSIUS, KELVIN, FAHRENHEIT,
+     * converted from the unit of the band: interval, minElev, maxElev and baseOffset are in it too; D-022, new in 2.3). */
     DDB_DLL DDBErr DDBGenerateContoursEx(const char *rasterPath, double interval, int count, double baseOffset,
                                          double minElev, double maxElev, double simplifyTolerance, int bandIndex,
                                          const DDBRasterOptions *options, char **output);

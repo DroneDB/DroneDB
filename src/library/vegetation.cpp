@@ -113,8 +113,10 @@ void VegetationEngine::initFormulas() {
     formulas_.push_back({"ARVI", "Atmospherically Resistant Vegetation Index", "(N - (2*R) + B) / (N + (2*R) + B)", "Corrects atmospheric effects", -1, 1, true, "RBN"});
 
     // Thermal formulas
-    formulas_.push_back({"CELSIUS", "Celsius Temperature", "pixel value (passthrough)", "Temperature in degrees Celsius", -40, 150, true, "T"});
-    formulas_.push_back({"KELVIN", "Kelvin Temperature", "pixel + 273.15", "Temperature in Kelvin", 233.15, 423.15, true, "T"});
+    // The band unit (K, degrees Celsius or Fahrenheit) is converted to the unit of the formula (D-022)
+    formulas_.push_back({"CELSIUS", "Celsius Temperature", "pixel in degrees Celsius (converted from the unit of the band)", "Temperature in degrees Celsius", -40, 150, true, "T"});
+    formulas_.push_back({"KELVIN", "Kelvin Temperature", "pixel in K (converted from the unit of the band)", "Temperature in Kelvin", 233.15, 423.15, true, "T"});
+    formulas_.push_back({"FAHRENHEIT", "Fahrenheit Temperature", "pixel in degrees Fahrenheit (converted from the unit of the band)", "Temperature in degrees Fahrenheit", -40, 302, true, "T"});
 }
 
 std::vector<char> VegetationEngine::requiredSymbols(const VegetationFormula &formula) {
@@ -256,7 +258,7 @@ struct PixelBands {
 
 // The formulas this file evaluates; the id of a VegetationFormula is looked up once per call, not
 // compared with every id for every pixel
-enum class FormulaKind { Unknown, NDVI, VARI, EXG, GLI, vNDVI, NDWI, GNDVI, SAVI, EVI, NDRE, NDYI, MPRI, OSAVI, GRVI, ENDVI, ARVI, CELSIUS, KELVIN };
+enum class FormulaKind { Unknown, NDVI, VARI, EXG, GLI, vNDVI, NDWI, GNDVI, SAVI, EVI, NDRE, NDYI, MPRI, OSAVI, GRVI, ENDVI, ARVI, CELSIUS, KELVIN, FAHRENHEIT };
 
 FormulaKind formulaKind(const std::string &id) {
     static const std::pair<const char *, FormulaKind> kinds[] = {
@@ -265,16 +267,19 @@ FormulaKind formulaKind(const std::string &id) {
         {"GNDVI", FormulaKind::GNDVI}, {"SAVI", FormulaKind::SAVI},     {"EVI", FormulaKind::EVI},
         {"NDRE", FormulaKind::NDRE},   {"NDYI", FormulaKind::NDYI},     {"MPRI", FormulaKind::MPRI},
         {"OSAVI", FormulaKind::OSAVI}, {"GRVI", FormulaKind::GRVI},     {"ENDVI", FormulaKind::ENDVI},
-        {"ARVI", FormulaKind::ARVI},   {"CELSIUS", FormulaKind::CELSIUS}, {"KELVIN", FormulaKind::KELVIN}};
+        {"ARVI", FormulaKind::ARVI},   {"CELSIUS", FormulaKind::CELSIUS}, {"KELVIN", FormulaKind::KELVIN},
+        {"FAHRENHEIT", FormulaKind::FAHRENHEIT}};
     for (const auto &[name, kind] : kinds)
         if (id == name) return kind;
     return FormulaKind::Unknown;
 }
 
 // The value of the formula over pixel i (nodata where it is undefined there): p are its bands, and
-// `thermal` is the first band of the raster (or null), which the thermal formulas read as it is
+// `thermal` is the first band of the raster (or null), which the thermal formulas read and convert with
+// `unit` from the unit of the band to their own
 template <FormulaKind kind>
-inline float evaluateFormula(const PixelBands &p, const float *thermal, size_t i, float nodata) {
+inline float evaluateFormula(const PixelBands &p, const float *thermal, const TemperatureConversion &unit, size_t i,
+                             float nodata) {
     const float EPS = 1e-10f;
     const float R = p.R, G = p.G, B = p.B, N = p.N, Re = p.Re;
     // A ratio is undefined where its denominator is (nearly) zero
@@ -302,13 +307,13 @@ inline float evaluateFormula(const PixelBands &p, const float *thermal, size_t i
     case FormulaKind::GRVI: return over(N, G);
     case FormulaKind::ENDVI: return over((N + G) - (2.0f * B), (N + G) + (2.0f * B));
     case FormulaKind::ARVI: return over(N - (2.0f * R) + B, N + (2.0f * R) + B);
-    // Thermal passthrough: the pixel value is already the temperature in °C. For single-band
-    // thermal rasters, band index 0 is used directly.
+    // Thermal: the first band of the raster, converted from its unit to the unit of the formula (D-022). For a
+    // single-band thermal raster, band index 0 is used directly.
     case FormulaKind::CELSIUS:
-        return thermal != nullptr && !hasNoValue(thermal[i], nodata) ? thermal[i] : nodata;
-    // Celsius to Kelvin
     case FormulaKind::KELVIN:
-        return thermal != nullptr && !hasNoValue(thermal[i], nodata) ? thermal[i] + 273.15f : nodata;
+    case FormulaKind::FAHRENHEIT:
+        return thermal != nullptr && !hasNoValue(thermal[i], nodata) ? static_cast<float>(unit.apply(thermal[i]))
+                                                                      : nodata;
     case FormulaKind::Unknown: break;
     }
     return nodata;
@@ -321,6 +326,7 @@ struct FormulaInput {
     float *out;
     size_t count;
     float nodata;
+    TemperatureConversion thermalUnit; // the first band to the unit of a thermal formula
 };
 
 // The formula over every pixel. One instance per formula: the choice of the formula is made once, not
@@ -349,8 +355,14 @@ void formulaLoop(const FormulaInput &in) {
             continue;
         }
 
-        in.out[i] = evaluateFormula<kind>(PixelBands{R, G, B, N, Re}, in.thermal, i, nodata);
+        in.out[i] = evaluateFormula<kind>(PixelBands{R, G, B, N, Re}, in.thermal, in.thermalUnit, i, nodata);
     }
+}
+
+// The conversion from the unit of the first band to the unit of a thermal formula (none for any other formula)
+TemperatureConversion thermalUnitConversion(const std::string &formulaId, TemperatureUnit bandUnit) {
+    const auto unit = thermalFormulaUnit(formulaId);
+    return unit ? temperatureConversion(bandUnit, *unit) : TemperatureConversion();
 }
 
 void runFormula(FormulaKind kind, const FormulaInput &in) {
@@ -373,6 +385,7 @@ void runFormula(FormulaKind kind, const FormulaInput &in) {
     case FormulaKind::ARVI: return formulaLoop<FormulaKind::ARVI>(in);
     case FormulaKind::CELSIUS: return formulaLoop<FormulaKind::CELSIUS>(in);
     case FormulaKind::KELVIN: return formulaLoop<FormulaKind::KELVIN>(in);
+    case FormulaKind::FAHRENHEIT: return formulaLoop<FormulaKind::FAHRENHEIT>(in);
     case FormulaKind::Unknown: return formulaLoop<FormulaKind::Unknown>(in);
     }
 }
@@ -381,9 +394,8 @@ void runFormula(FormulaKind kind, const FormulaInput &in) {
 
 std::string VegetationEngine::renderRefusal(const VegetationFormula &formula, const BandFilter &filter,
                                             const RasterDataKind &data) {
-    // The thermal passthroughs read the first band (FormulaInput::thermal), not a band of the filter
-    const FormulaKind kind = formulaKind(formula.id);
-    if (kind == FormulaKind::CELSIUS || kind == FormulaKind::KELVIN) return dataRefusal(formula, data);
+    // The thermal formulas read the first band (FormulaInput::thermal), not a band of the filter
+    if (isThermalFormulaId(formula.id)) return dataRefusal(formula, data);
     return unavailableReason(formula, filter, data);
 }
 
@@ -392,7 +404,8 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
                                      const std::vector<float*> &bandData,
                                      float *outData,
                                      size_t pixelCount,
-                                     float nodata) const {
+                                     float nodata,
+                                     TemperatureUnit bandUnit) const {
     // Get band data pointers by symbol
     // bandData indices match the raster band order (0-based)
     auto getBand = [&](char sym) -> const float* {
@@ -403,7 +416,7 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
 
     const FormulaInput input{getBand('R'), getBand('G'), getBand('B'), getBand('N'), getBand('e'),
                              (!bandData.empty() && bandData[0] != nullptr) ? bandData[0] : nullptr,
-                             outData, pixelCount, nodata};
+                             outData, pixelCount, nodata, thermalUnitConversion(formula.id, bandUnit)};
     runFormula(formulaKind(formula.id), input);
 }
 

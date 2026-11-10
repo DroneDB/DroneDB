@@ -122,42 +122,20 @@ double valueOfRaw(const DemContext &dem, const std::optional<ThermalCalibration>
 }
 
 // The unit the values of a point or an area are given in (D-022): the unit of the band without a formula; a
-// thermal formula converts them from the unit of the band (K, else degrees Celsius) to its own: CELSIUS to
-// degrees Celsius, KELVIN to K. Any other formula has no value at a point (a RefusedArgumentException).
+// thermal formula converts them from the unit of the band (thermal.h thermalFormulaConversion) to its own: CELSIUS
+// to degrees Celsius, KELVIN to K, FAHRENHEIT to degrees Fahrenheit. Any other formula has no value at a point (a
+// RefusedArgumentException).
 struct ValueFormula {
-    double add = 0.0;  // the value in the unit of the formula is the value of the band + add
-    std::string unit;  // the unit of the values
+    TemperatureConversion conversion; // the value in the unit of the formula
+    std::string unit;                 // the unit of the values
 
-    double apply(double v) const { return v + add; }
+    double apply(double v) const { return conversion.apply(v); }
 };
 
-// Whether a unit of a band is Kelvin: "K", "Kelvin", "degK", "\u00B0K" (any case)
-bool isKelvinUnit(const std::string &unit) {
-    std::string u;
-    for (const char c : unit)
-        if (std::isalnum(static_cast<unsigned char>(c)))
-            u += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return u == "k" || u == "kelvin" || u == "degk";
-}
-
 ValueFormula valueFormulaOf(const std::string &bandUnit, const std::string &formula) {
-    ValueFormula f;
-    f.unit = bandUnit;
-    if (formula.empty()) return f;
-    const VegetationFormula *vf = VegetationEngine::instance().getFormula(formula);
-    if (vf == nullptr) throw RefusedArgumentException("Unknown formula: " + formula);
-    const bool kelvin = isKelvinUnit(bandUnit);
-    if (vf->id == "CELSIUS") {
-        f.add = kelvin ? -273.15 : 0.0;
-        f.unit = "\xC2\xB0\x43"; // UTF-8 "\u00B0C"
-    } else if (vf->id == "KELVIN") {
-        f.add = kelvin ? 0.0 : 273.15;
-        f.unit = "K";
-    } else {
-        throw RefusedArgumentException("The values of a point or an area take a thermal formula (CELSIUS, KELVIN), not " +
-                                       formula);
-    }
-    return f;
+    if (formula.empty()) return ValueFormula{{}, bandUnit};
+    const ThermalFormulaConversion converted = thermalFormulaConversion(bandUnit, formula);
+    return ValueFormula{converted.conversion, converted.unit};
 }
 
 // The unit of the values of a band: its unit type, degrees Celsius for a thermal raster that has none
@@ -392,8 +370,20 @@ PhysicalStats physicalStats(const BandStatistics &s, GDALRasterBandH band, const
 // its minimum to its maximum; the bands of a raster that is not Byte each over the mean +- 2.33 standard
 // deviations, clamped to the minimum and the maximum (stretchRange).
 json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const DemContext &dem,
-                        const std::optional<ThermalCalibration> &cal, const RasterValueOptions &options) {
+                        const std::optional<ThermalCalibration> &cal, const RasterValueOptions &options,
+                        const ValueFormula &unit) {
     auto &ve = VegetationEngine::instance();
+    // A thermal formula (D-022): the stretch of the first band, in the unit of the formula
+    if (isThermalFormulaId(options.formula)) {
+        const std::optional<double> nodataOverride =
+            dem.nodataOverridden ? std::optional<double>(dem.nodata.value) : std::nullopt;
+        const PhysicalStats p = physicalStats(RasterStatsProvider::instance().get(filePath, hDs, 1, nodataOverride),
+                                              dem.band, cal);
+        const double lo = unit.apply(p.min);
+        double hi = unit.apply(p.max);
+        if (!(hi > lo)) hi = lo + 1.0;
+        return json::array({stretchEntry(lo, hi)});
+    }
     if (!options.formula.empty()) {
         const VegetationFormula *formula = ve.getFormula(options.formula);
         // A thermal formula keeps the stretch of the band; an index has its own
@@ -468,17 +458,19 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
         const BandStatistics raw = RasterStatsProvider::instance().get(filePath, hDs, 1, options.nodata);
         const PhysicalStats p = physicalStats(raw, dem.band, rawCal);
 
-        std::string unit = dem.unit;
-        // Provide a sensible default unit label for thermal rasters if not advertised by GDAL.
-        if (unit.empty() && isThermal) unit = "\xC2\xB0\x43"; // UTF-8 "°C"
+        // The unit of the values: the band's, else degrees Celsius for a thermal raster that has none; a thermal
+        // formula gives the range in its own unit (D-022)
+        const ValueFormula unit = isThermalFormulaId(options.formula)
+                                      ? valueFormulaOf(bandUnitOf(dem, isThermal), options.formula)
+                                      : ValueFormula{{}, bandUnitOf(dem, isThermal)};
 
         result["width"] = dem.width;
         result["height"] = dem.height;
         result["bandCount"] = GDALGetRasterCount(hDs);
         result["dataType"] = dataTypeName(dt);
-        result["valueMin"] = tidyValue(p.min, dt);
-        result["valueMax"] = tidyValue(p.max, dt);
-        result["unit"] = unit;
+        result["valueMin"] = tidyValue(unit.apply(p.min), dt);
+        result["valueMax"] = tidyValue(unit.apply(p.max), dt);
+        result["unit"] = unit.unit;
         result["isThermal"] = isThermal;
         result["isDirectValue"] = isDirect;
         result["sensorId"] = sensorId;
@@ -509,7 +501,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
             result["windowPixelCount"] = static_cast<uint64_t>(cols * rows);
         }
 
-        result["stretch"] = defaultStretchJson(filePath, hDs, dem, rawCal, options);
+        result["stretch"] = defaultStretchJson(filePath, hDs, dem, rawCal, options, unit);
         hasStats = true;
     } catch (const GDALException &e) {
         // A file GDAL cannot read, or no pixel with a value: the R-JPEG fallback below, else the failure
@@ -522,6 +514,8 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
     if (!hasStats && isThermal) {
         TemperatureData td = readTemperatureData(filePath);
         if (!td.temperatures.empty()) {
+            // The temperatures of the grid are in degrees Celsius; a thermal formula gives them in its unit (D-022)
+            const ValueFormula unit = valueFormulaOf("\xC2\xB0\x43", isThermalFormulaId(options.formula) ? options.formula : "");
             // A raw sample equal to the NoData value of the options has no value (FR-RAS-31)
             const RawThermalData raw = options.nodata ? extractRawThermalData(filePath) : RawThermalData();
             float vMin = std::numeric_limits<float>::max();
@@ -540,9 +534,9 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
             result["height"] = td.height;
             result["bandCount"] = 1;
             result["dataType"] = dataTypeName(GDT_Unknown);
-            result["valueMin"] = vMin;
-            result["valueMax"] = vMax;
-            result["unit"] = "\xC2\xB0\x43";
+            result["valueMin"] = unit.apply(vMin);
+            result["valueMax"] = unit.apply(vMax);
+            result["unit"] = unit.unit;
             result["isThermal"] = isThermal;
             result["isDirectValue"] = isDirect;
             result["sensorId"] = sensorId;
@@ -552,7 +546,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
             result["nodataInvalid"] = false;
             result["pixelCount"] = static_cast<uint64_t>(td.width) * static_cast<uint64_t>(td.height);
             result["validPixelCount"] = validCount;
-            result["stretch"] = json::array({stretchEntry(vMin, vMax > vMin ? vMax : vMin + 1.0)});
+            result["stretch"] = json::array({stretchEntry(unit.apply(vMin), unit.apply(vMax > vMin ? vMax : vMin + 1.0))});
             hasStats = true;
         }
     }

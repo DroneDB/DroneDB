@@ -5,6 +5,7 @@
 #include "cancellation.h"
 #include "dem.h"
 #include "raster_stats.h"
+#include "thermal.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "json.h"
@@ -356,7 +357,18 @@ std::string generateContoursJson(const std::string &rasterPath,
     cancel::throwIfCanceled();
 
     // --- Open raster ------------------------------------------------------
-    const DemContext dem = openDem(rasterPath, options.bandIndex, BandValueOptions{options.nodata});
+    DemContext dem = openDem(rasterPath, options.bandIndex, BandValueOptions{options.nodata});
+    // A thermal formula gives the levels in its unit (D-022): the band model reads the values in it, so the
+    // statistics, the levels and the elevations written back are all in that unit
+    if (!options.formula.empty()) {
+        const ThermalFormulaConversion converted = thermalFormulaConversion(dem.unit, options.formula);
+        const double scale = dem.hasScale ? dem.scale : 1.0;
+        const double offset = dem.hasScale ? dem.offset : 0.0;
+        dem.scale = scale * converted.conversion.scale;
+        dem.offset = offset * converted.conversion.scale + converted.conversion.offset;
+        dem.hasScale = true;
+        dem.unit = converted.unit;
+    }
     const std::string &unit = dem.unit;
 
     // Band statistics drive interval-from-count and JSON metadata: the exact statistics of the pixels that

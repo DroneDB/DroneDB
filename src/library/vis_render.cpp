@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "vis_render.h"
+#include <cstdio>
 
 #include <algorithm>
 #include <cmath>
@@ -33,6 +34,26 @@ namespace ddb
         {
             throw InvalidArgsException("Invalid rescale values: " + rescale + ". Expected numeric format: min,max");
         }
+    }
+
+    std::string convertRescale(const std::string &rescale, TemperatureUnit from, TemperatureUnit to)
+    {
+        parseRescaleRange(rescale); // the format is checked once, with its message
+        const auto commaPos = rescale.find(',');
+        const TemperatureConversion conversion = temperatureConversion(from, to);
+        double lo, hi;
+        try
+        {
+            lo = conversion.apply(std::stod(rescale.substr(0, commaPos)));
+            hi = conversion.apply(std::stod(rescale.substr(commaPos + 1)));
+        }
+        catch (const std::exception &)
+        {
+            throw InvalidArgsException("Invalid rescale values: " + rescale + ". Expected numeric format: min,max");
+        }
+        char text[64];
+        std::snprintf(text, sizeof(text), "%.9g,%.9g", lo, hi);
+        return text;
     }
 
     std::vector<int> resolveVisBands(const std::string &rasterPath, const ThumbVisParams &visParams, int maxBand)
@@ -188,7 +209,7 @@ namespace ddb
 
         // The rule of what a raster can compute (the lists of formulas ask its base,
         // unavailableReason): a band the filter does not map ("Requires bands: RN" for NDVI over
-        // an RGB raster; not for CELSIUS and KELVIN, which read the first band), then the data
+        // an RGB raster; not for the thermal formulas, which read the first band), then the data
         const std::string refusal = VegetationEngine::renderRefusal(*plan.formula, filter, rasterDataKind(ds));
         if (!refusal.empty())
             throw RefusedArgumentException(refusal);
@@ -202,6 +223,12 @@ namespace ddb
         }
 
         plan.nodata = detectBandNodata(ds, plan.bandCount);
+        if (plan.bandCount >= 1)
+        {
+            // The thermal formulas convert from the unit of the first band to their own (D-022)
+            const char *unitType = GDALGetRasterUnitType(GDALGetRasterBand(ds, 1));
+            plan.bandUnit = bandTemperatureUnit(unitType != nullptr ? unitType : "");
+        }
         return plan;
     }
 
@@ -291,7 +318,7 @@ namespace ddb
 
         buffers.result.resize(pixels);
         VegetationEngine::instance().applyFormula(*plan.formula, plan.filter, buffers.ptrs, buffers.result.data(),
-                                                  pixels, NODATA_SENTINEL);
+                                                  pixels, NODATA_SENTINEL, plan.bandUnit);
     }
 
     std::optional<std::pair<float, float>> fixedDisplayRange(const std::string &rescale,

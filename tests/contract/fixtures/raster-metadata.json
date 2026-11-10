@@ -176,7 +176,7 @@
       {
         "disabled": true,
         "disabledReason": "Requires bands: T",
-        "expr": "pixel value (passthrough)",
+        "expr": "pixel in degrees Celsius (converted from the unit of the band)",
         "help": "Temperature in degrees Celsius",
         "id": "CELSIUS",
         "name": "Celsius Temperature",
@@ -188,13 +188,25 @@
       {
         "disabled": true,
         "disabledReason": "Requires bands: T",
-        "expr": "pixel + 273.15",
+        "expr": "pixel in K (converted from the unit of the band)",
         "help": "Temperature in Kelvin",
         "id": "KELVIN",
         "name": "Kelvin Temperature",
         "range": [
           233.15,
           423.15
+        ]
+      },
+      {
+        "disabled": true,
+        "disabledReason": "Requires bands: T",
+        "expr": "pixel in degrees Fahrenheit (converted from the unit of the band)",
+        "help": "Temperature in degrees Fahrenheit",
+        "id": "FAHRENHEIT",
+        "name": "Fahrenheit Temperature",
+        "range": [
+          -40.0,
+          302.0
         ]
       }
     ],
@@ -412,33 +424,33 @@
     "statistics": {
       "1": {
         "max": 252.0,
-        "mean": 126.0,
+        "mean": 125.99999999999999,
         "min": 0.0,
         "percentiles": {
-          "p2": -46.1679238418121,
+          "p2": -46.16792384181214,
           "p98": 298.1679238418121
         },
-        "std": 73.89181280764467
+        "std": 73.89181280764468
       },
       "2": {
         "max": 248.0,
         "mean": 124.0,
         "min": 0.0,
         "percentiles": {
-          "p2": -48.10484711361269,
+          "p2": -48.104847113612664,
           "p98": 296.10484711361266
         },
-        "std": 73.86474125047755
+        "std": 73.86474125047754
       },
       "3": {
         "max": 252.0,
-        "mean": 126.0,
+        "mean": 126.00000000000003,
         "min": 0.0,
         "percentiles": {
-          "p2": -46.1679238418121,
-          "p98": 298.1679238418121
+          "p2": -46.167923841811984,
+          "p98": 298.167923841812
         },
-        "std": 73.89181280764467
+        "std": 73.89181280764464
       }
     }
   },
