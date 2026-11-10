@@ -775,7 +775,7 @@ namespace
         EXPECT_TRUE(fs::exists(aligned));
     }
 
-    // ------------------------------------------------------------------ outputs that exist (2.1)
+    // ------------------------------------------------------------------ outputs that exist
 
     // Expects the call to fail with `code` and a message of its own
 #define EXPECT_DDB_FAILS(code, call)                                   \

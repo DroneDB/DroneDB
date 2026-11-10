@@ -1546,7 +1546,7 @@ std::vector<int> previewBandList(const char* previewBands) {
 struct RasterOptionsView {
     ddb::RasterValueOptions values;
     std::optional<double> nodata;
-    std::optional<ddb::TemperatureUnit> rescaleUnit; // new in 2.3: the unit of the rescale of a thermal formula
+    std::optional<ddb::TemperatureUnit> rescaleUnit; // new in 2.4: the unit of the rescale of a thermal formula
 };
 
 RasterOptionsView rasterOptions(const DDBRasterOptions* options) {

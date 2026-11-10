@@ -521,7 +521,7 @@ std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPat
 
     if (det.detected) {
         result["detectedSensor"] = det.sensorId;
-        // The profile's name next to its id (new in 2.3); absent for bands no profile matched
+        // The profile's name next to its id (new in 2.4); absent for bands no profile matched
         if (!det.sensorName.empty()) result["detectedSensorName"] = det.sensorName;
 
         json bandsArr = json::array();

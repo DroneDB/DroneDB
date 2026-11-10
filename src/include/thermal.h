@@ -162,7 +162,7 @@ void pixelToGeo(double px, double py, const double geoTransform[6],
 // Temperature units (D-022, FR-XC-24, FR-RAS-03). The one place that knows what the unit of a band is and
 // how a thermal formula (CELSIUS, KELVIN, FAHRENHEIT) turns the values of a band into the unit it is named
 // after: the point, area, profile, contour, value info, tile, thumbnail and export of a thermal raster all
-// convert here, never with a constant of their own. New in 2.3 (the FAHRENHEIT formula and the conversion
+// convert here, never with a constant of their own. New in 2.4 (the FAHRENHEIT formula and the conversion
 // of every value endpoint).
 enum class TemperatureUnit { Celsius, Kelvin, Fahrenheit };
 

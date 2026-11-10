@@ -761,7 +761,7 @@ namespace
             ASSERT_TRUE(algorithm["category"].is_string()) << algorithm["id"];
             byId[algorithm["id"]] = algorithm;
         }
-        // 18 formulas and FAHRENHEIT (U-202, new in 2.3)
+        // 18 formulas and FAHRENHEIT (U-202, new in 2.4)
         EXPECT_EQ(byId.size(), 19u);
 
         const auto bands = [&](const char *id) { return byId.at(id)["requiredBands"]; };

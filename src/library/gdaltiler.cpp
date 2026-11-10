@@ -349,8 +349,8 @@ namespace ddb
                                  !visParams.nodata;
 
         // A tile out of the bounds of the raster before anything is planned (a plan reads statistics): the tile of
-        // visualisation parameters is refused, as it was in 2.3.0, and the one of none (a colormap alone included,
-        // which 2.3.0 drew as the plain tile) is the plain tile, transparent
+        // visualisation parameters is refused ("Out of bounds"), and the one of none (a colormap alone included,
+        // which is no styled tile here) is the plain tile, transparent
         const int xyzY = tms ? tmsToXYZ(ty, tz) : ty;
         if (!getMinMaxCoordsForZ(tz).contains(tx, xyzY))
         {

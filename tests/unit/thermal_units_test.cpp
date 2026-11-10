@@ -161,7 +161,7 @@ namespace
         EXPECT_EQ(thermalFormulaUnit("FAHRENHEIT"), TemperatureUnit::Fahrenheit);
         EXPECT_FALSE(thermalFormulaUnit("NDVI").has_value());
         EXPECT_FALSE(thermalFormulaUnit("celsius").has_value());
-        // The engine lists the new formula next to the two of 2.2
+        // The engine lists the new formula next to the two others
         const VegetationFormula *fahrenheit = VegetationEngine::instance().getFormula("FAHRENHEIT");
         ASSERT_NE(fahrenheit, nullptr);
         EXPECT_EQ(fahrenheit->requiredBands, "T");
@@ -182,7 +182,7 @@ namespace
     }
 
     // CELSIUS over K subtracts 273.15, KELVIN over K keeps it, FAHRENHEIT converts; over degrees Celsius CELSIUS is
-    // the identity and KELVIN adds 273.15 (the 2.2 behaviour); over degrees Fahrenheit CELSIUS converts down
+    // the identity and KELVIN adds 273.15 (the behaviour without a unit); over degrees Fahrenheit CELSIUS converts down
     TEST(ThermalUnits, theFormulasConvertFromTheUnitOfTheBand)
     {
         const VegetationEngine &ve = VegetationEngine::instance();
@@ -223,7 +223,7 @@ namespace
         EXPECT_NEAR(celsiusOfFahrenheit[0], 100.0f, 1e-3);
         EXPECT_NEAR(celsiusOfFahrenheit[1], -40.0f, 1e-3);
 
-        // Without a unit, the band is in degrees Celsius: the 2.2 result
+        // Without a unit, the band is in degrees Celsius: the result without a unit
         std::vector<float> out(band.size());
         ve.applyFormula(*ve.getFormula("KELVIN"), filter, bands, out.data(), band.size(), -9999.0f);
         EXPECT_NEAR(out[1], 233.15f, 1e-4);
@@ -515,7 +515,7 @@ namespace
                   DDBERR_INVALIDARGS);
     }
 
-    // A caller of 2.2 passes a struct that stops before rescaleUnit: its formula still counts and the rescale unit is
+    // A caller built before 2.4 passes a struct that stops before rescaleUnit: its formula still counts and the rescale unit is
     // unset
     TEST(ThermalUnits, aStructOfTheOldSizeKeepsItsFormula)
     {
@@ -661,10 +661,10 @@ namespace
         EXPECT_THROW(convertRescale("10", TemperatureUnit::Celsius, TemperatureUnit::Kelvin), InvalidArgsException);
         EXPECT_THROW(convertRescale("a,b", TemperatureUnit::Celsius, TemperatureUnit::Kelvin), InvalidArgsException);
     }
-    // ---------------------------------------------------------------- contours of a layer styled with an index (2.2)
+    // ---------------------------------------------------------------- contours of a layer styled with an index
 
-    // A host of 2.2 passes the options of the layer to the contours, whose formula 2.2 ignored: an index (the Plant
-    // Health formula of the layer) is still ignored, so the contours are those of the band (K, on multiples of 5 K);
+    // A host passes the options of the layer to the contours: an index (the Plant
+    // Health formula of the layer) is ignored, so the contours are those of the band (K, on multiples of 5 K);
     // a thermal formula converts; a formula that does not exist is refused
     TEST(ThermalUnits, theContoursIgnoreAnIndexFormulaAsIn2_2)
     {

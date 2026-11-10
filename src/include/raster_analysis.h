@@ -136,8 +136,8 @@ std::string getRasterAreaStatsBoxJson(const std::string &filePath, double minLon
  *                              "histogram": {"counts", "edges", "bins", "below", "above"}  // formula only
  *                            }} | null,
  *   "algorithms": [{"id", "name", "expr", "help", "requiredBands", "category", "range"?, "disabled"?, "disabledReason"?}],
- *                  // requiredBands (new in 2.3): the names of the bands the formula reads (["Red", "NIR"]);
- *                  // category (new in 2.3): "rgb", "multispectral" or "thermal", the kind of raster it is for
+ *                  // requiredBands (new in 2.4): the names of the bands the formula reads (["Red", "NIR"]);
+ *                  // category (new in 2.4): "rgb", "multispectral" or "thermal", the kind of raster it is for
  *   "colormaps": ..., "autoBands": {"filter", "match"}, "detectedSensor": string
  * }
  * @param formula "" for the statistics of each band, else the id of a formula: its statistics

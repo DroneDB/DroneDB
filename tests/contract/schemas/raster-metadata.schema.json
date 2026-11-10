@@ -122,7 +122,7 @@
             "type": "string"
           },
           "requiredBands": {
-            "description": "the names of the bands the formula reads (new in 2.3)",
+            "description": "the names of the bands the formula reads (new in 2.4)",
             "type": "array",
             "items": {
               "type": "string"
@@ -130,7 +130,7 @@
             "minItems": 1
           },
           "category": {
-            "description": "the kind of raster the formula is for (new in 2.3)",
+            "description": "the kind of raster the formula is for (new in 2.4)",
             "enum": [
               "rgb",
               "multispectral",

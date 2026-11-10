@@ -108,10 +108,10 @@ public:
     static const char *symbolName(char symbol);
 
     // The names of the bands a formula reads, in the order of its requiredBands ("Red", "NIR"): what the
-    // algorithm list gives as "requiredBands" (new in 2.3), so a client lists them without parsing a symbol string
+    // algorithm list gives as "requiredBands" (new in 2.4), so a client lists them without parsing a symbol string
     static std::vector<std::string> requiredBandNames(const VegetationFormula &formula);
 
-    // The kind of raster a formula is for, "category" of the algorithm list (new in 2.3): "thermal" for a formula
+    // The kind of raster a formula is for, "category" of the algorithm list (new in 2.4): "thermal" for a formula
     // of the thermal band, "multispectral" for one that reads the NIR or the red edge band, else "rgb"
     static const char *formulaCategory(const VegetationFormula &formula);
 

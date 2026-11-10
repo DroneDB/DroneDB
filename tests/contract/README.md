@@ -515,13 +515,6 @@ Registry has to adopt first.
   stockpile detected at this location`), and `DDBDetectAllStockpiles` for a raster without valid
   elevation (no pile found is an empty list, as before). The reason is empty. No fixture changed.
 
-* 2026-11-08: 2.1.0 (ABI 2.1): `capabilities` has `abi.minor` 1 and lists the new exports
-  `DDBAlignRasterEx`, `DDBMaskBordersEx` and `DDBMergeMultispectralEx` (the old exports with an
-  options struct whose `overwrite` replaces an output that exists); `DDBMaskBordersEx` is in
-  `cancellable` too. Additive: no other member and no other fixture changed. The old
-  `DDBAlignRaster`, `DDBMaskBorders` and `DDBMergeMultispectral` now refuse an output that
-  exists (`DDBERR_EXCEPTION`).
-
 * 2026-11-09: one build key (FR-XC-28, D-020). The build folder of an entry is named by its build key: the
   hash for a type whose build depends on the content only, and `<hash>-<16 hex characters of the SHA-256 of
   the georef property>` for a model or a splat that has a georeference (the same file in two folders builds
@@ -535,10 +528,10 @@ Registry has to adopt first.
   element of an entry they re-read (no fixture lists a rescan): `buildKeyChanged` is true when the entry's
   build is not in the folder of its key, which a host rebuilds. The schemas and the five fixtures above
   changed (the three schemas gain `key`); no other fixture did. Registry's exact-JSON adapter tests of
-  these outputs need the member before Registry moves to a libddb build that has it. No version bump is
-  made here: the members are additive and the ABI minor goes up with the release that ships them.
+  these outputs need the member before Registry moves to a libddb build that has it. The members are
+  additive and come with the ABI minor 4 of the 2.4.0 release.
 
-* 2026-11-09: `capabilities` lists the raster value exports of 2.2 (U-201: `DDBGetRasterValueInfoEx`,
+* 2026-11-09: `capabilities` lists the raster value exports (new in 2.4, U-201: `DDBGetRasterValueInfoEx`,
   `DDBGetRasterPointValueEx`, `DDBGetRasterAreaStatsEx`, `DDBGetRasterProfileEx`,
   `DDBGenerateContoursEx`, `DDBGenerateMemoryThumbnailEx2`, `DDBMemoryTileEx2`, `DDBExportRaster3`, and the
   pixel exports for a raster without a map, an R-JPEG: `DDBGetRasterPointValuePixelEx`,
@@ -547,25 +540,20 @@ Registry has to adopt first.
   (`nodata`, `nodataOverridden`, `nodataInvalid`, `pixelCount`, `validPixelCount`, `windowPixelCount`,
   `stretch`, `scale`, `offset`); the point result of a map coordinate adds `lon` and `lat`.
 
-* 2026-11-09: 2.2.0 (ABI 2.2): `capabilities` has `abi.minor` 2. 2.2 ships the raster value exports and
-  `DDBRasterOptions` of U-201 (above; all ten are in `cancellable` too) and the build key members of U-210
-  (`key`, `buildKey`, `buildKeyChanged`). Additive: no export was removed or changed its signature. A host
-  that reads `key` or calls one of the new exports checks `DDBGetAbiVersion()` for 2.2 or later.
-
-* 2026-11-10: new in 2.3 (U-202: FR-RAS-03, FR-RAS-06, D-022): the algorithm list of the raster metadata has the
+* 2026-11-10: new in 2.4 (U-202: FR-RAS-03, FR-RAS-06, D-022): the algorithm list of the raster metadata has the
   thermal formula `FAHRENHEIT` (after `CELSIUS` and `KELVIN`), and the `expr` of `CELSIUS` and `KELVIN` says that the
   band unit (K, degrees Celsius or Fahrenheit) is converted to theirs. `DDBRasterOptions` grows a field,
-  `rescaleUnit` (a smaller `structSize` of 2.2 still works). The thermal formulas convert from the unit of the band:
+  `rescaleUnit` (a smaller `structSize`, from a caller built before 2.4, still works). The thermal formulas convert from the unit of the band:
   value info (`valueMin`, `valueMax`, `unit`, `stretch`), point, area, profile and contours give their values in the
   unit of the formula, and the thermal formulas of a tile, a thumbnail and an export too. No export is added or
   changed.
-* 2026-11-10: `capabilities` lists `DDBGenerateContoursEx2` (new in 2.3, U-413, FR-RAS-11), also in
+* 2026-11-10: `capabilities` lists `DDBGenerateContoursEx2` (new in 2.4, U-413, FR-RAS-11), also in
   `cancellable`: `DDBGenerateContoursEx` with a progress callback (fraction, phase "statistics", "levels" or
   "lines"; a non-zero return cancels). The contour result gains `truncated` (true when the lines were cut at the
   cap) and `featureCap` (the cap, 100000 lines); both are in the output of `DDBGenerateContours`,
   `DDBGenerateContoursEx` and `DDBGenerateContoursEx2`. A host that calls the new export checks
-  `DDBGetAbiVersion()` for 2.3 or later. No fixture lists a contour result.
-* 2026-11-10: the raster panels (U-415, additive, new in 2.3). Each item of the `algorithms` of
+  `DDBGetAbiVersion()` for 2.4 or later. No fixture lists a contour result.
+* 2026-11-10: the raster panels (U-415, additive, new in 2.4). Each item of the `algorithms` of
   `DDBGetRasterMetadata` carries `requiredBands` (the names of the bands the formula reads, for example
   `["Red", "NIR"]`) and `category` (`rgb`, `multispectral` or `thermal`), next to `disabledReason`, whose text
   is unchanged. `DDBGetRasterInfo` adds `detectedSensorName`, the name of the sensor profile next to its id
@@ -577,28 +565,54 @@ Registry has to adopt first.
   profile's presets stand. The generic profile is named `Generic 4-band`. A raster of fewer than three data bands that is not thermal has no band filter, so
   every formula that needs bands is listed disabled with "Requires bands: ...". `raster-metadata.schema.json`
   and `raster-info.schema.json` changed; the two `raster-metadata` fixtures changed, `raster-info` did not.
-* 2026-11-10: `capabilities` lists `DDBBuildEx2` (new in 2.3, FR-PRC-42), also in `cancellable`: `DDBBuildEx`
+* 2026-11-10: `capabilities` lists `DDBBuildEx2` (new in 2.4, FR-PRC-42), also in `cancellable`: `DDBBuildEx`
   with a progress callback (fraction from 0 to 1, or -1 while nothing is measured; the phase: the type of the
   entry, `warping`, `overviews`, `compressing`, `publishing`; a non-zero return cancels). The STAC asset of a
   plain `.laz` is `application/vnd.laszip` (only the COPC file of a build is `application/vnd.laszip+copc`) and
   the footprint of a vector entry is always a WGS 84 envelope (the rescan replaces one in metres); no fixture
   changed.
-* 2026-11-10: `DDBExportRaster3` exports a window (new in 2.3, U-406, FR-RAS-16): with `DDB_RASTER_OPT_BBOX` the
+* 2026-11-10: `DDBExportRaster3` exports a window (new in 2.4, U-406, FR-RAS-16): with `DDB_RASTER_OPT_BBOX` the
   bbox of `DDBRasterOptions` is also the part of the raster the export writes. No export, field or fixture
-  changed; a 2.2 library ignores the box and exports the whole raster.
-* 2026-11-10: `entry.schema.json` documents `warningCode` (new in 2.3, U-408, FR-EXP-18), the stable code of
+  changed; a 2.0 library ignores the box and exports the whole raster.
+* 2026-11-10: `entry.schema.json` documents `warningCode` (new in 2.4, U-408, FR-EXP-18), the stable code of
   the `warning` of an entry: `dwg-converter-missing` for a DWG drawing without the dwg2dxf converter. No
   fixture changed.
-* 2026-11-10: R-JPEG (U-603, FR-RAS-13..15, changed in 2.3): a DJI R-JPEG is read from its raw thermal data;
+* 2026-11-10: R-JPEG (U-603, FR-RAS-13..15, changed in 2.4): a DJI R-JPEG is read from its raw thermal data;
   its raw counts have no conversion in libddb, so value info, point and area give the raw counts with `unit`
   "" (`isDirectValue` false, no `calibration`, whatever the formula), and point and area refuse a thermal
   formula (DDBERR_INVALIDARGS); a FLIR
   R-JPEG has a `calibration` only when its tags give the Planck constants. No schema or fixture changed.
 
-* 2026-11-10: 2.3.0 (ABI 2.3): `capabilities` has `abi.minor` 3. 2.3 ships `DDBBuildEx2` and
-  `DDBGenerateContoursEx2` (both in `cancellable`), `DDBRasterOptions.rescaleUnit`, the window export of
+* 2026-11-10: 2.4.0 (ABI 2.4), the one release after 2.0.1: `capabilities` has `abi.minor` 4. Everything
+  documented as new in 2.4 above is in it, additively (no export was removed or changed its signature, and a
+  `DDBRasterOptions` of a smaller `structSize` still works): the new exports `DDBAlignRasterEx`,
+  `DDBMaskBordersEx` and `DDBMergeMultispectralEx` (the old exports with an options struct whose `overwrite`
+  replaces an output that exists; `DDBMaskBordersEx` is in `cancellable` too), the raster value exports and
+  `DDBRasterOptions` (`DDBGetRasterValueInfoEx`, `DDBGetRasterPointValueEx`, `DDBGetRasterPointValuePixelEx`,
+  `DDBGetRasterAreaStatsEx`, `DDBGetRasterAreaStatsPixelEx`, `DDBGetRasterProfileEx`, `DDBGenerateContoursEx`,
+  `DDBGenerateMemoryThumbnailEx2`, `DDBMemoryTileEx2`, `DDBExportRaster3`, all in `cancellable` too), the build
+  key members (`key`, `buildKey`, `buildKeyChanged`), `DDBBuildEx2` and `DDBGenerateContoursEx2` (both in
+  `cancellable`), `DDBRasterOptions.rescaleUnit` with the `FAHRENHEIT` formula, the window export of
   `DDBExportRaster3` (`DDB_RASTER_OPT_BBOX`), `truncated` and `featureCap` of the contour result, the
-  `warningCode` of an entry, and `requiredBands`, `category` and `detectedSensorName` of the raster panels
-  (above). Additive: no export was removed or changed its signature, and a `DDBRasterOptions` of the 2.2 size
-  still works. A host that calls a new export, sets `rescaleUnit` or sends a bbox to `DDBExportRaster3` checks
-  `DDBGetAbiVersion()` for 2.3 or later.
+  `warningCode` of an entry, and `requiredBands`, `category` and `detectedSensorName` of the raster panels. A
+  host that calls a new export, reads `key`, sets `rescaleUnit` or sends a bbox to `DDBExportRaster3` checks
+  `DDBGetAbiVersion()` for 2.4 or later.
+  Behaviour that changed since 2.0.1, with no new export: `DDBAlignRaster`, `DDBMaskBorders` and
+  `DDBMergeMultispectral` refuse an output that exists (`DDBERR_EXCEPTION`); a tile (`DDBMemoryTileEx`,
+  `DDBMemoryTileEx2`), a thumbnail (`DDBGenerateMemoryThumbnailEx`) and an export (`DDBExportRaster3`) with a
+  colormap and no formula of exactly one band (a DEM, or `bands` or a preset that name one band) are the RGBA
+  picture of that band with the colormap, over the rescale else over the default stretch of the band, with
+  no-data transparent, where 2.0 drew the tile and the thumbnail grey and exported one grey 8-bit band
+  (FR-RAS-01, FR-RAS-26); an unknown colormap of such a band is `DDBERR_INVALIDARGS` (`DDBERR_EXCEPTION` from
+  `DDBMemoryTileEx`); a Byte band with a colormap is stretched over its exact minimum to maximum (its first tile
+  reads the statistics of the band, which a plain Byte tile does not), a band with no pixel that has a value
+  (all NoData) gives a transparent tile, a thumbnail and an export instead of an error, and a tile out of the
+  raster is refused ("Out of bounds") when it has bands, a preset or a NoData value, and transparent with a
+  colormap alone. The temperatures of a FLIR R-JPEG (value info, point, area, thumbnail, export) are those of the
+  FLIR measurement equations (emissivity, reflected temperature, atmosphere, IR window, as far as the file says
+  them) and the raw image of a FLIR record that is a PNG image is read, so the handheld cameras have
+  temperatures; a raw image over 4 megapixels is not read as one, and the relative humidity of the `calibration`
+  is a fraction from 0 to 1 also when it comes from the XMP (FR-RAS-13..15). A rescan or `ddb add` no longer
+  indexes the staging folders (`.align-stage-`, `.mask-stage-`, `.merge-stage-`, `.bm3d-stage-`, `.cog-stage-`,
+  `.copc-stage-` and 16 characters) that an interrupted operation left in a dataset, and the progress of
+  `DDBBuildEx2` always reports `warping` (fraction 0) for a build that warps (FR-PRC-42).

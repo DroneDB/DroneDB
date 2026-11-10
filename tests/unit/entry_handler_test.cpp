@@ -750,7 +750,7 @@ TEST(entryHandler, SidecarMainsLookupOrder) {
 
 // A DWG that this installation cannot convert (no dwg2dxf) is indexed with the stable code of its
 // warning, so a client says "DWG is not supported on this server" and not "the file is corrupted"
-// (new in 2.3).
+// (new in 2.4).
 TEST(entryHandler, DwgWithoutConverterHasTheWarningCode) {
     TestArea ta(TEST_NAME, true);
     const auto root = ta.getFolder("ds");

@@ -107,7 +107,7 @@
       ]
     },
     "detectedSensorName": {
-      "description": "the name of the sensor profile next to its id; absent when no profile matched (new in 2.3)",
+      "description": "the name of the sensor profile next to its id; absent when no profile matched (new in 2.4)",
       "type": "string"
     },
     "indexLayer": {

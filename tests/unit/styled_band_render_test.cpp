@@ -361,9 +361,9 @@ DDBErr tileOutside(const fs::path& raster, const char* colormap, const char* ban
     return err;
 }
 
-// The tile out of the raster keeps the contract of 2.3.0: visualisation parameters (bands) refuse it ("Out of
-// bounds", before any statistics are read), and a colormap alone, which 2.3.0 drew as the plain tile, is the plain
-// tile: transparent
+// The tile out of the raster keeps its contract: visualisation parameters (bands) refuse it ("Out of
+// bounds", before any statistics are read), and a colormap alone, which is no styled tile of a band out of the raster,
+// is the plain tile: transparent
 TEST_F(StyledBandRender, aTileOutsideTheRasterIsRefusedWithBandsAndTransparentWithAColormapAlone) {
     TestArea ta(TEST_NAME, true);
     const fs::path dem = makeDem(ta.getPath("dem.tif"));
@@ -390,7 +390,7 @@ TEST_F(StyledBandRender, aTileOutsideTheRasterIsRefusedWithBandsAndTransparentWi
 }
 
 // A band with no pixel that has a value has no range to stretch: its tile, its thumbnail and its export are empty
-// pictures (all transparent), not errors, as 2.3.0 drew them
+// pictures (all transparent), not errors
 void expectAllNodataBandRendersTransparent(const fs::path& raster, const char* bands) {
     const Picture t = tile(raster, "viridis", nullptr, bands);
     ASSERT_EQ(t.bands.size(), 4u);

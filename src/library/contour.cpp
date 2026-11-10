@@ -409,7 +409,7 @@ std::string generateContoursJson(const std::string &rasterPath,
     session.report(0.0, "statistics");
 
     // A thermal formula gives the levels in its unit (below). Any other formula of the options (the index a layer
-    // is styled with) is ignored, as 2.2 ignored every formula: the contours are those of the values of the band.
+    // is styled with) is ignored: the contours are those of the values of the band.
     // A formula that does not exist is refused.
     if (!options.formula.empty() && !isThermalFormulaId(options.formula) &&
         VegetationEngine::instance().getFormula(options.formula) == nullptr)
@@ -464,7 +464,7 @@ std::string generateContoursJson(const std::string &rasterPath,
     result["unit"] = unit;
     result["rasterMin"] = bMin;
     result["rasterMax"] = bMax;
-    // new in 2.3: the lines were cut at the cap (FR-RAS-11)
+    // new in 2.4: the lines were cut at the cap (FR-RAS-11)
     result["truncated"] = collected.truncated;
     result["featureCap"] = std::max(1, options.maxFeatures);
 

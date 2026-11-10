@@ -65,21 +65,21 @@ namespace
         EXPECT_EQ(version & 0xFFFFu, static_cast<uint32_t>(DDB_ABI_MINOR));
     }
 
-    // Pinned: 2.0.0 is the first release with the handshake and the C ABI of the one version;
-    // 2.1 adds DDBAlignRasterEx, DDBMaskBordersEx and DDBMergeMultispectralEx; 2.2 adds
+    // Pinned: 2.0.0 is the first release with the handshake and the C ABI of the one version; 2.4
+    // is the ABI after 2.0.1 and adds DDBAlignRasterEx, DDBMaskBordersEx, DDBMergeMultispectralEx,
     // DDBRasterOptions with the raster value exports (DDBGetRasterValueInfoEx,
     // DDBGetRasterPointValueEx, DDBGetRasterPointValuePixelEx, DDBGetRasterAreaStatsEx,
     // DDBGetRasterAreaStatsPixelEx, DDBGetRasterProfileEx, DDBGenerateContoursEx,
-    // DDBGenerateMemoryThumbnailEx2, DDBMemoryTileEx2, DDBExportRaster3) and the build key members;
-    // 2.3 adds DDBBuildEx2, DDBGenerateContoursEx2, DDBRasterOptions.rescaleUnit and the window
+    // DDBGenerateMemoryThumbnailEx2, DDBMemoryTileEx2, DDBExportRaster3), the build key members,
+    // DDBBuildEx2, DDBGenerateContoursEx2, DDBRasterOptions.rescaleUnit and the window
     // of DDBExportRaster3 (DDB_RASTER_OPT_BBOX).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_3)
+    TEST(AbiVersion, is2_4)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 3);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x00020003u);
+        EXPECT_EQ(DDB_ABI_MINOR, 4);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x00020004u);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

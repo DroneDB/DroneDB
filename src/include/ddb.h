@@ -122,7 +122,10 @@ extern "C"
     DDB_DLL const char *DDBGetVersion(void);
 
     /** ABI version of the loaded library: (DDB_ABI_MAJOR << 16) | DDB_ABI_MINOR.
-     * Callable at any time, before DDBRegisterProcess too; it never changes DDBGetLastError(). */
+     * Callable at any time, before DDBRegisterProcess too; it never changes DDBGetLastError().
+     * ABI 2.4 (libddb 2.4.0) is the ABI after 2.0: every export, field and JSON member documented as new in 2.4
+     * is missing from a 2.0 library, so a host checks DDBGetAbiVersion() for 2.4 (0x00020004) before it calls
+     * them or sets them, and the DDBGetCapabilities() "symbols" tell which exports the library has. */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -132,7 +135,7 @@ extern "C"
      *   "errorReasons" every reason DDBGetLastErrorReason() returns, sorted
      *   "cancellable"  the exports whose work checks a cancel token (DDBSetThreadCancelToken)
      *                  while it runs, and stops with DDBERR_CANCELED when it is canceled;
-     *                  DDBExportRaster2, DDBExportSplatTrainingData and DDBBuildEx2 (new in 2.3) also
+     *                  DDBExportRaster2, DDBExportSplatTrainingData and DDBBuildEx2 (new in 2.4) also
      *                  stop when their DDBProgressCallback asks to
      *   "symbols"      every exported DDB* function, sorted (ddb.symbols)
      * Fields are only ever added. The string is built once and owned by the library: it stays
@@ -266,7 +269,7 @@ extern "C"
      * The cancellable exports are the render, tile and thumbnail paths, the exports of rasters
      * (export, mask, statistics and metadata, point and area values, profile, volume, stockpiles,
      * contours), the training data of a splat (DDBExportSplatTrainingData) and its .spz
-     * export (DDBExportSplatSpz), DDBBuild, DDBBuildEx, DDBBuildEx2 (new in 2.3),
+     * export (DDBExportSplatSpz), DDBBuild, DDBBuildEx, DDBBuildEx2 (new in 2.4),
      * DDBComputeDeltaLocals and DDBApplyDelta(Ex). A canceled call leaves
      * no half result: a raster output file is deleted, and DDBApplyDelta changes the dataset
      * whole or not at all (see there). */
@@ -743,7 +746,7 @@ extern "C"
      *              Valid types: generic, geoimage, georaster, pointcloud, image, dronedb, markdown, video, geovideo, model, panorama, geopanorama, vector, gaussiansplat
      * @param stopOnError whether to stop processing on first error (default true)
      * @return DDBERR_NONE on success, an error otherwise. Each element of the output of an entry that was
-     *         re-read also has (since 2.2) "buildKey", the key of its build folder now ("<hash>", or
+     *         re-read also has (new in 2.4) "buildKey", the key of its build folder now ("<hash>", or
      *         "<hash>-<georef digest>" for a model or a splat that has a georeference, see "Build
      *         manifest"), and "buildKeyChanged", true when that is not the key of the build the entry
      *         had: its build must be made again (a changed file, a changed georeference, and the first
@@ -819,7 +822,7 @@ extern "C"
     DDB_DLL DDBErr DDBBuildEx(const char *ddbPath, const char *source, const char *dest, bool force,
                               bool pendingOnly, const char *optionsJson);
 
-    /** Build with options and progress (new in 2.3): DDBBuildEx, and the progress of the build is reported to
+    /** Build with options and progress (new in 2.4): DDBBuildEx, and the progress of the build is reported to
      * a callback, which can cancel it.
      * @param ddbPath, source, dest, force, pendingOnly, optionsJson as for DDBBuildEx
      * @param progress optional progress callback (may be NULL: then this is DDBBuildEx): the fraction of the work
@@ -1006,7 +1009,7 @@ extern "C"
      *   source     dataset-relative path of the entry the artifacts belong to: the entry itself,
      *              or the main file of a sidecar
      *   hash       the content hash of source
-     *   key        (new in 2.2) the build key of source, which names its build (URLs: ".../build/{key}/{path}"):
+     *   key        (new in 2.4) the build key of source, which names its build (URLs: ".../build/{key}/{path}"):
      *              the hash for a type whose build depends on the content only, and "<hash>-<digest>"
      *              (16 hexadecimal characters of the SHA-256 of the entry's "georef" property) for a
      *              model or a splat that has a georeference, so the same file in two places has a
@@ -1084,7 +1087,7 @@ extern "C"
      * of the artifact the file belongs to, as DDBGetBuildArtifacts lists it now (the same for
      * the index and the tiles of a directory artifact), absent only when it cannot be read.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param hash the key of the build ("key" of a build object, since 2.2): 64 hexadecimal characters, then for a
+     * @param hash the key of the build ("key" of a build object, new in 2.4): 64 hexadecimal characters, then for a
      *             model or a splat with a georeference '-' and 16 more
      * @param path the file, relative to the build root: an artifact's path, or a file below a
      *             directory artifact ("mvt/3/4/2.pbf"). The dataset path rules apply
@@ -1113,7 +1116,7 @@ extern "C"
      * @param hash the key of the build ("key" of a build object)
      * @param output pointer to C-string where to store the JSON (free with DDBFree):
      *               {"hash": string, "key": string, "artifacts": [artifact], "pending": bool}: the
-     *               content hash and the key (new in 2.2), the artifacts of the destination after the copy (as in
+     *               content hash and the key (new in 2.4), the artifacts of the destination after the copy (as in
      *               a build object) and whether it has a pending marker
      * @return DDBERR_NONE on success, also when the source has nothing built (nothing copied);
      *         DDBERR_INVALIDARGS when an argument is NULL or empty, the hash is malformed or
@@ -1345,15 +1348,15 @@ extern "C"
      *  sensor profile (or it has five or more unnamed data bands, read as R, G, B, Red edge, NIR)
      *  and, for SAVI and EVI, which need reflectance, when its data is floating point:
      *  DDBRenderRasterIndex refuses the others. "detectedSensor" is the id of the sensor profile
-     *  and "detectedSensorName" (new in 2.3) its name, absent when no profile matched.
+     *  and "detectedSensorName" (new in 2.4) its name, absent when no profile matched.
      * @param path Path to raster file
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetRasterInfo(const char *path, char **output);
 
     /** Get raster statistics and histogram for a band or formula, and the list of formulas ("algorithms"):
-     * each item has "requiredBands" (new in 2.3: the names of the bands the formula reads, ["Red", "NIR"])
-     * and "category" (new in 2.3: "rgb", "multispectral" or "thermal"), next to "disabled" and "disabledReason"
+     * each item has "requiredBands" (new in 2.4: the names of the bands the formula reads, ["Red", "NIR"])
+     * and "category" (new in 2.4: "rgb", "multispectral" or "thermal"), next to "disabled" and "disabledReason"
      * @param path Path to raster file
      * @param formula Optional formula (e.g., "NDVI"), NULL for raw bands
      * @param bandFilter Band order (e.g., "RGB", "RGBNRe"), NULL for auto-detect
@@ -1376,13 +1379,13 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise
      *
      * An R-JPEG (FLIR or DJI) with a colormap and a thermal formula (CELSIUS, KELVIN, FAHRENHEIT) or none is drawn from
-     * the temperatures of its raw thermal data (changed in 2.3), in the unit of the formula, over the rescale or else the
+     * the temperatures of its raw thermal data (changed in 2.4), in the unit of the formula, over the rescale or else the
      * minimum to the maximum of the image: the hottest pixel has the last colour of the colormap. Its size is that of
      * the raw thermal image. The raw counts of a DJI R-JPEG are not temperatures (they need DJI's own conversion, which
      * libddb does not have): they are coloured from their minimum to their maximum, the formula gives them no unit and
      * the rescale applies only without a formula.
      *
-     * Another raster with a colormap and no formula (changed in 2.3.1, a patch release with no new export): when it
+     * Another raster with a colormap and no formula (changed in 2.4, with no new export): when it
      * shows exactly one band (a raster of one data band, or bands or a preset that name one band, the same one three
      * times included), the RGBA picture of that band with the colormap, as DDBMemoryTileEx and DDBExportRaster3 draw
      * it: over the rescale, else over the minimum to the maximum of the band, in its physical values (raw * scale +
@@ -1390,7 +1393,7 @@ extern "C"
      * maximum are those of the default stretch of a thumbnail: exact when they are known or the band has at most
      * 2048 x 2048 pixels, else those of a sample of at most that many pixels, so the thumbnail of a large raster can
      * differ slightly from its tiles until its statistics are known. With several bands the colormap is ignored. A
-     * library older than 2.3.1 draws the band grey and ignores the colormap. */
+     * library older than 2.4 draws the band grey and ignores the colormap. */
     DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx(const char *filePath, int size,
                                                  const char *preset, const char *bands,
                                                  const char *formula, const char *bandFilter,
@@ -1417,13 +1420,13 @@ extern "C"
      * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for a formula that does not exist or that
      *         the raster cannot compute (DDBGetLastError: "Unknown formula: X", "Requires bands: RN"); an error otherwise
      *
-     * A colormap without a formula (changed in 2.3.1, a patch release with no new export): when the tile shows exactly
+     * A colormap without a formula (changed in 2.4, with no new export): when the tile shows exactly
      * one band (a raster of one data band, a DEM, or bands or a preset that name one band, the same one three times
      * included), the tile is the RGBA picture of that band with the colormap, the picture DDBExportRaster3 writes:
      * over the rescale, else over the default stretch of the band (its minimum to its maximum over the whole raster,
      * with the NoData of the options), in its physical values (raw * scale + offset), a pixel with no data
      * transparent; a colormap that does not exist is an error (DDBERR_INVALIDARGS from DDBMemoryTileEx2). An 8-bit
-     * band is stretched as any other. With several bands the colormap is ignored. A library older than 2.3.1 draws
+     * band is stretched as any other. With several bands the colormap is ignored. A library older than 2.4 draws
      * the band grey and ignores the colormap and the rescale of a tile without a formula. */
     DDB_DLL DDBErr DDBMemoryTileEx(const char *inputPath,
                                     int tz, int tx, int ty,
@@ -1456,12 +1459,12 @@ extern "C"
     /** Merge single-band rasters into multi-band GeoTIFF
      * @param paths Array of input file paths
      * @param numPaths Number of input file paths
-     * @param outputPath Output GeoTIFF file path. An output that exists is refused (since 2.1;
+     * @param outputPath Output GeoTIFF file path. An output that exists is refused (new in 2.4;
      *        DDBMergeMultispectralEx replaces it when asked), and so is one that is an input.
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputPath);
 
-    /** Options for DDBMergeMultispectralEx (new in 2.1). Set structSize to sizeof(DDBMergeMultispectralOptions) and every
+    /** Options for DDBMergeMultispectralEx (new in 2.4). Set structSize to sizeof(DDBMergeMultispectralOptions) and every
      * other field explicitly. A later version may append fields: a library that does not know them
      * rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
     typedef struct {
@@ -1475,7 +1478,7 @@ extern "C"
     DDB_STATIC_ASSERT(offsetof(DDBMergeMultispectralOptions, overwrite) == 4, "DDBMergeMultispectralOptions layout");
     DDB_STATIC_ASSERT(offsetof(DDBMergeMultispectralOptions, reserved) == 5, "DDBMergeMultispectralOptions layout");
 
-    /** DDBMergeMultispectral with options (new in 2.1): an output that exists is replaced when
+    /** DDBMergeMultispectral with options (new in 2.4): an output that exists is replaced when
      * options->overwrite is true. The merge is written beside outputPath in a private folder and
      * replaces the existing output in one rename once it is complete: a failed call leaves it as
      * it was.
@@ -1503,8 +1506,8 @@ extern "C"
      * @param referencePath Absolute path to reference GeoTIFF
      * @param outputPath Absolute path for the aligned output: a GeoTIFF in the CRS and with the
      *   pixel size and the bands (alpha included) of the source, compressed without loss; only
-     *   its georeference changes (before 2.2 it was a COG in EPSG:3857, JPEG compressed).
-     *   An output that exists is refused (since 2.1; DDBAlignRasterEx replaces it when asked),
+     *   its georeference changes (in 2.0 it was a COG in EPSG:3857, JPEG compressed).
+     *   An output that exists is refused (new in 2.4; DDBAlignRasterEx replaces it when asked),
      *   and so is one that is the source or the reference.
      * @param mode "similarity" (default) or "translation"
      * @param output Pointer to C-string to receive JSON AlignResult (caller frees with DDBFree)
@@ -1515,7 +1518,7 @@ extern "C"
                                   const char *mode,
                                   char **output);
 
-    /** Options for DDBAlignRasterEx (new in 2.1). Set structSize to sizeof(DDBAlignRasterOptions) and every
+    /** Options for DDBAlignRasterEx (new in 2.4). Set structSize to sizeof(DDBAlignRasterOptions) and every
      * other field explicitly. A later version may append fields: a library that does not know them
      * rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
     typedef struct {
@@ -1529,7 +1532,7 @@ extern "C"
     DDB_STATIC_ASSERT(offsetof(DDBAlignRasterOptions, overwrite) == 4, "DDBAlignRasterOptions layout");
     DDB_STATIC_ASSERT(offsetof(DDBAlignRasterOptions, reserved) == 5, "DDBAlignRasterOptions layout");
 
-    /** DDBAlignRaster with options (new in 2.1): an output that exists is replaced when
+    /** DDBAlignRaster with options (new in 2.4): an output that exists is replaced when
      * options->overwrite is true, in one rename once the new GeoTIFF is complete (a failed call leaves
      * it as it was).
      * @param sourcePath, referencePath, outputPath, mode, output as DDBAlignRaster
@@ -1586,7 +1589,7 @@ extern "C"
                                     int tileSize,
                                     DDBProgressCallback progress, void *progressUserData);
 
-    /** Options of the raster value exports (new in 2.2): the NoData value that replaces the one of the band
+    /** Options of the raster value exports (new in 2.4): the NoData value that replaces the one of the band
      * (FR-RAS-31), the formula of the values and a WGS84 window. One type for every endpoint, not a
      * parameter per endpoint. A NULL options pointer is every option unset. Set structSize to
      * sizeof(DDBRasterOptions) and every other field explicitly. A later version may append fields: a
@@ -1597,25 +1600,25 @@ extern "C"
         uint32_t flags;        /* DDB_RASTER_OPT_* bits: which of the fields below are set */
         double nodata;         /* with DDB_RASTER_OPT_NODATA: a finite NoData value that replaces the NoData value of every band */
         double bbox[4];        /* with DDB_RASTER_OPT_BBOX: minLon, minLat, maxLon, maxLat (WGS84). The window of the value
-                                  info (its estimate of the export) and, new in 2.3, the part of the raster that
+                                  info (its estimate of the export) and, new in 2.4, the part of the raster that
                                   DDBExportRaster3 exports; the other calls ignore it */
         const char *formula;   /* the formula of the values (an index for the default stretch of value info; a thermal
-                                  formula, CELSIUS, KELVIN or FAHRENHEIT (new in 2.3), for the unit of the values of
+                                  formula, CELSIUS, KELVIN or FAHRENHEIT (new in 2.4), for the unit of the values of
                                   value info, a point, an area, a profile and contours (all in the unit of the
                                   formula, converted from the unit of the band, D-022) and of a tile, a thumbnail
                                   and an export), or NULL */
-        const char *rescaleUnit; /* new in 2.3: with a thermal formula, the unit of the rescale string of a tile,
+        const char *rescaleUnit; /* new in 2.4: with a thermal formula, the unit of the rescale string of a tile,
                                   thumbnail or export ("K", "C", "F", "degC", "Kelvin"...): ddb converts the
                                   rescale to the unit of the formula. NULL (or no thermal formula): the rescale is
-                                  in the unit of the formula. A structSize that stops before this field (a 2.2
-                                  caller) leaves it NULL. */
+                                  in the unit of the formula. A structSize that stops before this field (a caller
+                                  built before 2.4) leaves it NULL. */
     } DDBRasterOptions;
 
     /** DDBRasterOptions::flags */
     #define DDB_RASTER_OPT_NODATA 0x1u
     #define DDB_RASTER_OPT_BBOX   0x2u
 
-    /** DDBGetRasterValueInfo with options (new in 2.2). The info also has the exact range of the pixels that
+    /** DDBGetRasterValueInfo with options (new in 2.4). The info also has the exact range of the pixels that
      * have a value in the units of the band (valueMin, valueMax: raw * scale + offset), "nodata" (the value
      * that applies), "nodataInvalid" (the NoData value of the band cannot be held by its type),
      * "pixelCount" and "validPixelCount", "windowPixelCount" (with the bbox option: the source pixels in
@@ -1628,7 +1631,7 @@ extern "C"
      *         cannot compute, or invalid options; an error otherwise */
     DDB_DLL DDBErr DDBGetRasterValueInfoEx(const char *filePath, const DDBRasterOptions *options, char **output);
 
-    /** The value of the raster at a map coordinate (new in 2.2): the pixel of the file under the WGS84 point,
+    /** The value of the raster at a map coordinate (new in 2.4): the pixel of the file under the WGS84 point,
      * found with the one geo-to-pixel conversion of libddb (the point is moved to the CRS of the file and
      * converted with the inverse geotransform of the file), in the units of the band.
      * @param filePath Path to the raster
@@ -1642,7 +1645,7 @@ extern "C"
     DDB_DLL DDBErr DDBGetRasterPointValueEx(const char *filePath, double lon, double lat,
                                             const DDBRasterOptions *options, char **output);
 
-    /** Value statistics for a WGS84 rectangle (new in 2.2): the pixels of the file whose centre is inside it
+    /** Value statistics for a WGS84 rectangle (new in 2.4): the pixels of the file whose centre is inside it
      * ("bounds" are those pixels), in the units of the band.
      * @param filePath Path to the raster
      * @param minLon, minLat, maxLon, maxLat The rectangle (WGS84)
@@ -1654,7 +1657,7 @@ extern "C"
                                            double maxLon, double maxLat,
                                            const DDBRasterOptions *options, char **output);
 
-    /** DDBGetRasterPointValue with options (new in 2.2): the value at a PIXEL of the raster, for a raster that
+    /** DDBGetRasterPointValue with options (new in 2.4): the value at a PIXEL of the raster, for a raster that
      * has no map (an R-JPEG: a pixel of its raw thermal grid). The NoData value of the options replaces the one
      * of the band (a pixel whose raw sample equals it has no value); a thermal formula (CELSIUS, KELVIN, FAHRENHEIT) gives
      * the value in its unit, converted from the unit of the band (D-022), and the result says it in "unit".
@@ -1663,7 +1666,7 @@ extern "C"
      * never the byte of the colour preview. An R-JPEG whose raw counts have no conversion (a DJI R-JPEG: its raw counts
      * need DJI's own conversion, which libddb does not have; a FLIR R-JPEG without the Planck constants in its file)
      * gives its raw count with no unit ("unit": ""), and one without raw data its colour byte with no unit; a thermal
-     * formula is then DDBERR_INVALIDARGS (no thermal calibration). Changed in 2.3: they were labelled in degrees
+     * formula is then DDBERR_INVALIDARGS (no thermal calibration). Changed in 2.4: they were labelled in degrees
      * Celsius (the raw counts of a DJI R-JPEG through FLIR's default Planck constants).
      * @param filePath Path to the raster
      * @param x, y The pixel
@@ -1675,7 +1678,7 @@ extern "C"
     DDB_DLL DDBErr DDBGetRasterPointValuePixelEx(const char *filePath, int x, int y,
                                                  const DDBRasterOptions *options, char **output);
 
-    /** DDBGetRasterAreaStats with options (new in 2.2): the statistics of a rectangle of PIXELS, for a raster
+    /** DDBGetRasterAreaStats with options (new in 2.4): the statistics of a rectangle of PIXELS, for a raster
      * that has no map (an R-JPEG). The options as for DDBGetRasterPointValuePixelEx: the NoData value leaves its
      * pixels out, a thermal formula gives the statistics in its unit ("unit"). NULL options are
      * DDBGetRasterAreaStats.
@@ -1688,24 +1691,24 @@ extern "C"
     DDB_DLL DDBErr DDBGetRasterAreaStatsPixelEx(const char *filePath, int x0, int y0, int x1, int y1,
                                                 const DDBRasterOptions *options, char **output);
 
-    /** DDBGetRasterProfile with options (new in 2.2): the NoData value of the options replaces the one of the band.
+    /** DDBGetRasterProfile with options (new in 2.4): the NoData value of the options replaces the one of the band.
      * A thermal formula (CELSIUS, KELVIN, FAHRENHEIT) gives the samples, their statistics and "unit" in its unit,
-     * converted from the unit of the band (D-022; new in 2.3). */
+     * converted from the unit of the band (D-022; new in 2.4). */
     DDB_DLL DDBErr DDBGetRasterProfileEx(const char *filePath, const char *geoJsonLineString, int samples,
                                          const DDBRasterOptions *options, char **output);
 
-    /** DDBGenerateContours with options (new in 2.2): the NoData value of the options replaces the one of the
+    /** DDBGenerateContours with options (new in 2.4): the NoData value of the options replaces the one of the
      * band; the levels, the statistics and the elevations of the output are in the units of the band
      * (raw * scale + offset), or in the unit of a thermal formula of the options (CELSIUS, KELVIN, FAHRENHEIT,
-     * converted from the unit of the band: interval, minElev, maxElev and baseOffset are in it too; D-022, new in 2.3).
-     * Any other formula of the options (an index) is ignored, as in 2.2: the contours are those of the band; a
+     * converted from the unit of the band: interval, minElev, maxElev and baseOffset are in it too; D-022, new in 2.4).
+     * Any other formula of the options (an index) is ignored: the contours are those of the band; a
      * formula that does not exist is DDBERR_INVALIDARGS. */
     DDB_DLL DDBErr DDBGenerateContoursEx(const char *rasterPath, double interval, int count, double baseOffset,
                                          double minElev, double maxElev, double simplifyTolerance, int bandIndex,
                                          const DDBRasterOptions *options, char **output);
 
-    /** DDBGenerateContoursEx with progress (new in 2.3): the output says when the lines were cut at the most a
-     * result holds ("truncated": true, "featureCap": the number of lines; both new in 2.3, and also in the output of
+    /** DDBGenerateContoursEx with progress (new in 2.4): the output says when the lines were cut at the most a
+     * result holds ("truncated": true, "featureCap": the number of lines; both new in 2.4, and also in the output of
      * DDBGenerateContours and DDBGenerateContoursEx).
      * @param progress Called with the fraction done in [0,1] and the phase ("statistics", "levels", "lines"); a
      *                 non-zero return cancels the call (DDBERR_CANCELED). NULL: no progress.
@@ -1715,7 +1718,7 @@ extern "C"
                                           const DDBRasterOptions *options, DDBProgressCallback progress,
                                           void *progressUserData, char **output);
 
-    /** DDBGenerateMemoryThumbnailEx with options (new in 2.2): the NoData value of the options replaces the one
+    /** DDBGenerateMemoryThumbnailEx with options (new in 2.4): the NoData value of the options replaces the one
      * of the bands (a pixel equal to it is transparent and out of the stretch). */
     DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx2(const char *filePath, int size,
                                                   const char *preset, const char *bands,
@@ -1724,7 +1727,7 @@ extern "C"
                                                   const DDBRasterOptions *options,
                                                   uint8_t **outBuffer, int *outBufferSize);
 
-    /** DDBMemoryTileEx with options (new in 2.2): the NoData value of the options replaces the one of the bands
+    /** DDBMemoryTileEx with options (new in 2.4): the NoData value of the options replaces the one of the bands
      * (a pixel equal to it is transparent and out of the stretch). */
     DDB_DLL DDBErr DDBMemoryTileEx2(const char *inputPath,
                                      int tz, int tx, int ty,
@@ -1736,17 +1739,17 @@ extern "C"
                                      const DDBRasterOptions *options,
                                      uint8_t **outBuffer, int *outBufferSize);
 
-    /** DDBExportRaster2 with options (new in 2.2): the NoData value of the options replaces the one of the
+    /** DDBExportRaster2 with options (new in 2.4): the NoData value of the options replaces the one of the
      * bands (a pixel equal to it is not exported).
-     * New in 2.3: with DDB_RASTER_OPT_BBOX the export is the window of the raster under the WGS84 box of the
+     * New in 2.4: with DDB_RASTER_OPT_BBOX the export is the window of the raster under the WGS84 box of the
      * options (minLon, minLat, maxLon, maxLat; FR-RAS-16): the pixels whose centre is inside the box, cut at the
      * edges of the raster, at the resolution of the input, in its CRS (libddb moves the box to it) and with the
      * geotransform of the window. A formula export without a rescale takes its auto range from the window.
      * DDBERR_INVALIDARGS for a box without a pixel of the raster, a box across the antimeridian that the raster
-     * does not cross, or a raster without a geotransform. A library older than 2.3 exports the whole raster and
+     * does not cross, or a raster without a geotransform. A library older than 2.4 exports the whole raster and
      * ignores the box: check the ABI minor of DDBGetCapabilities before sending it.
      *
-     * The output (new in 2.3.1 for a band with a colormap, a patch release with no new export): with a formula,
+     * The output (new in 2.4 for a band with a colormap, with no new export): with a formula,
      * the RGBA picture of the formula painted with the colormap (rdylgn when NULL) over the rescale, else the
      * range of the formula, else the 2nd to the 98th percentile of its values. Without a formula and with a
      * colormap, when the export is exactly one band (a raster of one data band, or bands or a preset that name
@@ -1756,7 +1759,7 @@ extern "C"
      * transparent; DDBERR_INVALIDARGS for a colormap that does not exist. Without a formula and without a
      * colormap, or with a colormap and several bands, 8-bit GeoTIFF of the bands (the first three, or those
      * chosen) scaled to the rescale, else to their minimum and maximum, and the colormap is ignored. A library
-     * older than 2.3.1 ignores the colormap of a band without a formula and writes the 8-bit grey band. */
+     * older than 2.4 ignores the colormap of a band without a formula and writes the 8-bit grey band. */
     DDB_DLL DDBErr DDBExportRaster3(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,
@@ -1907,7 +1910,7 @@ extern "C"
      * dataset mask (any pre-existing alpha band in RGBA inputs is overwritten).
      * @param input Path to input GeoTIFF
      * @param output Path to output GeoTIFF (with internal dataset mask). An output that exists is
-     *        refused (since 2.1; DDBMaskBordersEx replaces it when asked), and so is one that is
+     *        refused (new in 2.4; DDBMaskBordersEx replaces it when asked), and so is one that is
      *        the input.
      * @param near Tolerance in grey levels (default 15)
      * @param white If true, search for white borders instead of black
@@ -1917,7 +1920,7 @@ extern "C"
                                    int nearDist,
                                    bool white);
 
-    /** Options for DDBMaskBordersEx (new in 2.1). Set structSize to sizeof(DDBMaskBordersOptions) and every
+    /** Options for DDBMaskBordersEx (new in 2.4). Set structSize to sizeof(DDBMaskBordersOptions) and every
      * other field explicitly. A later version may append fields: a library that does not know them
      * rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
     typedef struct {
@@ -1931,7 +1934,7 @@ extern "C"
     DDB_STATIC_ASSERT(offsetof(DDBMaskBordersOptions, overwrite) == 4, "DDBMaskBordersOptions layout");
     DDB_STATIC_ASSERT(offsetof(DDBMaskBordersOptions, reserved) == 5, "DDBMaskBordersOptions layout");
 
-    /** DDBMaskBorders with options (new in 2.1): an output that exists is replaced when
+    /** DDBMaskBorders with options (new in 2.4): an output that exists is replaced when
      * options->overwrite is true. The mask is written beside output in a private folder and
      * replaces the existing output (a stale `<output>.msk` goes with it) in one rename once it is
      * complete: a failed or canceled call leaves it as it was.

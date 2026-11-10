@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDBBuildEx2 (new in 2.3, FR-PRC-42): DDBBuildEx with a progress callback.
+// DDBBuildEx2 (new in 2.4, FR-PRC-42): DDBBuildEx with a progress callback.
 //
 //  - the fractions it reports never go down and the last one of a build that succeeds is 1;
 //  - a raster (COG) build reports the phases "warping", "overviews" and "compressing", in that order;
