@@ -17,11 +17,13 @@
 #include "parallel.h"
 #include "raster_cache.h"
 #include "retrypolicy.h"
+#include "sog_layout.h"
 #include "status.h"
 #include "transaction.h"
 
 #include <ctime>
 #include <map>
+#include <memory>
 #include <optional>
 
 namespace ddb
@@ -304,6 +306,9 @@ namespace ddb
         // retry/jitter per RetryPolicy.
         Transaction tx(db);
 
+        // The folders of an unbundled SOG splat are looked at once for the whole rescan
+        const auto sogFolders = std::make_shared<SogFolderCache>();
+
         while (q->fetch())
         {
             const std::string path = q->getText(0);
@@ -348,7 +353,9 @@ namespace ddb
                 }
 
                 Entry e;
-                parseEntry(fullPath, directory, e, true);
+                FingerprintContext ctx;
+                ctx.sogFolders = sogFolders;
+                parseEntry(fullPath, directory, e, true, ctx);
                 doUpdate(updateQ.get(), e);
 
                 if (keyCallback != nullptr)

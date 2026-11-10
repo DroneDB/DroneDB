@@ -5,16 +5,14 @@
 // Image, GeoImage, Panorama, GeoPanorama, Video and GeoVideo entries: photos and videos read
 // through their EXIF/XMP tags. The Image handler also detects GeoRasters (TIFF, JPEG 2000).
 
-#include <algorithm>
-#include <fstream>
 #include <memory>
 
 #include "entry.h"
 #include "entry_handlers_builtin.h"
-#include "json.h"
 #include "logger.h"
 #include "mio.h"
 #include "raster_helper.h"
+#include "sog_layout.h"
 #include "thermal.h"
 
 namespace ddb {
@@ -46,60 +44,6 @@ bool detectionAlwaysReadsMetadata(const io::Path &p)
     return isOtherImage(p) || isVideo(p);
 }
 
-// The textures of an unbundled SOG splat (FR-UPL-09): the .webp files of a folder that holds a
-// lod-meta.json (the level-of-detail layout: the textures are in the folder and in the folders
-// below it, up to the root of the index), or a meta.json of the SOG schema (a single chunk: the
-// textures are next to it). Such a texture is not a photo, and a panorama is a photo twice as
-// wide as high: it is a plain file, like every file of a layout DroneDB does not read.
-constexpr const char *SogLodMeta = "lod-meta.json";
-constexpr const char *SogMeta = "meta.json";
-// A SOG meta.json is a few kilobytes; a bigger file is not read
-constexpr std::uintmax_t SogMetaMaxBytes = 4u * 1024u * 1024u;
-
-bool isSogMeta(const fs::path &file)
-{
-    std::error_code ec;
-    if (!fs::is_regular_file(file, ec) || ec)
-        return false;
-    const auto size = fs::file_size(file, ec);
-    if (ec || size > SogMetaMaxBytes)
-        return false;
-
-    std::ifstream in(file, std::ios::binary);
-    json meta = json::parse(in, nullptr, false);
-    // The schema of a SOG: the splat count and one entry for each texture group
-    return meta.is_object() && meta.contains("count") && meta.contains("means") && meta.contains("scales") &&
-           meta.contains("quats") && meta.contains("sh0");
-}
-
-bool isSogLodTexture(const fs::path &path, const fs::path &rootDirectory)
-{
-    if (rootDirectory.empty() || !io::Path(path).checkExtension({"webp"}))
-        return false;
-
-    std::error_code ec;
-    const std::string relative = io::Path(path).relativeTo(rootDirectory).generic();
-    // Not under the root (a file given alone): no layout to look for
-    if (relative.empty() || relative.rfind("..", 0) == 0)
-        return false;
-
-    fs::path folder = path.parent_path();
-    if (isSogMeta(folder / SogMeta))
-        return true;
-
-    // The folders from the file's up to the root: a lod-meta.json in any of them
-    const auto depth = std::count(relative.begin(), relative.end(), '/');
-    for (std::ptrdiff_t i = 0; i <= depth; i++)
-    {
-        if (fs::exists(folder / SogLodMeta, ec) && !ec)
-            return true;
-        if (!folder.has_parent_path() || folder == folder.parent_path())
-            break;
-        folder = folder.parent_path();
-    }
-    return false;
-}
-
 // The image family is told apart by reading the file: a TIFF or JPEG 2000 with a projection
 // is a GeoRaster, an image twice as wide as high a Panorama, EXIF/XMP GPS tags make it Geo*.
 EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
@@ -107,10 +51,18 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
     EntryType type = EntryType::Generic;
     io::Path p(path);
 
-    if (isSogLodTexture(path, ctx.rootDirectory))
+    // The textures of an unbundled SOG splat (FR-UPL-09, sog_layout.h) are not photos (a
+    // panorama is a photo twice as wide as high): plain files, like every file of a layout
+    // DroneDB does not read
+    if (!ctx.rootDirectory.empty() && isSogTextureName(path))
     {
-        LOGD << "Not an image: a texture of an unbundled SOG splat " << io::toUtf8(path);
-        return EntryType::Generic;
+        if (!ctx.sogFolders)
+            ctx.sogFolders = std::make_shared<SogFolderCache>();
+        if (isUnbundledSogTexture(path, ctx.rootDirectory, *ctx.sogFolders))
+        {
+            LOGD << "Not an image: a texture of an unbundled SOG splat " << io::toUtf8(path);
+            return EntryType::Generic;
+        }
     }
 
     bool gdalRaster = isGdalRaster(p);

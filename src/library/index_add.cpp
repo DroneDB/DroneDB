@@ -6,9 +6,12 @@
 #include "dbops.h"
 #include "dataset_walk.h"
 #include "index_internal.h"
+#include "index_sql.h"
+#include "sog_layout.h"
 
 #include "build.h"
 #include "build_internal.h"
+#include "build_layout.h"
 #include "cad.h"
 #include "entry_handler.h"
 #include "entry_path.h"
@@ -23,7 +26,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <optional>
+#include <set>
 #include <unordered_map>
 
 namespace ddb
@@ -219,7 +224,8 @@ namespace ddb
     };
 
     ComputeOutcome computeAddEntry(const PlannedAddItem &item, const fs::path &directory, bool stopOnError,
-                                   const KnownHashes *knownHashes) {
+                                   const KnownHashes *knownHashes,
+                                   const std::shared_ptr<SogFolderCache> &sogFolders) {
         ComputeOutcome outcome;
         Entry e;
         bool add = false;
@@ -262,7 +268,9 @@ namespace ddb
             }
 
             // parseEntry() skips re-hashing if checkUpdate() already set e.hash.
-            parseEntry(item.absPath, directory, e, true);
+            FingerprintContext ctx;
+            ctx.sogFolders = sogFolders;
+            parseEntry(item.absPath, directory, e, true, ctx);
         } catch (const AppException &ex) {
             // Only item-scoped failures become an item error; anything else aborts the batch.
             const char *code = addErrorCode(ex);
@@ -297,8 +305,10 @@ namespace ddb
                                     const fs::path &directory, bool stopOnError,
                                     const KnownHashes *knownHashes = nullptr) {
         std::vector<ComputeOutcome> outcomes(planned.size());
+        // The folders of an unbundled SOG splat are looked at once for the whole batch
+        const auto sogFolders = std::make_shared<SogFolderCache>();
         parallel::forEachIndex(planned.size(), indexThreads(), [&](size_t i) {
-            outcomes[i] = computeAddEntry(planned[i], directory, stopOnError, knownHashes);
+            outcomes[i] = computeAddEntry(planned[i], directory, stopOnError, knownHashes, sogFolders);
         });
 
         ComputedBatch batch;
@@ -503,10 +513,135 @@ namespace ddb
 
     namespace {
 
-    // What follows a committed add of entries (added or updated): the main files of an added .prj
-    // are refreshed, and the builds that await one of the added files are released
+    bool isImageFamily(EntryType type) {
+        return type == EntryType::Image || type == EntryType::GeoImage || type == EntryType::Panorama ||
+               type == EntryType::GeoPanorama;
+    }
+
+    // The textures of an unbundled SOG splat are plain files (FR-UPL-09), but the type of a file is
+    // decided when it is indexed: a texture indexed before its lod-meta.json or meta.json (a folder
+    // uploaded file by file, in any order and at the same time) is an image. After an add, the
+    // image-family entries that are SOG textures by the rule of sog_layout.h become Generic: those
+    // below an added lod-meta.json or meta.json, and the added ones (their marker may have arrived
+    // while they were read). Their pending markers and the artifacts of their old type go.
+    // Runs after the add transaction; best effort: the add is never reported as failed.
+    // The entries of the add that change are updated in `entries`.
+    void retypeSogTextures(Database *db, const fs::path &directory, std::vector<std::pair<Entry, bool>> &entries,
+                           size_t first) {
+        std::set<std::string> candidates;
+        std::set<std::string> markerFolders;
+        for (size_t i = first; i < entries.size(); i++) {
+            const Entry &e = entries[i].first;
+            const fs::path path = io::Path(io::fromUtf8(e.path)).get();
+            if (isImageFamily(e.type) && isSogTextureName(path))
+                candidates.insert(e.path);
+            else if (e.type != EntryType::Directory && isSogMarkerName(path)) {
+                const auto slash = e.path.rfind('/');
+                markerFolders.insert(slash == std::string::npos ? std::string() : e.path.substr(0, slash));
+            }
+        }
+
+        try {
+            for (const auto &folder : markerFolders) {
+                SqlConditions conditions;
+                conditions.addEntryTypes("type", {EntryType::Image, EntryType::GeoImage, EntryType::Panorama,
+                                                  EntryType::GeoPanorama});
+                if (!folder.empty())
+                    conditions.add(descendantsPredicate(folder, "path"));
+                const auto q = db->query("SELECT path FROM entries" + conditions.whereClause());
+                conditions.bind(*q);
+                while (q->fetch()) {
+                    std::string path = q->getText(0);
+                    if (isSogTextureName(io::Path(io::fromUtf8(path)).get()))
+                        candidates.insert(std::move(path));
+                }
+                q->reset();
+            }
+            if (candidates.empty())
+                return;
+
+            const auto sogFolders = std::make_shared<SogFolderCache>();
+            const auto mtimeQ = db->query("SELECT mtime FROM entries WHERE path=?");
+            struct Retyped {
+                Entry old;
+                Entry fresh;
+                double mtime = 0;
+            };
+            std::vector<Retyped> retyped;
+            for (const auto &path : candidates) {
+                const fs::path absPath = directory / io::Path(io::fromUtf8(path)).get();
+                if (!isUnbundledSogTexture(absPath, directory, *sogFolders))
+                    continue;
+                auto old = getEntry(db, path);
+                if (!old || !isImageFamily(old->type))
+                    continue;
+                mtimeQ->bind(1, path);
+                if (!mtimeQ->fetch()) {
+                    mtimeQ->reset();
+                    continue;
+                }
+                const double mtime = mtimeQ->getDouble(0);
+                mtimeQ->reset();
+
+                try {
+                    Retyped r;
+                    r.fresh.hash = old->hash; // content unchanged: skip re-hashing
+                    FingerprintContext ctx;
+                    ctx.sogFolders = sogFolders;
+                    parseEntry(absPath, directory, r.fresh, true, ctx);
+                    if (isImageFamily(r.fresh.type))
+                        continue;
+                    r.old = std::move(*old);
+                    r.mtime = mtime;
+                    retyped.push_back(std::move(r));
+                } catch (const AppException &ex) {
+                    LOGW << "Cannot read " << path << " again as a texture of a SOG splat: " << ex.what();
+                }
+            }
+            if (retyped.empty())
+                return;
+
+            {
+                const auto updateQ = db->query(kUpdateEntrySql);
+                Transaction tx(db);
+                for (const auto &r : retyped)
+                    doUpdate(updateQ.get(), r.fresh, r.mtime);
+                tx.commit();
+            }
+
+            const fs::path buildDirectory = db->buildDirectory();
+            for (const auto &r : retyped) {
+                LOGD << "Indexed " << r.old.path << " as a texture of an unbundled SOG splat, not an image";
+                const auto &handler = entryHandler(r.old.type);
+                const std::string key = handler.buildKey(r.old);
+                std::error_code ec;
+                fs::remove(pendingMarkerPath(buildDirectory, key, r.old.path), ec);
+                if (ec) {
+                    LOGW << "Cannot remove the pending marker of " << r.old.path << ": " << ec.message();
+                }
+                const fs::path out = buildDirectory / io::fromUtf8(key);
+                for (const auto &folder : handler.artifactFolders(true))
+                    io::assureIsRemoved(out / folder);
+
+                for (size_t i = first; i < entries.size(); i++)
+                    if (entries[i].first.path == r.old.path) {
+                        const time_t mtime = entries[i].first.mtime;
+                        entries[i].first = r.fresh;
+                        entries[i].first.mtime = mtime;
+                    }
+            }
+        } catch (const std::exception &ex) {
+            // The add is already committed: never report it as failed
+            LOGW << "Cannot index the textures of an unbundled SOG splat as files: " << ex.what();
+        }
+    }
+
+    // What follows a committed add of entries (added or updated): the textures of an unbundled
+    // SOG splat become files, the main files of an added .prj are refreshed, and the builds that
+    // await one of the added files are released
     void afterEntriesIndexed(Database *db, const fs::path &directory,
-                             const std::vector<std::pair<Entry, bool>> &entries, size_t first = 0) {
+                             std::vector<std::pair<Entry, bool>> &entries, size_t first = 0) {
+        retypeSogTextures(db, directory, entries, first);
         std::vector<std::string> prjPaths;
         std::vector<std::string> filePaths;
         for (size_t i = first; i < entries.size(); i++) {
@@ -532,7 +667,7 @@ namespace ddb
         // stopOnError: nothing lands in errors; unchanged and conflicting paths are not reported
         const auto planned = planAddCandidates(db, pathList, directory);
         const auto batch = computeAddEntries(planned, directory, /*stopOnError=*/true, knownHashes);
-        const auto committed = commitAddEntries(db, batch.computed, directory, callback);
+        auto committed = commitAddEntries(db, batch.computed, directory, callback);
         afterEntriesIndexed(db, directory, committed.accepted);
     }
 

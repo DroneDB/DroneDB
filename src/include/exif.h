@@ -213,6 +213,9 @@ namespace ddb
         struct ProbeOutcome; // raster_helper.h
     }
 
+    // The folders of an unbundled SOG splat already looked at in a pass (sog_layout.h, private)
+    struct SogFolderCache;
+
     /**
      * @brief Context for caching the parsed metadata of an image between fingerprint and parseEntry.
      *
@@ -243,6 +246,10 @@ namespace ddb
         // an unbundled SOG splat) looks up to it. Empty for a file seen alone: that detection is
         // off.
         fs::path rootDirectory;
+        // What that detection found in the folders it looked at: read once per folder for the
+        // files that share this cache (the files of one add or rescan share one). Made on first use
+        // when null.
+        std::shared_ptr<SogFolderCache> sogFolders;
 
         FingerprintContext() = default;
 
