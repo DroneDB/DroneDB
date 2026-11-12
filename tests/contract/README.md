@@ -657,3 +657,8 @@ Registry has to adopt first.
   size of its proportions within that budget (an even grid of its pixels, nearest); a sample in which no pixel has
   a value is read once more with 16 times the budget. 2.4 computed the formula over every pixel of the part for
   the range and once more for the picture, so the colours of a large export may differ slightly from those of 2.4.
+  The opaque value of an alpha band comes from its full-resolution pixels (a sample of windows, then the exact
+  maximum when the sample has none above 0) instead of GDAL's approximate maximum, which reads the overviews: the
+  cubic overviews of a COG ring above the opaque value at the edge of the data (266 for 255), so a UInt32, Int16,
+  Float32 or Float64 alpha band that holds 255 was opaque at 511 and its renders half transparent (a Float32 band of
+  0..1 at 3).
