@@ -1774,17 +1774,23 @@ extern "C"
      * does not cross, or a raster without a geotransform. A library older than 2.4 exports the whole raster and
      * ignores the box: check the ABI minor of DDBGetCapabilities before sending it.
      *
-     * The output (new in 2.4 for a band with a colormap, with no new export): with a formula,
-     * the RGBA picture of the formula painted with the colormap (rdylgn when NULL) over the rescale, else the
-     * range of the formula, else the 2nd to the 98th percentile of its values. Without a formula and with a
-     * colormap, when the export is exactly one band (a raster of one data band, or bands or a preset that name
-     * one band, the same one three times included), the RGBA picture of that band with the colormap, drawn
-     * as the formula picture is: over the rescale, else over the default stretch of the map tiles (the minimum to
-     * the maximum of the band), the values being the physical ones (raw * scale + offset), a pixel with no data
-     * transparent; DDBERR_INVALIDARGS for a colormap that does not exist. Without a formula and without a
-     * colormap, or with a colormap and several bands, 8-bit GeoTIFF of the bands (the first three, or those
-     * chosen) scaled to the rescale, else to their minimum and maximum, and the colormap is ignored. A library
-     * older than 2.4 ignores the colormap of a band without a formula and writes the 8-bit grey band. */
+     * The output (new in 2.4 for a band with a colormap, with no new export): with a formula, the RGBA picture of
+     * the formula painted with the colormap (rdylgn when NULL) over the rescale, else the range of the formula,
+     * else the 2nd to the 98th percentile of its values (of the window with the bbox). Changed in 2.5: those
+     * percentiles are those of a bounded sample of the exported part, as for the range of a formula thumbnail:
+     * every pixel of a part of at most 4194304 (2048 x 2048) pixels (the output of 2.4), else its pixels in the
+     * largest overview in which it has no more than that, else the part read at the largest size of its proportions
+     * within that budget (an even grid of its pixels, nearest), and a sample in which no pixel has a value is read
+     * once more with 16 times the budget; so the colours of a larger export may differ slightly from those of 2.4,
+     * which computed the formula over every pixel for the range and again for the picture. Without a formula and
+     * with a colormap, when the export is exactly one band (a raster of one data band, or bands or a preset that
+     * name one band, the same one three times included), the RGBA picture of that band with the colormap, drawn as
+     * the formula picture is: over the rescale, else over the default stretch of the map tiles (the minimum to the
+     * maximum of the band), the values being the physical ones (raw * scale + offset), a pixel with no data
+     * transparent; DDBERR_INVALIDARGS for a colormap that does not exist. Without a formula and without a colormap,
+     * or with a colormap and several bands, 8-bit GeoTIFF of the bands (the first three, or those chosen) scaled to
+     * the rescale, else to their minimum and maximum, and the colormap is ignored. A library older than 2.4 ignores
+     * the colormap of a band without a formula and writes the 8-bit grey band. */
     DDB_DLL DDBErr DDBExportRaster3(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,

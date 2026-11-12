@@ -20,19 +20,6 @@
 
 namespace ddb
 {
-    /// Pixel window of a raster read into a buffer of outWidth x outHeight
-    struct RasterWindow
-    {
-        int x = 0;
-        int y = 0;
-        int xsize = 0;
-        int ysize = 0;
-        int outWidth = 0;
-        int outHeight = 0;
-
-        size_t outPixels() const { return static_cast<size_t>(outWidth) * outHeight; }
-    };
-
     /// Parses a "min,max" rescale range. Throws InvalidArgsException when malformed.
     std::pair<float, float> parseRescaleRange(const std::string &rescale);
 

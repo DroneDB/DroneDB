@@ -649,3 +649,11 @@ Registry has to adopt first.
   Behaviour that changed, with no new export: the formula renders (tiles, thumbnails, exports, the formula statistics of the metadata)
   no longer read the bands that cannot change their pixels (a band that the band filter does not map, that has
   no NoData value and is not the alpha band): their output is byte for byte that of 2.4.
+  The automatic range of a formula export (`DDBExportRaster`, `DDBExportRaster2`, `DDBExportRaster3` with a
+  formula that has no range of its own, such as EXG, GRVI or ENDVI, and no rescale) is the 2nd to the 98th
+  percentile of the formula over a bounded sample of the exported part, as for the range of a formula thumbnail:
+  every pixel of a part of at most 4194304 (2048 x 2048) pixels, so those exports are byte for byte those of 2.4;
+  else its pixels in the largest overview in which it has no more than that; else the part read at the largest
+  size of its proportions within that budget (an even grid of its pixels, nearest); a sample in which no pixel has
+  a value is read once more with 16 times the budget. 2.4 computed the formula over every pixel of the part for
+  the range and once more for the picture, so the colours of a large export may differ slightly from those of 2.4.

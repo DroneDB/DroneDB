@@ -417,43 +417,150 @@ namespace ddb
         return finishAll(accumulators, static_cast<uint64_t>(set.width) * static_cast<uint64_t>(set.height), false);
     }
 
-    std::vector<BandStatistics> sampleBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
-                                                     const std::optional<double> &nodata, uint64_t maxPixels)
+    namespace
     {
-        if (bands.empty())
-            return {};
-        maxPixels = std::max<uint64_t>(1, maxPixels);
-        const BandSet full = bandSetOf(ds, bands);
-        const uint64_t pixelCount = static_cast<uint64_t>(full.width) * static_cast<uint64_t>(full.height);
-        if (pixelCount <= maxPixels)
+        // Calls `read` with the windows of a grid of cells of cellWidth x cellHeight pixels from the corner of the
+        // region (x, y, width, height), cut at its right and bottom edges, row by row; each window is read at its size
+        void forEachGridWindow(int x, int y, int width, int height, int cellWidth, int cellHeight,
+                               const std::function<void(const RasterWindow &)> &read)
         {
-            // Small enough to be read whole: the exact statistics
-            auto accumulators = accumulatorsOf(full, nodata);
-            accumulateAll(full, accumulators);
-            return finishAll(accumulators, pixelCount, false);
-        }
-
-        // The largest overview that is within the budget, read whole
-        std::optional<BandSet> overview;
-        uint64_t overviewPixels = 0;
-        const int overviewCount = GDALGetOverviewCount(full.bands.front());
-        for (int i = 0; i < overviewCount; i++)
-        {
-            auto candidate = overviewSetOf(full, i);
-            if (!candidate)
-                continue;
-            const uint64_t pixels = static_cast<uint64_t>(candidate->width) * static_cast<uint64_t>(candidate->height);
-            if (pixels > 0 && pixels <= maxPixels && pixels > overviewPixels)
+            cellWidth = std::max(1, cellWidth);
+            cellHeight = std::max(1, cellHeight);
+            for (int y0 = 0; y0 < height; y0 += cellHeight)
             {
-                overview = std::move(candidate);
-                overviewPixels = pixels;
+                const int h = std::min(cellHeight, height - y0);
+                for (int x0 = 0; x0 < width; x0 += cellWidth)
+                {
+                    const int w = std::min(cellWidth, width - x0);
+                    read(RasterWindow{x + x0, y + y0, w, h, w, h});
+                }
             }
         }
-        if (overview)
+
+        // The pixel of `size` source pixels that output pixel `i` of `out` starts at
+        int scaledEdge(int i, int out, int size)
         {
-            auto accumulators = accumulatorsOf(*overview, nodata);
-            accumulateAll(*overview, accumulators);
-            return finishAll(accumulators, pixelCount, true);
+            return static_cast<int>(static_cast<int64_t>(i) * size / out);
+        }
+    }
+
+    void BoundedSample::forEachBlock(const std::function<void(const RasterWindow &)> &read) const
+    {
+        if (kind != Kind::Blocks)
+            return;
+        // The middle block of each step x step cell of blocks
+        const uint64_t offset = step / 2;
+        const int64_t partRight = static_cast<int64_t>(part.x) + part.xsize;
+        const int64_t partBottom = static_cast<int64_t>(part.y) + part.ysize;
+        for (uint64_t cy = 0; cy * step < blocksY; cy++)
+        {
+            const uint64_t by = firstBlockY + std::min(cy * step + offset, blocksY - 1);
+            const int64_t top = static_cast<int64_t>(by) * blockHeight;
+            const int y0 = static_cast<int>(std::max<int64_t>(top, part.y));
+            const int y1 = static_cast<int>(std::min<int64_t>(top + blockHeight, partBottom));
+            for (uint64_t cx = 0; cx * step < blocksX; cx++)
+            {
+                cancel::throwIfCanceled();
+                const uint64_t bx = firstBlockX + std::min(cx * step + offset, blocksX - 1);
+                const int64_t left = static_cast<int64_t>(bx) * blockWidth;
+                const int x0 = static_cast<int>(std::max<int64_t>(left, part.x));
+                const int x1 = static_cast<int>(std::min<int64_t>(left + blockWidth, partRight));
+                read(RasterWindow{x0, y0, x1 - x0, y1 - y0, x1 - x0, y1 - y0});
+            }
+        }
+    }
+
+    void BoundedSample::forEachWindow(int maxSide, const std::function<void(const RasterWindow &)> &read) const
+    {
+        maxSide = std::max(1, maxSide);
+        switch (kind)
+        {
+        case Kind::Whole:
+            forEachGridWindow(part.x, part.y, part.xsize, part.ysize, maxSide, maxSide, read);
+            return;
+        case Kind::Blocks:
+            forEachBlock([&](const RasterWindow &block) {
+                forEachGridWindow(block.x, block.y, block.xsize, block.ysize, maxSide, maxSide, read);
+            });
+            return;
+        case Kind::Overview:
+        case Kind::Decimated:
+        {
+            // A grid over the window at the size it is read at, whose cells cover at most maxSide pixels of the
+            // raster across and down, each read from the pixels of the raster it covers
+            const int cellWidth = static_cast<int>(static_cast<int64_t>(maxSide) * outWidth / part.xsize);
+            const int cellHeight = static_cast<int>(static_cast<int64_t>(maxSide) * outHeight / part.ysize);
+            forEachGridWindow(0, 0, outWidth, outHeight, cellWidth, cellHeight, [&](const RasterWindow &out) {
+                cancel::throwIfCanceled();
+                const int x0 = part.x + scaledEdge(out.x, outWidth, part.xsize);
+                const int x1 = part.x + scaledEdge(out.x + out.xsize, outWidth, part.xsize);
+                const int y0 = part.y + scaledEdge(out.y, outHeight, part.ysize);
+                const int y1 = part.y + scaledEdge(out.y + out.ysize, outHeight, part.ysize);
+                read(RasterWindow{x0, y0, x1 - x0, y1 - y0, out.xsize, out.ysize});
+            });
+            return;
+        }
+        }
+    }
+
+    BoundedSample planBoundedSample(GDALDatasetH ds, const std::vector<int> &bands, const RasterWindow &part,
+                                    uint64_t maxPixels, BoundedSample::Fallback fallback)
+    {
+        maxPixels = std::max<uint64_t>(1, maxPixels);
+        const BandSet full = bandSetOf(ds, bands);
+        BoundedSample sample;
+        sample.part = part;
+        const uint64_t partWidth = static_cast<uint64_t>(std::max(0, part.xsize));
+        const uint64_t partHeight = static_cast<uint64_t>(std::max(0, part.ysize));
+        if (full.bands.empty() || partWidth * partHeight <= maxPixels)
+            return sample; // small enough to be read whole
+
+        // The largest overview in which the window is within the budget
+        const int overviewCount = GDALGetOverviewCount(full.bands.front());
+        uint64_t overviewPixels = 0;
+        for (int i = 0; i < overviewCount; i++)
+        {
+            const auto candidate = overviewSetOf(full, i);
+            if (!candidate || candidate->width <= 0 || candidate->height <= 0)
+                continue;
+            // The window in the pixels of the overview, rounded up
+            const uint64_t w = std::max<uint64_t>(
+                1, (partWidth * candidate->width + full.width - 1) / static_cast<uint64_t>(full.width));
+            const uint64_t h = std::max<uint64_t>(
+                1, (partHeight * candidate->height + full.height - 1) / static_cast<uint64_t>(full.height));
+            if (w * h <= maxPixels && w * h > overviewPixels && w <= partWidth && h <= partHeight)
+            {
+                sample.kind = BoundedSample::Kind::Overview;
+                sample.overview = i;
+                sample.outWidth = static_cast<int>(w);
+                sample.outHeight = static_cast<int>(h);
+                overviewPixels = w * h;
+            }
+        }
+        if (sample.kind == BoundedSample::Kind::Overview)
+            return sample;
+
+        if (fallback == BoundedSample::Fallback::Decimated)
+        {
+            // The largest size of the proportions of the window within the budget
+            const double scale =
+                std::sqrt(static_cast<double>(maxPixels) / static_cast<double>(partWidth * partHeight));
+            const auto scaled = [scale](uint64_t size) {
+                return std::clamp<uint64_t>(static_cast<uint64_t>(static_cast<double>(size) * scale), 1, size);
+            };
+            uint64_t w = scaled(partWidth);
+            uint64_t h = scaled(partHeight);
+            while (w * h > maxPixels)
+            {
+                if (w >= h && w > 1)
+                    w--;
+                else
+                    h--;
+            }
+            sample.kind = BoundedSample::Kind::Decimated;
+            sample.outWidth = static_cast<int>(w);
+            sample.outHeight = static_cast<int>(h);
+            return sample;
         }
 
         // Else whole blocks of the raster on an even lattice, at most maxPixels pixels: only the blocks
@@ -461,37 +568,68 @@ namespace ddb
         // some of them several times)
         int blockWidth = 0, blockHeight = 0;
         GDALGetBlockSize(full.bands.front(), &blockWidth, &blockHeight);
-        blockWidth = std::clamp(blockWidth, 1, full.width);
-        blockHeight = std::clamp(blockHeight, 1, full.height);
-        const uint64_t blocksX = (static_cast<uint64_t>(full.width) + blockWidth - 1) / blockWidth;
-        const uint64_t blocksY = (static_cast<uint64_t>(full.height) + blockHeight - 1) / blockHeight;
-        const uint64_t maxBlocks =
-            std::max<uint64_t>(1, maxPixels / (static_cast<uint64_t>(blockWidth) * static_cast<uint64_t>(blockHeight)));
-        const uint64_t step = latticeStep(blocksX, blocksY, maxBlocks);
-        // The middle block of each step x step cell of blocks
-        const uint64_t offset = step / 2;
+        sample.kind = BoundedSample::Kind::Blocks;
+        sample.blockWidth = std::clamp(blockWidth, 1, std::max(1, full.width));
+        sample.blockHeight = std::clamp(blockHeight, 1, std::max(1, full.height));
+        sample.firstBlockX = static_cast<uint64_t>(part.x) / sample.blockWidth;
+        sample.firstBlockY = static_cast<uint64_t>(part.y) / sample.blockHeight;
+        sample.blocksX = (static_cast<uint64_t>(part.x) + partWidth - 1) / sample.blockWidth - sample.firstBlockX + 1;
+        sample.blocksY = (static_cast<uint64_t>(part.y) + partHeight - 1) / sample.blockHeight - sample.firstBlockY + 1;
+        const uint64_t maxBlocks = std::max<uint64_t>(
+            1, maxPixels / (static_cast<uint64_t>(sample.blockWidth) * static_cast<uint64_t>(sample.blockHeight)));
+        sample.step = latticeStep(sample.blocksX, sample.blocksY, maxBlocks);
+        return sample;
+    }
+
+    uint64_t sparseSampleBudget(uint64_t maxPixels)
+    {
+        return maxPixels > std::numeric_limits<uint64_t>::max() / SparseSampleFactor
+                   ? std::numeric_limits<uint64_t>::max()
+                   : maxPixels * SparseSampleFactor;
+    }
+
+    std::vector<BandStatistics> sampleBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
+                                                     const std::optional<double> &nodata, uint64_t maxPixels)
+    {
+        if (bands.empty())
+            return {};
+        const BandSet full = bandSetOf(ds, bands);
+        const uint64_t pixelCount = static_cast<uint64_t>(full.width) * static_cast<uint64_t>(full.height);
+        const BoundedSample sample =
+            planBoundedSample(ds, bands, RasterWindow{0, 0, full.width, full.height, full.width, full.height},
+                              maxPixels);
+        switch (sample.kind)
+        {
+        case BoundedSample::Kind::Whole:
+        {
+            // Small enough to be read whole: the exact statistics
+            auto accumulators = accumulatorsOf(full, nodata);
+            accumulateAll(full, accumulators);
+            return finishAll(accumulators, pixelCount, false);
+        }
+        case BoundedSample::Kind::Overview:
+        {
+            // The overview, read whole
+            const BandSet overview = *overviewSetOf(full, sample.overview);
+            auto accumulators = accumulatorsOf(overview, nodata);
+            accumulateAll(overview, accumulators);
+            return finishAll(accumulators, pixelCount, true);
+        }
+        case BoundedSample::Kind::Blocks:
+        case BoundedSample::Kind::Decimated: // not planned with the fallback of whole blocks
+            break;
+        }
 
         auto accumulators = accumulatorsOf(full, nodata);
         std::vector<double> samples;
         std::vector<uint8_t> mask;
         uint64_t read = 0;
-        for (uint64_t cy = 0; cy * step < blocksY; cy++)
-        {
-            const uint64_t by = std::min(cy * step + offset, blocksY - 1);
-            for (uint64_t cx = 0; cx * step < blocksX; cx++)
-            {
-                cancel::throwIfCanceled();
-                const uint64_t bx = std::min(cx * step + offset, blocksX - 1);
-                const int x = static_cast<int>(bx) * blockWidth;
-                const int y = static_cast<int>(by) * blockHeight;
-                const int w = std::min(blockWidth, full.width - x);
-                const int h = std::min(blockHeight, full.height - y);
-                accumulateWindow(full, accumulators, x, y, w, h, samples, mask);
-                read++;
-            }
-        }
-        LOGD << "Sampled " << read << " of " << blocksX * blocksY << " blocks (" << blockWidth << "x" << blockHeight
-             << ") for the statistics of the stretch";
+        sample.forEachBlock([&](const RasterWindow &block) {
+            accumulateWindow(full, accumulators, block.x, block.y, block.xsize, block.ysize, samples, mask);
+            read++;
+        });
+        LOGD << "Sampled " << read << " of " << sample.blocksX * sample.blocksY << " blocks (" << sample.blockWidth
+             << "x" << sample.blockHeight << ") for the statistics of the stretch";
         return finishAll(accumulators, pixelCount, true);
     }
 
@@ -683,10 +821,7 @@ namespace ddb
                 // No pixel of the sample has a value (a sparse raster): once more with a larger budget,
                 // still bounded (the exact statistics when the band fits in it)
                 LOGD << "No pixel of the sample of the bands of " << path << " has a value: a larger sample";
-                const uint64_t larger = maxPixels > std::numeric_limits<uint64_t>::max() / SparseSampleFactor
-                                            ? std::numeric_limits<uint64_t>::max()
-                                            : maxPixels * SparseSampleFactor;
-                stats = sampleBandStatistics(ds, missing, nodata, larger);
+                stats = sampleBandStatistics(ds, missing, nodata, sparseSampleBudget(maxPixels));
             }
             for (size_t i = 0; i < missing.size(); i++)
             {

@@ -16,6 +16,7 @@
 #include "exceptions.h"
 #include "fs.h"
 #include "gdal_inc.h"
+#include "raster_utils.h"
 
 namespace ddb
 {
@@ -181,12 +182,80 @@ namespace ddb
     std::vector<BandStatistics> computeBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
                                                       const std::optional<double> &nodata);
 
+    /// The pixels that a read of at most a budget of pixels takes of a window of a raster (planBoundedSample):
+    /// the bounded read of the stretch of a thumbnail (sampleBandStatistics) and of the automatic range of a
+    /// formula export
+    struct BoundedSample
+    {
+        enum class Kind
+        {
+            Whole,     // every pixel of the window: it has no more than the budget
+            Overview,  // the window in the largest overview that every band has with no more pixels than the budget
+            Decimated, // the window read at a smaller size within the budget: an even grid of its pixels (nearest),
+                       // every block of the window decoded once
+            Blocks     // whole blocks of the raster (cut to the window) on an even lattice: only those are decoded
+        };
+        /// How a window larger than the budget is read when no overview is within it: whole blocks on a lattice
+        /// (the fewest blocks decoded, for a read under a time limit), or decimated (an even spread of its pixels,
+        /// which follows the values of the whole window more closely, for the price of decoding every block)
+        enum class Fallback
+        {
+            Blocks,
+            Decimated
+        };
+        Kind kind = Kind::Whole;
+        RasterWindow part; // the window, in the pixels of the raster
+        // Overview: its index (GDALGetOverview)
+        int overview = -1;
+        // Overview and Decimated: the size the window is read at (in the pixels of the overview)
+        int outWidth = 0;
+        int outHeight = 0;
+        // Blocks: the size of a block, the block of the raster where the window starts, the blocks across and
+        // down that the window touches and the step of the lattice (the middle block of each step x step
+        // cell of them is read)
+        int blockWidth = 0;
+        int blockHeight = 0;
+        uint64_t firstBlockX = 0;
+        uint64_t firstBlockY = 0;
+        uint64_t blocksX = 0;
+        uint64_t blocksY = 0;
+        uint64_t step = 1;
+
+        /// Whether the sample leaves pixels of the window out (all kinds but Whole)
+        bool sampled() const { return kind != Kind::Whole; }
+
+        /// Blocks: calls `read` with each block of the lattice cut to the window (at full resolution: the output
+        /// of each window is its size), row by row
+        void forEachBlock(const std::function<void(const RasterWindow &)> &read) const;
+
+        /// Calls `read` with windows that read the sample, row by row, each over at most maxSide x maxSide pixels
+        /// of the raster, so a read decodes no more blocks and fills no larger buffers than a window of that size:
+        /// the window cut into such windows (Whole: the windows of a grid of that size from its corner), each
+        /// block of the lattice cut the same way (Blocks), or the window at the size it is read at, cut into the
+        /// windows of a grid whose cells cover at most that many pixels (Overview, Decimated: each window has
+        /// fewer output pixels than pixels, which GDAL reads from the overview or decimates)
+        void forEachWindow(int maxSide, const std::function<void(const RasterWindow &)> &read) const;
+    };
+
+    /// How a read of at most maxPixels pixels samples the window `part` (in the pixels of the raster) of the
+    /// bands (1-based) of ds: every pixel when it has no more than that; else its pixels in the largest overview
+    /// that every band has (at the same size) in which it has no more; else, with Fallback::Blocks, those of whole
+    /// blocks of the raster (the blocks of the first band) on an even lattice of at most maxPixels / the pixels of a
+    /// block (one at least) blocks, so that only the blocks read are decoded, and with Fallback::Decimated the window
+    /// read at the largest size of its proportions within the budget. Throws GDALException for a band that ds does
+    /// not have.
+    BoundedSample planBoundedSample(GDALDatasetH ds, const std::vector<int> &bands, const RasterWindow &part,
+                                    uint64_t maxPixels,
+                                    BoundedSample::Fallback fallback = BoundedSample::Fallback::Blocks);
+
+    /// The budget of the second read of a sample in which no pixel has a value (a sparse raster): 16 times
+    /// maxPixels, still bounded
+    uint64_t sparseSampleBudget(uint64_t maxPixels);
+
     /// The statistics of several bands (1-based) of ds from at most maxPixels pixels of each band, read in
-    /// one pass: the exact ones (computeBandStatistics) when a band has no more pixels than that; else
-    /// the pixels of the largest overview that has no more (every band has it), else those of whole blocks
-    /// of the raster spread on an even lattice, so that only the blocks read are decoded. Those are
-    /// marked sampled, and their validCount counts the pixels read that have a value. The call can be
-    /// canceled.
+    /// one pass: the sample of planBoundedSample over the whole raster. Every pixel gives the exact ones
+    /// (computeBandStatistics); the pixels of an overview or of the blocks of a lattice are marked sampled,
+    /// and their validCount counts the pixels read that have a value. The call can be canceled.
     /// @throws NoValidPixelsException (a GDALException) when no pixel of a band has a value, sampled() when
     /// the pixels read were a sample
     std::vector<BandStatistics> sampleBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,

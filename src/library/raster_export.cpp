@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <numeric>
 #include <random>
 #include <sstream>
 #include <vector>
@@ -18,6 +19,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_artefacts.h"
+#include "raster_stats.h"
 #include "parallel.h"
 #include "raster_utils.h"
 #include "sensorprofile.h"
@@ -198,52 +200,65 @@ struct WindowGrid
     }
 };
 
-// Determine rescale range. Explicit rescale and formula-defined ranges
-// keep the export fully memory-bounded. The auto-percentile fallback
-// performs an extra windowed pass that collects valid values (only hit
-// when neither an explicit range nor a formula range is available).
-std::pair<float, float> displayRange(GDALDatasetH hSrcDs, const FormulaPlan &plan, const WindowGrid &grid,
+// The display range of the formula over the exported part: the explicit rescale, else the range of the formula,
+// else the p2-p98 of its values over a bounded sample of the part (planBoundedSample with the budget of the stretch
+// of a thumbnail, kStretchStatisticsMaxPixels, the percentiles of a formula thumbnail, percentileDisplayRange):
+// every pixel of a part that has no more than that, else its pixels in the largest overview within that budget,
+// else the part decimated to that budget (an even grid of its pixels, as a formula thumbnail reads it), so a large
+// export does not compute the formula over the whole raster twice. A sample in which no pixel has a value is read
+// once more with the larger budget of a sparse raster (sparseSampleBudget). The sample is read in windows over at
+// most the automatic tile of the export, whatever tile the request asks for, so the range does not depend on it,
+// and its values are kept in a reservoir of at most kMaxSamples values (a uniform subsample when there are more),
+// so the memory stays bounded.
+std::pair<float, float> displayRange(GDALDatasetH hSrcDs, const FormulaPlan &plan, const SourceWindow &part,
                                      const std::string &rescale)
 {
     if (const auto fixedRange = fixedDisplayRange(rescale, *plan.formula))
         return *fixedRange;
 
-    // Auto-percentile fallback: collect valid values with a windowed
-    // pass. To keep memory bounded regardless of raster size, values
-    // are uniformly subsampled into a fixed-capacity reservoir instead
-    // of storing every pixel.
     constexpr size_t kMaxSamples = 4ull * 1024 * 1024;  // 16 MB of floats
     FormulaBuffers buffers;
     std::vector<float> valid;
-    valid.reserve(std::min<size_t>(kMaxSamples, static_cast<size_t>(grid.width) * grid.height));
+    valid.reserve(std::min<size_t>(kMaxSamples, static_cast<size_t>(part.width) * static_cast<size_t>(part.height)));
     // Deterministic, thread-local RNG (fixed seed) for reproducible
     // reservoir sampling, independent of the global std::rand() state.
     std::mt19937 reservoirRng(1337u);
     std::uniform_real_distribution<double> reservoirUni(0.0, 1.0);
     size_t seen = 0;
-    for (int ty = 0; ty < grid.nty; ty++)
-    {
-        for (int tx = 0; tx < grid.ntx; tx++)
+    const auto collect = [&](const RasterWindow &window) {
+        cancel::throwIfCanceled();
+        computeFormulaValues(hSrcDs, plan, window, buffers);
+        for (float v : buffers.result)
         {
-            cancel::throwIfCanceled();
-            computeFormulaValues(hSrcDs, plan, grid.at(tx, ty), buffers);
-            for (float v : buffers.result)
+            if (!isFormulaValue(v)) continue;
+            seen++;  // count this element before drawing (Algorithm R)
+            if (valid.size() < kMaxSamples)
             {
-                if (!isFormulaValue(v)) continue;
-                seen++;  // count this element before drawing (Algorithm R)
-                if (valid.size() < kMaxSamples)
-                {
-                    valid.push_back(v);
-                }
-                else
-                {
-                    // Reservoir sampling: draw j from [0, seen) where seen
-                    // already includes this element → probability k/seen.
-                    const size_t j = static_cast<size_t>(reservoirUni(reservoirRng) * static_cast<double>(seen));
-                    if (j < kMaxSamples) valid[j] = v;
-                }
+                valid.push_back(v);
+            }
+            else
+            {
+                // Reservoir sampling: draw j from [0, seen) where seen
+                // already includes this element → probability k/seen.
+                const size_t j = static_cast<size_t>(reservoirUni(reservoirRng) * static_cast<double>(seen));
+                if (j < kMaxSamples) valid[j] = v;
             }
         }
+    };
+
+    std::vector<int> bands(static_cast<size_t>(plan.bandCount));
+    std::iota(bands.begin(), bands.end(), 1);
+    const RasterWindow window{part.x, part.y, part.width, part.height, part.width, part.height};
+    const int side = computeExportTileSize(hSrcDs, plan.bandCount, 0);
+    const BoundedSample sample =
+        planBoundedSample(hSrcDs, bands, window, kStretchStatisticsMaxPixels, BoundedSample::Fallback::Decimated);
+    sample.forEachWindow(side, collect);
+    if (valid.empty() && sample.sampled())
+    {
+        LOGD << "No pixel of the sample of the formula has a value: a larger sample";
+        planBoundedSample(hSrcDs, bands, window, sparseSampleBudget(kStretchStatisticsMaxPixels),
+                          BoundedSample::Fallback::Decimated)
+            .forEachWindow(side, collect);
     }
     return percentileDisplayRange(valid);
 }
@@ -387,7 +402,7 @@ void exportFormula(const RasterExport &request, ExportSession &session, GDALData
         planFormula(hSrcDs, request.input, request.formula, request.bandFilter, request.colormap, true);
 
     const WindowGrid grid(part, computeExportTileSize(hSrcDs, bandCount, request.tileSize));
-    const std::pair<float, float> range = displayRange(hSrcDs, plan, grid, request.rescale);
+    const std::pair<float, float> range = displayRange(hSrcDs, plan, part, request.rescale);
 
     // Deleted unless the export completes; declared first, so the dataset is closed
     // before the file is deleted

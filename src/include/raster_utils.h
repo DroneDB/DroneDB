@@ -4,6 +4,7 @@
 #ifndef RASTER_UTILS_H
 #define RASTER_UTILS_H
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 #include <cmath>
@@ -14,6 +15,18 @@
 namespace ddb {
 
 constexpr float NODATA_SENTINEL = -9999.0f;
+
+// Pixel window of a raster read into a buffer of outWidth x outHeight
+struct RasterWindow {
+    int x = 0;
+    int y = 0;
+    int xsize = 0;
+    int ysize = 0;
+    int outWidth = 0;
+    int outHeight = 0;
+
+    size_t outPixels() const { return static_cast<size_t>(outWidth) * outHeight; }
+};
 
 // The nodata value of one band: `has` tells whether the band declares one
 struct BandNodata {
