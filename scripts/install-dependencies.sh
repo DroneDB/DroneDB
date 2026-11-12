@@ -11,7 +11,7 @@ install_ubuntu_packages() {
         apt-utils git cmake unzip tar build-essential flex zip curl wget ntp tzdata \
         bison pkg-config python3 python3-pip python3-jinja2 python3-setuptools libsqlite3-dev autoconf autoconf-archive automake libtool \
         libreadline-dev libssl-dev lbzip2 libbz2-dev zlib1g-dev libffi-dev liblzma-dev \
-        libltdl-dev libicu-dev
+        libltdl-dev libicu-dev nasm
 
     sudo dpkg-reconfigure -f noninteractive tzdata
 
@@ -28,7 +28,7 @@ install_python_packages() {
 
 # Install macOS dependencies via Homebrew
 install_macos_packages() {
-    brew install flex bison autoconf
+    brew install flex bison autoconf nasm
 }
 
 # Main logic to determine platform and install appropriate packages
