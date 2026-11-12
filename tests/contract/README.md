@@ -634,3 +634,15 @@ Registry has to adopt first.
   `webp` or their MIME types; NULL or empty: PNG, the bytes of `DDBMemoryTileEx2`): the visualization tile is
   encoded once in the format the host serves, as `DDBMemoryTileFmt` encodes a plain tile, instead of a PNG
   that the host decodes and encodes again. No output, schema or fixture changes otherwise.
+  `DDBRenderRasterRegionEx2` and `DDBRenderRasterIndexEx` (also in `symbols` and `cancellable`) are
+  `DDBRenderRasterRegionEx` and `DDBRenderRasterIndex` with a `DDBRenderOptions` (16 bytes: `structSize`,
+  `flags`, `background`, `reserved`; NULL: the bytes of the older export). `DDB_RENDER_OPT_BACKGROUND`
+  composites the image over an opaque `0xRRGGBB`, with the rounding of Skia's 8-bit compositing, so a host gets
+  in one call the image it composited over its background (PNG and WebP without alpha, JPEG with that colour
+  instead of white); a GeoTIFF refuses it. The region and index renders (the older exports too) take the format
+  `rgba`: the pixels as RGBA, 8 bits a channel, `width * height * 4` bytes, straight alpha, what the PNG of the
+  same render decodes to, so a host that composites several renders reads them with no encode and decode. A
+  WebP of a grey region render is made RGB (the encoder refused it), the JPEG of a region of a raster with an
+  alpha band is RGB over white (the alpha band of the warp made it a four-band JPEG, read as CMYK), and the JPEG
+  of an index composites the partial alpha of an edge over white with the same rounding (it truncated). The index render warps only the
+  bands its formula reads and the alpha band, into memory: the same image from fewer reads.

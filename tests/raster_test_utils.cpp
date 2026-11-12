@@ -24,6 +24,33 @@ namespace testutils
                 std::strstr(msg, "succeeds") != nullptr && std::strstr(msg, "GDALOpen(/vsimem/") == nullptr)
                 openCount++;
         }
+
+        std::mutex debugMutex;
+        std::vector<std::string> debugMessages;
+
+        void CPL_STDCALL keepDebugMessage(CPLErr level, CPLErrorNum, const char *msg)
+        {
+            if (level != CE_Debug || msg == nullptr)
+                return;
+            const std::lock_guard<std::mutex> lock(debugMutex);
+            debugMessages.emplace_back(msg);
+        }
+
+        // Turns CPL_DEBUG on and sends every message to handler; restore() puts back what was there
+        std::string enableDebug(CPLErrorHandler handler, CPLErrorHandler &previous)
+        {
+            const char *debug = CPLGetConfigOption("CPL_DEBUG", nullptr);
+            std::string previousDebug = debug != nullptr ? debug : "";
+            CPLSetConfigOption("CPL_DEBUG", "ON");
+            previous = CPLSetErrorHandler(handler);
+            return previousDebug;
+        }
+
+        void restoreDebug(CPLErrorHandler previous, const std::string &previousDebug)
+        {
+            CPLSetErrorHandler(previous);
+            CPLSetConfigOption("CPL_DEBUG", previousDebug.empty() ? nullptr : previousDebug.c_str());
+        }
     }
 
     fs::path createGeoRaster(const fs::path &path, const GeoRasterSpec &spec)
@@ -142,22 +169,42 @@ namespace testutils
 
     GdalOpenCounter::GdalOpenCounter()
     {
-        const char *debug = CPLGetConfigOption("CPL_DEBUG", nullptr);
-        previousDebug_ = debug != nullptr ? debug : "";
         openCount = 0;
-        CPLSetConfigOption("CPL_DEBUG", "ON");
-        previous_ = CPLSetErrorHandler(countOpens);
+        previousDebug_ = enableDebug(countOpens, previous_);
     }
 
     GdalOpenCounter::~GdalOpenCounter()
     {
-        CPLSetErrorHandler(previous_);
-        CPLSetConfigOption("CPL_DEBUG", previousDebug_.empty() ? nullptr : previousDebug_.c_str());
+        restoreDebug(previous_, previousDebug_);
     }
 
     int GdalOpenCounter::count() const
     {
         return openCount.load();
+    }
+
+    GdalDebugLog::GdalDebugLog()
+    {
+        {
+            const std::lock_guard<std::mutex> lock(debugMutex);
+            debugMessages.clear();
+        }
+        previousDebug_ = enableDebug(keepDebugMessage, previous_);
+    }
+
+    GdalDebugLog::~GdalDebugLog()
+    {
+        restoreDebug(previous_, previousDebug_);
+    }
+
+    std::vector<std::string> GdalDebugLog::containing(const std::string &text) const
+    {
+        const std::lock_guard<std::mutex> lock(debugMutex);
+        std::vector<std::string> found;
+        for (const auto &message : debugMessages)
+            if (message.find(text) != std::string::npos)
+                found.push_back(message);
+        return found;
     }
 
     std::vector<uint8_t> takeBuffer(uint8_t *buffer, int size)

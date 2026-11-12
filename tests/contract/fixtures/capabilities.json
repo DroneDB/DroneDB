@@ -53,8 +53,10 @@
       "DDBMemoryTileEx3",
       "DDBMemoryTileFmt",
       "DDBRenderRasterIndex",
+      "DDBRenderRasterIndexEx",
       "DDBRenderRasterRegion",
       "DDBRenderRasterRegionEx",
+      "DDBRenderRasterRegionEx2",
       "DDBTile"
     ],
     "errorCodes": {
@@ -178,8 +180,10 @@
       "DDBReleaseConnections",
       "DDBRemove",
       "DDBRenderRasterIndex",
+      "DDBRenderRasterIndexEx",
       "DDBRenderRasterRegion",
       "DDBRenderRasterRegionEx",
+      "DDBRenderRasterRegionEx2",
       "DDBRescan",
       "DDBRescanEx",
       "DDBResolveBuildFile",

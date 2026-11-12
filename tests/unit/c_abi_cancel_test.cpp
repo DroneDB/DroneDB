@@ -480,6 +480,13 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
                  return DDBRenderRasterIndex(raster5.c_str(), "NDVI", bbox, "EPSG:3857", 64, 64, "png", b, s);
              });
          }},
+        {"DDBRenderRasterIndexEx",
+         [=] {
+             const DDBRenderOptions options{sizeof(DDBRenderOptions), DDB_RENDER_OPT_BACKGROUND, 0x336699u, 0};
+             return withBuffer([&](uint8_t** b, int* s) {
+                 return DDBRenderRasterIndexEx(raster5.c_str(), "NDVI", bbox, "EPSG:3857", 64, 64, "png", &options, b, s);
+             });
+         }},
         {"DDBRenderRasterRegion",
          [=] {
              return withBuffer([&](uint8_t** b, int* s) { return DDBRenderRasterRegion(raster.c_str(), bbox, "EPSG:3857", 64, 64, "png", b, s); });
@@ -488,6 +495,13 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
          [=] {
              return withBuffer([&](uint8_t** b, int* s) {
                  return DDBRenderRasterRegionEx(raster.c_str(), bbox, "EPSG:3857", nullptr, nullptr, 0, 64, 64, "png", b, s);
+             });
+         }},
+        {"DDBRenderRasterRegionEx2",
+         [=] {
+             return withBuffer([&](uint8_t** b, int* s) {
+                 return DDBRenderRasterRegionEx2(raster.c_str(), bbox, "EPSG:3857", nullptr, nullptr, 0, 64, 64, "rgba", nullptr,
+                                                 b, s);
              });
          }},
         {"DDBTile",

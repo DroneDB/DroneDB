@@ -115,8 +115,10 @@ DDBRegisterProcess
 DDBReleaseConnections
 DDBRemove
 DDBRenderRasterIndex
+DDBRenderRasterIndexEx
 DDBRenderRasterRegion
 DDBRenderRasterRegionEx
+DDBRenderRasterRegionEx2
 DDBRescan
 DDBRescanEx
 DDBResolveBuildFile

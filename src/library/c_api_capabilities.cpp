@@ -88,8 +88,10 @@ constexpr std::string_view kCancellable[] = {
     "DDBMemoryTileEx3",
     "DDBMemoryTileFmt",
     "DDBRenderRasterIndex",
+    "DDBRenderRasterIndexEx",
     "DDBRenderRasterRegion",
     "DDBRenderRasterRegionEx",
+    "DDBRenderRasterRegionEx2",
     "DDBTile",
 };
 

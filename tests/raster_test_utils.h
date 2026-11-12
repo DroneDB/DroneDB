@@ -83,6 +83,20 @@ namespace testutils
         int count() const;
     };
 
+    /// The GDAL debug messages (CPL_DEBUG) of any thread while alive, those of the drivers and of the
+    /// warper: what GDAL did, such as the datasets it created ("GDALDriver::Create(MEM,,64,64,3,Float32,...)")
+    class GdalDebugLog
+    {
+        CPLErrorHandler previous_;
+        std::string previousDebug_;
+
+    public:
+        GdalDebugLog();
+        ~GdalDebugLog();
+        /// The messages that contain text
+        std::vector<std::string> containing(const std::string &text) const;
+    };
+
     /// Copies a buffer allocated by GDAL (VSIMalloc) and frees it
     std::vector<uint8_t> takeBuffer(uint8_t *buffer, int size);
 }

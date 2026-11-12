@@ -294,6 +294,35 @@ namespace
         }
     }
 
+    // The layer warps into memory the bands its index reads and the alpha band, not every band of the raster
+    // into a GeoTIFF it reads back: NDVI of a raster of R, G, B, RedEdge, NIR and alpha warps R, NIR and
+    // alpha, NDRE RedEdge, NIR and alpha, EVI R, B, NIR and alpha, and the image is the same
+    TEST_F(RasterIndexLayer, theWarpHoldsTheBandsTheIndexReadsInMemory)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path raster = makeMultispectralWithAlpha(ta.getPath("alpha.tif"), GDT_Float32, true);
+        for (const auto &[index, bands] : std::vector<std::pair<std::string, int>>{{"NDVI", 3}, {"NDRE", 3}, {"EVI", 4}})
+        {
+            SCOPED_TRACE(index);
+            testutils::DecodedImage img;
+            std::vector<std::string> created;
+            {
+                testutils::GdalDebugLog log;
+                img = renderLayer(raster, index);
+                created = log.containing("GDALDriver::Create(");
+            }
+            ASSERT_FALSE(created.empty());
+            const std::string size = std::to_string(golden::kSize);
+            EXPECT_NE(created.front().find("Create(MEM,," + size + "," + size + "," + std::to_string(bands) + ",Float32"),
+                      std::string::npos)
+                << created.front();
+            for (const auto &message : created)
+                EXPECT_EQ(message.find("GTiff"), std::string::npos) << message;
+            EXPECT_EQ(img.width, golden::kSize);
+            EXPECT_TRUE(img.hasAlpha());
+        }
+    }
+
     // ODM writes the alpha band of a UInt16 orthophoto as 255. The warp of the layer must not rescale
     // it by the 65535 of the type, which made every pixel of such a raster transparent
     TEST_F(RasterIndexLayer, anAlphaOf255InAUInt16BandIsOpaque)

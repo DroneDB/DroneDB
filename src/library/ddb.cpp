@@ -2187,9 +2187,10 @@ DDBErr DDBMaskBordersEx(const char *input, const char *output, int nearDist, boo
 
 namespace {
 
-// The region of the C arguments (bbox is checked by the callers)
-ddb::RegionRequest regionRequest(const char* inputPath, const double* bbox, const char* bboxSrs,
-                                 int width, int height, const char* format) {
+// The region of the C arguments (bbox is checked by the callers) with the render options: NULL is none; an
+// unknown flag, a background that is not 0xRRGGBB and a reserved field that is not 0 are refused
+ddb::RegionRequest regionRequest(const char* inputPath, const double* bbox, const char* bboxSrs, int width,
+                                 int height, const char* format, const DDBRenderOptions* options) {
     ddb::RegionRequest request;
     request.inputPath = inputPath;
     std::copy(bbox, bbox + 4, request.bbox.begin());
@@ -2197,7 +2198,56 @@ ddb::RegionRequest regionRequest(const char* inputPath, const double* bbox, cons
     request.width = width;
     request.height = height;
     request.format = optStr(format);
+    if (options == nullptr)
+        return request;
+    const auto opts = requireOptions(options, sizeof(DDBRenderOptions), "options");
+    if ((opts.flags & ~DDB_RENDER_OPT_BACKGROUND) != 0)
+        throw InvalidArgsException("options->flags has an unknown bit");
+    if (opts.reserved != 0)
+        throw InvalidArgsException("options->reserved must be 0");
+    if ((opts.flags & DDB_RENDER_OPT_BACKGROUND) != 0) {
+        if (opts.background > 0xFFFFFFu)
+            throw InvalidArgsException("options->background must be 0xRRGGBB");
+        request.background = ddb::RgbColor{static_cast<uint8_t>(opts.background >> 16),
+                                           static_cast<uint8_t>(opts.background >> 8),
+                                           static_cast<uint8_t>(opts.background)};
+    }
     return request;
+}
+
+// The region render of the C arguments (DDBRenderRasterRegionEx, DDBRenderRasterRegionEx2)
+void renderRegion(const char* inputPath, const double* bbox, const char* bboxSrs, const char* outputCrs,
+                  const int* bands, int bandCount, int width, int height, const char* format,
+                  const DDBRenderOptions* options, uint8_t** outBuffer, int* outBufferSize, uint8_t** buffer,
+                  int* bufferSize) {
+    requireText(inputPath, "No input path provided");
+    requireOutput(bbox, "No bbox provided");
+    requireOutput(outBuffer, "outBuffer is null");
+    requireOutput(outBufferSize, "outBufferSize is null");
+    if (bandCount < 0)
+        throw InvalidArgsException("bandCount is negative");
+    if (bandCount > 0 && bands == nullptr)
+        throw InvalidArgsException("bands is null but bandCount > 0");
+    std::vector<int> bandVec;
+    if (bandCount > 0)
+        bandVec.assign(bands, bands + bandCount);
+
+    ddb::renderRasterRegion(regionRequest(inputPath, bbox, bboxSrs, width, height, format, options),
+                            {optStr(outputCrs), bandVec}, buffer, bufferSize);
+}
+
+// The index render of the C arguments (DDBRenderRasterIndex, DDBRenderRasterIndexEx)
+void renderIndex(const char* inputPath, const char* indexName, const double* bbox, const char* bboxSrs, int width,
+                 int height, const char* format, const DDBRenderOptions* options, uint8_t** outBuffer,
+                 int* outBufferSize, uint8_t** buffer, int* bufferSize) {
+    requireText(inputPath, "No input path provided");
+    requireText(indexName, "No indexName provided");
+    requireOutput(bbox, "No bbox provided");
+    if (outBuffer == nullptr || outBufferSize == nullptr)
+        throw InvalidArgsException("outBuffer/outBufferSize is null");
+
+    ddb::renderRasterIndex(regionRequest(inputPath, bbox, bboxSrs, width, height, format, options),
+                           std::string(indexName), buffer, bufferSize);
 }
 
 }  // namespace
@@ -2228,20 +2278,25 @@ DDBErr DDBRenderRasterRegionEx(const char *inputPath,
                                uint8_t **outBuffer,
                                int *outBufferSize) {
     return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
-        requireText(inputPath, "No input path provided");
-        requireOutput(bbox, "No bbox provided");
-        requireOutput(outBuffer, "outBuffer is null");
-        requireOutput(outBufferSize, "outBufferSize is null");
-        if (bandCount < 0)
-            throw InvalidArgsException("bandCount is negative");
-        if (bandCount > 0 && bands == nullptr)
-            throw InvalidArgsException("bands is null but bandCount > 0");
+        renderRegion(inputPath, bbox, bboxSrs, outputCrs, bands, bandCount, width, height, format, nullptr, outBuffer,
+                     outBufferSize, buffer, bufferSize);
+    });
+}
 
-        std::vector<int> bandVec;
-        if (bandCount > 0) bandVec.assign(bands, bands + bandCount);
-
-        ddb::renderRasterRegion(regionRequest(inputPath, bbox, bboxSrs, width, height, format),
-                                {optStr(outputCrs), bandVec}, buffer, bufferSize);
+DDBErr DDBRenderRasterRegionEx2(const char *inputPath,
+                                const double *bbox,
+                                const char *bboxSrs,
+                                const char *outputCrs,
+                                const int *bands,
+                                int bandCount,
+                                int width, int height,
+                                const char *format,
+                                const DDBRenderOptions *options,
+                                uint8_t **outBuffer,
+                                int *outBufferSize) {
+    return guardedBuffer<kNewExportCodes>(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        renderRegion(inputPath, bbox, bboxSrs, outputCrs, bands, bandCount, width, height, format, options, outBuffer,
+                     outBufferSize, buffer, bufferSize);
     });
 }
 
@@ -2254,14 +2309,23 @@ DDBErr DDBRenderRasterIndex(const char *inputPath,
                             uint8_t **outBuffer,
                             int *outBufferSize) {
     return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
-        requireText(inputPath, "No input path provided");
-        requireText(indexName, "No indexName provided");
-        requireOutput(bbox, "No bbox provided");
-        if (outBuffer == nullptr || outBufferSize == nullptr)
-            throw InvalidArgsException("outBuffer/outBufferSize is null");
+        renderIndex(inputPath, indexName, bbox, bboxSrs, width, height, format, nullptr, outBuffer, outBufferSize,
+                    buffer, bufferSize);
+    });
+}
 
-        ddb::renderRasterIndex(regionRequest(inputPath, bbox, bboxSrs, width, height, format),
-                               std::string(indexName), buffer, bufferSize);
+DDBErr DDBRenderRasterIndexEx(const char *inputPath,
+                              const char *indexName,
+                              const double *bbox,
+                              const char *bboxSrs,
+                              int width, int height,
+                              const char *format,
+                              const DDBRenderOptions *options,
+                              uint8_t **outBuffer,
+                              int *outBufferSize) {
+    return guardedBuffer<kNewExportCodes>(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        renderIndex(inputPath, indexName, bbox, bboxSrs, width, height, format, options, outBuffer, outBufferSize,
+                    buffer, bufferSize);
     });
 }
 

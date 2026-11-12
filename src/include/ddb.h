@@ -126,7 +126,7 @@ extern "C"
      * ABI 2.4 (libddb 2.4.0) is the ABI after 2.0: every export, field and JSON member documented as new in 2.4
      * is missing from a 2.0 library, so a host checks DDBGetAbiVersion() for 2.4 (0x00020004) before it calls
      * them or sets them, and the DDBGetCapabilities() "symbols" tell which exports the library has. ABI 2.5
-     * (libddb 2.5.0) adds DDBMemoryTileEx3 (0x00020005). */
+     * (libddb 2.5.0) adds DDBMemoryTileEx3, DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (0x00020005). */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -1989,8 +1989,11 @@ extern "C"
      * @param width Output width in pixels (1..4096).
      * @param height Output height in pixels (1..4096).
      * @param format MIME type: "image/png" | "image/jpeg" | "image/webp" |
-     *               "image/tiff" | "image/geotiff".
-     *               If NULL, defaults to "image/png".
+     *               "image/tiff" | "image/geotiff", or "rgba" (new in 2.5: the pixels, see
+     *               DDBRenderRasterRegionEx2). If NULL, defaults to "image/png". Changed in 2.5: a WebP of a
+     *               grey render has its grey in red, green and blue (the WebP encoder refused it), and the JPEG
+     *               of a raster with an alpha band is RGB over white (the alpha band of the warp made it a
+     *               four-band JPEG, which readers take for CMYK).
      * @param outBuffer Receives a newly allocated buffer (free with DDBVSIFree).
      * @param outBufferSize Receives the buffer size in bytes.
      * @return DDBERR_NONE on success, an error otherwise. */
@@ -2039,7 +2042,9 @@ extern "C"
      * @param bboxSrs CRS authority code; NULL = "EPSG:4326".
      * @param width Output width in pixels (1..4096).
      * @param height Output height in pixels (1..4096).
-     * @param format MIME: "image/png" | "image/jpeg" | "image/webp" | "image/tiff" | "image/geotiff".
+     * @param format MIME: "image/png" | "image/jpeg" | "image/webp" | "image/tiff" | "image/geotiff", or
+     *               "rgba" (new in 2.5, see DDBRenderRasterRegionEx2). Changed in 2.5: a JPEG composites the
+     *               partial alpha of an edge over white with the rounding of DDBRenderOptions::background.
      * @param outBuffer Allocated buffer (free with DDBVSIFree).
      * @param outBufferSize Buffer size in bytes.
      * @return DDBERR_NONE on success, an error otherwise. */
@@ -2051,6 +2056,71 @@ extern "C"
                                         const char *format,
                                         uint8_t **outBuffer,
                                         int *outBufferSize);
+
+    /** Options of the region and index renders (new in 2.5). A NULL options pointer is every option
+     * unset. Set structSize to sizeof(DDBRenderOptions) and every other field explicitly. A later
+     * version may append fields: a library that does not know them rejects a struct whose unknown
+     * bytes are not zero (DDBERR_INVALIDARGS). */
+    typedef struct {
+        uint32_t structSize; /* sizeof(DDBRenderOptions) */
+        uint32_t flags;      /* DDB_RENDER_OPT_* bits: which of the fields below are set */
+        uint32_t background; /* with DDB_RENDER_OPT_BACKGROUND: 0xRRGGBB, the opaque colour under the image.
+                                The image is composited over it, so it has no transparent pixel: PNG and
+                                WebP are written without alpha, "rgba" has alpha 255, and JPEG shows the
+                                colour instead of white where the raster has no data. A pixel of colour c
+                                and alpha a becomes round(c * a / 255) + ((background * (255 - a) + 255) >> 8)
+                                per channel, the rounding of the 8-bit compositing of Skia: the image is
+                                pixel for pixel the one a host composites over that colour with Skia. Not
+                                for GeoTIFF (DDBERR_INVALIDARGS). */
+        uint32_t reserved;   /* must be 0 */
+    } DDBRenderOptions;
+
+    DDB_STATIC_ASSERT(sizeof(DDBRenderOptions) == 16, "DDBRenderOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBRenderOptions, flags) == 4, "DDBRenderOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBRenderOptions, background) == 8, "DDBRenderOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBRenderOptions, reserved) == 12, "DDBRenderOptions layout");
+
+    /** DDBRenderOptions::flags */
+    #define DDB_RENDER_OPT_BACKGROUND 0x1u
+
+    /** DDBRenderRasterRegionEx with options (new in 2.5), see DDBRenderOptions. With NULL options the
+     * output is the one of DDBRenderRasterRegionEx, byte for byte. The format may also be "rgba": the
+     * pixels themselves instead of an encoded image, RGBA with 8 bits a channel, width * height * 4
+     * bytes, rows top to bottom, straight (not premultiplied) alpha, grey in red, green and blue and
+     * alpha 255 for an image without alpha: what the PNG of the same render decodes to. A host that
+     * composites several renders reads them as they are, with no encode and decode. The pixels of a
+     * render are 8 bits: "rgba" with a band selection of other data or of 2 or more than 3 bands is
+     * refused (DDBERR_INVALIDARGS).
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for invalid arguments or options (a NULL
+     *         argument, a structSize below 16, an unknown flag, a background above 0xFFFFFF, a
+     *         non-zero reserved field, a background for a GeoTIFF, an unknown format); DDBERR_CANCELED
+     *         when canceled; an error otherwise */
+    DDB_DLL DDBErr DDBRenderRasterRegionEx2(const char *inputPath,
+                                            const double *bbox,
+                                            const char *bboxSrs,
+                                            const char *outputCrs,
+                                            const int *bands,
+                                            int bandCount,
+                                            int width, int height,
+                                            const char *format,
+                                            const DDBRenderOptions *options,
+                                            uint8_t **outBuffer,
+                                            int *outBufferSize);
+
+    /** DDBRenderRasterIndex with options (new in 2.5), see DDBRenderOptions. With NULL options the output
+     * is the one of DDBRenderRasterIndex. The format may also be "rgba", as for DDBRenderRasterRegionEx2.
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for invalid arguments or options (as
+     *         DDBRenderRasterRegionEx2) and for an index the raster cannot render, with the reason;
+     *         DDBERR_CANCELED when canceled; an error otherwise */
+    DDB_DLL DDBErr DDBRenderRasterIndexEx(const char *inputPath,
+                                          const char *indexName,
+                                          const double *bbox,
+                                          const char *bboxSrs,
+                                          int width, int height,
+                                          const char *format,
+                                          const DDBRenderOptions *options,
+                                          uint8_t **outBuffer,
+                                          int *outBufferSize);
 
     /** Query a raster at a geographic point (WMS GetFeatureInfo).
      * Translates (x, y) in @p srs to pixel coords and samples every band.

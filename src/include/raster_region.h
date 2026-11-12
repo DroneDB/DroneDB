@@ -5,12 +5,27 @@
 #define RASTER_REGION_H
 
 #include <array>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
-#include <cstdint>
 
 namespace ddb
 {
+
+    /** The format of a render that is its pixels and not an encoded image: RGBA, 8 bits a channel,
+     *  width * height * 4 bytes, rows top to bottom, straight (not premultiplied) alpha. A grey image
+     *  has its grey in red, green and blue; an image without alpha has alpha 255. The pixels are
+     *  those a PNG of the same render decodes to. */
+    inline constexpr const char *kRgbaPixelsFormat = "rgba";
+
+    /** An opaque colour */
+    struct RgbColor
+    {
+        uint8_t r = 0;
+        uint8_t g = 0;
+        uint8_t b = 0;
+    };
 
     /** A rectangular area of a raster to render as an image. */
     struct RegionRequest
@@ -24,9 +39,16 @@ namespace ddb
         /// Output size in pixels (1..4096 each).
         int width = 0;
         int height = 0;
-        /// MIME type: "image/png" | "image/jpeg" | "image/webp" | "image/tiff" | "image/geotiff".
-        /// Empty = "image/png".
+        /// MIME type: "image/png" | "image/jpeg" | "image/webp" | "image/tiff" | "image/geotiff",
+        /// or kRgbaPixelsFormat. Empty = "image/png".
         std::string format{};
+        /// The opaque colour under the image: when set, the image is composited over it, so it has
+        /// no transparent pixel (PNG and WebP are written without alpha, rgba has alpha 255, JPEG
+        /// shows the colour instead of white where the raster has no data). A pixel of the raster
+        /// with alpha a and colour c becomes round(c * a / 255) + ((background * (255 - a) + 255) >> 8)
+        /// per channel: the rounding of the 8-bit compositing of Skia, so the image is pixel for
+        /// pixel the one a host composites with Skia over that colour. Not for GeoTIFF.
+        std::optional<RgbColor> background{};
     };
 
     /** What renderRasterRegion can do besides the region. */

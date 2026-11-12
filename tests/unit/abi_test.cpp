@@ -73,7 +73,8 @@ namespace
     // DDBGenerateMemoryThumbnailEx2, DDBMemoryTileEx2, DDBExportRaster3), the build key members,
     // DDBBuildEx2, DDBGenerateContoursEx2, DDBRasterOptions.rescaleUnit and the window
     // of DDBExportRaster3 (DDB_RASTER_OPT_BBOX); 2.5 adds DDBMemoryTileEx3 (the visualization
-    // tile in a chosen format).
+    // tile in a chosen format) and DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (a region and an
+    // index render over a background, DDBRenderOptions, or as their RGBA pixels).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
     TEST(AbiVersion, is2_5)
