@@ -35,6 +35,7 @@ namespace {
 using merge::SeparateVrt;
 using merge::buildSeparateVrt;
 using merge::openAll;
+using merge::buildAlignedVrt;
 
 // The creation options of the tiled GTiff that a merge writes (GDALTranslate and GDALWarp
 // alike); numThreads is the GDAL thread option of the merge's CPU tokens
@@ -296,63 +297,6 @@ void describeMergedOutput(GDALDatasetH out, const std::vector<MergedBand> &bands
             LOGD << "Could not write the XMP of the capture to the merged output";
         }
     }
-}
-
-// The VRT over the inputs cropped to the area every band covers, each band shifted into place
-// with -srcwin
-SeparateVrt buildAlignedVrt(const std::vector<std::string> &inputPaths, const AlignmentCrop &crop) {
-    // Created via GDALTranslate with -srcwin (declared after their files: closed before they go)
-    std::vector<VsiMemFile> shiftedFiles;
-    std::vector<GDALDatasetUniquePtr> shiftedDatasets;
-
-    for (size_t i = 0; i < inputPaths.size(); i++) {
-        const auto src = raster::openInputRaster(inputPaths[i]);
-        if (!src) {
-            throw GDALException("Cannot open " + inputPaths[i]);
-        }
-        GDALDatasetH srcDs = datasetHandle(src);
-
-        int srcX = crop.padLeft - crop.dx[i];
-        int srcY = crop.padTop - crop.dy[i];
-
-        int srcW = GDALGetRasterXSize(srcDs);
-        int srcH = GDALGetRasterYSize(srcDs);
-        if (srcX < 0 || srcY < 0 ||
-            srcX + crop.outW > srcW || srcY + crop.outH > srcH) {
-            LOGD << "Invalid aligned crop window for band " << i
-                 << ": srcwin=(" << srcX << ", " << srcY << ", "
-                 << crop.outW << ", " << crop.outH << "), dataset=("
-                 << srcW << ", " << srcH << ")";
-            throw GDALException("Invalid aligned crop window for band " + std::to_string(i));
-        }
-
-        VsiMemFile shiftedFile =
-            VsiMemFile::unique("shifted_", "_" + std::to_string(i) + ".tif");
-
-        CPLStringList tArgs;
-        tArgs.AddString("-srcwin");
-        tArgs.AddString(std::to_string(srcX).c_str());
-        tArgs.AddString(std::to_string(srcY).c_str());
-        tArgs.AddString(std::to_string(crop.outW).c_str());
-        tArgs.AddString(std::to_string(crop.outH).c_str());
-
-        const GdalOptionsPtr<GDALTranslateOptions> srcOpts(
-            GDALTranslateOptionsNew(tArgs.List(), nullptr));
-
-        auto shiftedDs = adoptDataset(
-            GDALTranslate(shiftedFile.c_str(), srcDs, srcOpts.get(), nullptr));
-        if (!shiftedDs) {
-            throw GDALException("Cannot create shifted dataset for band " + std::to_string(i));
-        }
-
-        flushOrThrow(datasetHandle(shiftedDs), "the shifted band " + std::to_string(i));
-        shiftedFiles.push_back(std::move(shiftedFile));
-        shiftedDatasets.push_back(std::move(shiftedDs));
-    }
-
-    // Build VRT from shifted datasets
-    return buildSeparateVrt(std::move(shiftedDatasets), std::move(shiftedFiles),
-                            "_aligned.vrt", "Cannot build VRT for aligned merge");
 }
 
 // What the GPS correction of a cropped merge needs to know about the camera

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "gdal_raii.h"
+#include "merge_crop.h"
 
 namespace ddb::merge {
 
@@ -19,11 +20,12 @@ namespace ddb::merge {
 std::vector<GDALDatasetUniquePtr> openAll(const std::vector<std::string> &paths);
 
 // The bands of a merge as one /vsimem/ VRT (-separate) with the sources it reads. The members
-// are declared so that the VRT closes first, then its file goes, then the sources and their
-// /vsimem/ files (the shifted bands). Movable, not assignable: a member-wise assignment would
-// close them in the wrong order; close() does it in the right one.
+// are declared so that the VRT closes first, then its file goes, then the sources, then the
+// rasters the sources read (the inputs of the shifted bands, each a window of its input). Movable,
+// not assignable: a member-wise assignment would close them in the wrong order; close() does it
+// in the right one.
 struct SeparateVrt {
-    std::vector<VsiMemFile> sourceFiles;
+    std::vector<GDALDatasetUniquePtr> inputs;
     std::vector<GDALDatasetUniquePtr> sources;
     VsiMemFile file;
     GDALDatasetUniquePtr vrt;
@@ -38,15 +40,21 @@ struct SeparateVrt {
         vrt.reset();
         file.reset();
         sources.clear();
-        sourceFiles.clear();
+        inputs.clear();
     }
 };
 
-// Builds the VRT over the sources (taking them and their files); the VRT file name ends with
-// suffix. Throws GDALException(error) when GDAL cannot build it.
+// Builds the VRT over the sources (taking them and the inputs they read); the VRT file name ends
+// with suffix. Throws GDALException(error) when GDAL cannot build it.
 SeparateVrt buildSeparateVrt(std::vector<GDALDatasetUniquePtr> sources,
-                             std::vector<VsiMemFile> sourceFiles, const std::string &suffix,
+                             std::vector<GDALDatasetUniquePtr> inputs, const std::string &suffix,
                              const std::string &error);
+
+// The VRT over the inputs cropped to the area every band covers, each band shifted into place: a
+// band is the -srcwin window of its input as a VRT of its own, which reads the input when the
+// merge reads it (no pixel is copied). Throws GDALException for an input that cannot be opened or
+// a window that does not lie inside its input.
+SeparateVrt buildAlignedVrt(const std::vector<std::string> &inputPaths, const AlignmentCrop &crop);
 
 }  // namespace ddb::merge
 
