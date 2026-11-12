@@ -327,17 +327,23 @@ namespace ddb
     {
         const size_t pixels = window.outPixels();
 
-        // The bands to read: all of them, or those the formula reads and the alpha band
-        std::vector<bool> read(plan.bandCount, true);
-        if (mask == NodataMask::BandsRead)
-        {
-            std::fill(read.begin(), read.end(), false);
-            for (const int b : VegetationEngine::bandsRead(*plan.formula, plan.filter))
-                if (b < plan.bandCount)
+        // The bands to read: those whose values the formula looks at (BandsRead: only those it uses) and the alpha
+        // band. With AnyBand also every band that has a NoData value: the only other bands that can leave a pixel
+        // out, since premaskNodata matches a band with its NoData value alone (NaN in a band without one does not
+        // match) and applyFormula never looks at another band. The values are those of a read of every band.
+        std::vector<bool> read(plan.bandCount, false);
+        const std::vector<int> looked = mask == NodataMask::BandsRead
+                                            ? VegetationEngine::bandsRead(*plan.formula, plan.filter)
+                                            : VegetationEngine::inputBands(*plan.formula, plan.filter);
+        for (const int b : looked)
+            if (b < plan.bandCount)
+                read[b] = true;
+        if (plan.nodata.alphaBandIdx >= 0)
+            read[plan.nodata.alphaBandIdx] = true;
+        if (mask == NodataMask::AnyBand)
+            for (int b = 0; b < plan.bandCount; b++)
+                if (plan.nodata.bands[b].has)
                     read[b] = true;
-            if (plan.nodata.alphaBandIdx >= 0)
-                read[plan.nodata.alphaBandIdx] = true;
-        }
 
         readPhysicalBands(ds, plan.nodata, plan.bandCount, read, window, buffers);
 

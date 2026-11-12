@@ -646,3 +646,6 @@ Registry has to adopt first.
   alpha band is RGB over white (the alpha band of the warp made it a four-band JPEG, read as CMYK), and the JPEG
   of an index composites the partial alpha of an edge over white with the same rounding (it truncated). The index render warps only the
   bands its formula reads and the alpha band, into memory: the same image from fewer reads.
+  Behaviour that changed, with no new export: the formula renders (tiles, thumbnails, exports, the formula statistics of the metadata)
+  no longer read the bands that cannot change their pixels (a band that the band filter does not map, that has
+  no NoData value and is not the alpha band): their output is byte for byte that of 2.4.

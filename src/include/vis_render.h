@@ -132,9 +132,12 @@ namespace ddb
     /// Which bands decide that a pixel has no value, when a formula is computed
     enum class NodataMask
     {
-        /// A pixel with no data (nodata, NaN) in ANY band of the raster, or transparent in the alpha
-        /// band or the dataset mask, is left out. The rule of the thumbnails, the tiles and the
-        /// formula renders: the same pixels are blank whichever formula is shown.
+        /// A pixel at the NoData value of ANY band of the raster (NaN when that value is NaN), with no
+        /// value (nodata, NaN, infinite) in a band the band filter maps (VegetationEngine::inputBands),
+        /// or transparent in the alpha band or the dataset mask, is left out. The rule of the
+        /// thumbnails, the tiles and the formula renders: the same pixels are blank whichever formula
+        /// is shown. The bands that cannot decide it (not mapped, no NoData value, not alpha) are not
+        /// read.
         AnyBand,
         /// Only the bands the formula reads (and the alpha band or the dataset mask, which say "no
         /// data here" for every band) decide. A pixel whose only gap is in a band the formula does
@@ -153,10 +156,10 @@ namespace ddb
         std::vector<uint8_t> mask; // the window of the dataset mask, when the raster has one
     };
 
-    /// Reads window of every band as float, masks the transparent and nodata pixels and applies
-    /// the formula: buffers.result holds window.outPixels() values, NODATA_SENTINEL where a pixel
-    /// has none, the pixels that mask being those of `mask`. With BandsRead the bands that are not
-    /// read have a null entry in buffers.ptrs. The read stops with the call that is canceled.
+    /// Reads window of the bands that `mask` needs as float, masks the transparent and nodata pixels
+    /// and applies the formula: buffers.result holds window.outPixels() values, NODATA_SENTINEL where
+    /// a pixel has none, the pixels that mask being those of `mask`. The bands that are not read have
+    /// a null entry in buffers.ptrs. The read stops with the call that is canceled.
     void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
                               FormulaBuffers &buffers, NodataMask mask = NodataMask::AnyBand);
 

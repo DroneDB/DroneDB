@@ -337,6 +337,10 @@ inline float evaluateFormula(const PixelBands &p, const float *thermal, const Te
     return nodata;
 }
 
+// The symbols whose bands a formula runs over (FormulaInput R, G, B, N, Re) when the filter maps them: a pixel where
+// one of them has no value has none, whether the formula uses that band or not
+constexpr char kFilterInputSymbols[] = {'R', 'G', 'B', 'N', 'e'};
+
 // What a formula runs over: a pointer per source band (null for a band the filter does not name),
 // the first band of the raster for the thermal formulas, and the output
 struct FormulaInput {
@@ -436,6 +440,18 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
                              (!bandData.empty() && bandData[0] != nullptr) ? bandData[0] : nullptr,
                              outData, pixelCount, nodata, thermalUnitConversion(formula.id, bandUnit)};
     runFormula(formulaKind(formula.id), input);
+}
+
+std::vector<int> VegetationEngine::inputBands(const VegetationFormula &formula, const BandFilter &filter) {
+    std::vector<int> bands;
+    for (const char symbol : kFilterInputSymbols) {
+        const int band = filter.get(symbol);
+        if (band >= 0) bands.push_back(band);
+    }
+    if (isThermalFormulaId(formula.id)) bands.push_back(0);
+    std::sort(bands.begin(), bands.end());
+    bands.erase(std::unique(bands.begin(), bands.end()), bands.end());
+    return bands;
 }
 
 void VegetationEngine::applyColormap(const float *values,

@@ -159,6 +159,12 @@ public:
     // are not mapped by the filter are left out)
     static std::vector<int> bandsRead(const VegetationFormula &formula, const BandFilter &filter);
 
+    // The 0-based bands whose values applyFormula looks at, ascending: every band the filter maps to R, G, B, N
+    // or Re, which leaves out a pixel where it has no value (nodata, NaN, infinite) even when the formula does not
+    // use it (NDVI with the filter RGBN reads G and B too), and the first band for a thermal formula. A band that
+    // is not one of them never changes the values of applyFormula, so its entry of bandData can be null.
+    static std::vector<int> inputBands(const VegetationFormula &formula, const BandFilter &filter);
+
     // The whole table of colormaps, the unlisted ones included. Tests check the table through it
     // (the ids and names, which ramps are listed, and a hash of each ramp).
     const std::vector<Colormap>& getColormaps() const { return colormaps_; }
