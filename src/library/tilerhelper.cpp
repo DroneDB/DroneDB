@@ -152,6 +152,9 @@ namespace ddb
         const int tz = request.tz, tx = request.tx, ty = request.ty;
         uint8_t **outBuffer = request.outBuffer;
         int *outBufferSize = request.outBufferSize;
+        // The requested format for every tile, a visualization included: the host gets the bytes it serves and
+        // does not decode a PNG to encode it again
+        const ImageFormat format = parseImageFormat(request.format);
 
         if (request.visParams)
         {
@@ -159,12 +162,11 @@ namespace ddb
             return io::fromUtf8(withTiler(request.source, [&](Tiler &t) {
                 // Visualization parameters apply to rasters; point clouds render as usual
                 if (auto *raster = dynamic_cast<GDALTiler *>(&t))
-                    return raster->tile(tz, tx, ty, visParams, outBuffer, outBufferSize);
-                return t.tile(tz, tx, ty, outBuffer, outBufferSize);
+                    return raster->tile(tz, tx, ty, visParams, format, outBuffer, outBufferSize);
+                return t.tile(tz, tx, ty, format, outBuffer, outBufferSize);
             }));
         }
 
-        const ImageFormat format = parseImageFormat(request.format);
         return io::fromUtf8(withTiler(request.source, [&](Tiler &t) {
             return t.tile(tz, tx, ty, format, outBuffer, outBufferSize);
         }));

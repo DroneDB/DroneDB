@@ -1683,15 +1683,14 @@ DDBErr DDBGenerateMemoryThumbnailEx2(const char* filePath, int size,
     });
 }
 
-DDBErr DDBMemoryTileEx2(const char* inputPath,
-                        int tz, int tx, int ty,
-                        int tileSize, bool tms,
-                        bool forceRecreate, const char* inputPathHash,
-                        const char* preset, const char* bands,
-                        const char* formula, const char* bandFilter,
-                        const char* colormap, const char* rescale,
-                        const DDBRasterOptions* options,
-                        uint8_t** outBuffer, int* outBufferSize) {
+namespace {
+
+// DDBMemoryTileEx2 and DDBMemoryTileEx3: the visualization tile in outputFormat (NULL or "": PNG)
+DDBErr memoryTileWithVisualization(const char* inputPath, int tz, int tx, int ty, int tileSize, bool tms,
+                                   bool forceRecreate, const char* inputPathHash, const char* preset,
+                                   const char* bands, const char* formula, const char* bandFilter,
+                                   const char* colormap, const char* rescale, const DDBRasterOptions* options,
+                                   const char* outputFormat, uint8_t** outBuffer, int* outBufferSize) {
     return guardedBuffer<kNewExportCodes>(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
         requireText(inputPath, "No input path provided");
         requireBufferOutput(outBuffer, outBufferSize);
@@ -1711,10 +1710,42 @@ DDBErr DDBMemoryTileEx2(const char* inputPath,
         auto request = tileRequest(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, nullptr);
         request.source.pathHash = optStr(inputPathHash) + vizKey;
         request.visParams = visParamsWith(raster, preset, bands, formula, bandFilter, colormap, rescale);
+        request.format = optStr(outputFormat);
         request.outBuffer = buffer;
         request.outBufferSize = bufferSize;
         ddb::TilerHelper::getTile(request);
     });
+}
+
+}  // namespace
+
+DDBErr DDBMemoryTileEx2(const char* inputPath,
+                        int tz, int tx, int ty,
+                        int tileSize, bool tms,
+                        bool forceRecreate, const char* inputPathHash,
+                        const char* preset, const char* bands,
+                        const char* formula, const char* bandFilter,
+                        const char* colormap, const char* rescale,
+                        const DDBRasterOptions* options,
+                        uint8_t** outBuffer, int* outBufferSize) {
+    return memoryTileWithVisualization(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, inputPathHash, preset,
+                                       bands, formula, bandFilter, colormap, rescale, options, nullptr, outBuffer,
+                                       outBufferSize);
+}
+
+DDBErr DDBMemoryTileEx3(const char* inputPath,
+                        int tz, int tx, int ty,
+                        int tileSize, bool tms,
+                        bool forceRecreate, const char* inputPathHash,
+                        const char* preset, const char* bands,
+                        const char* formula, const char* bandFilter,
+                        const char* colormap, const char* rescale,
+                        const DDBRasterOptions* options,
+                        const char* outputFormat,
+                        uint8_t** outBuffer, int* outBufferSize) {
+    return memoryTileWithVisualization(inputPath, tz, tx, ty, tileSize, tms, forceRecreate, inputPathHash, preset,
+                                       bands, formula, bandFilter, colormap, rescale, options, outputFormat, outBuffer,
+                                       outBufferSize);
 }
 
 DDBErr DDBValidateMergeMultispectral(const char** paths, int numPaths, char** output) {

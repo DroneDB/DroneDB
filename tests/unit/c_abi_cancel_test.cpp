@@ -461,6 +461,13 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
                                          nullptr, nullptr, nullptr, nullptr, nullptr, b, s);
              });
          }},
+        {"DDBMemoryTileEx3",
+         [=] {
+             return withBuffer([&](uint8_t** b, int* s) {
+                 return DDBMemoryTileEx3(raster.c_str(), 14, 8192, 8191, 256, false, true, nullptr, nullptr, nullptr,
+                                         nullptr, nullptr, nullptr, nullptr, nullptr, "webp", b, s);
+             });
+         }},
         {"DDBMemoryTileFmt",
          [=] {
              return withBuffer([&](uint8_t** b, int* s) {

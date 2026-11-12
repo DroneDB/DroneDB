@@ -10,7 +10,7 @@
   "output": {
     "abi": {
       "major": 2,
-      "minor": 4
+      "minor": 5
     },
     "cancellable": [
       "DDBApplyDelta",
@@ -50,6 +50,7 @@
       "DDBMemoryTile",
       "DDBMemoryTileEx",
       "DDBMemoryTileEx2",
+      "DDBMemoryTileEx3",
       "DDBMemoryTileFmt",
       "DDBRenderRasterIndex",
       "DDBRenderRasterRegion",
@@ -155,6 +156,7 @@
       "DDBMemoryTile",
       "DDBMemoryTileEx",
       "DDBMemoryTileEx2",
+      "DDBMemoryTileEx3",
       "DDBMemoryTileFmt",
       "DDBMergeMultispectral",
       "DDBMergeMultispectralEx",

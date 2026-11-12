@@ -72,14 +72,15 @@ namespace
     // DDBGetRasterAreaStatsPixelEx, DDBGetRasterProfileEx, DDBGenerateContoursEx,
     // DDBGenerateMemoryThumbnailEx2, DDBMemoryTileEx2, DDBExportRaster3), the build key members,
     // DDBBuildEx2, DDBGenerateContoursEx2, DDBRasterOptions.rescaleUnit and the window
-    // of DDBExportRaster3 (DDB_RASTER_OPT_BBOX).
+    // of DDBExportRaster3 (DDB_RASTER_OPT_BBOX); 2.5 adds DDBMemoryTileEx3 (the visualization
+    // tile in a chosen format).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_4)
+    TEST(AbiVersion, is2_5)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 4);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x00020004u);
+        EXPECT_EQ(DDB_ABI_MINOR, 5);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x00020005u);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

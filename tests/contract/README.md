@@ -628,3 +628,9 @@ Registry has to adopt first.
   (the point, the area statistics and the value info of such a raster), read windows too (the value info of a
   large raster: 5.38 GB down to 142 MB of peak memory), and the raw thermal data of a GDAL raster (a thermal
   GeoTIFF) of more than 4 megapixels is refused instead of read whole.
+
+* 2026-11-12: 2.5.0 (ABI 2.5: `capabilities` has `abi.minor` 5, and `DDBMemoryTileEx3` in `symbols` and
+  `cancellable`). `DDBMemoryTileEx3` is `DDBMemoryTileEx2` with an `outputFormat` (`png`, `jpeg`/`jpg`,
+  `webp` or their MIME types; NULL or empty: PNG, the bytes of `DDBMemoryTileEx2`): the visualization tile is
+  encoded once in the format the host serves, as `DDBMemoryTileFmt` encodes a plain tile, instead of a PNG
+  that the host decodes and encodes again. No output, schema or fixture changes otherwise.

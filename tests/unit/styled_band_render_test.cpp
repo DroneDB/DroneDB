@@ -661,4 +661,87 @@ USER_OPEN_TEST_F(StyledBandRender, theThumbnailOfALargeBandWithAColormapIsStretc
     fs::remove(sidecar);
 }
 
+// DDBMemoryTileEx3: the visualization tile in the requested format, encoded once. PNG (NULL, "", "png" or its
+// MIME type) is the bytes of DDBMemoryTileEx2; WebP and JPEG carry the same picture (lossy: within a few levels,
+// WebP with the same alpha); a format libddb does not write is refused.
+std::vector<uint8_t> tileEx3Bytes(const fs::path& raster, const char* colormap, const char* rescale, const char* bands,
+                                  const char* format, DDBErr expected = DDBERR_NONE) {
+    uint8_t* buffer = nullptr;
+    int size = 0;
+    EXPECT_EQ(DDBMemoryTileEx3(raster.string().c_str(), kZoom, kTx, kTy, kSize, false, false, nullptr, nullptr, bands,
+                               nullptr, nullptr, colormap, rescale, nullptr, format, &buffer, &size),
+              expected)
+        << DDBGetLastError();
+    if (expected != DDBERR_NONE) {
+        EXPECT_EQ(buffer, nullptr);
+        return {};
+    }
+    return testutils::takeBuffer(buffer, size);
+}
+
+std::vector<uint8_t> tileEx2Bytes(const fs::path& raster, const char* colormap, const char* rescale,
+                                  const char* bands) {
+    uint8_t* buffer = nullptr;
+    int size = 0;
+    EXPECT_EQ(DDBMemoryTileEx2(raster.string().c_str(), kZoom, kTx, kTy, kSize, false, false, nullptr, nullptr, bands,
+                               nullptr, nullptr, colormap, rescale, nullptr, &buffer, &size),
+              DDBERR_NONE)
+        << DDBGetLastError();
+    return testutils::takeBuffer(buffer, size);
+}
+
+// The colour of every opaque pixel within `tolerance` on average, and the alpha the same (when `alpha`)
+void expectSamePicture(const Picture& lossy, const Picture& reference, double tolerance, bool alpha) {
+    ASSERT_EQ(lossy.width, reference.width);
+    ASSERT_EQ(lossy.height, reference.height);
+    double diff = 0;
+    size_t opaque = 0;
+    for (int y = 0; y < reference.height; ++y)
+        for (int x = 0; x < reference.width; ++x) {
+            if (alpha) ASSERT_EQ(lossy.alphaAt(x, y), reference.alphaAt(x, y)) << x << "," << y;
+            if (reference.alphaAt(x, y) != 255) continue;
+            ++opaque;
+            for (int b = 0; b < 3; ++b) diff += std::abs(int(lossy.at(b, x, y)) - int(reference.at(b, x, y)));
+        }
+    ASSERT_GT(opaque, 0u);
+    EXPECT_LT(diff / (3.0 * static_cast<double>(opaque)), tolerance);
+}
+
+TEST_F(StyledBandRender, aVisualizationTileIsEncodedOnceInTheRequestedFormat) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path dem = makeDem(ta.getPath("dem.tif"));
+    testutils::GeoRasterSpec spec;
+    spec.bands = 3;
+    spec.type = GDT_Byte;
+    spec.value = [](int b, int x, int y) { return (x * 3 + y * 2 + b * 40) % 256; };
+    const fs::path rgb = onTileGrid(ta.getPath("rgb.tif"), spec);
+
+    // A band with a colormap (the styled branch) and a band selection (the bands branch)
+    for (const auto& [raster, colormap, rescale, bands] :
+         {std::tuple<fs::path, const char*, const char*, const char*>{dem, "viridis", "-100,300", nullptr},
+          std::tuple<fs::path, const char*, const char*, const char*>{rgb, nullptr, nullptr, "3,2,1"}}) {
+        const std::vector<uint8_t> png = tileEx2Bytes(raster, colormap, rescale, bands);
+        ASSERT_FALSE(png.empty());
+        for (const char* f : {static_cast<const char*>(nullptr), "", "png", "PNG", "image/png"})
+            EXPECT_EQ(tileEx3Bytes(raster, colormap, rescale, bands, f), png) << (f ? f : "NULL");
+        const Picture reference = pictureOf(testutils::decodeImage(png));
+
+        const std::vector<uint8_t> webp = tileEx3Bytes(raster, colormap, rescale, bands, "webp");
+        ASSERT_GT(webp.size(), 12u);
+        EXPECT_EQ(std::string(webp.begin(), webp.begin() + 4), "RIFF");
+        EXPECT_EQ(std::string(webp.begin() + 8, webp.begin() + 12), "WEBP");
+        EXPECT_EQ(tileEx3Bytes(raster, colormap, rescale, bands, "image/webp"), webp);
+        expectSamePicture(pictureOf(testutils::decodeImage(webp)), reference, 4.0, true);
+
+        const std::vector<uint8_t> jpeg = tileEx3Bytes(raster, colormap, rescale, bands, "jpg");
+        ASSERT_GT(jpeg.size(), 2u);
+        EXPECT_EQ(jpeg[0], 0xFF);
+        EXPECT_EQ(jpeg[1], 0xD8);
+        EXPECT_EQ(tileEx3Bytes(raster, colormap, rescale, bands, "jpeg"), jpeg);
+        expectSamePicture(pictureOf(testutils::decodeImage(jpeg)), reference, 6.0, false);
+    }
+
+    tileEx3Bytes(dem, "viridis", nullptr, nullptr, "bmp", DDBERR_INVALIDARGS);
+}
+
 }  // namespace
