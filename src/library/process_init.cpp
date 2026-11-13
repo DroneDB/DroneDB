@@ -19,7 +19,6 @@
 #endif
 
 #include "build_budget.h"
-#include "cpu_requirements.h"
 #include "databasepool.h"
 #include "ddbt/ddbt.h"
 #include "ddb.h"
@@ -268,9 +267,6 @@ namespace ddb
     void registerProcess(bool verbose)
     {
         std::call_once(initialization_flag, [verbose]() {
-            // First: the rest of the library may use instructions this CPU does not have
-            requireCpuFeatures();
-
             // Before anything (GDAL, PROJ, SpatiaLite) initializes SQLite
             const int sqliteConfigRc = configureSqlite();
 

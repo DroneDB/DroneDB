@@ -75,6 +75,10 @@ endif()
 # ddb-tilers (MPL-2.0): the COG and COPC builders and tilers, linked statically into libddb
 # (ddbt::ddbt). As a subproject it builds only its static library. It also provides the LAZ
 # codec libddb decodes COPC nodes with (ddbt::lazperf, its laz-perf fork, Apache-2.0).
+# Its code is compiled for plain x86-64, as libddb's, and picks its SIMD paths for the CPU at run
+# time; set here, not left to its cache entry, so a build directory configured with an older
+# ddb-tilers default (x86-64-v3, which needs AVX2) cannot keep it.
+set(DDBT_ISA_BASELINE "x86-64")
 add_subdirectory("ddb-tilers")
 
 set(SRC_LIST
