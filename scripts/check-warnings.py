@@ -20,8 +20,14 @@ a full build (an incremental build, a failed target, another compiler), not that
 fixed. Smaller drops pass with a reminder to run --update, so the ratchet keeps the gain.
 
 The baseline is measured with the compiler of the CI Linux job (GCC 13 on ubuntu-24.04, recorded
-in its header). GCC 13 and GCC 15 report the same set today; when --build-dir points to a build
-with another compiler or major version, the check notes it, since the sets may differ.
+in its header). Another compiler or major version reports another set: GCC 15 misses some
+-Wmaybe-uninitialized warnings that GCC 13 gives at -O3, so a local build with a newer GCC can
+pass and CI fail. --compile checks with the baseline's compiler whatever compiler the build
+directory uses: it compiles every translation unit of the build directory's
+compile_commands.json with that compiler (GNU 13: gcc-13 and g++-13, which must be installed),
+with the same flags, and discards the objects. The build directory itself is not changed and
+needs no rebuild of its dependencies; it must be configured, and its generated sources built.
+When --build-dir or --build points to a build with another compiler, the check notes it.
 GCC/Clang logs ("file:line:col: warning: ... [-Wflag]") and MSVC logs
 ("file(line,col): warning C4244: ...") are both parsed, but CI ratchets the Linux build only:
 Windows warnings are reported in its build log, not ratcheted, until a Windows baseline exists.
@@ -33,6 +39,7 @@ of a complete build: a fresh build directory, or --build, which rebuilds with --
 Usage:
     scripts/check-warnings.py <build-log>               compare a full build log with the baseline
     scripts/check-warnings.py --build [<build-dir>]     clean-rebuild <build-dir> (default: build)
+    scripts/check-warnings.py --compile [<build-dir>]   compile <build-dir> with the CI compiler
     scripts/check-warnings.py --update <build-log>      write the log's warnings to the baseline
     scripts/check-warnings.py --summary <build-log>     print the counts per flag, compare nothing
 
@@ -44,10 +51,14 @@ from __future__ import annotations
 
 import argparse
 import collections
+import concurrent.futures
+import json
 import math
 import os
 import posixpath
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -152,6 +163,20 @@ def read_baseline(path: Path) -> tuple[dict[tuple[str, str], int], str | None]:
     return counts, compiler
 
 
+def recorded_compiler(path: Path) -> str | None:
+    """'<id> <major>' recorded in the header of the baseline, if any."""
+    return read_baseline(path)[1] if path.is_file() else None
+
+
+def compiler_commands(compiler: str) -> tuple[str, str]:
+    """The C and C++ compiler commands of '<id> <major>' as distributions install them."""
+    compiler_id, major = compiler.split()
+    names = {"GNU": ("gcc", "g++"), "Clang": ("clang", "clang++")}
+    if compiler_id not in names:
+        raise SystemExit(f"error: no compiler commands known for {compiler}; pass --cc and --cxx")
+    return f"{names[compiler_id][0]}-{major}", f"{names[compiler_id][1]}-{major}"
+
+
 def build_compiler(build_dir: Path) -> str | None:
     """'<CMAKE_CXX_COMPILER_ID> <major>' of a configured CMake build directory, if any."""
     for cmake_file in sorted(build_dir.glob("CMakeFiles/*/CMakeCXXCompiler.cmake")):
@@ -206,6 +231,50 @@ def run_build(build_dir: Path) -> str:
         sys.exit(2)
     print(f"Build log: {log}")
     return result.stdout
+
+
+def compile_unit(entry: dict, cc: str, cxx: str, env: dict[str, str]) -> tuple[str, int]:
+    """Compiles one compile_commands.json entry with cc or cxx, the object discarded."""
+    args = entry["arguments"] if "arguments" in entry else shlex.split(entry["command"])
+    is_c = Path(entry["file"]).suffix == ".c"
+    args = [cc if is_c else cxx] + args[1:]
+    if "-o" in args:
+        args[args.index("-o") + 1] = os.devnull
+    result = subprocess.run(args, cwd=entry["directory"], env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, errors="replace", check=False)
+    output = result.stdout
+    if result.returncode != 0:
+        output += f"error: {entry['file']}: the compiler exited with {result.returncode}\n"
+    return output, result.returncode
+
+
+def run_compile(build_dir: Path, cc: str, cxx: str) -> str:
+    """Compiles every translation unit of build_dir with cc and cxx and returns their output."""
+    database = build_dir / "compile_commands.json"
+    if not database.is_file():
+        raise SystemExit(f"error: no {database}: configure {build_dir} with CMake first")
+    for command in (cc, cxx):
+        if not shutil.which(command):
+            raise SystemExit(f"error: {command} not found (on Ubuntu: apt install {command})")
+    entries = json.loads(database.read_text(encoding="utf-8"))
+    env = dict(os.environ, LC_ALL="C")
+    jobs = os.cpu_count() or 2
+    print(f"Compiling {len(entries)} translation units of {display(build_dir)} with {cc} and {cxx} "
+          f"({jobs} jobs, objects discarded)", flush=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        results = list(pool.map(lambda entry: compile_unit(entry, cc, cxx, env), entries))
+    # Each unit's output whole and in the order of the database: no interleaved diagnostics
+    text = "".join(output for output, _ in results)
+    log = build_dir / f"warnings-{Path(cxx).name}.log"
+    log.write_text(text, encoding="utf-8")
+    failed = sum(1 for _, code in results if code != 0)
+    if failed:
+        errors = [line for line in text.splitlines() if " error: " in line or line.startswith("error: ")]
+        print("\n".join(errors[:50]), file=sys.stderr)
+        print(f"error: {failed} translation units do not compile with {cxx} (full log: {log})", file=sys.stderr)
+        sys.exit(2)
+    print(f"Compile log: {log}")
+    return text
 
 
 def describe(entries: list[tuple[tuple[str, str], int, int]]) -> list[str]:
@@ -265,6 +334,9 @@ def main() -> int:
     source.add_argument("log", nargs="?", type=Path, help="log of a full build")
     source.add_argument("--build", nargs="?", const=DEFAULT_BUILD_DIR, type=Path, metavar="BUILD_DIR",
                         help="clean-rebuild BUILD_DIR (default: build) and check its output")
+    source.add_argument("--compile", nargs="?", const=DEFAULT_BUILD_DIR, type=Path, metavar="BUILD_DIR",
+                        help="compile every translation unit of BUILD_DIR (default: build) with the "
+                             "baseline's compiler, objects discarded, and check its output")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--update", action="store_true", help="write the warnings to the baseline")
     mode.add_argument("--summary", action="store_true", help="print the counts per flag only")
@@ -272,6 +344,8 @@ def main() -> int:
     parser.add_argument("--build-dir", type=Path,
                         help="CMake build directory of the log: its compiler is checked against the "
                              "baseline and recorded by --update (default: build)")
+    parser.add_argument("--cc", help="C compiler of --compile (default: the baseline's, e.g. gcc-13)")
+    parser.add_argument("--cxx", help="C++ compiler of --compile (default: the baseline's, e.g. g++-13)")
     parser.add_argument("--max-drop", type=int, default=50,
                         help="largest drop of the total accepted without a baseline update (default 50)")
     parser.add_argument("--max-drop-percent", type=float, default=10.0,
@@ -279,11 +353,26 @@ def main() -> int:
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)  # keep stdout and stderr in order in CI logs
 
-    build_dir = args.build or args.build_dir or DEFAULT_BUILD_DIR
-    text = run_build(build_dir) if args.build else args.log.read_text(encoding="utf-8", errors="replace")
+    build_dir = args.build or args.compile or args.build_dir or DEFAULT_BUILD_DIR
+    if args.compile:
+        compiler = recorded_compiler(args.baseline)
+        if args.cc or args.cxx:
+            if not (args.cc and args.cxx):
+                raise SystemExit("error: pass both --cc and --cxx")
+            cc, cxx, compiler = args.cc, args.cxx, None  # their id and major are not known
+        elif compiler:
+            cc, cxx = compiler_commands(compiler)
+        else:
+            raise SystemExit(f"error: {display(args.baseline)} records no compiler; pass --cc and --cxx")
+        text = run_compile(build_dir, cc, cxx)
+    elif args.build:
+        text = run_build(build_dir)
+        compiler = build_compiler(build_dir)
+    else:
+        text = args.log.read_text(encoding="utf-8", errors="replace")
+        compiler = build_compiler(build_dir)
     found = parse_log(text, build_dir)
     counts = counts_of(found)
-    compiler = build_compiler(build_dir)
     print(per_flag_summary(counts))
 
     if args.summary:
@@ -301,7 +390,7 @@ def main() -> int:
         print(f"note: the baseline was measured with {baseline_compiler}, this build uses {compiler}; another "
               "compiler may report other warnings. CI (the build_ubuntu job) is the reference.")
     if not compiler:
-        print(f"note: compiler of {build_dir} unknown, compiler check skipped")
+        print("note: compiler of the log unknown, compiler check skipped")
     update_hint = (f"Run {SCRIPT} --update <build log> --build-dir <its build dir> and commit "
                    f"{display(args.baseline)}, so the ratchet keeps the gain.")
     return compare(baseline, found, args.max_drop, args.max_drop_percent, update_hint)

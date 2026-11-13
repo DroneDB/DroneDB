@@ -83,6 +83,24 @@ Take a look at the list of [open issues](https://github.com/uav4geo/ddb/issues) 
 
 This project adheres to the [Contributor Covenant](CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to the project maintainers.
 
+## Compiler warnings
+
+The Linux CI job fails when a change adds a compiler warning to `src/`, `apps/` or `tests/`
+(`scripts/check-warnings.py` against `cmake/warnings-baseline.txt`). CI builds with GCC 13
+(ubuntu-24.04), and a newer GCC does not report the same warnings: GCC 15 misses some
+`-Wmaybe-uninitialized` warnings that GCC 13 gives at `-O3`. Before you push, check with the CI
+compiler (install `gcc-13` and `g++-13`; on Ubuntu: `apt install g++-13`):
+
+```bash
+python3 scripts/check-warnings.py --compile build
+```
+
+This compiles every translation unit of `build/compile_commands.json` with `gcc-13` and
+`g++-13`, with the flags of the build, and discards the objects. The build directory and its
+vcpkg packages do not change, whatever compiler they use. Build the project once before, so that
+the generated sources exist, and reconfigure after you add or remove a source file. The output
+is in `build/warnings-g++-13.log`.
+
 ## Overlay ports (vcpkg-overlays)
 
 `vcpkg-overlays/` holds vcpkg ports that replace the ones of the vcpkg submodule
