@@ -144,7 +144,9 @@ namespace
                 const double nodata = GDALGetRasterNoDataValue(band, &hasNodata);
                 EXPECT_EQ(hasNodata != 0, capture.nodata.has_value());
                 if (capture.nodata)
+                {
                     EXPECT_EQ(nodata, *capture.nodata);
+                }
 
                 const auto input = adoptDataset(GDALOpen(paths[i].c_str(), GA_ReadOnly));
                 ASSERT_TRUE(input);

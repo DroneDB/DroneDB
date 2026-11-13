@@ -698,7 +698,9 @@ void expectSamePicture(const Picture& lossy, const Picture& reference, double to
     size_t opaque = 0;
     for (int y = 0; y < reference.height; ++y)
         for (int x = 0; x < reference.width; ++x) {
-            if (alpha) ASSERT_EQ(lossy.alphaAt(x, y), reference.alphaAt(x, y)) << x << "," << y;
+            if (alpha) {
+                ASSERT_EQ(lossy.alphaAt(x, y), reference.alphaAt(x, y)) << x << "," << y;
+            }
             if (reference.alphaAt(x, y) != 255) continue;
             ++opaque;
             for (int b = 0; b < 3; ++b) diff += std::abs(int(lossy.at(b, x, y)) - int(reference.at(b, x, y)));

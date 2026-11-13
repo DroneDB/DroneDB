@@ -127,17 +127,20 @@ namespace
         for (int b = 1; b <= layout.dataBands; b++)
         {
             GDALRasterBand *band = ds->GetRasterBand(b);
-            const std::optional<double> nodata =
-                static_cast<size_t>(b - 1) < layout.nodata.size() ? layout.nodata[b - 1] : std::nullopt;
-            if (nodata)
-                band->SetNoDataValue(*nodata);
+            // A plain flag and value, not a copied std::optional: GCC 13 at -O3 reports the
+            // copy's value as maybe uninitialized (-Wmaybe-uninitialized) where it is read.
+            const size_t slot = static_cast<size_t>(b - 1);
+            const bool hasNodata = slot < layout.nodata.size() && layout.nodata[slot].has_value();
+            const double nodata = hasNodata ? *layout.nodata[slot] : 0.0;
+            if (hasNodata)
+                band->SetNoDataValue(nodata);
             for (int y = 0; y < layout.height; y++)
                 for (int x = 0; x < layout.width; x++)
                 {
                     double v = sampleValue(layout.type, b, x, y);
-                    if (nodata && (x + y * 3 + b) % 11 == 0)
-                        v = *nodata;
-                    else if (!nodata && floating && layout.nanInBandsWithoutNodata)
+                    if (hasNodata && (x + y * 3 + b) % 11 == 0)
+                        v = nodata;
+                    else if (!hasNodata && floating && layout.nanInBandsWithoutNodata)
                     {
                         if ((x * y + b) % 7 == 0)
                             v = std::numeric_limits<double>::quiet_NaN();
