@@ -386,6 +386,27 @@ prefer not to redistribute this code may omit `bm3d` / `bm3d.exe`.
 
 ---
 
+## ddb-tilers (COG and COPC builders and tilers)
+
+[ddb-tilers](https://github.com/DroneDB/ddb-tilers) (MPL-2.0, the same
+licence as DroneDB) is vendored as a git submodule under
+`vendor/ddb-tilers` and linked statically into `libddb` and every
+program that embeds it (`ddbcmd`, `gdal-util`). It contains two
+third-party code bases, both Apache-2.0:
+
+- a modified copy of [laz-perf](https://github.com/hobuinc/laz-perf)
+  3.4.0, the LAZ codec libddb decodes COPC point cloud nodes with; its
+  `NOTICE` names the copyright holders and `FORK.md` lists every change;
+- [fpnge](https://github.com/veluca93/fpnge), unmodified.
+
+Its `THIRD_PARTY_NOTICES.md` lists them and the vcpkg libraries it links
+(Highway, libdeflate, LERC, OpenJPEG and others, whose notices ship with
+the other vcpkg ones below). Both packages ship the licence texts of
+ddb-tilers, the laz-perf fork (with its `NOTICE`) and fpnge, listed in
+[`scripts/helper-licences.txt`](scripts/helper-licences.txt).
+
+---
+
 ## vcpkg-managed libraries
 
 The libraries vcpkg builds (GDAL, PROJ, GEOS, PDAL, SQLite, libcurl,

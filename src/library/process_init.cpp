@@ -19,11 +19,14 @@
 #endif
 
 #include "build_budget.h"
+#include "cpu_requirements.h"
 #include "databasepool.h"
+#include "ddbt/ddbt.h"
 #include "ddb.h"
 #include "exif_metadata.h"
 #include "gdal_raii.h"
 #include "hash.h"
+#include "json.h"
 #include "log_forwarding.h"
 #include "logger.h"
 #include "mio.h"
@@ -77,6 +80,15 @@ static bool hostSetEnv(const char* name) {
 //
 // The argument is the folder of the executable, which the data lookup finds by itself; it stays
 // for the exported signature.
+// ddb-tilers (the COG and COPC tilers and builders) makes its own PROJ contexts: it gets the same
+// proj.db folder. Without one it uses PROJ's own search, which reads PROJ_DATA / PROJ_LIB.
+static void configureTilers(const std::string& projDataDir) {
+    const std::string config = json{{"projDataDir", projDataDir}}.dump();
+    if (ddbtConfigure(config.c_str()) != DDBT_ERR_NONE) {
+        LOGW << "Cannot configure ddb-tilers: " << ddbtLastError();
+    }
+}
+
 void setupEnvironmentVariables(const std::string&) {
     if (hostSetEnv("PROJ_DATA") || hostSetEnv("PROJ_LIB")) {
         LOGD << "PROJ data: PROJ_DATA/PROJ_LIB of the host";
@@ -93,6 +105,7 @@ void setupEnvironmentVariables(const std::string&) {
     const std::string dataDir = io::toUtf8(dataFolder);
     const char* const searchPaths[] = {dataDir.c_str(), nullptr};
     OSRSetPROJSearchPaths(searchPaths);
+    configureTilers(dataDir);
     LOGD << "Set the PROJ search path: " << dataDir;
 
     // Debug: Print proj.db hash
@@ -255,6 +268,9 @@ namespace ddb
     void registerProcess(bool verbose)
     {
         std::call_once(initialization_flag, [verbose]() {
+            // First: the rest of the library may use instructions this CPU does not have
+            requireCpuFeatures();
+
             // Before anything (GDAL, PROJ, SpatiaLite) initializes SQLite
             const int sqliteConfigRc = configureSqlite();
 
