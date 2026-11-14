@@ -50,8 +50,6 @@ ALLOWED_FILES: dict[str, str] = {
         "the open policy itself: opens a file of a user with the drivers its extension allows",
     "src/library/raster_artefacts.cpp":
         "opens the artefacts libddb wrote (and the files it just wrote) with the drivers it writes them with",
-    "src/library/copc_utils.cpp":
-        "reads a COPC file by /vsicurl/ with VSI calls for the node cache; no GDAL driver parses it",
     "src/library/merge_vrt.cpp":
         "GDALBuildVRT over the handles of artefacts it already opened (no file names)",
 }
