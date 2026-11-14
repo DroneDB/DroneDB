@@ -664,8 +664,13 @@ Registry has to adopt first.
   0..1 at 3).
   The tiles (`DDBTile`, `DDBMemoryTile`, `DDBMemoryTileFmt`, `DDBMemoryTileEx*`, `ddb tile`) are rendered by
   ddb-tilers. The tiles of a georaster are those of 2.4 in PNG (pixel for pixel) and JPEG (byte for byte); WebP
-  tiles are encoded differently. A photo is converted once to an EPSG:3857 COG and tiled from it: its tiles may
-  differ from those of 2.4. Point-cloud tiles are ddb-tilers' modern rendering (the octree depth from the density
+  tiles are encoded differently. A photo is converted once to an EPSG:3857 COG and tiled from it, warped by
+  ddb-tilers from the corners of its EXIF footprint in one pass: its tiles may differ from those of
+  2.4. `ddb geoproj` (geoProject) writes its GeoTIFF with ddb-tilers too, on gdalwarp's grid in
+  EPSG:4326 with nearest resampling: a COG, JPEG with the footprint in a mask instead of an alpha
+  band for 8-bit RGB (LZW with an alpha band otherwise, so a GIF or a palette PNG, which 2.4 could
+  not write as JPEG, is projected); an `outsize` below 100% of a JPEG samples the full image, not
+  GDAL's reduced-resolution decode, so its colours differ slightly. Point-cloud tiles are ddb-tilers' modern rendering (the octree depth from the density
   of the cloud in EPSG:3857, a symmetric disc on each point with a per-pixel depth test, the same tile whatever the
   threads, no seams at the deepest zooms): they differ from those of 2.4. A COPC at an http(s) URL is read with
   range requests of libddb's HTTP client (206 Partial Content; the ETag, else the Last-Modified date, tells a

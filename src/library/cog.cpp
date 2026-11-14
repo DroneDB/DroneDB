@@ -17,51 +17,66 @@
 #include "tilers_call.h"
 
 #include <functional>
+#include <array>
 #include <atomic>
 
 namespace ddb
 {
-    namespace
-    {
-        // The COG of a GeoRaster (GeoTIFF or JPEG 2000), built by ddb-tilers in one streamed pass:
-        // Web Mercator tiles, or the source's own grid for an optimized COG; JPEG for 8-bit RGB /
-        // RGBA without nodata (DDB_COG_JPEG_QUALITY), LZW with a predictor otherwise; nodata,
-        // alpha and mask kept; the statistics sidecar; with the threads of the build and its
-        // memory budget (DDB_COG_CACHE_MB + DDB_WARP_MEMORY_MB)
-        void buildCogWithTilers(const fs::path &path, const fs::path &outFile, const raster::CogParams &params,
-                                    const raster::ProgressCallback &reportProgress)
-        {
-            BuildOptions options;
-            options.threads = params.threads;
-            const BuildResourceBudget budget = BuildResourceBudget::fromConfig(options);
-            const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
-            // The pool of ddb-tilers takes its size before its first build (the helper runs one)
-            const std::string config = json{{"threads", cpu.threads()}}.dump();
-            if (ddbtConfigure(config.c_str()) != DDBT_ERR_NONE)
-            {
-                LOGD << "ddb-tilers keeps its pool: " << ddbtLastError();
-            }
-            const int64_t memoryMb = budget.cacheBytes / (1024 * 1024) + budget.warpMemoryMb;
-            const std::string buildOptions = json{{"memoryMb", memoryMb}}.dump();
-
-            LOGD << "Building COG from " << io::toUtf8(path) << " with ddb-tilers (" << cpu.threads()
-                 << " threads, " << memoryMb << " MB)";
-            tilers::BuildProgress progress("COG", reportProgress);
-            const ddbtErr rc = ddbtBuildCog2(io::toUtf8(path).c_str(), io::toUtf8(outFile).c_str(),
-                                             buildOptions.c_str(), &tilers::BuildProgress::forward, &progress);
-            // An input that cannot be built (no coordinate system, no geotransform, a layout the
-            // builder does not read) is a raster that cannot be read, as GDAL's build reported it
-            tilers::checkBuild(rc, "The COG build", [](const std::string &message) { throw GDALException(message); });
-        }
-    } // namespace
-
     namespace raster
     {
+
+    json photoGcps(const PhotoGeoreference &photo, double scale)
+    {
+        // The corners of the photo, scaled as gdal_translate -outsize scales it
+        const int width = static_cast<int>(static_cast<double>(photo.width) * scale);
+        const int height = static_cast<int>(static_cast<double>(photo.height) * scale);
+        const std::array<std::array<int, 2>, 4> pixels{{{0, 0}, {0, height}, {width, height}, {width, 0}}};
+        json gcps = json::array();
+        for (size_t corner = 0; corner < pixels.size(); corner++)
+            gcps.push_back(json::array({pixels[corner][0], pixels[corner][1], photo.footprint[corner][0],
+                                        photo.footprint[corner][1]}));
+        return gcps;
+    }
+
+    void buildWithTilers(const fs::path &path, const fs::path &outFile, const std::optional<int> &threads,
+                         json options, const ProgressCallback &reportProgress,
+                         const std::function<void(const std::string &)> &unreadable)
+    {
+        BuildOptions buildOptions;
+        buildOptions.threads = threads;
+        const BuildResourceBudget budget = BuildResourceBudget::fromConfig(buildOptions);
+        const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
+        // The pool of ddb-tilers takes its size before its first build (the helper runs one)
+        const std::string config = json{{"threads", cpu.threads()}}.dump();
+        if (ddbtConfigure(config.c_str()) != DDBT_ERR_NONE)
+        {
+            LOGD << "ddb-tilers keeps its pool: " << ddbtLastError();
+        }
+        const int64_t memoryMb = budget.cacheBytes / (1024 * 1024) + budget.warpMemoryMb;
+        options["memoryMb"] = memoryMb;
+
+        LOGD << "Building COG from " << io::toUtf8(path) << " with ddb-tilers (" << cpu.threads() << " threads, "
+             << memoryMb << " MB)";
+        tilers::BuildProgress progress("COG", reportProgress);
+        const ddbtErr rc = ddbtBuildCog2(io::toUtf8(path).c_str(), io::toUtf8(outFile).c_str(), options.dump().c_str(),
+                                         &tilers::BuildProgress::forward, &progress);
+        tilers::checkBuild(rc, "The COG build", unreadable);
+    }
 
     void buildCogFile(const fs::path &path, const fs::path &outFile, const CogParams &params,
                       const ProgressCallback &reportProgress)
     {
-        buildCogWithTilers(path, outFile, params, reportProgress);
+        json options = json::object();
+        if (params.photo)
+        {
+            // A photo is warped from its corners on the ground straight to the tiles
+            options["gcps"] = photoGcps(*params.photo, 1.0);
+            options["gcpSrs"] = "EPSG:4326";
+        }
+        // An input that cannot be built (no coordinate system, no geotransform, a layout the
+        // builder does not read) is a raster that cannot be read, as GDAL's build reported it
+        buildWithTilers(path, outFile, params.threads, std::move(options), reportProgress,
+                        [](const std::string &message) { throw GDALException(message); });
     }
 
     } // namespace raster
@@ -103,7 +118,7 @@ namespace ddb
     }
 
     void buildCogInPrivateFolder(const std::string &input, const fs::path &produced,
-                                 const BuildOptions &options)
+                                 const BuildOptions &options, const std::optional<raster::PhotoGeoreference> &photo)
     {
         // The threads of the build come from the CPU pool of this process, which bounds all the
         // builds it runs: the helper has a pool of its own and is told how many it may use. The
@@ -113,6 +128,7 @@ namespace ddb
 
         raster::CogParams params;
         params.threads = static_cast<int>(cpu.threads());
+        params.photo = photo;
 
         // The phases of the work depend on whether the helper warps the raster: an optimized COG is
         // encoded again at its own grid and has none. The helper says which in its

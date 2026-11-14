@@ -635,12 +635,54 @@ namespace ddb
                 if (threads)
                     result["threads"] = *threads;
             }
+
+            // The members of a photo's georeference: width, height and the four corners of footprint
+            json photoToJson(const PhotoGeoreference &photo)
+        {
+            json footprint = json::array();
+            for (const auto &corner : photo.footprint)
+                footprint.push_back(json::array({corner[0], corner[1]}));
+            return {{"width", photo.width}, {"height", photo.height}, {"footprint", footprint}};
+        }
+
+        // @throws ProtocolError for a size that is not an integer from 1 to 1000000, a footprint
+        // that is not four [longitude, latitude] of finite numbers
+        void readPhoto(const json &params, PhotoGeoreference &photo)
+        {
+            for (const char *name : {"width", "height"})
+            {
+                const json &size = required(params, name);
+                if (!size.is_number_integer() || size.get<int64_t>() < 1 || size.get<int64_t>() > 1'000'000)
+                    throw ProtocolError(std::string("'") + name + "' is not an integer from 1 to 1000000");
+            }
+            photo.width = required(params, "width").get<int>();
+            photo.height = required(params, "height").get<int>();
+
+            const json &footprint = required(params, "footprint");
+            if (!footprint.is_array() || footprint.size() != photo.footprint.size())
+                throw ProtocolError("'footprint' is not an array of four corners");
+            for (size_t i = 0; i < photo.footprint.size(); i++)
+            {
+                const json &corner = footprint[i];
+                if (!corner.is_array() || corner.size() != 2 || !corner[0].is_number() || !corner[1].is_number())
+                    throw ProtocolError("a corner of 'footprint' is not [longitude, latitude]");
+                for (size_t axis = 0; axis < 2; axis++)
+                {
+                    const double value = corner[axis].get<double>();
+                    if (!std::isfinite(value))
+                        throw ProtocolError("a corner of 'footprint' is not a finite number");
+                    photo.footprint[i][axis] = value;
+                }
+            }
+        }
         } // namespace
 
         json toJson(const CogParams &params)
         {
             json result = json::object();
             setBuildThreads(result, params.threads);
+            if (params.photo)
+                result["photo"] = photoToJson(*params.photo);
             return result;
         }
 
@@ -650,6 +692,13 @@ namespace ddb
                 throw ProtocolError("the cog params are not an object");
             CogParams result;
             result.threads = buildThreadsFromJson(params);
+            if (const json *photo = member(params, "photo"))
+            {
+                if (!photo->is_object())
+                    throw ProtocolError("'photo' is not an object");
+                result.photo = PhotoGeoreference{};
+                readPhoto(*photo, *result.photo);
+            }
             return result;
         }
 
@@ -714,10 +763,7 @@ namespace ddb
 
         json toJson(const GeoprojectParams &params)
         {
-            json footprint = json::array();
-            for (const auto &corner : params.footprint)
-                footprint.push_back(json::array({corner[0], corner[1]}));
-            json result = {{"width", params.width}, {"height", params.height}, {"footprint", footprint}};
+            json result = photoToJson(params);
             if (!params.outsize.empty())
                 result["outsize"] = params.outsize;
             return result;
@@ -728,31 +774,7 @@ namespace ddb
             if (!params.is_object())
                 throw ProtocolError("the geoproject params are not an object");
             GeoprojectParams result;
-            for (const char *name : {"width", "height"})
-            {
-                const json &size = required(params, name);
-                if (!size.is_number_integer() || size.get<int64_t>() < 1 || size.get<int64_t>() > 1'000'000)
-                    throw ProtocolError(std::string("'") + name + "' is not an integer from 1 to 1000000");
-            }
-            result.width = required(params, "width").get<int>();
-            result.height = required(params, "height").get<int>();
-
-            const json &footprint = required(params, "footprint");
-            if (!footprint.is_array() || footprint.size() != result.footprint.size())
-                throw ProtocolError("'footprint' is not an array of four corners");
-            for (size_t i = 0; i < result.footprint.size(); i++)
-            {
-                const json &corner = footprint[i];
-                if (!corner.is_array() || corner.size() != 2 || !corner[0].is_number() || !corner[1].is_number())
-                    throw ProtocolError("a corner of 'footprint' is not [longitude, latitude]");
-                for (size_t axis = 0; axis < 2; axis++)
-                {
-                    const double value = corner[axis].get<double>();
-                    if (!std::isfinite(value))
-                        throw ProtocolError("a corner of 'footprint' is not a finite number");
-                    result.footprint[i][axis] = value;
-                }
-            }
+            readPhoto(params, result);
             if (const json *outsize = member(params, "outsize"))
             {
                 if (!outsize->is_string())

@@ -902,9 +902,6 @@ namespace
     {
         if (std::string(op) == raster::op::kThumbnail)
             return json{{"size", 32}};
-        if (std::string(op) == raster::op::kGeoproject)
-            return json{{"width", 100}, {"height", 80}, {"footprint", json::array({json::array({9.1, 45.3}), json::array({9.1, 45.2}),
-                                                                                   json::array({9.2, 45.2}), json::array({9.2, 45.3})})}};
         if (std::string(op) == raster::op::kProbe)
             return json{{"kind", "raster"}};
         return json::object();
@@ -946,7 +943,6 @@ namespace
             {raster::op::kProbe, 25, 16 * kMiB, 256, 2 * kGiB},
             {raster::op::kThumbnail, 25, 64 * kMiB, 256, 2 * kGiB},
             {raster::op::kNormalize, 110, 128 * kGiB, 1024, 4 * kGiB},
-            {raster::op::kGeoproject, 110, 16 * kGiB, 1024, 4 * kGiB},
         };
         for (const auto &expected : table)
         {

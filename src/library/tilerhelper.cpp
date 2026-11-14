@@ -288,17 +288,18 @@ namespace ddb
             tilers::check(ddbtReleaseSources());
         }
 
-        // The COG of `raster` (a raster of the user `source`, or the geoprojection of a photo of
-        // it), in the artefacts of the cache: built by the raster helper, checked, and moved to
-        // the name the source and its state give. Its statistics stay behind: the tiles are
-        // stretched with statistics computed on the whole COG, as they are for any raster without
-        // a sidecar, not with the approximate ones of a build.
-        void produceCogArtefact(const fs::path &raster, const fs::path &source, const fs::path &target)
+        // The COG of the raster of the user `source` (a photo is placed on the ground by `photo`), in
+        // the artefacts of the cache: built by the raster helper, checked, and moved to the name the
+        // source and its state give. Its statistics stay behind: the tiles are stretched with
+        // statistics computed on the whole COG, as they are for any raster without a sidecar, not
+        // with the approximate ones of a build.
+        void produceCogArtefact(const fs::path &source, const fs::path &target,
+                                const std::optional<raster::PhotoGeoreference> &photo = std::nullopt)
         {
             const io::ScopedTempDir request = raster::makeArtefactRequestFolder("cog-");
             const fs::path produced = request.path() / "cog.tif";
             // The build refuses an output that does not open as a raster
-            buildCogInPrivateFolder(io::toUtf8(raster), produced);
+            buildCogInPrivateFolder(io::toUtf8(source), produced, {}, photo);
 
             releaseTilersOf(source, target);
             raster::publishArtefact(produced, target);
@@ -317,19 +318,19 @@ namespace ddb
         maybeCleanupUserCache();
 
         // The tiler reads only what libddb wrote, so a file of a user (or a download) is read
-        // once, by the raster helper, and the tiles come from what it writes
-        // Georasters are converted to a COG; other images are geoprojected first, and the
-        // geoprojection converted. artefactOnce makes it once (a lock, then a rename)
+        // once, by the raster helper, and the tiles come from what it writes: the COG of a georaster,
+        // or of a photo warped from its corners on the ground (its EXIF footprint) in one pass.
+        // artefactOnce makes it once (a lock, then a rename)
         const fs::path target = io::concat(raster::artefactsDir() / raster::artefactKey(localTileablePath), ".tif");
         if (entryHandler(fingerprint(localTileablePath)).tilesWithoutReprojection())
-            return artefactOnce(target, forceRecreate,
-                                [&] { produceCogArtefact(localTileablePath, localTileablePath, target); });
+            return artefactOnce(target, forceRecreate, [&] { produceCogArtefact(localTileablePath, target); });
 
         return artefactOnce(target, forceRecreate, [&] {
-            const io::ScopedTempDir request = raster::makeArtefactRequestFolder("geoproject-");
-            const fs::path projected = request.path() / "geoprojected.tif";
-            ddb::geoProject({io::toUtf8(localTileablePath)}, io::toUtf8(projected), "100%", true);
-            produceCogArtefact(projected, localTileablePath, target);
+            std::string problem;
+            const auto photo = photoGeoreferenceOf(localTileablePath, problem);
+            if (!photo)
+                throw FSException("Cannot geoproject " + io::toUtf8(localTileablePath) + ", " + problem);
+            produceCogArtefact(localTileablePath, target, photo);
         });
     }
 

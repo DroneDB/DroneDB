@@ -242,10 +242,23 @@ namespace ddb
         // @throws ProtocolError for a member that is not an integer from 1 to 4096
         std::optional<int> buildThreadsFromJson(const json &params);
 
-        // The params of a `cog`: the warp and the compression of the COG use `threads`
+        // What the host knows of a photo from its EXIF, since the helper reads none: `footprint` is
+        // the ground position of the corners of the picture (upper left, lower left, lower right,
+        // upper right) as longitude and latitude in EPSG:4326, `width` and `height` its size in
+        // pixels. The photo is placed on the ground by these four corners as ground control points.
+        struct PhotoGeoreference
+        {
+            int width = 0;
+            int height = 0;
+            std::array<std::array<double, 2>, 4> footprint{};
+        };
+
+        // The params of a `cog`: the warp and the compression of the COG use `threads`; `photo`
+        // places a photo, which has no georeferencing of its own, on the ground
         struct CogParams
         {
             std::optional<int> threads;
+            std::optional<PhotoGeoreference> photo;
         };
 
         json toJson(const CogParams &params);
@@ -278,17 +291,11 @@ namespace ddb
         // @throws ProtocolError
         VectorParams vectorParamsFromJson(const json &params);
 
-        // The params of a `geoproject`: what the host knows of a photo from its EXIF, since the
-        // helper reads none. `footprint` is the ground position of the corners of the picture
-        // (upper left, lower left, lower right, upper right) as longitude and latitude in
-        // EPSG:4326, `width` and `height` its size in pixels, `outsize` the size of the result
-        // as gdal_translate -outsize takes it ("100%" or a number of pixels of width; empty: as
-        // the picture).
-        struct GeoprojectParams
+        // The params of a `geoproject`: the photo's georeference and `outsize`, the size of the
+        // result as gdal_translate -outsize takes it ("100%" or a number of pixels of width; empty:
+        // as the picture)
+        struct GeoprojectParams : PhotoGeoreference
         {
-            int width = 0;
-            int height = 0;
-            std::array<std::array<double, 2>, 4> footprint{};
             std::string outsize;
         };
 

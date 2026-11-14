@@ -27,6 +27,7 @@
 #include "gtest/gtest.h"
 #include "json.h"
 #include "mio.h"
+#include "geoproject.h"
 #include "raster_artefacts.h"
 #include "raster_cache.h"
 #include "raster_helper.h"
@@ -665,6 +666,28 @@ namespace
         for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
             EXPECT_EQ(entry.path().filename().string().rfind("req-", 0), std::string::npos)
                 << "the folder of the request is gone: " << entry.path();
+    }
+
+    // A photo is tiled from one build of the helper: the COG warped from the photo by the corners of
+    // its EXIF footprint, with no intermediate projection of it
+    TEST_F(RasterArtefacts, aPhotoIsWarpedToItsCogInOneBuildFromItsFootprint)
+    {
+        const fs::path photo = area_->downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
+        ConvertingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
+        const raster::ScopedRasterHelper installed(helper);
+
+        TilerHelper::toGeoTIFF(photo);
+
+        EXPECT_EQ(helper.count("cog"), 1u);
+        EXPECT_EQ(helper.pathOf("cog"), photo);
+        std::string problem;
+        const auto expected = photoGeoreferenceOf(photo, problem);
+        ASSERT_TRUE(expected) << problem;
+        const auto params = raster::cogParamsFromJson(helper.lastCogParams);
+        ASSERT_TRUE(params.photo.has_value()) << helper.lastCogParams.dump();
+        EXPECT_EQ(params.photo->width, expected->width);
+        EXPECT_EQ(params.photo->height, expected->height);
+        EXPECT_EQ(params.photo->footprint, expected->footprint);
     }
 
     TEST_F(RasterArtefacts, aCogOfABuildIsTiledAsItIs)

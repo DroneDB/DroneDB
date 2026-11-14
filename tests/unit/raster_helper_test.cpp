@@ -1311,6 +1311,15 @@ namespace
         cog.threads = 6;
         EXPECT_EQ(cogParamsFromJson(toJson(cog)).threads, std::optional<int>(6));
         EXPECT_FALSE(cogParamsFromJson(json::object()).threads.has_value());
+        EXPECT_FALSE(cogParamsFromJson(json::object()).photo.has_value());
+        cog.photo = PhotoGeoreference{4000, 3000, {{{9.1, 45.3}, {9.1, 45.2}, {9.2, 45.2}, {9.2, 45.3}}}};
+        const CogParams placed = cogParamsFromJson(toJson(cog));
+        ASSERT_TRUE(placed.photo.has_value());
+        EXPECT_EQ(placed.photo->width, 4000);
+        EXPECT_EQ(placed.photo->height, 3000);
+        EXPECT_EQ(placed.photo->footprint, cog.photo->footprint);
+        EXPECT_THROW(cogParamsFromJson(json{{"photo", json{{"width", 4000}}}}), ProtocolError) << "no footprint";
+        EXPECT_THROW(cogParamsFromJson(json{{"photo", 1}}), ProtocolError);
 
         VectorParams vector;
         EXPECT_EQ(toJson(vector), json::object());

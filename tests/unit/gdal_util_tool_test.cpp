@@ -1187,6 +1187,7 @@ namespace
                        {"geotransform", std::vector<double>(gt, gt + 6)},
                        {"projection", GDALGetProjectionRef(dataset)},
                        {"overviews", GDALGetOverviewCount(GDALGetRasterBand(dataset, 1))},
+                       {"maskFlags", GDALGetMaskFlags(GDALGetRasterBand(dataset, 1))},
                        {"bands", bands}};
         GDALClose(dataset);
         return result;
@@ -1466,7 +1467,7 @@ namespace
     TEST_F(GdalUtilToolTest, theLongBuildsRunOnlyOneShot)
     {
         Server server;
-        for (const char *op : {"cog", "copc", "vector"})
+        for (const char *op : {"cog", "copc", "vector", "geoproject"})
         {
             SCOPED_TRACE(op);
             const auto response = server.ask(buildRequest(1, op, geotiff_, area_->getFolder() / "never", json::object()));
@@ -1568,21 +1569,27 @@ namespace
         raster::geoprojectImage(jpeg_, inProcess, photoParams());
 
         const fs::path byProgram = area_->getFolder() / "projected-program.tif";
-        Server server;
-        const auto response = server.ask(buildRequest(57, raster::op::kGeoproject, jpeg_, byProgram, raster::toJson(photoParams())));
+        const ToolRun run =
+            runTool({"--request", raster::encodeRequest(buildRequest(57, raster::op::kGeoproject, jpeg_, byProgram,
+                                                                     raster::toJson(photoParams())))});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        const auto response = raster::decodeResponse(run.lines.back());
         ASSERT_TRUE(response.ok) << response.message;
 
         const json expected = describeRaster(inProcess);
         EXPECT_EQ(describeRaster(byProgram), expected);
-        EXPECT_EQ(expected.at("bands").size(), 4u) << "RGB and alpha";
+        EXPECT_EQ(expected.at("bands").size(), 3u) << "RGB, the footprint in the mask";
+        EXPECT_EQ(expected.at("maskFlags"), GMF_PER_DATASET);
         EXPECT_NE(expected.at("projection").get<std::string>().find("4326"), std::string::npos);
     }
 
     TEST_F(GdalUtilToolTest, aGeoprojectRequestWithoutTheFootprintOfThePhotoIsRefused)
     {
-        Server server;
-        const auto response = server.ask(buildRequest(58, raster::op::kGeoproject, jpeg_, area_->getFolder() / "none.tif",
-                                                      json{{"width", 96}, {"height", 64}}));
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(58, raster::op::kGeoproject, jpeg_,
+                                                                                     area_->getFolder() / "none.tif",
+                                                                                     json{{"width", 96}, {"height", 64}}))});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        const auto response = raster::decodeResponse(run.lines.back());
         EXPECT_FALSE(response.ok);
         EXPECT_EQ(response.error, raster::ErrorCode::Internal);
         EXPECT_FALSE(fs::exists(area_->getFolder() / "none.tif"));

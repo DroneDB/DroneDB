@@ -563,7 +563,8 @@ namespace
 
         GDALDatasetUniquePtr ds(GDALDataset::Open(out.string().c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY));
         ASSERT_TRUE(ds);
-        EXPECT_EQ(ds->GetRasterCount(), 4) << "RGB + alpha";
+        EXPECT_EQ(ds->GetRasterCount(), 3) << "RGB, the footprint in the mask";
+        EXPECT_EQ(ds->GetRasterBand(1)->GetMaskFlags(), GMF_PER_DATASET);
         ASSERT_NE(ds->GetSpatialRef(), nullptr);
         double gt[6];
         EXPECT_EQ(ds->GetGeoTransform(gt), CE_None);

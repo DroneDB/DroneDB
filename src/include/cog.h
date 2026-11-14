@@ -5,12 +5,14 @@
 #define COG_H
 
 #include <functional>
+#include <optional>
 #include <string>
 
 #include "basicgeometry.h"
 #include "build_budget.h"
 #include "fs.h"
 #include "json_fwd.h"
+#include "raster_protocol.h"
 
 namespace ddb {
 
@@ -35,10 +37,12 @@ void buildCog(const std::string& input, const std::string& outputCog, const Buil
               bool overwrite = true);
 // The same build, written as `produced` in a private folder the caller made for it
 // (raster::makePrivateFolder) and left there for the caller to publish, with its statistics
-// (statsSidecarOf) next to it. Throws GDALException when what the helper wrote does not open as
-// a raster.
+// (statsSidecarOf) next to it. A photo (which has no georeferencing of its own) is placed on the
+// ground by `photo` and warped from it in the same pass. Throws GDALException when what the
+// helper wrote does not open as a raster.
 void buildCogInPrivateFolder(const std::string& input, const fs::path& produced,
-                             const BuildOptions& options = {});
+                             const BuildOptions& options = {},
+                             const std::optional<raster::PhotoGeoreference>& photo = std::nullopt);
 
 }
 

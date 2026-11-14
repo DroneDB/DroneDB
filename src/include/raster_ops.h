@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <optional>
 
 #include "entry.h"
@@ -134,10 +135,24 @@ namespace ddb
         void buildVectorFiles(const fs::path &path, const fs::path &outFolder, const VectorParams &params);
 
         // Writes the GeoTIFF outFile of a photo placed on the ground by the corners of
-        // GeoprojectParams (JPEG compressed, with an alpha band)
-        // @throws RasterOpException when the file cannot be opened; GDALException,
+        // GeoprojectParams, in EPSG:4326 on gdalwarp's grid with its nearest resampling (a COG,
+        // JPEG with a mask for 8-bit RGB, LZW with an alpha band otherwise)
+        // @throws RasterOpException when the file cannot be read; GDALException,
         // InvalidArgsException for an outsize that is not a positive number
         void geoprojectImage(const fs::path &path, const fs::path &outFile, const GeoprojectParams &params);
+
+        // The ground control points of a photo for ddb-tilers ([[pixel, line, longitude, latitude],
+        // ...]): its corners, of the photo scaled by `scale`, at the corners of its footprint
+        json photoGcps(const PhotoGeoreference &photo, double scale);
+
+        // Builds outFile from the raster `path` with ddb-tilers' COG builder (ddbtBuildCog2) and
+        // its `options`, with the threads (`threads`, lowered by DDB_BUILD_THREADS, from the CPU
+        // pool) and the memory (DDB_COG_CACHE_MB + DDB_WARP_MEMORY_MB) of a build. A full device
+        // is a RetryableBuildException; an input the builder cannot read is passed to `unreadable`,
+        // which throws
+        void buildWithTilers(const fs::path &path, const fs::path &outFile, const std::optional<int> &threads,
+                             json options, const ProgressCallback &reportProgress,
+                             const std::function<void(const std::string &)> &unreadable);
 
     } // namespace raster
 } // namespace ddb

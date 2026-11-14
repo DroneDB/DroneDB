@@ -321,9 +321,8 @@ namespace ddb
 
         void GdalUtilHelper::geoproject(const fs::path &path, const fs::path &out, const json &params)
         {
-            const Response response = serve(op::kGeoproject, path, out, params, options_.conversionTimeout, ResponseCheck());
-            if (!response.ok)
-                raiseFailure(op::kGeoproject, path, response);
+            // A build with the threads of a build (ddb-tilers): a process of its own, as a COG
+            runOneShot(op::kGeoproject, path, out, params, ProgressCallback());
         }
 
         void GdalUtilHelper::buildCog(const fs::path &path, const fs::path &out, const json &params,
