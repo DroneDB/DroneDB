@@ -653,6 +653,46 @@ namespace ddb
             return result;
         }
 
+        json toJson(const CopcParams &params)
+        {
+            // A path each, as an object of its own: `path`, or `path64` for one that is no UTF-8
+            json inputs = json::array();
+            for (const fs::path &input : params.inputs)
+            {
+                json item = json::object();
+                setText(item, "path", io::toUtf8(input));
+                inputs.push_back(std::move(item));
+            }
+            json result = json::object();
+            if (!inputs.empty())
+                result["inputs"] = std::move(inputs);
+            setBuildThreads(result, params.threads);
+            return result;
+        }
+
+        CopcParams copcParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the copc params are not an object");
+            CopcParams result;
+            if (const json *inputs = member(params, "inputs"))
+            {
+                if (!inputs->is_array())
+                    throw ProtocolError("'inputs' is not an array");
+                for (const json &item : *inputs)
+                {
+                    if (!item.is_object())
+                        throw ProtocolError("an item of 'inputs' is not an object");
+                    fs::path input = getPath(item, "path");
+                    if (input.empty())
+                        throw ProtocolError("an item of 'inputs' has no path");
+                    result.inputs.push_back(std::move(input));
+                }
+            }
+            result.threads = buildThreadsFromJson(params);
+            return result;
+        }
+
         json toJson(const VectorParams &params)
         {
             json result = json::object();

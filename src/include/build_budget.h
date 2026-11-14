@@ -23,12 +23,12 @@ using BuildProgressCallback = std::function<void(double fraction, std::string_vi
 // process-wide state, so concurrent builds keep their own.
 struct BuildOptions {
     // The most threads this build may use; it only lowers. The GDAL warps of a raster build,
-    // bm3d and PDAL's writers.copc get the lower of it and the DDB_BUILD_THREADS budget
-    // (BuildResourceBudget::fromConfig). Obj2Tiles is not under that budget: it runs on the
+    // bm3d and the COPC build of a point cloud get the lower of it and the DDB_BUILD_THREADS
+    // budget (BuildResourceBudget::fromConfig). Obj2Tiles is not under that budget: it runs on the
     // lowest of it, DDB_OBJ2TILES_MAX_CORES (else an inherited DOTNET_PROCESSOR_COUNT) and the
     // host cores, and a cap that does not lower that count is no cap (obj2tiles_runner.h).
-    // Nothing: each tool as without a cap. Untwine (point clouds) and build-lod (splats) have no
-    // thread option: the cap does not bound them.
+    // Nothing: each tool as without a cap. build-lod (splats) has no thread option: the cap does
+    // not bound it.
     std::optional<int> threads;
 
     // Where the build reports its progress (DDBBuildEx2); empty: nowhere. A build of several entries
@@ -62,8 +62,8 @@ struct BuildOptions {
 //   DDB_COG_CACHE_MB    GDAL block cache while a raster build runs (default 1024)
 //   DDB_WARP_MEMORY_MB  GDALWarp working memory, -wm (default 512)
 //   DDB_BUILD_THREADS   threads one build wants: GDAL's for a raster build, bm3d's for a
-//                       model build, PDAL writers.copc's for a point cloud build without
-//                       Untwine; 0 = all cores (default min(8, cores)).
+//                       model build, the COPC builder's for a point cloud build; 0 = all cores
+//                       (default min(8, cores)).
 //                       The CPU token pool (parallel.h) decides how many run.
 // A BuildOptions cap lowers the threads: the one place that decides how many threads a build
 // asks the pool for.

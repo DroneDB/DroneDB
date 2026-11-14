@@ -154,8 +154,8 @@ extern "C"
      *   "cpuPoolSize"    integer 0..4096, env DDB_CPU_POOL_SIZE, default cores - 1.
      *                    The process-wide CPU token pool: the worker threads libddb may run at
      *                    once beside the calling threads, across every call (parallel indexing,
-     *                    GDAL NUM_THREADS, PDAL readers, the cores given to Obj2Tiles and those
-     *                    counted for untwine). A calling thread always works and never needs a
+     *                    GDAL NUM_THREADS, PDAL readers, the threads of a COPC build, the cores
+     *                    given to Obj2Tiles). A calling thread always works and never needs a
      *                    token; a section gets the tokens that are free and never waits for one,
      *                    so 0 runs every call on its calling thread only. The calls a host runs
      *                    at once plus cpuPoolSize bound libddb's busy CPU threads.
@@ -807,12 +807,8 @@ extern "C"
      *                         that count drops the texture encoder threads as that variable
      *                         does; a cap at or above it limits nothing and the run is that of
      *                         no cap (the encoder keeps its threads);
-     *                       point cloud, Untwine: not bounded. Untwine has no thread option: it
-     *                         keeps its own fixed thread count and keeps holding 10 CPU pool
-     *                         tokens whatever the cap is;
-     *                       point cloud, PDAL writers.copc (when Untwine is not installed or
-     *                         fails): its threads, the lower of the cap and the
-     *                         DDB_BUILD_THREADS budget;
+     *                       point cloud (COPC): the threads of the builder, the lower of the
+     *                         cap and the DDB_BUILD_THREADS budget;
      *                       Gaussian splat (build-lod): not bounded, it has no thread option.
      *        The threads a build gets still come from the CPU pool (cpuPoolSize), which may give
      *        fewer. A cap does not change what is built.
@@ -848,8 +844,12 @@ extern "C"
      *                         of GDAL's COG driver scaled to 0 to 0.5, the statistics from 0.5 with the
      *                         fraction of the raster read; a raster that is on the tile grid already has no
      *                         warp and never reports "warping" (its phases are "overviews", "compressing"
-     *                         and "statistics"); the other kinds report no phase of their own and keep
-     *                         fraction -1 until they are done;
+     *                         and "statistics"); for a point cloud (COPC) build, "planning" (the inputs
+     *                         are opened and the octree is planned) from 0, "reading" (the points are read
+     *                         and sorted) from 0.05, "building" (the nodes are thinned, encoded and
+     *                         written) from 0.4, rising as the parts of the cloud are done, and "writing"
+     *                         (the end of the file) when the builder is done; the other kinds
+     *                         report no phase of their own and keep fraction -1 until they are done;
      *                      3. "publishing" with the last fraction reported (never 1) when the output is
      *                         made and moves into place: a cancel at this report stops the build before
      *                         anything is published;

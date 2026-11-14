@@ -687,3 +687,18 @@ Registry has to adopt first.
   `geotransform`, and its COG is warped with that transform. A complex raster (CInt16, CInt32, CFloat32,
   CFloat64) keeps its samples in its COG; its statistics, tiles and thumbnail are those of the magnitude of its
   samples (a thumbnail takes the magnitude of the nearest sample).
+  The COPC of a point cloud (the build of a PointCloud entry, `ddb copc`) is built by ddb-tilers in the raster
+  helper (`gdal-util`, protocol 1.1, operation `copc`), on the threads of the build (`DDB_BUILD_THREADS`, lowered by
+  the `threads` of `DDBBuildEx`) and within `DDBT_COPC_BUILD_MEM_MB` (default 4 GiB, at most half the memory): a
+  larger cloud spills to the build folder. It reads LAS, LAZ, E57, PTS, XYZ and PLY point clouds itself, with no
+  conversion to a temporary LAS. The point count and the bounds are those of the sources; the file differs from the
+  COPC of 2.4: another octree (the same file whatever the threads and the memory), LAS 1.4 point format 6, 7 with
+  colours or 8 with near infrared (a cloud without colours no longer has zero colours, so its `dimensions` have no
+  `Red`, `Green`, `Blue`), the scale and offset of a single LAS source (else finer ones than the 0.01 of 2.4), and
+  the 8-bit colours and intensities of PLY, PTS and XYZ sources scaled to 16 bits. A cloud of fewer than 2 points
+  or of no extent in X or Y is refused as before (`DDBERR_INVALIDARGS`), from the count and bounds of the COPC it
+  made; a cloud without any point is a cloud that cannot be read (`DDBERR_EXCEPTION`, "the input holds no
+  points"). A full disk during the build is a retryable failure. `DDBBuildEx2` reports the phases of a point cloud
+  build: "planning" from 0, "reading" from 0.05, "building" from 0.4 and "writing" when the file is done (2.4:
+  fraction -1 until it was done). `DDB_UNTWINE_PATH`, `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose
+  between Untwine and PDAL's writers.copc in 2.4, are no longer read, and the packages have no Untwine.

@@ -114,6 +114,17 @@ namespace ddb
         void buildCogFile(const fs::path &path, const fs::path &outFile, const CogParams &params,
                           const ProgressCallback &progress);
 
+        // Builds the COPC outFile of the point cloud `path` and of the ones of params.inputs, merged
+        // into one, with ddb-tilers: on the threads of the build (acquireBuildThreads), within the
+        // memory of DDBT_COPC_BUILD_MEM_MB (else 4 GiB, at most half the memory of the machine),
+        // with its temporary files in the folder of outFile. `progress` is called at most once per
+        // percent.
+        // @throws RasterOpException (Unreadable) for an input the builder cannot read or that has
+        // no points; RetryableBuildException when the device is full; FSException for an input
+        // that does not exist
+        void buildCopcFile(const fs::path &path, const fs::path &outFile, const CopcParams &params,
+                           const ProgressCallback &progress);
+
         // Builds the vector outputs of a file in the folder outFolder, which exists and is
         // empty: vec/source.gpkg and, unless the file is a CAD drawing without a coordinate
         // system, the MVT tiles in mvt/ (a drawing without one gets vec/local.json instead).

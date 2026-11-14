@@ -3,8 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // libE57Format shares state between the readers of a process: E57 files read at the same time (a
-// dataset indexed in parallel, builds next to indexing) crash it. One E57 file goes through the
-// reader at a time.
+// dataset indexed in parallel) crash it. One E57 file goes through the reader at a time.
 
 #include <atomic>
 #include <string>
@@ -78,38 +77,5 @@ namespace
 
         EXPECT_EQ(failures.load(), 0);
         EXPECT_EQ(wrongCounts.load(), 0);
-    }
-
-    TEST(PointCloudE57Parallel, TranslationsToLasAtOnce)
-    {
-        TestArea ta(TEST_NAME);
-        const fs::path asset = e57Asset(ta);
-
-        std::atomic<int> failures{0};
-        std::vector<std::thread> threads;
-        for (int i = 0; i < 4; i++)
-        {
-            const fs::path copy = ta.getPath("translate" + std::to_string(i) + ".e57");
-            fs::copy_file(asset, copy, fs::copy_options::overwrite_existing);
-            const fs::path las = ta.getPath("translate" + std::to_string(i) + ".las");
-            threads.emplace_back(
-                [&failures, copy, las]()
-                {
-                    try
-                    {
-                        translateToLas(io::toUtf8(copy), io::toUtf8(las));
-                        if (!fs::exists(las))
-                            failures++;
-                    }
-                    catch (const std::exception &)
-                    {
-                        failures++;
-                    }
-                });
-        }
-        for (auto &t : threads)
-            t.join();
-
-        EXPECT_EQ(failures.load(), 0);
     }
 }

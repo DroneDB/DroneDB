@@ -5,29 +5,101 @@
 #include "pointcloud.h"
 #include "3d.h"
 
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <limits>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "build_budget.h"
+#include "ddbt/ddbt.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "gtest/gtest.h"
+#include "mio.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
 #include "utils.h"
-#include "untwine_runner.h"
 
 
 namespace {
 
-// RAII helper that forces refresh of the Untwine binary cache on entry/exit so
-// tests that set DDB_UNTWINE_PATH don't leak state into siblings.
-struct UntwineEnvReset {
-    UntwineEnvReset() { ddb::untwine::findUntwineBinary(true); }
-    ~UntwineEnvReset() {
-        unsetEnv("DDB_UNTWINE_PATH");
-        unsetEnv("DDB_USE_PDAL_COPC");
-        unsetEnv("DDB_COPC_BACKEND");
-        ddb::untwine::findUntwineBinary(true);
-    }
+// The count and the XYZ bounds of the points of a text cloud (XYZ, PTS): its lines that start with at
+// least three numbers, whatever separates them (a header, a point count or a comment is no point)
+struct TextCloud {
+    size_t count = 0;
+    double min[3] = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(),
+                     std::numeric_limits<double>::max()};
+    double max[3] = {std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest(),
+                     std::numeric_limits<double>::lowest()};
 };
+
+TextCloud readTextCloud(const fs::path& file) {
+    TextCloud cloud;
+    std::ifstream in(file);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::replace_if(line.begin(), line.end(), [](char c) { return c == ',' || c == ';' || c == '\t'; }, ' ');
+        std::istringstream tokens(line);
+        std::string token;
+        std::vector<double> values;
+        while (values.size() < 3 && tokens >> token) {
+            char* end = nullptr;
+            const double value = std::strtod(token.c_str(), &end);
+            if (end == token.c_str() || *end != '\0')
+                break;
+            values.push_back(value);
+        }
+        if (values.size() < 3)
+            continue;
+        cloud.count++;
+        for (size_t a = 0; a < 3; a++) {
+            cloud.min[a] = std::min(cloud.min[a], values[a]);
+            cloud.max[a] = std::max(cloud.max[a], values[a]);
+        }
+    }
+    return cloud;
+}
+
+// Builds the COPC of `sources` in `folder` and reads it back
+ddb::PointCloudInfo buildAndRead(const std::vector<std::string>& sources, const fs::path& folder) {
+    ddb::buildCopc(sources, folder.string());
+    ddb::PointCloudInfo copc;
+    EXPECT_TRUE(ddb::getCopcInfo((folder / "cloud.copc.laz").string(), copc));
+    EXPECT_EQ(copc.bounds.size(), 6u);
+    return copc;
+}
+
+// The COPC holds the points of the text cloud: as many, within the bounds of their coordinates (the
+// COPC stores them on a grid of `tolerance`)
+void expectPointsOf(const TextCloud& source, const ddb::PointCloudInfo& copc, double tolerance) {
+    ASSERT_GT(source.count, 0u);
+    EXPECT_EQ(copc.pointCount, source.count);
+    ASSERT_EQ(copc.bounds.size(), 6u);
+    for (size_t a = 0; a < 3; a++) {
+        EXPECT_NEAR(copc.bounds[a], source.min[a], tolerance) << "min of axis " << a;
+        EXPECT_NEAR(copc.bounds[3 + a], source.max[a], tolerance) << "max of axis " << a;
+    }
+}
+
+// The COPC holds the points of a cloud whose header gives its count and its bounds (LAS, LAZ)
+void expectPointsOf(const ddb::PointCloudInfo& source, const ddb::PointCloudInfo& copc, size_t copies = 1) {
+    EXPECT_EQ(copc.pointCount, source.pointCount * copies);
+    ASSERT_EQ(source.bounds.size(), 6u);
+    ASSERT_EQ(copc.bounds.size(), 6u);
+    for (size_t i = 0; i < 6; i++)
+        EXPECT_NEAR(copc.bounds[i], source.bounds[i], 1e-6) << "bound " << i;
+}
+
+// Nothing of a build that failed is left in its folder: no COPC, no private folder
+void expectNothingIn(const fs::path& folder) {
+    EXPECT_FALSE(fs::exists(folder / "cloud.copc.laz"));
+    for (const auto& entry : fs::directory_iterator(folder))
+        ADD_FAILURE() << "left behind: " << entry.path().filename().string();
+}
 
 using namespace ddb;
 
@@ -51,8 +123,9 @@ TEST(pointcloud, copc) {
         testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
-    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
-    EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz"));
+    ddb::PointCloudInfo source;
+    ASSERT_TRUE(ddb::getPointCloudInfo(pc.string(), source));
+    expectPointsOf(source, buildAndRead({pc.string()}, ta.getFolder("copc")));
 }
 
 TEST(pointcloud, toledoInfo) {
@@ -81,21 +154,14 @@ TEST(pointcloud, copcFromPly) {
     auto fp = ddb::fingerprint(pc);
     EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
 
-    // Verify PLY info doesn't have bounds (this is expected)
+    // PLY info has no bounds: the build does not need them
     ddb::PointCloudInfo plyInfo;
     EXPECT_TRUE(ddb::getPointCloudInfo(pc.string(), plyInfo));
     EXPECT_TRUE(plyInfo.bounds.empty()) << "PLY files should not have bounds in metadata";
     EXPECT_GT(plyInfo.pointCount, 0) << "PLY file should have points";
 
-    // Build COPC from PLY - this should work by reading bounds from converted LAS
-    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
-    EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz")) << "COPC generation from PLY should succeed";
-
-    // Verify the generated COPC has valid bounds
-    ddb::PointCloudInfo copcInfo;
-    EXPECT_TRUE(ddb::getCopcInfo((ta.getFolder("copc") / "cloud.copc.laz").string(), copcInfo));
-    EXPECT_EQ(copcInfo.bounds.size(), 6) << "COPC should have 6 bounds values";
-    EXPECT_GT(copcInfo.pointCount, 0) << "COPC should have points";
+    const ddb::PointCloudInfo copc = buildAndRead({pc.string()}, ta.getFolder("copc"));
+    EXPECT_EQ(copc.pointCount, plyInfo.pointCount);
 }
 
 TEST(pointcloud, bm3dFromPlyMesh) {
@@ -162,15 +228,7 @@ TEST(pointcloud, copcFromPts) {
     auto fp = ddb::fingerprint(pc);
     EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
 
-    // Build COPC from PTS - this should work by converting to LAS first
-    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
-    EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz")) << "COPC generation from PTS should succeed";
-
-    // Verify the generated COPC has valid bounds
-    ddb::PointCloudInfo copcInfo;
-    EXPECT_TRUE(ddb::getCopcInfo((ta.getFolder("copc") / "cloud.copc.laz").string(), copcInfo));
-    EXPECT_EQ(copcInfo.bounds.size(), 6) << "COPC should have 6 bounds values";
-    EXPECT_GT(copcInfo.pointCount, 0) << "COPC should have points";
+    expectPointsOf(readTextCloud(pc), buildAndRead({pc.string()}, ta.getFolder("copc")), 1e-3);
 }
 
 TEST(pointcloud, copcFromXyz) {
@@ -182,15 +240,7 @@ TEST(pointcloud, copcFromXyz) {
     auto fp = ddb::fingerprint(pc);
     EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
 
-    // Build COPC from XYZ - this should work by converting to LAS first
-    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
-    EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz")) << "COPC generation from XYZ should succeed";
-
-    // Verify the generated COPC has valid bounds
-    ddb::PointCloudInfo copcInfo;
-    EXPECT_TRUE(ddb::getCopcInfo((ta.getFolder("copc") / "cloud.copc.laz").string(), copcInfo));
-    EXPECT_EQ(copcInfo.bounds.size(), 6) << "COPC should have 6 bounds values";
-    EXPECT_GT(copcInfo.pointCount, 0) << "COPC should have points";
+    expectPointsOf(readTextCloud(pc), buildAndRead({pc.string()}, ta.getFolder("copc")), 1e-3);
 }
 
 TEST(pointcloud, e57Info) {
@@ -216,15 +266,12 @@ TEST(pointcloud, copcFromE57) {
     auto fp = ddb::fingerprint(pc);
     EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
 
-    // Build COPC from E57 - this should work by converting to LAS first
-    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
-    EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz")) << "COPC generation from E57 should succeed";
-
-    // Verify the generated COPC has valid bounds
-    ddb::PointCloudInfo copcInfo;
-    EXPECT_TRUE(ddb::getCopcInfo((ta.getFolder("copc") / "cloud.copc.laz").string(), copcInfo));
-    EXPECT_EQ(copcInfo.bounds.size(), 6) << "COPC should have 6 bounds values";
-    EXPECT_GT(copcInfo.pointCount, 0) << "COPC should have points";
+    ddb::PointCloudInfo e57Info;
+    ASSERT_TRUE(ddb::getPointCloudInfo(pc.string(), e57Info));
+    const ddb::PointCloudInfo copc = buildAndRead({pc.string()}, ta.getFolder("copc"));
+    EXPECT_EQ(copc.pointCount, e57Info.pointCount);
+    EXPECT_GT(copc.bounds[3], copc.bounds[0]);
+    EXPECT_GT(copc.bounds[4], copc.bounds[1]);
 }
 
 TEST(pointcloud, xyzWithCloudCompareHeaders) {
@@ -332,88 +379,150 @@ TEST(pointcloud, xyzSemicolonSeparated) {
 }
 
 // ---------------------------------------------------------------------------
-// COPC backend selection tests (Untwine vs PDAL fallback)
+// COPC builds (ddb-tilers, in the raster helper)
 // ---------------------------------------------------------------------------
 
-TEST(pointcloud, copcBackendForcePdal) {
-    // DDB_USE_PDAL_COPC=1 must always select PDAL, regardless of binary.
-    UntwineEnvReset reset;
-    setEnv("DDB_USE_PDAL_COPC", "1");
-    EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Auto), ddb::CopcBackend::Pdal);
-    EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Untwine), ddb::CopcBackend::Pdal);
-}
-
-TEST(pointcloud, copcBackendMissingBinaryFallsBackToPdal) {
-    // Pointing DDB_UNTWINE_PATH to a non-existent file must fall back to PDAL on Auto.
-    UntwineEnvReset reset;
-    setEnv("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
-    EXPECT_TRUE(ddb::untwine::findUntwineBinary(true).empty());
-    EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Auto), ddb::CopcBackend::Pdal);
-}
-
-TEST(pointcloud, copcBackendForceUntwineMissingThrows) {
-    // Forcing Untwine when no binary is present must raise UntwineException.
-    UntwineEnvReset reset;
-    setEnv("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
-    ddb::untwine::findUntwineBinary(true);
-    EXPECT_THROW(ddb::untwine::resolveBackend(ddb::CopcBackend::Untwine), ddb::UntwineException);
-}
-
-TEST(pointcloud, copcBuildFallbackWhenUntwineUnavailable) {
-    // End-to-end: even with a fake binary path, buildCopc should produce a valid COPC
-    // by falling back to the PDAL pipeline.
-    UntwineEnvReset reset;
-    setEnv("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
-    ddb::untwine::findUntwineBinary(true);
-
+// The text clouds DroneDB indexes (getPointCloudInfo reads them above) build with all their points:
+// a CloudCompare header, a point count line, comments, tabs, semicolons and commas
+TEST(pointcloud, copcOfEveryTextLayoutHasAllItsPoints) {
     TestArea ta(TEST_NAME);
-    fs::path pc = ta.downloadTestAsset(
-        testDataUrl("brighton/point_cloud.laz"),
-        "point_cloud.laz");
-
-    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
-    EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz"));
-}
-
-TEST(pointcloud, copcBuildForcePdalProducesValidOutput) {
-    UntwineEnvReset reset;
-    setEnv("DDB_USE_PDAL_COPC", "1");
-
-    TestArea ta(TEST_NAME);
-    fs::path pc = ta.downloadTestAsset(
-        testDataUrl("brighton/point_cloud.laz"),
-        "point_cloud.laz");
-
-    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
-    fs::path out = ta.getFolder("copc") / "cloud.copc.laz";
-    EXPECT_TRUE(fs::exists(out));
-
-    // Validate via the existing COPC info reader (round-trip).
-    ddb::PointCloudInfo info;
-    EXPECT_TRUE(ddb::getCopcInfo(out.string(), info));
-    EXPECT_GT(info.pointCount, 0u);
-}
-
-TEST(pointcloud, copcBuildWithUntwineWhenAvailable) {
-    // If untwine is discoverable in the environment (bundled next to ddbtest, or via
-    // DDB_UNTWINE_PATH), exercise the Untwine path end-to-end.
-    UntwineEnvReset reset;
-    if (ddb::untwine::findUntwineBinary(true).empty()) {
-        GTEST_SKIP() << "untwine binary not available in this environment";
+    const std::vector<std::pair<std::string, std::string>> clouds = {
+        {"cloudcompare_headers.xyz",
+         "//X Y Z R G B Return_Number Number_Of_Returns User_Data\n"
+         "274849.83 4603201.67 3.68 95 116 77 1.0 1.0 3.0\n"
+         "274849.93 4603202.21 3.58 103 129 87 1.0 1.0 3.0\n"
+         "274850.13 4603202.71 3.48 104 130 88 1.0 1.0 3.0\n"},
+        {"no_headers.xyz", "274849.83 4603201.67 3.68 95 116 77\n274849.93 4603202.21 3.58 103 129 87\n"},
+        {"with_count.xyz", "2\n274849.83 4603201.67 3.68 95 116 77\n274849.93 4603202.21 3.58 103 129 87\n"},
+        {"multiple_comments.xyz",
+         "//Generated by CloudCompare\n//Export date: 2024-01-01\n//X Y Z R G B\n"
+         "1.0 2.0 3.0 100 150 200\n4.0 5.0 6.0 110 160 210\n"},
+        {"tab_separated.xyz", "X\tY\tZ\n1.0\t2.0\t3.0\n4.0\t5.0\t6.0\n"},
+        {"semicolon_separated.xyz", "X;Y;Z\n1.0;2.0;3.0\n4.0;5.0;6.0\n"},
+        {"comma_separated.xyz", "X,Y,Z\n289814.15,4320978.61,170.76\n289814.64,4320978.84,170.75\n"}};
+    for (const auto& [name, text] : clouds) {
+        SCOPED_TRACE(name);
+        const fs::path file = ta.getPath(name);
+        std::ofstream(file) << text;
+        const fs::path out = ta.getFolder("copc-" + fs::path(name).stem().string());
+        expectPointsOf(readTextCloud(file), buildAndRead({file.string()}, out), 1e-3);
     }
+}
 
+// The clouds of a build are merged into one, each read where it lies (the helper reads the folder of
+// each of them)
+TEST(pointcloud, copcOfSeveralCloudsHasThePointsOfAll) {
     TestArea ta(TEST_NAME);
-    fs::path pc = ta.downloadTestAsset(
-        testDataUrl("brighton/point_cloud.laz"),
-        "point_cloud.laz");
+    const fs::path pc = ta.downloadTestAsset(testDataUrl("brighton/point_cloud.laz"), "point_cloud.laz");
+    const fs::path first = ta.getFolder("a") / "first.laz";
+    const fs::path second = ta.getFolder("b") / "second.laz";
+    fs::copy_file(pc, first, fs::copy_options::overwrite_existing);
+    fs::copy_file(pc, second, fs::copy_options::overwrite_existing);
 
-    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
-    fs::path out = ta.getFolder("copc") / "cloud.copc.laz";
-    ASSERT_TRUE(fs::exists(out));
+    ddb::PointCloudInfo source;
+    ASSERT_TRUE(ddb::getPointCloudInfo(pc.string(), source));
+    expectPointsOf(source, buildAndRead({first.string(), second.string()}, ta.getFolder("copc")), 2);
+}
 
-    ddb::PointCloudInfo info;
-    EXPECT_TRUE(ddb::getCopcInfo(out.string(), info));
-    EXPECT_GT(info.pointCount, 0u);
+// A cloud of fewer than 2 points, or of no extent in X or Y, has no COPC: the count and the bounds are
+// those of the points the builder read, whatever the format of the file
+TEST(pointcloud, aCloudOfFewerThanTwoPointsOrNoExtentHasNoCopc) {
+    TestArea ta(TEST_NAME);
+    const std::vector<std::pair<std::string, std::string>> clouds = {
+        {"one.xyz", "1 2 3\n"}, {"vertical.xyz", "1 2 3\n1 2 5\n1 2 7\n"}, {"line.pts", "2\n1 2 3\n1 5 3\n"}};
+    for (const auto& [name, text] : clouds) {
+        SCOPED_TRACE(name);
+        const fs::path file = ta.getPath(name);
+        std::ofstream(file) << text;
+        const fs::path out = ta.getFolder("copc-" + fs::path(name).stem().string());
+        EXPECT_THROW(ddb::buildCopc({file.string()}, out.string()), ddb::InvalidArgsException);
+        expectNothingIn(out);
+    }
+}
+
+// A file the builder cannot read is a point cloud that cannot be read, as PDAL's build reported it,
+// and leaves nothing
+TEST(pointcloud, aCloudTheBuilderCannotReadIsAPdalException) {
+    TestArea ta(TEST_NAME);
+    const std::vector<std::pair<std::string, std::string>> clouds = {
+        {"header_only.xyz", "X Y Z\n"}, {"text.las", "this is not a point cloud\n"}};
+    for (const auto& [name, text] : clouds) {
+        SCOPED_TRACE(name);
+        const fs::path file = ta.getPath(name);
+        std::ofstream(file) << text;
+        ASSERT_EQ(ddb::fingerprint(file), ddb::EntryType::PointCloud);
+        const fs::path out = ta.getFolder("copc-" + fs::path(name).stem().string());
+        EXPECT_THROW(ddb::buildCopc({file.string()}, out.string()), ddb::PDALException);
+        expectNothingIn(out);
+    }
+}
+
+// A file that is not a point cloud, or that does not exist, is refused before the helper runs
+TEST(pointcloud, aSourceThatIsNoPointCloudIsRefusedBeforeTheBuild) {
+    TestArea ta(TEST_NAME);
+    const fs::path notes = ta.getPath("notes.txt");
+    std::ofstream(notes) << "1 2 3\n4 5 6\n";
+    const fs::path out = ta.getFolder("copc");
+    EXPECT_THROW(ddb::buildCopc({notes.string()}, out.string()), ddb::InvalidArgsException);
+    EXPECT_THROW(ddb::buildCopc({ta.getPath("missing.laz").string()}, out.string()), ddb::FSException);
+    EXPECT_THROW(ddb::buildCopc({}, out.string()), ddb::InvalidArgsException);
+    expectNothingIn(out);
+}
+
+// The build reports the phases of the builder, from the plan at 0 to the end of the file at 1
+TEST(pointcloud, theCopcBuildReportsThePhasesOfTheBuilder) {
+    TestArea ta(TEST_NAME);
+    const fs::path pc = ta.downloadTestAsset(testDataUrl("brighton/point_cloud.laz"), "point_cloud.laz");
+
+    std::vector<std::pair<double, std::string>> reports;
+    ddb::BuildOptions options;
+    options.progress = [&reports](double fraction, std::string_view phase) {
+        reports.emplace_back(fraction, std::string(phase));
+    };
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string(), options);
+
+    ASSERT_GE(reports.size(), 3u);
+    EXPECT_EQ(reports.front(), std::make_pair(0.0, std::string("planning")));
+    EXPECT_EQ(reports.back(), std::make_pair(1.0, std::string("writing")));
+    const std::vector<std::string> order = {"planning", "reading", "building", "writing"};
+    size_t last = 0;
+    bool building = false;
+    for (size_t i = 0; i < reports.size(); i++) {
+        SCOPED_TRACE(i);
+        if (i > 0) {
+            EXPECT_GE(reports[i].first, reports[i - 1].first);
+        }
+        const size_t at = static_cast<size_t>(std::find(order.begin(), order.end(), reports[i].second) - order.begin());
+        ASSERT_LT(at, order.size()) << reports[i].second;
+        EXPECT_GE(at, last) << "the phases go in order";
+        last = at;
+        building = building || reports[i].second == "building";
+    }
+    EXPECT_TRUE(building);
+}
+
+// The phase of a fraction is the one ddb-tilers reports with it
+TEST(pointcloud, thePhaseOfAFractionIsTheOneOfTheBuilder) {
+    TestArea ta(TEST_NAME);
+    const fs::path pc = ta.downloadTestAsset(testDataUrl("brighton/point_cloud.laz"), "point_cloud.laz");
+
+    std::vector<std::pair<double, std::string>> reports;
+    const ddbtProgressCallback record = [](double fraction, const char* phase, void* user) {
+        static_cast<std::vector<std::pair<double, std::string>>*>(user)->emplace_back(fraction, phase);
+    };
+    const std::string out = (ta.getFolder("copc") / "cloud.copc.laz").string();
+    ASSERT_EQ(ddbtBuildCopc2(pc.string().c_str(), out.c_str(), R"({"threads": 2, "metadata": false})", record, &reports),
+              DDBT_ERR_NONE)
+        << ddbtLastError();
+
+    std::vector<std::string> phases;
+    for (const auto& [fraction, phase] : reports) {
+        SCOPED_TRACE(fraction);
+        EXPECT_STREQ(ddb::copcPhaseOfFraction(fraction), phase.c_str());
+        if (phases.empty() || phases.back() != phase)
+            phases.push_back(phase);
+    }
+    EXPECT_EQ(phases, (std::vector<std::string>{"planning", "reading", "building", "writing"}));
 }
 
 }  // namespace

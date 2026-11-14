@@ -21,21 +21,6 @@
 
 namespace ddb
 {
-    // Reports the build (the work of GDAL, then the statistics) to the caller at every whole percent
-    // and logs it every 5%, to aid diagnostics. Uses an atomic counter to throttle (GDAL may call this
-    // very frequently, from its own threads too).
-    static void reportWarpProgress(std::atomic<int>& lastPct, double dfComplete, const raster::ProgressCallback& progress) {
-        const int pct = static_cast<int>(dfComplete * 100.0);
-        int prev = lastPct.load();
-        if (pct < prev + 1 || !lastPct.compare_exchange_strong(prev, pct))
-            return;
-        if (progress)
-            progress(dfComplete);
-        if (pct / 5 != prev / 5) {
-            LOGD << "COG progress: " << pct << "%";
-        }
-    }
-
     namespace
     {
         // The COG of a GeoRaster (GeoTIFF or JPEG 2000), built by ddb-tilers in one streamed pass:
@@ -61,27 +46,12 @@ namespace ddb
 
             LOGD << "Building COG from " << io::toUtf8(path) << " with ddb-tilers (" << cpu.threads()
                  << " threads, " << memoryMb << " MB)";
-            std::atomic<int> pct{0};
-            struct Progress
-            {
-                std::atomic<int> *pct;
-                const raster::ProgressCallback *report;
-            } progress{&pct, &reportProgress};
-            const ddbtProgressCallback onProgress = [](double fraction, const char *, void *user) {
-                auto *p = static_cast<Progress *>(user);
-                reportWarpProgress(*p->pct, fraction, *p->report);
-            };
+            tilers::BuildProgress progress("COG", reportProgress);
             const ddbtErr rc = ddbtBuildCog2(io::toUtf8(path).c_str(), io::toUtf8(outFile).c_str(),
-                                             buildOptions.c_str(), onProgress, &progress);
-            if (rc == DDBT_ERR_NO_SPACE)
-                throw RetryableBuildException("The COG build ran out of space: " + std::string(ddbtLastError()),
-                                              RetryableBuildReason::NoSpaceOnDevice);
-            cancel::throwIfCanceled();
+                                             buildOptions.c_str(), &tilers::BuildProgress::forward, &progress);
             // An input that cannot be built (no coordinate system, no geotransform, a layout the
             // builder does not read) is a raster that cannot be read, as GDAL's build reported it
-            if (rc == DDBT_ERR_INVALIDARGS || rc == DDBT_ERR_NOT_IMPLEMENTED)
-                throw GDALException(ddbtLastError());
-            tilers::check(rc);
+            tilers::checkBuild(rc, "The COG build", [](const std::string &message) { throw GDALException(message); });
         }
     } // namespace
 

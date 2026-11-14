@@ -22,7 +22,7 @@ if(BUILD_TESTING)
     #   ddb_unit_tests  tests/unit/: self-contained tests. A test file belongs here when none of
     #                   its tests downloads anything (TestFS or downloadTestAsset with a URL),
     #                   calls a network service (DSM elevation), runs an external tool that
-    #                   is not built in this tree (Obj2Tiles, untwine, dwg2dxf, build-lod; the
+    #                   is not built in this tree (Obj2Tiles, dwg2dxf, build-lod; the
     #                   fake tools a test writes itself, ddbtest_child and the helper programs
     #                   built with the tests (scripts/helper-tools.txt) are fine), reads CAD
     #                   assets or builds a 3D model (bm3d/3D Tiles: bm3d and Obj2Tiles). Whole

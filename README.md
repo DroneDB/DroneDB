@@ -48,7 +48,7 @@ Download the latest release from [GitHub Releases](https://github.com/DroneDB/Dr
 **Long paths.** Windows refuses a path of 260 characters or more unless it allows long paths, and a
 build writes temporary files about 130 characters below the root of the dataset (a point cloud
 build, for one), so a dataset in a deep folder fails to build. The programs of the package
-(`ddb`, `bm3d`, `metadata-util`, `untwine`) declare themselves long path aware, but Windows has to
+(`ddb`, `bm3d`, `metadata-util`, `gdal-util`) declare themselves long path aware, but Windows has to
 allow it: set `LongPathsEnabled` to 1 under `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`
 (or enable the group policy *Enable Win32 long paths*), as an administrator, and start the programs
 again. Without it, keep the root of a dataset under about 130 characters. A program that
@@ -200,23 +200,7 @@ After successful build, find executables in the `build/` directory:
 - **ddbcmd.exe** - Command-line tool
 - **ddb.dll** - Core library
 - **ddbtest.exe** - Test suite
-- **untwine.exe** - COPC converter (optional, see below)
 - **build-lod.exe** - Gaussian Splat LOD producer (required: a Gaussian Splat build fails without it)
-
-#### Untwine COPC (optional)
-
-If the `vendor/untwine` git submodule is initialised, the build script automatically compiles [Untwine](https://github.com/hobuinc/untwine) and places `untwine.exe` next to `ddbcmd.exe`. Untwine significantly accelerates the generation of Cloud Optimized Point Clouds (COPC) compared to the PDAL fallback.
-
-> **Important:** Untwine is always compiled with the **same `-BuildType`** as DroneDB. Both binaries share vcpkg-managed DLLs (pdalcpp, gdal, proj, …) that must link against the same C runtime. Mixing configurations (e.g. DroneDB Debug + Untwine Release) causes a CRT mismatch and a crash at startup.
-
-To initialise the submodule:
-
-```powershell
-git submodule update --init vendor/untwine
-.\full-build-win.ps1          # or -BuildType Release
-```
-
-If the submodule is not present, DroneDB falls back to the built-in PDAL `writers.copc` pipeline automatically - no configuration required.
 
 #### build-lod (Gaussian Splat LOD producer)
 
@@ -251,7 +235,7 @@ If `build-lod.exe` is missing, a Gaussian Splat build fails until the tool is in
 
 ### Linux Build Script
 
-The `full-build-linux.sh` script configures vcpkg, runs CMake, and optionally builds the Untwine COPC accelerator in a single step.
+The `full-build-linux.sh` script configures vcpkg, runs CMake and builds the helper programs in a single step.
 
 #### Basic Usage
 
@@ -270,21 +254,7 @@ The first (optional) positional argument sets the build type and is passed direc
 After a successful build, executables are placed in `build/`:
 - **ddbcmd** / **libddb.so** - CLI tool and core library
 - **ddbtest** - Test suite
-- **untwine** - COPC accelerator (optional, see below)
 - **build-lod** - Gaussian Splat LOD producer (required: a Gaussian Splat build fails without it)
-
-#### Untwine COPC Accelerator (optional)
-
-Same logic as on Windows: if `vendor/untwine/CMakeLists.txt` exists, the script compiles Untwine using the **same build type** as DroneDB and copies the resulting binary next to `ddbcmd`.
-
-To initialise the submodule:
-
-```bash
-git submodule update --init vendor/untwine
-./full-build-linux.sh          # or Debug
-```
-
-A build failure in the Untwine step is **non-blocking** - DroneDB falls back to the PDAL `writers.copc` pipeline automatically.
 
 #### build-lod (Gaussian Splat LOD producer)
 
@@ -376,8 +346,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENSE.md).
 
 Distribution archives (Windows ZIP, Debian package, Docker image) may include
-third-party components under different licenses - most notably the optional
-[Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0), the
+third-party components under different licenses - most notably the
 [Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles) 3D Tiles converter (AGPL-3.0)
 with its bundled libktx (Apache-2.0), the `metadata-util` image metadata helper (Exiv2,
 GPL-2.0-or-later), the [`bm3d`](https://github.com/DroneDB/bm3d) mesh streaming helper

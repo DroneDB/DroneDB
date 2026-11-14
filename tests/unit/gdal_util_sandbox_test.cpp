@@ -1022,6 +1022,55 @@ namespace
         session.kill();
     }
 
+    // The address space of a process held while it opens the input of its build
+    uint64_t addressSpaceOfABuild(const fs::path &folder, const char *op, const fs::path &input, const json &params)
+    {
+        HeldInput held(folder / input);
+        Session session;
+        process::SessionOptions options;
+        options.envOverrides = {{kSandboxEnv, "strict"}};
+        const raster::Request build = request(1, op, folder / input, folder / "out" / "built", params);
+        fs::create_directories(folder / "out");
+        if (!session.start(tool(), {"--request", raster::encodeRequest(build)}, options))
+        {
+            ADD_FAILURE() << session.startError();
+            return 0;
+        }
+        if (!held.waitForReader())
+        {
+            ADD_FAILURE() << session.stderrTail();
+            return 0;
+        }
+        const uint64_t bytes = limitOf(session.pid(), "Max address space").softValue();
+        session.kill();
+        return bytes;
+    }
+
+    // The builder of a COPC maps the clouds it parses in place, and a mapping counts in the address
+    // space: a COPC build has the address space of the other builds plus the size of its clouds
+    TEST_F(GdalUtilSandboxFiles, aCopcBuildHasTheAddressSpaceOfABuildAndTheSizeOfItsCloudsBesides)
+    {
+        if (!hostOffers("landlock") || !hostOffers("seccomp"))
+            GTEST_SKIP() << (hostOffers("landlock") ? kNeedsSeccomp : kNeedsLandlock);
+        if (sandbox::sanitizerAllowances().unlimitedAddressSpace)
+            GTEST_SKIP() << "a " << sandbox::sanitizerAllowances().runtime << " build has no address space limit";
+
+        // A sparse cloud of 64 GiB, far more than the memory share of any machine the tests run on
+        constexpr uint64_t kCloudBytes = 64 * kGiB;
+        const fs::path cloud = area_->getFolder("large-cloud") / "large.xyz";
+        std::ofstream(cloud).close();
+        fs::resize_file(cloud, kCloudBytes);
+
+        const uint64_t cog = addressSpaceOfABuild(area_->getFolder("held-cog"), raster::op::kCog, "held.tif", json{{"threads", 1}});
+        raster::CopcParams params;
+        params.inputs = {cloud};
+        params.threads = 1;
+        const uint64_t copc =
+            addressSpaceOfABuild(area_->getFolder("held-copc"), raster::op::kCopc, "held.laz", raster::toJson(params));
+        ASSERT_GT(cog, 0u);
+        EXPECT_EQ(copc, cog + kCloudBytes);
+    }
+
     // ------------------------------------------------------------------ the limits end in `limit`
 
     // A raster whose blocks are large and cost a lot of cpu time: three bands of 12288 x 12288

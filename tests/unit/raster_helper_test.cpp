@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -36,6 +37,7 @@
 #include "gtest/gtest.h"
 #include "mio.h"
 #include "parallel.h"
+#include "pointcloud.h"
 #include "process_runner.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
@@ -979,7 +981,7 @@ namespace
         mutable std::mutex mutex_;
         mutable std::vector<fs::path> programs;
         mutable std::vector<std::vector<std::string>> calls;
-        std::string versionText = "gdal-util test protocol 1.0";
+        std::string versionText = "gdal-util test protocol 1.1";
         Handler handler;
     };
 
@@ -1066,6 +1068,29 @@ namespace
         EXPECT_EQ(decodeRequest(runner.calls.at(1).at(1)).op, op::kVector);
     }
 
+    TEST(RasterOneShot, theCopcBuildIsTheSameRequestWithItsOwnOperationAndTheOtherClouds)
+    {
+        FakeRunner runner;
+        runner.handler = [](const std::vector<std::string> &args, const process::Options &options) {
+            options.onOutputLine(R"({"progress":0.4})");
+            options.onOutputLine(R"({"id":)" + std::to_string(idOfRequest(args)) + R"(,"ok":true,"result":{}})");
+            return exitedWith(0);
+        };
+        GdalUtilHelper helper = oneShotHelper(runner);
+        CopcParams params;
+        params.inputs = {fs::absolute("b.laz")};
+        params.threads = 2;
+        std::vector<double> progress;
+        helper.buildCopc(fs::absolute("a.laz"), fs::absolute("out/cloud.copc.laz"), toJson(params),
+                         [&progress](double fraction) { progress.push_back(fraction); });
+
+        const Request request = decodeRequest(runner.calls.at(1).at(1));
+        EXPECT_EQ(request.op, op::kCopc);
+        EXPECT_EQ(request.path, fs::absolute("a.laz").lexically_normal());
+        EXPECT_EQ(copcParamsFromJson(request.params).inputs, params.inputs);
+        EXPECT_EQ(progress, std::vector<double>{0.4});
+    }
+
     TEST(RasterOneShot, aBuildProcessHasAHeapArenaForEachOfItsThreads)
     {
         FakeRunner runner;
@@ -1105,24 +1130,29 @@ namespace
                 return exitedWith(1);
             };
             GdalUtilHelper helper = oneShotHelper(runner);
-            const auto build = [&] { helper.buildCog(fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback()); };
-            if (expected == "notread")
-                EXPECT_THROW(build(), RasterNotReadException);
-            else if (expected == "retryable")
+            const std::vector<std::function<void()>> builds = {
+                [&] { helper.buildCog(fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback()); },
+                [&] { helper.buildCopc(fs::absolute("a.laz"), fs::absolute("o.laz"), json::object(), ProgressCallback()); }};
+            for (const auto &build : builds)
             {
-                // A build that runs out of space is retried when there is some, as every build says it
-                try
+                if (expected == "notread")
+                    EXPECT_THROW(build(), RasterNotReadException);
+                else if (expected == "retryable")
                 {
-                    build();
-                    FAIL() << "no exception";
+                    // A build that runs out of space is retried when there is some, as every build says it
+                    try
+                    {
+                        build();
+                        FAIL() << "no exception";
+                    }
+                    catch (const RetryableBuildException &e)
+                    {
+                        EXPECT_EQ(e.reason(), RetryableBuildReason::NoSpaceOnDevice);
+                    }
                 }
-                catch (const RetryableBuildException &e)
-                {
-                    EXPECT_EQ(e.reason(), RetryableBuildReason::NoSpaceOnDevice);
-                }
+                else
+                    EXPECT_THROW(build(), RasterOpException);
             }
-            else
-                EXPECT_THROW(build(), RasterOpException);
         }
     }
 
@@ -1229,6 +1259,21 @@ namespace
         }
     }
 
+    // The COPC build came with protocol 1.1: a program of 1.0 does not know the operation
+    TEST(RasterOneShot, aProgramOfAnEarlierProtocolMinorIsNotRun)
+    {
+        FakeRunner runner;
+        runner.versionText = "gdal-util test protocol 1.0";
+        runner.handler = [](const std::vector<std::string> &, const process::Options &) {
+            ADD_FAILURE() << "the request must not be sent";
+            return exitedWith(0);
+        };
+        GdalUtilHelper helper = oneShotHelper(runner);
+        EXPECT_THROW(helper.buildCopc(fs::absolute("a.laz"), fs::absolute("o.laz"), json::object(), ProgressCallback()),
+                     HelperUnavailableException);
+        EXPECT_EQ(runner.calls.size(), 1u);
+    }
+
     TEST(RasterOneShot, aProgramOfAnotherProtocolMajorIsNotRun)
     {
         FakeRunner runner;
@@ -1284,8 +1329,36 @@ namespace
         EXPECT_EQ(back.outsize, "25%");
     }
 
+    // The clouds merged with the path of a COPC build travel in their order, each as a path of its own
+    TEST(RasterBuildParams, theCloudsOfACopcBuildAreTheOnesTheHostSent)
+    {
+        CopcParams copc;
+        EXPECT_EQ(toJson(copc), json::object());
+        copc.inputs = {"/data/ds/b.laz", "/data/other/c.xyz"};
+        copc.threads = 3;
+        const json sent = toJson(copc);
+        EXPECT_EQ(sent, json::parse(R"({"inputs":[{"path":"/data/ds/b.laz"},{"path":"/data/other/c.xyz"}],"threads":3})"));
+        const CopcParams back = copcParamsFromJson(sent);
+        EXPECT_EQ(back.inputs, copc.inputs);
+        EXPECT_EQ(back.threads, std::optional<int>(3));
+#ifndef _WIN32
+        // A file name is bytes on POSIX systems: this one is Latin-1, and goes as base64
+        copc.inputs = {fs::path(std::string("/data/caf\xE9.laz"))};
+        const json latin1 = toJson(copc);
+        EXPECT_FALSE(latin1.at("inputs").at(0).contains("path"));
+        EXPECT_TRUE(latin1.at("inputs").at(0).contains("path64"));
+        EXPECT_EQ(copcParamsFromJson(latin1).inputs, copc.inputs);
+#endif
+    }
+
     TEST(RasterBuildParams, paramsThatAreNotWhatTheOperationTakesAreRefused)
     {
+        EXPECT_THROW(copcParamsFromJson(json::array()), ProtocolError);
+        EXPECT_THROW(copcParamsFromJson(json{{"inputs", "/data/b.laz"}}), ProtocolError);
+        EXPECT_THROW(copcParamsFromJson(json{{"inputs", json::array({"/data/b.laz"})}}), ProtocolError);
+        EXPECT_THROW(copcParamsFromJson(json{{"inputs", json::array({json::object()})}}), ProtocolError);
+        EXPECT_THROW(copcParamsFromJson(json{{"inputs", json::array({json{{"path", 3}}})}}), ProtocolError);
+        EXPECT_THROW(copcParamsFromJson(json{{"threads", 0}}), ProtocolError);
         EXPECT_THROW(cogParamsFromJson(json::array()), ProtocolError);
         EXPECT_THROW(cogParamsFromJson(json{{"threads", 0}}), ProtocolError);
         EXPECT_THROW(cogParamsFromJson(json{{"threads", 5000}}), ProtocolError);
@@ -1341,6 +1414,7 @@ namespace
         std::function<void(const fs::path &, const fs::path &, const json &)> onCog;
         std::function<void(const fs::path &, const fs::path &, const json &)> onVector;
         std::function<void(const fs::path &, const fs::path &, const json &)> onGeoproject;
+        std::function<void(const fs::path &, const fs::path &, const json &, const ProgressCallback &)> onCopc;
 
         ProbeResult probe(const fs::path &, const ProbeParams &) override
         {
@@ -1364,6 +1438,12 @@ namespace
         {
             ASSERT_TRUE(onCog) << "no COG is built";
             onCog(path, out, params);
+        }
+        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+                       const ProgressCallback &progress) override
+        {
+            ASSERT_TRUE(onCopc) << "no COPC is built";
+            onCopc(path, out, params, progress);
         }
         void buildVector(const fs::path &path, const fs::path &out, const json &params, const ProgressCallback &) override
         {
@@ -1430,6 +1510,112 @@ namespace
         // calling thread is one of the threads
         EXPECT_EQ(tokensDuring, tokensBefore + static_cast<size_t>(threads - 1));
         EXPECT_EQ(parallel::cpuTokensInUse(), tokensBefore);
+    }
+
+    // A small point cloud as text, `points` points over a 10 x 10 square
+    fs::path writeTextCloud(const fs::path &file, int points = 11)
+    {
+        std::ofstream xyz(file);
+        for (int i = 0; i < points; i++)
+            xyz << i % 11 << " " << (i * 7) % 11 << " " << i % 3 << "\n";
+        return file;
+    }
+
+    TEST_F(RasterBuildsTest, theCopcBuildGivesTheHelperAFolderBesideTheOutputTheOtherCloudsAndItsThreads)
+    {
+        const fs::path first = writeTextCloud(area_->getPath("first.xyz"));
+        const fs::path second = writeTextCloud(area_->getFolder("more") / "second.xyz");
+        const fs::path outdir = area_->getFolder("out");
+
+        ScriptedHelper helper;
+        fs::path seenPath, seenOut;
+        CopcParams seen;
+        size_t tokensDuring = 0;
+        helper.onCopc = [&](const fs::path &path, const fs::path &out, const json &params,
+                            const ProgressCallback &progress) {
+            seenPath = path;
+            seenOut = out;
+            seen = copcParamsFromJson(params);
+            tokensDuring = parallel::cpuTokensInUse();
+            buildCopcFile(path, out, seen, progress);
+        };
+        const ScopedRasterHelper installed(helper);
+
+        const size_t tokensBefore = parallel::cpuTokensInUse();
+        buildCopc({io::toUtf8(first), io::toUtf8(second)}, io::toUtf8(outdir), BuildOptions::withThreads(3));
+
+        EXPECT_EQ(seenPath, first);
+        EXPECT_EQ(seen.inputs, std::vector<fs::path>{second}) << "the other clouds, absolute";
+        // The helper writes into a private folder made in the output folder, and the COPC is moved
+        // to its name
+        EXPECT_EQ(seenOut.parent_path().parent_path(), outdir);
+        EXPECT_EQ(seenOut.filename(), fs::path(CopcFileName));
+        EXPECT_FALSE(fs::exists(seenOut.parent_path()));
+        PointCloudInfo copc;
+        ASSERT_TRUE(getCopcInfo(io::toUtf8(outdir / CopcFileName), copc));
+        EXPECT_EQ(copc.pointCount, 22u);
+        ASSERT_TRUE(seen.threads.has_value());
+        ASSERT_GE(*seen.threads, 1);
+        EXPECT_LE(*seen.threads, 3) << "the cap of the caller lowers the threads";
+        // The tokens of the CPU pool of the host stay taken for as long as the helper works
+        EXPECT_EQ(tokensDuring, tokensBefore + static_cast<size_t>(*seen.threads - 1));
+        EXPECT_EQ(parallel::cpuTokensInUse(), tokensBefore);
+    }
+
+    // What the helper wrote is published only when it reads as a COPC; a failure of the helper keeps
+    // what it means (a full device is retried, a cloud the builder cannot read is PDAL's failure) and
+    // leaves nothing in the folder of the output
+    TEST_F(RasterBuildsTest, aCopcBuildPublishesOnlyACopcAndKeepsTheMeaningOfAFailure)
+    {
+        const fs::path cloud = writeTextCloud(area_->getPath("cloud.xyz"));
+        struct Case
+        {
+            const char *name;
+            std::function<void(const fs::path &)> helperDoes;
+            std::function<void(const std::function<void()> &)> expectThrown;
+        };
+        const std::vector<Case> cases = {
+            {"garbage", [](const fs::path &out) { std::ofstream(out) << "not a point cloud"; },
+             [](const std::function<void()> &build) { EXPECT_THROW(build(), PDALException); }},
+            {"nospace",
+             [](const fs::path &) {
+                 throw RetryableBuildException("The COPC build ran out of space", RetryableBuildReason::NoSpaceOnDevice);
+             },
+             [](const std::function<void()> &build) {
+                 try
+                 {
+                     build();
+                     FAIL() << "no exception";
+                 }
+                 catch (const RetryableBuildException &e)
+                 {
+                     EXPECT_EQ(e.reason(), RetryableBuildReason::NoSpaceOnDevice);
+                 }
+             }},
+            {"unreadable", [](const fs::path &) { throw RasterOpException(ErrorCode::Unreadable, "no points"); },
+             [](const std::function<void()> &build) {
+                 try
+                 {
+                     build();
+                     FAIL() << "no exception";
+                 }
+                 catch (const PDALException &e)
+                 {
+                     EXPECT_EQ(std::string(e.what()), "COPC build failed: no points");
+                 }
+             }}};
+        for (const Case &c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            ScriptedHelper helper;
+            helper.onCopc = [&c](const fs::path &, const fs::path &out, const json &, const ProgressCallback &) {
+                c.helperDoes(out);
+            };
+            const ScopedRasterHelper installed(helper);
+            const fs::path outdir = area_->getFolder(std::string("out-") + c.name);
+            c.expectThrown([&] { buildCopc({io::toUtf8(cloud)}, io::toUtf8(outdir)); });
+            EXPECT_TRUE(fs::is_empty(outdir)) << "nothing is left in the folder of the output";
+        }
     }
 
     TEST_F(RasterBuildsTest, theVectorBuildTellsTheHelperTheThreadsItHoldsTheTokensOf)

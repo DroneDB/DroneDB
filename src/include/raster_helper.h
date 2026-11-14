@@ -42,7 +42,7 @@ namespace ddb
         inline constexpr std::chrono::seconds kThumbnailTimeout{30};
         inline constexpr std::chrono::seconds kConversionTimeout{120};
 
-        // The longest a build (cog, vector) may run in total, whatever the program prints: the
+        // The longest a build (cog, copc, vector) may run in total, whatever the program prints: the
         // variable that sets it in seconds, and its default. The host ends the program at that
         // time and the program limits its own cpu time by it (tools::toolMaxRuntime reads the
         // variable).
@@ -102,6 +102,9 @@ namespace ddb
             // process one with the reason IdleTimeout.
             virtual void buildCog(const fs::path &path, const fs::path &out, const json &params,
                                   const ProgressCallback &progress) = 0;
+            // `path` is the first of the point clouds of the COPC, the others are in `params`
+            virtual void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+                                   const ProgressCallback &progress) = 0;
             virtual void buildVector(const fs::path &path, const fs::path &out, const json &params,
                                      const ProgressCallback &progress) = 0;
         };
@@ -175,6 +178,8 @@ namespace ddb
             void geoproject(const fs::path &path, const fs::path &out, const json &params) override;
             void buildCog(const fs::path &path, const fs::path &out, const json &params,
                           const ProgressCallback &progress) override;
+            void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+                           const ProgressCallback &progress) override;
             void buildVector(const fs::path &path, const fs::path &out, const json &params,
                              const ProgressCallback &progress) override;
 

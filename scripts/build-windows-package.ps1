@@ -198,17 +198,6 @@ foreach ($file in $supportFiles) {
     }
 }
 
-# Copy untwine.exe if present (optional – enables disk-backed COPC builds in DroneDB)
-Write-Host ""
-Write-Host "Copying optional components..." -ForegroundColor Cyan
-$untwinePath = Join-Path $BuildDir "untwine.exe"
-if (Test-Path $untwinePath) {
-    Copy-Item $untwinePath $stagingDir -Force
-    Write-Host "  ✓ untwine.exe (COPC accelerator)" -ForegroundColor Green
-} else {
-    Write-Host "  - untwine.exe (not found, skipping - DroneDB will fall back to PDAL writers.copc)" -ForegroundColor Yellow
-}
-
 # Copy build-lod.exe (mandatory for Gaussian Splat builds, vendor/spark; the workflow fails a
 # release build whose zip does not have it)
 Write-Host ""

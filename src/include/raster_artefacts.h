@@ -92,7 +92,7 @@ namespace ddb
         {
             // The confined raster helper (gdal-util), at low integrity on Windows
             Helper,
-            // This process, or a program it runs unconfined (bm3d, untwine, PDAL)
+            // This process, or a program it runs unconfined (bm3d)
             Host
         };
 

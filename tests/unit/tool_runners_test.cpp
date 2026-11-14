@@ -30,7 +30,6 @@
 #include "tool_locator.h"
 #include "tool_run_support.h"
 #include "tool_runner_result.h"
-#include "untwine_runner.h"
 #include "utils.h"
 
 namespace {
@@ -259,7 +258,6 @@ TEST(ToolLocator, theRunnersFindTheirToolThroughIt) {
     const fs::path tool = fakeTool(ta, "bin/tool");
     for (const auto& [var, find] : std::vector<std::pair<const char*, std::function<fs::path()>>>{
              {"DDB_OBJ2TILES_PATH", [] { return obj2tiles::findObj2TilesBinary(true); }},
-             {"DDB_UNTWINE_PATH", [] { return untwine::findUntwineBinary(true); }},
              {"DDB_BUILDLOD_PATH", [] { return buildlod::findBuildLodBinary(true); }},
              {"DDB_DWG2DXF_PATH", [] { return cad::findDwg2DxfBinary(true); }},
              {"DDB_BM3D_PATH", [] { return bm3d::findBm3dBinary(true); }}}) {
@@ -756,151 +754,6 @@ TEST(Bm3dRunner, aMissingToolIsLookedUpThroughTheVariable) {
 TEST(Bm3dRunner, aCanceledChildPropagatesAndReleasesItsCpuTokens) {
     Bm3dFixture f("runner_bm3d_cancel");
     f.fake.effect = [](const FakeProcessRunner::Call &) { throw CanceledException("canceled"); };
-    const auto before = parallel::cpuTokensInUse();
-    EXPECT_THROW(f.run(), CanceledException);
-    EXPECT_EQ(parallel::cpuTokensInUse(), before);
-}
-
-// ------------------------------------------------------------------------ Untwine
-
-struct UntwineFixture {
-    TestArea ta;
-    fs::path tool, outFile, tempDir;
-    std::vector<std::string> inputs;
-    FakeProcessRunner fake;
-
-    explicit UntwineFixture(const std::string &name) : ta(name, true) {
-        tool = fakeTool(ta, "bin/untwine");
-        outFile = ta.getPath("out/cloud.copc.laz");
-        tempDir = ta.getPath("tmp");
-        inputs = {io::toUtf8(ta.getPath("a.laz")), io::toUtf8(ta.getPath("b.laz"))};
-        fake.effect = [this](const FakeProcessRunner::Call &) { touch(outFile); };
-    }
-
-    ToolRunResult run(const process::Options &options = process::Options()) {
-        return untwine::runUntwineResult(inputs, outFile, tempDir, tool, options, fake);
-    }
-};
-
-TEST(UntwineRunner, buildsTheArgumentsAndTheProgressChannel) {
-    UntwineFixture f("runner_untwine_args");
-    bool channelFed = false;
-    f.fake.effect = [&](const FakeProcessRunner::Call &call) {
-        touch(f.outFile);
-        // The progress decoder lives only during the run: a message (id 1000, 50 %, "half")
-        // and a truncated one are decoded without trouble
-        ASSERT_TRUE(static_cast<bool>(call.options.onExtraData));
-        const int32_t id = 1000;
-        const uint32_t percent = 50, size = 4;
-        std::string message(reinterpret_cast<const char *>(&id), 4);
-        message.append(reinterpret_cast<const char *>(&percent), 4).append(reinterpret_cast<const char *>(&size), 4);
-        message += "half";
-        call.options.onExtraData(message.data(), message.size());
-        call.options.onExtraData(message.data(), 6);
-        channelFed = true;
-    };
-    const auto r = f.run();
-    ASSERT_TRUE(r.succeeded) << r.error;
-    EXPECT_TRUE(channelFed);
-    ASSERT_EQ(f.fake.calls.size(), 1u);
-    const auto &call = f.fake.calls[0];
-    EXPECT_EQ(call.binary, f.tool);
-    EXPECT_TRUE(hasArgs(call.args, {"--files", f.inputs[0] + "," + f.inputs[1], "--output_dir", io::toUtf8(f.outFile),
-                                    "--temp_dir", io::toUtf8(f.tempDir), "--progress_fd",
-                                    process::kExtraChannelPlaceholder}));
-    EXPECT_TRUE(call.options.extraChannel);
-}
-
-// Untwine has no thread option: it runs its own threads whatever a build is capped to, and the
-// tokens of its 10 threads (the calling thread is one) say so to the other sections
-TEST(UntwineRunner, itHoldsTheTokensOfItsFixedThreadsWhateverTheCapOfTheBuild) {
-    UntwineFixture f("runner_untwine_tokens");
-    const ScopedProcessConfig pool(R"({"cpuPoolSize": 64})");
-    EnvVarGuard threads("DDB_BUILD_THREADS", "1");
-    const auto before = parallel::cpuTokensInUse();
-    size_t heldWhileRunning = 0;
-    f.fake.effect = [&](const FakeProcessRunner::Call &) {
-        heldWhileRunning = parallel::cpuTokensInUse() - before;
-        touch(f.outFile);
-    };
-    ASSERT_TRUE(f.run().succeeded);
-    EXPECT_EQ(heldWhileRunning, 9u) << "10 threads: the calling one and 9 tokens";
-    EXPECT_EQ(parallel::cpuTokensInUse(), before);
-}
-
-TEST(UntwineRunner, theCallersOptionsAreKept) {
-    UntwineFixture f("runner_untwine_options");
-    process::Options options;
-    options.idleTimeout = std::chrono::seconds(7);
-    ASSERT_TRUE(f.run(options).succeeded);
-    EXPECT_EQ(f.fake.calls.at(0).options.idleTimeout, std::chrono::seconds(7));
-}
-
-TEST(UntwineRunner, withoutATempFolderTheFlagIsLeftOut) {
-    UntwineFixture f("runner_untwine_notemp");
-    f.tempDir.clear();
-    ASSERT_TRUE(f.run().succeeded);
-    EXPECT_FALSE(contains(f.fake.calls.at(0).args, "--temp_dir"));
-}
-
-TEST(UntwineRunner, anExitCodeIsAFailureAndATimeoutIsRetryable) {
-    UntwineFixture f("runner_untwine_failures");
-    f.fake.effect = nullptr;
-
-    f.fake.result = FakeProcessRunner::exited(2, "PDAL: bad header");
-    auto r = f.run();
-    EXPECT_FALSE(r.succeeded);
-    EXPECT_FALSE(r.timedOut);
-    EXPECT_EQ(r.error, "untwine exited with code 2: PDAL: bad header");
-    EXPECT_NO_THROW(r.throwIfRetryable("COPC: "));
-
-    f.fake.result = FakeProcessRunner::timedOutAfterIdle();
-    r = f.run();
-    EXPECT_FALSE(r.succeeded);
-    EXPECT_TRUE(r.timedOut);
-    try {
-        r.throwIfRetryable("COPC: ");
-        FAIL() << "a timeout is retryable";
-    } catch (const RetryableBuildException &e) {
-        EXPECT_EQ(e.reason(), RetryableBuildReason::IdleTimeout);
-    }
-}
-
-TEST(UntwineRunner, successWithoutTheOutputFileIsAFailure) {
-    UntwineFixture f("runner_untwine_nooutput");
-    f.fake.effect = nullptr;
-    const auto r = f.run();
-    EXPECT_FALSE(r.succeeded);
-    EXPECT_NE(r.error.find("reported success but expected output is missing"), std::string::npos) << r.error;
-}
-
-TEST(UntwineRunner, aStaleOutputIsRemovedBeforeTheLaunch) {
-    UntwineFixture f("runner_untwine_stale");
-    touch(f.outFile, "stale");
-    bool existedAtLaunch = true;
-    f.fake.effect = [&](const FakeProcessRunner::Call &) { existedAtLaunch = fs::exists(f.outFile); };
-    const auto r = f.run();
-    EXPECT_FALSE(existedAtLaunch);
-    EXPECT_FALSE(r.succeeded);  // the fake wrote nothing
-}
-
-TEST(UntwineRunner, aMissingToolOrNoInputNeverStartsAChild) {
-    UntwineFixture f("runner_untwine_missing");
-    f.tool = f.ta.getPath("missing/untwine");
-    auto r = f.run();
-    EXPECT_FALSE(r.succeeded);
-    EXPECT_EQ(r.error, "untwine binary not found");
-
-    f.tool = fakeTool(f.ta, "bin/untwine");
-    f.inputs.clear();
-    r = f.run();
-    EXPECT_EQ(r.error, "no input files provided");
-    EXPECT_TRUE(f.fake.calls.empty());
-}
-
-TEST(UntwineRunner, aCanceledChildPropagatesAndReleasesItsCpuTokens) {
-    UntwineFixture f("runner_untwine_cancel");
-    f.fake.effect = [](const FakeProcessRunner::Call &) { throw ShutdownException("shutting down"); };
     const auto before = parallel::cpuTokensInUse();
     EXPECT_THROW(f.run(), CanceledException);
     EXPECT_EQ(parallel::cpuTokensInUse(), before);

@@ -21,7 +21,7 @@
 #include "raster_helper.h"
 #include "test.h"
 #include "testarea.h"
-#include "untwine_runner.h"
+#include "tilers_call.h"
 #include "vector.h"
 #include "user_open_child.h"
 
@@ -70,16 +70,25 @@ TEST(BuildRetryClassification, BuildLodIdleTimeoutIsStructured) {
     EXPECT_THROW(result.throwIfRetryable("primary build: "), RetryableBuildException);
 }
 
-TEST(BuildRetryClassification, UntwineIdleTimeoutAbortsPrimaryRatherThanFallback) {
-    TestArea area(TEST_NAME, true);
-    process::Options options;
-    options.idleTimeout = std::chrono::milliseconds(150);
-    options.envOverrides.emplace_back("DDB_TEST_CHILD_MODE", "idle");
-    const auto result = untwine::runUntwineResult({"input.laz"}, area.getPath("model.copc.laz"),
-                                                area.getPath("tmp"), testChildPath(), options);
-    EXPECT_FALSE(result.succeeded);
-    EXPECT_TRUE(result.timedOut);
-    EXPECT_THROW(result.throwIfRetryable("primary build: "), RetryableBuildException);
+// What the end of a build of ddb-tilers (a COG, a COPC) means: a full device is retried when there is
+// room, an input the builder cannot read is what the caller says, the rest as any call of ddb-tilers
+TEST(BuildRetryClassification, TheEndOfATilersBuildIsMappedByItsCode) {
+    const auto unreadable = [](const std::string& message) { throw PDALException("unreadable: " + message); };
+    EXPECT_NO_THROW(tilers::checkBuild(DDBT_ERR_NONE, "The COPC build", unreadable));
+    try {
+        tilers::checkBuild(DDBT_ERR_NO_SPACE, "The COPC build", unreadable);
+        FAIL() << "no exception";
+    } catch (const RetryableBuildException& e) {
+        EXPECT_EQ(e.reason(), RetryableBuildReason::NoSpaceOnDevice);
+        EXPECT_EQ(std::string(e.what()).rfind("The COPC build ran out of space: ", 0), 0u) << e.what();
+    }
+    for (const ddbtErr unbuildable : {DDBT_ERR_INVALIDARGS, DDBT_ERR_NOT_IMPLEMENTED}) {
+        SCOPED_TRACE(unbuildable);
+        EXPECT_THROW(tilers::checkBuild(unbuildable, "The COPC build", unreadable), PDALException);
+    }
+    EXPECT_THROW(tilers::checkBuild(DDBT_ERR_EXCEPTION, "The COPC build", unreadable), GDALException);
+    EXPECT_THROW(tilers::checkBuild(DDBT_ERR_NOTFOUND, "The COPC build", unreadable), FSException);
+    EXPECT_THROW(tilers::checkBuild(DDBT_ERR_CANCELED, "The COPC build", unreadable), CanceledException);
 }
 
 TEST(BuildRetryClassification, ExitZeroWithoutOutputIsPermanent) {

@@ -234,16 +234,6 @@ override_dh_auto_install:
 	@test -f \$(CURDIR)/debian/third-party/index.txt || { echo "ERROR: debian/third-party (vcpkg licence notices) is missing"; exit 1; }
 	cp -r \$(CURDIR)/debian/third-party debian/ddb/usr/share/doc/ddb/third-party
 
-	# Optional: copy untwine COPC accelerator if it was built (vendor/untwine).
-	# Installed alongside ddb so that runtime discovery
-	# (untwine_runner.cpp::findUntwineBinary -> getExeFolder()) finds it
-	# without any extra configuration. Falls back to PDAL writers.copc when
-	# the binary is missing.
-	if [ -f \$(CURDIR)/build/untwine ]; then \\
-		cp \$(CURDIR)/build/untwine debian/ddb/usr/bin/untwine; \\
-		chmod +x debian/ddb/usr/bin/untwine; \\
-	fi
-
 	# Optional: copy build-lod Gaussian Splat LOD producer if it was built (vendor/spark).
 	# Installed alongside ddb so that runtime discovery
 	# (buildlod_runner.cpp::findBuildLodBinary -> getExeFolder()) finds it

@@ -332,6 +332,12 @@ namespace ddb
             runOneShot(op::kCog, path, out, params, progress);
         }
 
+        void GdalUtilHelper::buildCopc(const fs::path &path, const fs::path &out, const json &params,
+                                       const ProgressCallback &progress)
+        {
+            runOneShot(op::kCopc, path, out, params, progress);
+        }
+
         void GdalUtilHelper::buildVector(const fs::path &path, const fs::path &out, const json &params,
                                          const ProgressCallback &progress)
         {

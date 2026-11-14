@@ -221,12 +221,6 @@ jobs:
         run: |
           ls /usr/bin/clang-tidy-diff*.py >/dev/null 2>&1 || sudo apt-get install -y -qq clang-tidy
           python3 scripts/lint-changed-lines.py tidy --base "$LINT_BASE" --build-dir build
-      - name: Build Untwine COPC accelerator
-        # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),
-        # but MUST succeed on release tags so the .deb ships with untwine.
-        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        run: |
-          ./scripts/build-untwine.sh build Release
       - name: Install Rust toolchain
         # Required to build the build-lod Gaussian Splat LOD producer (vendor/spark).
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -381,19 +375,6 @@ jobs:
             fi
           done
           echo "  ✓ GDAL data present in .deb"
-
-          # Verify untwine packaging. Required on release tags, informational otherwise.
-          echo "Checking whether untwine is included in the Debian package..."
-          if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/untwine$' >/dev/null; then
-            echo "  ✓ untwine present in .deb (COPC accelerator enabled)"
-          else
-            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-              echo "  ✗ untwine NOT present in .deb - release builds MUST include untwine. Failing."
-              exit 1
-            else
-              echo "  ! untwine NOT present in .deb (DroneDB will fall back to PDAL writers.copc)"
-            fi
-          fi
 
           # Verify build-lod packaging. Required on release tags, informational otherwise.
           echo "Checking whether build-lod is included in the Debian package..."
@@ -843,14 +824,6 @@ jobs:
         # Qt5*/Qt6* DLL
         run: .\scripts\check-gpl-linkage.ps1 -BuildDir build
         shell: pwsh
-      - name: Build Untwine COPC accelerator
-        # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),
-        # but MUST succeed on release tags so the zip ships with untwine.exe.
-        # Uses Ninja (default) to avoid VS 2025 clang-tidy co-compilation errors
-        # with third-party vcpkg dependencies (e.g. h3 library).
-        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        shell: pwsh
-        run: .\scripts\build-untwine.ps1 -BuildDir build -Config Release
       - name: Install Rust toolchain
         # Required to build the build-lod Gaussian Splat LOD producer (vendor/spark).
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -884,12 +857,11 @@ jobs:
       - name: Check that the executables are long path aware
         # Windows takes a path of 260 characters or more only in a process whose executable has
         # <longPathAware>true</longPathAware> in its manifest (cmake/LongPathAware.cmake): the
-        # CLI, the test binaries, the helper programs (scripts/helper-tools.txt) and Untwine
+        # CLI, the test binaries and the helper programs (scripts/helper-tools.txt)
         shell: pwsh
         run: |
           $names = @('ddbcmd.exe', 'ddbtest.exe', 'ddb_unit_tests.exe')
           $names += @(python scripts/check-helper-tools.py --names | ForEach-Object { "$_.exe" })
-          if (Test-Path build/untwine.exe) { $names += 'untwine.exe' }
           python scripts/check-long-path-aware.py @($names | ForEach-Object { "build/$_" })
           exit $LASTEXITCODE
       - name: Allow long paths in Windows
@@ -998,7 +970,7 @@ jobs:
             Write-Host "  Package: $($_.Name) ($([Math]::Round($_.Length / 1MB, 2)) MB)"
           }
 
-          # Verify untwine packaging. Required on release tags, informational otherwise.
+          # Verify the content of the zip: the helper programs, then the optional tools (required on release tags, informational otherwise).
           $zipCheckDir = Join-Path $env:RUNNER_TEMP 'ddb-zip-check'
           if (Test-Path $zipCheckDir) { Remove-Item -Recurse -Force $zipCheckDir }
           $zipFile = Get-ChildItem build/dist/*.zip | Select-Object -First 1
@@ -1029,16 +1001,6 @@ jobs:
               Write-Host '  ✓ the helper executables run from the zip at the package version; ddbcmd.exe indexed a GPS JPEG as GeoImage'
             } finally {
               $env:PATH = $savedPath
-            }
-            if (Test-Path (Join-Path $zipCheckDir 'untwine.exe')) {
-              Write-Host '  ✓ untwine.exe present in zip (COPC accelerator enabled)'
-            } else {
-              if ($env:GITHUB_REF -like 'refs/tags/v*') {
-                Write-Host '  ✗ untwine.exe NOT present in zip - release builds MUST include untwine. Failing.'
-                exit 1
-              } else {
-                Write-Host '  ! untwine.exe NOT present in zip (DroneDB will fall back to PDAL writers.copc)'
-              }
             }
             if (Test-Path (Join-Path $zipCheckDir 'Obj2Tiles.exe')) {
               Write-Host '  ✓ Obj2Tiles.exe present in zip (OGC 3D Tiles generation enabled)'
