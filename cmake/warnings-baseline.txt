@@ -65,7 +65,7 @@ tests/unit/export_raster_test.cpp -Wunused-result 1
 tests/unit/index_change_test.cpp -Wdangling-else 1
 tests/unit/mask_cog_test.cpp -Wunused-result 2
 tests/unit/process_runner_test.cpp -Wconversion 1
-tests/unit/process_runner_test.cpp -Wdangling-else 2
+tests/unit/process_runner_test.cpp -Wdangling-else 1
 tests/unit/raster_profile_test.cpp -Wunused-result 2
 tests/unit/stockpile_test.cpp -Wunused-result 2
 tests/unit/tiler_cache_test.cpp -Wdangling-else 1

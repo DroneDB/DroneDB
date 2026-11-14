@@ -40,19 +40,6 @@ namespace ddb
         namespace
         {
 
-            void deliverExtra(const Options &opts, const char *data, size_t n)
-            {
-                if (!opts.onExtraData) return;
-                try
-                {
-                    opts.onExtraData(data, n);
-                }
-                catch (...)
-                {
-                    // Never let a consumer abort the supervision loop.
-                }
-            }
-
             std::string fmtSeconds(milliseconds ms)
             {
                 std::ostringstream oss;
@@ -134,22 +121,6 @@ namespace ddb
                 r.errorMessage = "killed: the call was canceled";
             }
 
-            std::vector<std::string> expandArgs(const std::vector<std::string> &args,
-                                                const Options &opts,
-                                                const std::string &extraId)
-            {
-                std::vector<std::string> out;
-                out.reserve(args.size());
-                for (const auto &a : args)
-                {
-                    if (opts.extraChannel && a == kExtraChannelPlaceholder)
-                        out.push_back(extraId);
-                    else
-                        out.push_back(a);
-                }
-                return out;
-            }
-
 #ifndef _WIN32
 
             // ---------------------------------------------------------------- POSIX
@@ -166,8 +137,7 @@ namespace ddb
                 {
                     argStrings_.reserve(args.size() + 1);
                     argStrings_.push_back(path_);
-                    for (auto &a : expandArgs(args, opts, std::to_string(kExtraChannelFd)))
-                        argStrings_.push_back(std::move(a));
+                    argStrings_.insert(argStrings_.end(), args.begin(), args.end());
                     envStrings_ = childEnvironment(opts.envOverrides);
                 }
 
@@ -200,8 +170,6 @@ namespace ddb
                 bool launch()
                 {
                     if (!makePipe(outPipe_)) return setupFailure("pipe() for output");
-                    if (opts_.extraChannel && !makePipe(extraPipe_))
-                        return setupFailure("pipe() for extra channel");
                     devNull_.reset(::open("/dev/null", O_RDONLY | O_CLOEXEC));
                     if (!devNull_) return setupFailure("open(/dev/null)");
 
@@ -212,13 +180,11 @@ namespace ddb
                                                devNull_.get(),
                                                outPipe_[1].get(),
                                                outPipe_[1].get(),
-                                               extraPipe_[1].get(),
                                                true,
                                                opts_.maxMemoryBytes};
                     std::string error;
                     pid_ = spawnChild(request, error);
                     outPipe_[1].reset();
-                    extraPipe_[1].reset();
                     devNull_.reset();
                     if (pid_ < 0)
                     {
@@ -250,12 +216,12 @@ namespace ddb
                     }
                 }
 
-                // Drains both pipes until EOF, the child's exit plus the drain grace, a limit,
-                // or the cancellation.
+                // Drains the output pipe until EOF, the child's exit plus the drain grace, a
+                // limit, or the cancellation.
                 void drainPipes()
                 {
                     lastActivity_ = Clock::now();
-                    while (outPipe_[0] || extraPipe_[0])
+                    while (outPipe_[0])
                     {
                         if (!childExited_) probeExit();
                         if (!childExited_ && cancel::isCanceled())
@@ -290,21 +256,8 @@ namespace ddb
                             waitMs = std::min(waitMs, left);
                         }
 
-                        pollfd pfds[2];
-                        int fdKinds[2];
-                        nfds_t n = 0;
-                        if (outPipe_[0])
-                        {
-                            pfds[n] = {outPipe_[0].get(), POLLIN, 0};
-                            fdKinds[n++] = 0;
-                        }
-                        if (extraPipe_[0])
-                        {
-                            pfds[n] = {extraPipe_[0].get(), POLLIN, 0};
-                            fdKinds[n++] = 1;
-                        }
-
-                        const int pr = ::poll(pfds, n, static_cast<int>(std::max<long long>(waitMs, 0LL)));
+                        pollfd pfd{outPipe_[0].get(), POLLIN, 0};
+                        const int pr = ::poll(&pfd, 1, static_cast<int>(std::max<long long>(waitMs, 0LL)));
                         if (pr < 0)
                         {
                             if (errno == EINTR) continue;
@@ -313,36 +266,28 @@ namespace ddb
                             break;
                         }
 
-                        for (nfds_t i = 0; i < n; ++i)
-                        {
-                            if (pfds[i].revents == 0) continue;
-                            readPipe(fdKinds[i] == 0 ? outPipe_[0] : extraPipe_[0], fdKinds[i] == 0);
-                        }
+                        if (pfd.revents != 0) readOutput();
                     }
                     outPipe_[0].reset();
-                    extraPipe_[0].reset();
                 }
 
-                // Reads what is available on one pipe; bytes count as activity. The pipe is
-                // closed on EOF or an unrecoverable error.
-                void readPipe(UniqueFd &fd, bool isOutput)
+                // Reads what is available on the output pipe; bytes count as activity. The pipe
+                // is closed on EOF or an unrecoverable error.
+                void readOutput()
                 {
-                    const ssize_t nr = ::read(fd.get(), buf_.data(), buf_.size());
+                    const ssize_t nr = ::read(outPipe_[0].get(), buf_.data(), buf_.size());
                     if (nr > 0)
                     {
                         lastActivity_ = Clock::now();
-                        if (isOutput)
-                            sink_.feed(buf_.data(), static_cast<size_t>(nr));
-                        else
-                            deliverExtra(opts_, buf_.data(), static_cast<size_t>(nr));
+                        sink_.feed(buf_.data(), static_cast<size_t>(nr));
                     }
                     else if (nr == 0 || (errno != EINTR && errno != EAGAIN))
                     {
-                        fd.reset(); // EOF or unrecoverable error
+                        outPipe_[0].reset(); // EOF or unrecoverable error
                     }
                 }
 
-                // Every monitored pipe is closed but the child may still be running
+                // The output pipe is closed but the child may still be running
                 // (e.g. it closed stdout/stderr itself): keep enforcing the idle
                 // timeout, measured from the last activity, and the cancellation instead
                 // of blocking in waitpid() forever. Nothing can count as activity any more.
@@ -413,7 +358,6 @@ namespace ddb
 
                 // Every descriptor of the parent closes on return (and on an exception)
                 UniqueFd outPipe_[2];
-                UniqueFd extraPipe_[2];
                 UniqueFd devNull_;
 
                 pid_t pid_ = 0;
@@ -482,14 +426,6 @@ namespace ddb
                         return setupFailure("CreatePipe for output", GetLastError());
                     if (!SetHandleInformation(outWrite_.get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
                         return setupFailure("SetHandleInformation", GetLastError());
-                    if (opts_.extraChannel)
-                    {
-                        if (!CreatePipe(extraRead_.put(), extraWrite_.put(), nullptr, 0))
-                            return setupFailure("CreatePipe for extra channel", GetLastError());
-                        if (!SetHandleInformation(extraWrite_.get(), HANDLE_FLAG_INHERIT,
-                                                  HANDLE_FLAG_INHERIT))
-                            return setupFailure("SetHandleInformation", GetLastError());
-                    }
                     SECURITY_ATTRIBUTES saInherit{};
                     saInherit.nLength = sizeof(saInherit);
                     saInherit.bInheritHandle = TRUE;
@@ -505,14 +441,7 @@ namespace ddb
                 bool startChild()
                 {
                     std::vector<HANDLE> inherit = {nul_.get(), outWrite_.get()};
-                    if (extraWrite_) inherit.push_back(extraWrite_.get());
-
-                    // The child inherits the handle with the same value: pass it as size_t
-                    // (QgisUntwine convention for --progress_fd).
-                    const std::string extraId =
-                        extraWrite_ ? std::to_string(reinterpret_cast<uintptr_t>(extraWrite_.get()))
-                                    : std::string();
-                    const std::string commandLine = quotedCommandLine(binary_, expandArgs(args_, opts_, extraId));
+                    const std::string commandLine = quotedCommandLine(binary_, args_);
 
                     std::string error;
                     const bool ok = spawnChild({binary_, commandLine, opts_.envOverrides, nul_.get(),
@@ -522,7 +451,6 @@ namespace ddb
 
                     // The parent never uses the child's ends.
                     outWrite_.reset();
-                    extraWrite_.reset();
                     nul_.reset();
 
                     if (!ok)
@@ -538,36 +466,33 @@ namespace ddb
 
                 // Anonymous pipes do not support overlapped I/O: poll with PeekNamedPipe and wait
                 // on the process handle while idle. True when bytes were read.
-                bool pump(UniqueHandle &h, bool isOutput)
+                bool pump()
                 {
-                    if (!h) return false;
+                    if (!outRead_) return false;
                     DWORD avail = 0;
-                    if (!PeekNamedPipe(h.get(), nullptr, 0, nullptr, &avail, nullptr))
+                    if (!PeekNamedPipe(outRead_.get(), nullptr, 0, nullptr, &avail, nullptr))
                     {
-                        h.reset(); // ERROR_BROKEN_PIPE: writer closed and drained
+                        outRead_.reset(); // ERROR_BROKEN_PIPE: writer closed and drained
                         return false;
                     }
                     if (avail == 0) return false;
                     DWORD nr = 0;
                     const DWORD want = static_cast<DWORD>(std::min<size_t>(avail, buf_.size()));
-                    if (!ReadFile(h.get(), buf_.data(), want, &nr, nullptr) || nr == 0)
+                    if (!ReadFile(outRead_.get(), buf_.data(), want, &nr, nullptr) || nr == 0)
                     {
-                        h.reset();
+                        outRead_.reset();
                         return false;
                     }
-                    if (isOutput)
-                        sink_.feed(buf_.data(), nr);
-                    else
-                        deliverExtra(opts_, buf_.data(), nr);
+                    sink_.feed(buf_.data(), nr);
                     return true;
                 }
 
-                // Drains both pipes until EOF, the child's exit plus the drain grace, a limit,
-                // or the cancellation.
+                // Drains the output pipe until EOF, the child's exit plus the drain grace, a
+                // limit, or the cancellation.
                 void pumpPipes()
                 {
                     lastActivity_ = Clock::now();
-                    while (outRead_ || extraRead_)
+                    while (outRead_)
                     {
                         // Probe on every iteration, including when a descendant is
                         // continuously writing. Record the first observed exit once.
@@ -582,8 +507,7 @@ namespace ddb
                             terminateChild();
                             break;
                         }
-                        bool active = pump(outRead_, true);
-                        active = pump(extraRead_, false) || active;
+                        const bool active = pump();
                         const auto now = Clock::now();
                         if (active) lastActivity_ = now;
                         if (!childExited_ && anyLimit(opts_))
@@ -595,7 +519,7 @@ namespace ddb
                                 break;
                             }
                         }
-                        if (childExited_ && (outRead_ || extraRead_) && now - exitTime_ >= kExitDrainGrace)
+                        if (childExited_ && outRead_ && now - exitTime_ >= kExitDrainGrace)
                         {
                             terminateChild(); // a descendant keeps the pipes open
                             r_.descendantsTerminated = child_.inJob;
@@ -604,10 +528,9 @@ namespace ddb
                         if (!active) Sleep(25);
                     }
                     outRead_.reset();
-                    extraRead_.reset();
                 }
 
-                // Every monitored pipe is closed but the child may still be running: keep
+                // The output pipe is closed but the child may still be running: keep
                 // enforcing the idle timeout (from the last activity) instead of waiting forever.
                 void awaitExit()
                 {
@@ -658,7 +581,6 @@ namespace ddb
 
                 // Every handle of the parent closes on return (and on an exception)
                 UniqueHandle outRead_, outWrite_;
-                UniqueHandle extraRead_, extraWrite_;
                 UniqueHandle nul_;
                 WinChild child_;
 
