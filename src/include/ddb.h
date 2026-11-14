@@ -126,7 +126,8 @@ extern "C"
      * ABI 2.4 (libddb 2.4.0) is the ABI after 2.0: every export, field and JSON member documented as new in 2.4
      * is missing from a 2.0 library, so a host checks DDBGetAbiVersion() for 2.4 (0x00020004) before it calls
      * them or sets them, and the DDBGetCapabilities() "symbols" tell which exports the library has. ABI 2.5
-     * (libddb 2.5.0) adds DDBMemoryTileEx3, DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (0x00020005). */
+     * (libddb 2.5.0) adds DDBMemoryTileEx3, DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (0x00020005).
+     * ABI 2.6 (libddb 2.6.0, 0x00020006) adds no export: the DDBConfigure setting "artefactCacheMb". */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
