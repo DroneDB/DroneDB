@@ -39,12 +39,13 @@ namespace ddb
         constexpr size_t IoThreads = 1;
         constexpr size_t MinFreeDiskMb = 2;
         constexpr size_t GdalCacheMb = 3;
+        constexpr size_t ArtefactCacheMb = 4;
 
         // GDAL's block cache: 16 MiB to 1 TiB (1 TiB in bytes fits in 64 bits)
         constexpr uint64_t MinGdalCacheMb = 16;
         constexpr uint64_t MaxGdalCacheMb = 1024 * 1024;
 
-        const std::array<IntegerSetting, 4> kIntegerSettings = {{
+        const std::array<IntegerSetting, 5> kIntegerSettings = {{
             // Every core: the calling thread plus cores - 1 workers, as the parallel sections
             // used before the pool existed (ALL_CPUS)
             {"cpuPoolSize", "DDB_CPU_POOL_SIZE", 0, 4096,
@@ -57,6 +58,9 @@ namespace ddb
             // GDAL's own default is 5% of the RAM (6 GB on a 128 GB host), shared by tile serving
             // and builds: this is the bound libddb puts on it unless the host sets a size
             {"gdalCacheMb", "DDB_GDAL_CACHE_MB", MinGdalCacheMb, MaxGdalCacheMb, [] { return uint64_t{1024}; }},
+            // The files the raster helper writes for the tiles of user files (a COG of each photo
+            // or raster shown, the normalized copies): 4 GiB keeps a few hundred photos, 0 no bound
+            {"artefactCacheMb", "DDB_ARTEFACT_CACHE_MB", 0, MaxFreeDiskMb, [] { return uint64_t{4096}; }},
         }};
 
         constexpr std::string_view CacheDirName = "cacheDir";
@@ -232,6 +236,11 @@ namespace ddb
     ConfigSource ProcessConfig::gdalCacheSource() const
     {
         return integer(GdalCacheMb).source;
+    }
+
+    uint64_t ProcessConfig::artefactCacheMb() const
+    {
+        return integer(ArtefactCacheMb).value;
     }
 
     fs::path ProcessConfig::cacheDir() const

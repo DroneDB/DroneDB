@@ -121,6 +121,19 @@ namespace ddb
         // copies, and the folders of requests that were left behind
         void cleanupArtefacts(time_t maxAge);
 
+        // publishArtefact into the artefact cache (artefactsDir(), normalizedDir()), then
+        // trimArtefacts(target): the cache stays within its bound whatever is asked for
+        // @throws FSException
+        void publishCachedArtefact(const fs::path &produced, const fs::path &target);
+
+        // Keeps the artefact cache within artefactCacheMb (ProcessConfig, DDB_ARTEFACT_CACHE_MB;
+        // 0: no bound): while its files (the artefacts, their statistics sidecars, the normalized
+        // copies) take more, removes the least recently used ones, never `keep` nor a file used in
+        // the last kArtefactInUseSeconds (a tile request may be about to open it). The folders of
+        // requests in progress do not count. A file a reader holds open on Windows stays.
+        void trimArtefacts(const fs::path &keep);
+        inline constexpr time_t kArtefactInUseSeconds = 300;
+
     } // namespace raster
 } // namespace ddb
 

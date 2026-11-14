@@ -1,5 +1,5 @@
 {
-  "call": "DDBConfigure({\"cacheDir\": \"<cache>\", \"cpuPoolSize\": 3, \"gdalCacheMb\": 256, \"ioThreads\": 2, \"minFreeDiskMb\": 256}), then DDBGetEffectiveConfig()",
+  "call": "DDBConfigure({\"artefactCacheMb\": 2048, \"cacheDir\": \"<cache>\", \"cpuPoolSize\": 3, \"gdalCacheMb\": 256, \"ioThreads\": 2, \"minFreeDiskMb\": 256}), then DDBGetEffectiveConfig()",
   "description": "Every setting set with DDBConfigure, cacheDir an absolute folder <cache>",
   "normalisation": {
     "placeholders": [
@@ -12,6 +12,7 @@
   "output": {
     "hardwareThreads": 0,
     "settings": {
+      "artefactCacheMb": 2048,
       "cacheDir": "<cache>",
       "cpuPoolSize": 3,
       "gdalCacheMb": 256,
@@ -19,6 +20,7 @@
       "minFreeDiskMb": 256
     },
     "sources": {
+      "artefactCacheMb": "configure",
       "cacheDir": "configure",
       "cpuPoolSize": "configure",
       "gdalCacheMb": "configure",

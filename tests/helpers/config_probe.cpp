@@ -46,7 +46,7 @@ namespace
         bool ok = expectIn(config, "\"cpuPoolSize\":1,", when);
         ok = expectIn(config, "\"ioThreads\":3,", when) && ok;
         ok = expectIn(config, "\"cacheDir\":" + cacheJson + ",", when) && ok;
-        ok = expectIn(config, "\"sources\":{\"cacheDir\":\"configure\",\"cpuPoolSize\":\"configure\","
+        ok = expectIn(config, "\"sources\":{\"artefactCacheMb\":\"default\",\"cacheDir\":\"configure\",\"cpuPoolSize\":\"configure\","
                               "\"gdalCacheMb\":\"default\",\"ioThreads\":\"configure\"",
                       when) && ok;
         return ok;

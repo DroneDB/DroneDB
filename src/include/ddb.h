@@ -170,12 +170,18 @@ extern "C"
      *                    The size in MiB of GDAL's block cache, which the whole process shares
      *                    (tiles, renders, thumbnails, statistics, builds). Set with DDBConfigure
      *                    it is the size of the cache, at once, raising or lowering GDAL's own
-     *                    default (5% of the RAM; a GDAL_CACHEMAX set explicitly does not matter);
-     *                    a build in flight keeps the cache it asked for (DDB_COG_CACHE_MB) until
-     *                    it ends. From the environment variable or the default it is an upper
+     *                    default (5% of the RAM; a GDAL_CACHEMAX set explicitly does not matter).
+     *                    From the environment variable or the default it is an upper
      *                    bound only: DDBRegisterProcess lowers GDAL's cache to it, never raises
      *                    it, and leaves a GDAL_CACHEMAX set explicitly alone. Put back to null,
      *                    the cache GDAL had before DDBConfigure is restored and bounded again.
+     *   "artefactCacheMb" integer 0..10^13, env DDB_ARTEFACT_CACHE_MB, default 4096.
+     *                    The bound in MiB of the artefact cache (cacheDir/artefacts): the COG
+     *                    the raster helper writes for the tiles of each photo or raster of a user
+     *                    shown on a map, and the normalized copies of rasters. When a new one
+     *                    takes it past the bound, the least recently used files are removed (not
+     *                    one used in the last 5 minutes). 0: no bound; files not used for 5 days
+     *                    are removed either way.
      *   "cacheDir"       absolute folder path (UTF-8), default the profile folder: DDB_HOME/.ddb
      *                    when DDB_HOME is set (source "environment"), else the home folder's .ddb.
      *                    Where libddb caches thumbnails, tiles, index templates and DSM tiles

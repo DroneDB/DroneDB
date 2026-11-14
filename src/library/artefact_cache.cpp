@@ -40,7 +40,7 @@ namespace ddb
                 // A caller that asked at the same time may have published the same copy: it is
                 // the same file, and a reader may hold it
                 if (!fs::exists(target))
-                    publishArtefact(produced, target);
+                    publishCachedArtefact(produced, target);
             }
         } // namespace
 

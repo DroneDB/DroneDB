@@ -465,6 +465,13 @@ namespace
             {
                 const auto *event = reinterpret_cast<const inotify_event *>(buffer + at);
                 const std::string name = event->len > 0 ? event->name : "";
+                // The folder itself is listed (the bound of the cache is checked after a copy is
+                // published): only the files in it count
+                if (name.empty())
+                {
+                    at += static_cast<ssize_t>(sizeof(inotify_event) + event->len);
+                    continue;
+                }
                 if (event->mask & IN_MOVED_TO)
                     seen.push_back("moved " + name);
                 if (event->mask & IN_OPEN)

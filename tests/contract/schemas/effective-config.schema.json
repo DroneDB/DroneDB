@@ -13,6 +13,7 @@
     "settings": {
       "type": "object",
       "required": [
+        "artefactCacheMb",
         "cacheDir",
         "cpuPoolSize",
         "gdalCacheMb",
@@ -44,6 +45,12 @@
           "maximum": 10000000000000,
           "description": "Free MiB a build needs on its volume; 0 turns the check off"
         },
+        "artefactCacheMb": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000000000,
+          "description": "Bound in MiB of the artefact cache (the COGs and normalized copies the raster helper writes for the tiles of user files): the least recently used files are removed past it; 0: no bound"
+        },
         "gdalCacheMb": {
           "type": "integer",
           "minimum": 16,
@@ -55,6 +62,7 @@
     "sources": {
       "type": "object",
       "required": [
+        "artefactCacheMb",
         "cacheDir",
         "cpuPoolSize",
         "gdalCacheMb",
@@ -76,6 +84,9 @@
           "$ref": "#/$defs/source"
         },
         "gdalCacheMb": {
+          "$ref": "#/$defs/source"
+        },
+        "artefactCacheMb": {
           "$ref": "#/$defs/source"
         }
       }

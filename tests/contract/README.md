@@ -670,7 +670,11 @@ Registry has to adopt first.
   EPSG:4326 with nearest resampling: a COG, JPEG with the footprint in a mask instead of an alpha
   band for 8-bit RGB (LZW with an alpha band otherwise, so a GIF or a palette PNG, which 2.4 could
   not write as JPEG, is projected); an `outsize` below 100% of a JPEG samples the full image, not
-  GDAL's reduced-resolution decode, so its colours differ slightly. Point-cloud tiles are ddb-tilers' modern rendering (the octree depth from the density
+  GDAL's reduced-resolution decode, so its colours differ slightly. The artefact cache (`cacheDir/artefacts`: the COG
+  made for the tiles of each photo or raster of a user, the normalized copies) has a size bound,
+  the setting `artefactCacheMb` (`DDB_ARTEFACT_CACHE_MB`, 4096 MiB by default, 0 for none; in
+  `DDBConfigure` and `DDBGetEffectiveConfig`): past it, the least recently used files are removed
+  when a new one is made, never one used in the last 5 minutes. Point-cloud tiles are ddb-tilers' modern rendering (the octree depth from the density
   of the cloud in EPSG:3857, a symmetric disc on each point with a per-pixel depth test, the same tile whatever the
   threads, no seams at the deepest zooms): they differ from those of 2.4. A COPC at an http(s) URL is read with
   range requests of libddb's HTTP client (206 Partial Content; the ETag, else the Last-Modified date, tells a

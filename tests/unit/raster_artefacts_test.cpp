@@ -670,6 +670,69 @@ namespace
 
     // A photo is tiled from one build of the helper: the COG warped from the photo by the corners of
     // its EXIF footprint, with no intermediate projection of it
+    // A file of `kib` KiB in `folder`, last used `age` ago
+    fs::path cachedFile(const fs::path &folder, const std::string &name, size_t kib, std::chrono::seconds age)
+    {
+        fs::create_directories(folder);
+        const fs::path file = folder / name;
+        writeFile(file, std::string(kib * 1024, 'x'));
+        fs::last_write_time(file, fs::file_time_type::clock::now() - age);
+        return file;
+    }
+
+    // Past its bound, the artefact cache loses its least recently used files (a raster with its
+    // statistics, the normalized copies too) until it is within it again; the file just made,
+    // the files used in the last minutes and the folders of requests in progress stay
+    TEST_F(RasterArtefacts, theCacheLosesItsLeastRecentlyUsedFilesPastItsBound)
+    {
+        using namespace std::chrono_literals;
+        const ScopedProcessConfig bound(json{{"artefactCacheMb", 1}}.dump());
+        const fs::path dir = raster::artefactsDir();
+        const fs::path a = cachedFile(dir, "a.tif", 400, 3h);
+        const fs::path aStats = cachedFile(dir, "a.tif.stats.json", 10, 3h);
+        const fs::path b = cachedFile(dir, "b.tif", 400, 2h);
+        const fs::path c = cachedFile(dir, "c.tif", 400, 1h);
+        const fs::path made = cachedFile(dir, "made.tif", 400, 4h);
+        const fs::path inUse = cachedFile(dir, "in-use.tif", 400, 10s);
+        const fs::path normalized = cachedFile(raster::normalizedDir(), "n.tif", 400, 5h);
+        const fs::path request = cachedFile(dir / "req-cog-running", "cog.tif", 5 * 1024, 6h);
+
+        raster::trimArtefacts(made);
+
+        // 2410 KiB: n, a with its statistics, b and c go (n, a, b, c are the oldest that may go)
+        for (const fs::path &gone : {normalized, a, aStats, b, c})
+            EXPECT_FALSE(fs::exists(gone)) << gone;
+        EXPECT_TRUE(fs::exists(made)) << "the file just made";
+        EXPECT_TRUE(fs::exists(inUse)) << "a file used in the last minutes";
+        EXPECT_TRUE(fs::exists(request)) << "a request in progress is not the cache's";
+    }
+
+    TEST_F(RasterArtefacts, aCacheWithoutABoundKeepsEverything)
+    {
+        using namespace std::chrono_literals;
+        const ScopedProcessConfig unbounded(json{{"artefactCacheMb", 0}}.dump());
+        const fs::path old = cachedFile(raster::artefactsDir(), "old.tif", 2048, 4h);
+        raster::trimArtefacts(fs::path());
+        EXPECT_TRUE(fs::exists(old));
+    }
+
+    // The COG made for the tiles of a file is published within the bound: older artefacts go
+    TEST_F(RasterArtefacts, aNewArtefactKeepsTheCacheWithinItsBound)
+    {
+        using namespace std::chrono_literals;
+        const ScopedProcessConfig bound(json{{"artefactCacheMb", 1}}.dump());
+        const fs::path old = cachedFile(raster::artefactsDir(), "old.tif", 1024, 4h);
+        ConvertingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
+        const raster::ScopedRasterHelper installed(helper);
+        const fs::path raw = area_->getPath("raw.tif");
+        writeFile(raw, "bytes that no driver of GDAL opens");
+
+        const fs::path cog = TilerHelper::toGeoTIFF(raw);
+
+        EXPECT_TRUE(fs::exists(cog));
+        EXPECT_FALSE(fs::exists(old)) << "the least recently used artefact made room";
+    }
+
     TEST_F(RasterArtefacts, aPhotoIsWarpedToItsCogInOneBuildFromItsFootprint)
     {
         const fs::path photo = area_->downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
@@ -718,6 +781,8 @@ namespace
 
     TEST_F(RasterArtefacts, aFileThatIsNoCogIsNotPublished)
     {
+        // The clean-up of the cache runs on the way (it looks at the folders, makes none)
+        const ScopedCacheCleanupChanceForTesting always(1);
         const fs::path notACog = area_->getPath("prepared") / "cog.tif";
         writeFile(notACog, "this is not a GeoTIFF");
         ConvertingHelper helper(notACog);

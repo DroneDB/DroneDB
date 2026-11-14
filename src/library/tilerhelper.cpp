@@ -302,7 +302,7 @@ namespace ddb
             buildCogInPrivateFolder(io::toUtf8(source), produced, {}, photo);
 
             releaseTilersOf(source, target);
-            raster::publishArtefact(produced, target);
+            raster::publishCachedArtefact(produced, target);
         }
     } // namespace
 
