@@ -17,6 +17,7 @@
 #include "in_process_raster_helper.h"
 #include "parallel.h"
 #include "raster_helper.h"
+#include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
@@ -154,8 +155,15 @@ namespace
     USER_OPEN_TEST(CogCacheBudget, cacheIsBoundedDuringBuild)
     {
         TestArea ta(TEST_NAME, true);
-        const fs::path input = ta.downloadTestAsset(
-            testDataUrl("ortho/brighton-beach.tif"), "brighton-beach.tif");
+        // GDAL builds the COG of a JPEG 2000 (ddb-tilers those of GeoTIFFs, without GDAL's cache)
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 2048;
+        spec.epsg = 32633;
+        spec.originX = 500000.0;
+        spec.originY = 5000000.0;
+        spec.pixelSize = 0.05;
+        spec.value = [](int band, int x, int y) { return static_cast<double>((x * 7 + y * 3 + band * 50) % 251); };
+        const fs::path input = testutils::createGeoJp2(ta.getPath("ortho.jp2"), spec);
 
         // The cache of GDAL is the one of the process that builds: this one
         testutils::InProcessRasterHelper helper;
