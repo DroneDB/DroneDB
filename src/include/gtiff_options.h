@@ -52,9 +52,6 @@ namespace ddb
             return set("PREDICTOR", (type == GDT_Float32 || type == GDT_Float64) ? "3" : "2");
         }
 
-        // PREDICTOR=YES: GDAL chooses by the type of the samples
-        GtiffOptions &predictorAuto() { return set("PREDICTOR", "YES"); }
-
         // TILED=YES, with square blocks of `blockSize` pixels when it is positive
         GtiffOptions &tiled(int blockSize = 0)
         {

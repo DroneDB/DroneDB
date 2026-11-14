@@ -639,45 +639,6 @@ TEST(multispectral, multibandWarning) {
 }
 
 // ============================================================
-// COG Stats Sidecar Test
-// ============================================================
-
-TEST(multispectral, cogStatsSidecar) {
-    TestArea ta(TEST_NAME);
-
-    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
-    fs::path inputPath = ta.getPath("input_for_stats.tif");
-
-    {
-        GDALDatasetH hDs = GDALCreate(tifDrv, inputPath.string().c_str(), 100, 100, 3, GDT_Byte, nullptr);
-        ASSERT_NE(hDs, nullptr);
-        double gt[6] = {0, 0.001, 0, 50, 0, -0.001};
-        GDALSetGeoTransform(hDs, gt);
-        GDALSetProjection(hDs, "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]");
-
-        // Write some pixel data
-        std::vector<uint8_t> data(100 * 100, 128);
-        for (int b = 1; b <= 3; b++) {
-            GDALRasterIO(GDALGetRasterBand(hDs, b), GF_Write, 0, 0, 100, 100,
-                         data.data(), 100, 100, GDT_Byte, 0, 0);
-        }
-        GDALClose(hDs);
-    }
-
-    // Generate stats sidecar directly
-    generateCogStats(inputPath.string());
-
-    fs::path statsPath = inputPath.parent_path() / (inputPath.filename().string() + ".stats.json");
-    EXPECT_TRUE(fs::exists(statsPath));
-
-    // Read and verify JSON
-    std::ifstream ifs(statsPath.string());
-    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-    EXPECT_NE(content.find("\"bands\""), std::string::npos);
-    EXPECT_NE(content.find("\"computedAt\""), std::string::npos);
-}
-
-// ============================================================
 // C API Tests
 // ============================================================
 

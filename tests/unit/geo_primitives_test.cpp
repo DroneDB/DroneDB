@@ -311,7 +311,6 @@ namespace
             EXPECT_EQ(asVector(GtiffOptions().predictorFor(type).list()), std::vector<std::string>{"PREDICTOR=2"}) << GDALGetDataTypeName(type);
         for (const GDALDataType type : {GDT_Float32, GDT_Float64})
             EXPECT_EQ(asVector(GtiffOptions().predictorFor(type).list()), std::vector<std::string>{"PREDICTOR=3"}) << GDALGetDataTypeName(type);
-        EXPECT_EQ(asVector(GtiffOptions().predictorAuto().list()), std::vector<std::string>{"PREDICTOR=YES"});
         EXPECT_EQ(asVector(GtiffOptions().tiled().list()), std::vector<std::string>{"TILED=YES"}) << "no block size without one";
     }
 

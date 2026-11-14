@@ -47,7 +47,7 @@ tests/integration/exif_optimization_test.cpp -Wconversion 1
 tests/integration/hash_benchmark_test.cpp -Wconversion 15
 tests/integration/hash_benchmark_test.cpp -Wold-style-cast 1
 tests/integration/latent_bugs_test.cpp -Wunused-result 3
-tests/integration/multispectral_test.cpp -Wunused-result 9
+tests/integration/multispectral_test.cpp -Wunused-result 8
 tests/integration/plyconv_test.cpp -Wdangling-else 1
 tests/integration/plyconv_test.cpp -Wrange-loop-construct 1
 tests/integration/pointcloud_render_test.cpp -Wconversion 3

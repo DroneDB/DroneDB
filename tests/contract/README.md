@@ -677,8 +677,8 @@ Registry has to adopt first.
   coordinates; a cloud without colours is painted with the height ramp of its tiles instead of grey, and the
   points read are those of the deepest octree levels within the budget (2 points per pixel), as before; a COPC
   at an http(s) URL is read with the range requests of the HTTP client.
-  The COG of a GeoTIFF GeoRaster is built by ddb-tilers (JPEG 2000 keeps the GDAL build), with the layout,
-  compression, transparency and statistics sidecar of 2.4; its warp approximates the transform on a grid per
+  The COG of a GeoRaster (GeoTIFF or JPEG 2000) is built by ddb-tilers, with the layout, compression,
+  transparency and statistics sidecar of 2.4; its warp approximates the transform on a grid per
   tile instead of per scanline, so a warped float raster can differ by about 1e-5 in a few pixels. A full disk
   during the build is a retryable failure. The GeoTIFFs GDAL reads are read too: LZMA, CCITT, old JPEG, 12-bit
   JPEG, packed bits, 24-bit floats, CMYK, CIELab, YCbCr without JPEG, JPEG-XL, palettes and 1-bit images. A

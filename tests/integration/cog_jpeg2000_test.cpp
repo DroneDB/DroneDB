@@ -3,8 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // A JPEG 2000 builds the same COG as a GeoTIFF of the same pixels, and the decoding of a source
-// stays within the threads of the build: a JPEG 2000, whose decoder has threads of its own, and a
-// compressed GeoTIFF, whose blocks GDAL decodes on the threads of the build.
+// stays within the threads of the build: a JPEG 2000, whose decoder (OpenJPEG) can run threads of
+// its own, and a compressed GeoTIFF, whose blocks are decoded on the threads of the build.
 
 #include <atomic>
 #include <chrono>
@@ -65,6 +65,7 @@ namespace
         return shape;
     }
 
+    // GDAL still reads JPEG 2000 GeoRasters to index them and draw their thumbnails
     TEST(CogJpeg2000, gdalIsBuiltWithOpenJpeg)
     {
         EXPECT_NE(GDALGetDriverByName("JP2OpenJPEG"), nullptr) << "GDAL is built without OpenJPEG";
@@ -161,7 +162,7 @@ namespace
         return peak.load() - baseline;
     }
 
-    // A build capped to one thread, of a source GDAL could decode on one thread per CPU: the
+    // A build capped to one thread, of a source a decoder could decode on one thread per CPU: the
     // sampler itself, the decoder's one worker and some slack, not one per CPU. The build runs in
     // this process (an in-process raster helper, in the child that may open files of users), so
     // its threads are the threads this process counts.
@@ -175,9 +176,8 @@ namespace
         EXPECT_LE(extra, 4) << extra << " threads above the baseline, " << cpus << " CPUs";
     }
 
-    // The JPEG 2000 decoder starts one thread per CPU unless GDAL_NUM_THREADS says otherwise, and
-    // a warp with -multi reads on a GDAL worker thread that a thread-local option does not reach:
-    // a build capped to one thread peaked at about the CPU count before the decoding was capped
+    // OpenJPEG decodes with as many threads as it is given: a build capped to one thread gives it
+    // the threads of the build, not one per CPU
     USER_OPEN_TEST(CogJpeg2000, decodingStaysWithinTheThreadsOfTheBuild)
     {
         if (std::thread::hardware_concurrency() < 8)
@@ -190,8 +190,8 @@ namespace
         expectDecodingWithinOneThread(jp2, ta.getPath("cog.tif"));
     }
 
-    // A compressed GeoTIFF decodes its blocks on the threads of the build (GDAL_NUM_THREADS of
-    // the reading thread), so a build capped to one thread decodes on one
+    // A compressed GeoTIFF decodes its blocks on the threads of the build, so a build capped to
+    // one thread decodes on one
     USER_OPEN_TEST(CogDecoding, aCompressedGeoTiffStaysWithinTheThreadsOfTheBuild)
     {
         if (std::thread::hardware_concurrency() < 8)
