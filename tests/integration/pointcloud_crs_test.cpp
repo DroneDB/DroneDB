@@ -27,6 +27,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "tile_test_support.h"
+#include "thumbs.h"
 #include "tilerhelper.h"
 #include "tilers_tiler.h"
 #include "utils.h"
@@ -302,6 +303,29 @@ namespace
         EXPECT_EQ(geoid.opaquePixels, horizontal.opaquePixels);
         for (size_t i = 0; i < geoid.images.size(); i++)
             EXPECT_EQ(geoid.images[i].bands, horizontal.images[i].bands) << "tile " << i;
+    }
+
+    // No tile, but a thumbnail: the cloud drawn in its own coordinates, filling the square
+    TEST(PointCloudCrs, CrsWithoutTransformationHasAThumbnailInItsOwnCoordinates)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path las = ta.getPath("site-thumb.las");
+        std::vector<XyzPoint> points;
+        for (int i = 0; i <= 40; i++)
+            for (int j = 0; j <= 40; j++)
+                points.push_back({100.0 + i * 0.25, 200.0 + j * 0.25, 5.0 + i * 0.1});
+        writeLas(las, EngineeringWkt, points);
+        const fs::path out = ta.getFolder("copc");
+        ASSERT_NO_THROW(buildCopc({io::toUtf8(las)}, io::toUtf8(out)));
+
+        uint8_t *buf = nullptr;
+        int size = 0;
+        ASSERT_NO_THROW(generatePointCloudThumb(out / "cloud.copc.laz", 64, "", &buf, &size));
+        const auto image = testutils::decodeImage(testutils::takeBuffer(buf, size));
+        EXPECT_EQ(image.width, 64);
+        // A fully opaque thumbnail is written without alpha
+        const auto opaque = image.hasAlpha() ? std::count(image.alpha().begin(), image.alpha().end(), 255) : 64 * 64;
+        EXPECT_GT(opaque, 64 * 64 * 3 / 4);
     }
 
     TEST(PointCloudCrs, CrsWithoutTransformationRefusesTilesWithTheReason)

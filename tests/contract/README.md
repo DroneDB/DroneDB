@@ -672,4 +672,8 @@ Registry has to adopt first.
   changed file); a server that does not answer them is refused with that reason. `DDB_COPC_NODE_CACHE_MB` and
   `DDB_PCTILE_RESOLUTION_OFFSET` are no longer read (ddb-tilers' `DDBT_COPC_NODE_CACHE_MB` and
   `DDBT_COPC_TILE_CACHE_MB` size its caches). The tile folders of `DDBTile` are named with ddb-tilers' version
-  too, so a new renderer never serves the tiles of an earlier one.
+  too, so a new renderer never serves the tiles of an earlier one. Point-cloud thumbnails are drawn by ddb-tilers as its
+  modern tiles are: the whole cloud fitted and centred, in EPSG:3857 when it has a footprint, else in its own
+  coordinates; a cloud without colours is painted with the height ramp of its tiles instead of grey, and the
+  points read are those of the deepest octree levels within the budget (2 points per pixel), as before; a COPC
+  at an http(s) URL is read with the range requests of the HTTP client.

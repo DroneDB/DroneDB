@@ -24,7 +24,7 @@
 #include <pdal/StageFactory.hpp>
 
 #include "cancellation.h"
-#include "copc_utils.h"
+#include "point_batch.h"
 #include "exceptions.h"
 #include "artefact_cache.h"
 #include "gdal_raii.h"

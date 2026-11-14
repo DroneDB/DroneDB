@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Point-cloud tiles and thumbnails: shared rasterizer, batched reprojection, the tiles of ddb-tilers
-// (cached tiler, modern rendering, concurrent tiles, remote clouds), octree level chosen from a
-// point budget
+// Point-cloud tiles and thumbnails: batched reprojection, the tiles of ddb-tilers (cached tiler,
+// modern rendering, concurrent tiles, remote clouds) and its thumbnails (a point budget, a remote
+// cloud, a cloud without a CRS)
 
 #include <atomic>
 #include <cmath>
@@ -22,9 +22,8 @@
 #include "ddbt/ddbt.h"
 #include "exceptions.h"
 #include "json.h"
-#include "copc_utils.h"
 #include "pointcloud.h"
-#include "point_rasterizer.h"
+#include "point_batch.h"
 #include "raster_cache.h"
 #include "raster_test_utils.h"
 #include "test.h"
@@ -39,32 +38,6 @@ namespace
 {
     using namespace ddb;
     using namespace testutils;
-
-    // The point drawing the tiler used to do, kept as the reference
-    void referenceDrawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius, uint8_t r, uint8_t g,
-                             uint8_t b, int tileSize, int wSize)
-    {
-        const int r2 = radius * radius;
-        const int area = r2 << 2;
-        const int rr = radius << 1;
-        for (int i = 0; i < area; i++)
-        {
-            const int tx = (i % rr) - radius;
-            const int ty = (i / rr) - radius;
-            if (tx * tx + ty * ty <= r2)
-            {
-                const int dx = px + tx;
-                const int dy = py + ty;
-                if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize)
-                {
-                    buffer[dy * tileSize + dx + wSize * 0] = r;
-                    buffer[dy * tileSize + dx + wSize * 1] = g;
-                    buffer[dy * tileSize + dx + wSize * 2] = b;
-                    alpha[dy * tileSize + dx] = 255;
-                }
-            }
-        }
-    }
 
     PointBatch randomPoints(size_t n, double minX, double minY, double size, bool sixteenBit, unsigned seed)
     {
@@ -83,72 +56,6 @@ namespace
             b.blue.push_back(color(rng));
         }
         return b;
-    }
-
-    TEST(PointRasterizer, goldenImage)
-    {
-        const int tileSize = 256;
-        const double minX = 1000, minY = 2000, tileMeters = 150;
-        const double resolution = tileMeters / tileSize;
-
-        for (const bool sixteenBit : {false, true})
-        {
-            const auto points = randomPoints(20000, minX, minY, tileMeters, sixteenBit, 42);
-
-            // Reference: the loop the tiler used to run
-            const int wSize = tileSize * tileSize;
-            const int pointRadius = 2;
-            const double pointRadiusMeters = pointRadius * resolution;
-            const int paddedTileSize = tileSize + pointRadius * 2;
-            std::vector<uint8_t> buffer(wSize * 3, 0), alpha(wSize, 0);
-            std::vector<float> zBuffer(paddedTileSize * paddedTileSize, -99999.0f);
-            const double maxX = minX + tileMeters, maxY = minY + tileMeters;
-            const double paddedTileScaleW = paddedTileSize / (maxX - minX + pointRadiusMeters * 2.0);
-            const double paddedTileScaleH = paddedTileSize / (maxY - minY + pointRadiusMeters * 2.0);
-            for (size_t i = 0; i < points.size(); i++)
-            {
-                const double x = points.x[i], y = points.y[i], z = points.z[i];
-                int px = std::round((x - minX - pointRadiusMeters) * paddedTileScaleW);
-                int py = paddedTileSize - 1 - std::round((y - minY + pointRadiusMeters) * paddedTileScaleH);
-                if (px >= 0 && px < paddedTileSize && py >= 0 && py < paddedTileSize &&
-                    zBuffer[py * paddedTileSize + px] < z)
-                {
-                    zBuffer[py * paddedTileSize + px] = z;
-                    const auto c = [&](uint16_t v) { return sixteenBit ? uint8_t(v >> 8) : uint8_t(v); };
-                    referenceDrawCircle(buffer.data(), alpha.data(), px - pointRadius, py - pointRadius, pointRadius,
-                                        c(points.red[i]), c(points.green[i]), c(points.blue[i]), tileSize, wSize);
-                }
-            }
-
-            PixelMapping m;
-            m.originX = minX;
-            m.shiftX = -pointRadiusMeters;
-            m.scaleX = paddedTileScaleW;
-            m.originY = minY;
-            m.shiftY = pointRadiusMeters;
-            m.scaleY = paddedTileScaleH;
-            m.width = m.height = paddedTileSize;
-
-            // Two batches: the result must not depend on how points are chunked
-            PointRasterizer rasterizer(tileSize, m, pointRadius, pointRadius);
-            PointBatch first, second;
-            for (size_t i = 0; i < points.size(); i++)
-            {
-                auto &dst = i < points.size() / 3 ? first : second;
-                dst.x.push_back(points.x[i]);
-                dst.y.push_back(points.y[i]);
-                dst.z.push_back(points.z[i]);
-                dst.red.push_back(points.red[i]);
-                dst.green.push_back(points.green[i]);
-                dst.blue.push_back(points.blue[i]);
-            }
-            rasterizer.add(first);
-            rasterizer.add(second);
-            const auto image = rasterizer.toImage();
-
-            EXPECT_EQ(image.color, buffer) << "16-bit: " << sixteenBit;
-            EXPECT_EQ(image.alpha, alpha) << "16-bit: " << sixteenBit;
-        }
     }
 
     TEST(CoordsTransformer, batchMatchesPerPoint)
@@ -344,69 +251,16 @@ namespace
     }
 #endif
 
-    TEST(PointCloudThumbBudget, plannerPicksDeepestLevelInBudget)
-    {
-        const std::vector<uint64_t> counts{1000, 4000, 16000, 64000};
-        EXPECT_EQ(planCopcDepth(counts, 500), 0) << "the root is always read";
-        EXPECT_EQ(planCopcDepth(counts, 5000), 1);
-        EXPECT_EQ(planCopcDepth(counts, 20999), 1);
-        EXPECT_EQ(planCopcDepth(counts, 21000), 2);
-        EXPECT_EQ(planCopcDepth(counts, 1000000), 3);
-    }
-
-    TEST(PointCloudThumbBudget, resolutionSelectsDepth)
-    {
-        // readers.copc reads the depths below max(1, ceil(log2(spacing / resolution)) + 1)
-        for (const double spacing : {0.37, 8.0, 21.5, 1000.0})
-        {
-            for (int depth = 0; depth < 12; depth++)
-            {
-                const double r = copcResolutionForDepth(spacing, depth);
-                const int depthEnd = std::max(1, static_cast<int>(std::ceil(std::log2(spacing / r))) + 1);
-                EXPECT_EQ(depthEnd, depth + 1) << "spacing " << spacing << " depth " << depth;
-            }
-        }
-    }
-
-    uint64_t totalPoints(const CopcHierarchy &h)
-    {
-        uint64_t total = 0;
-        for (const auto n : h.pointsPerDepth)
-            total += n;
-        return total;
-    }
-
-    TEST(PointCloudThumbBudget, hierarchyCountsAllPoints)
-    {
-        TestArea ta(TEST_NAME, true);
-        const auto copc = brightonCopc(ta);
-        PointCloudInfo info;
-        ASSERT_TRUE(getCopcInfo(copc.string(), info));
-        const auto h = readCopcHierarchy(copc.string());
-        EXPECT_GT(h.spacing, 0);
-        EXPECT_GE(h.pointsPerDepth.size(), 2u);
-        EXPECT_EQ(totalPoints(h), info.pointCount);
-    }
-
     size_t opaquePixels(const DecodedImage &img)
     {
         return img.hasAlpha() ? std::count(img.alpha().begin(), img.alpha().end(), 255)
                               : static_cast<size_t>(img.width) * img.height;
     }
 
-    // The planned read fits the default budget (2 points per pixel) and leaves the
-    // deepest level out, and the thumbnail covers what the whole cloud covers
+    // A thumbnail read within its default budget (2 points per pixel, ddb-tilers' planner) covers what
+    // a thumbnail of every point covers
     void expectBudgetedThumbnailComplete(const fs::path &copc, int size)
     {
-        const uint64_t budget = 2ull * size * size;
-        const auto h = readCopcHierarchy(copc.string());
-        const int depth = planCopcDepth(h.pointsPerDepth, budget);
-        uint64_t planned = 0;
-        for (int d = 0; d <= depth; d++)
-            planned += h.pointsPerDepth[d];
-        EXPECT_TRUE(planned <= budget || depth == 0);
-        EXPECT_LT(depth + 1, static_cast<int>(h.pointsPerDepth.size())) << "the budget leaves deep levels out";
-
         uint8_t *buf = nullptr;
         int bufSize = 0;
         generatePointCloudThumb(copc, size, "", &buf, &bufSize);
@@ -414,14 +268,36 @@ namespace
         generatePointCloudThumb(copc, size, "", &buf, &bufSize, UINT64_MAX);
         const auto full = decodeImage(takeBuffer(buf, bufSize));
 
-        EXPECT_GE(opaquePixels(budgeted), opaquePixels(full) * 95 / 100)
-            << "read " << planned << " of " << totalPoints(h) << " points";
+        EXPECT_EQ(budgeted.width, size);
+        EXPECT_EQ(budgeted.height, size);
+        EXPECT_GT(opaquePixels(full), static_cast<size_t>(size) * size / 4);
+        EXPECT_GE(opaquePixels(budgeted), opaquePixels(full) * 95 / 100);
     }
+
+#ifndef _WIN32
+    // A thumbnail of a COPC at a URL is read with the range requests of the HTTP client
+    TEST(PointCloudThumbBudget, aRemoteCloudHasTheThumbnailOfTheFile)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto copc = brightonCopc(ta);
+        std::ifstream in(copc, std::ios::binary);
+        const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        testutils::LoopbackServer server(
+            [&](const std::string &request) { return rangeReply(bytes, request, "v1"); });
+
+        uint8_t *buf = nullptr;
+        int size = 0;
+        generatePointCloudThumb(copc, 128, "", &buf, &size);
+        const std::vector<uint8_t> local = takeBuffer(buf, size);
+        generatePointCloudThumb(server.url("/brighton/cloud.copc.laz"), 128, "", &buf, &size);
+        EXPECT_EQ(takeBuffer(buf, size), local);
+    }
+#endif
 
     TEST(PointCloudThumbBudget, pointBudgetRespected)
     {
         TestArea ta(TEST_NAME, true);
-        // 24.5k points: a 64 px thumbnail (budget 8192) reads the root level only
+        // 24.5k points: a 64 px thumbnail (budget 8192) reads the shallow levels only
         expectBudgetedThumbnailComplete(brightonCopc(ta), 64);
 
         // Large cloud given by DDB_TEST_LARGE_COPC (e.g. Autzen, 10.6 M points), at 512 px
