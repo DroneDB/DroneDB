@@ -131,9 +131,7 @@ namespace ddb
             GDALDatasetUniquePtr openArtefact(const fs::path &path, const std::vector<std::string> &drivers,
                                               unsigned int kind, bool update)
             {
-                if (!isLibddbArtefact(path))
-                    throw GDALException("Refusing to open " + io::toUtf8(path) +
-                                        ": it is not a file libddb wrote (build the dataset, or copy it with the raster helper, first)");
+                requireArtefact(path);
                 return openWithDrivers(io::toUtf8(path), drivers, kind, update);
             }
         } // namespace
@@ -146,6 +144,13 @@ namespace ddb
         fs::path normalizedDir()
         {
             return UserProfile::get()->getCachePath(fs::path("artefacts") / "normalized");
+        }
+
+        void requireArtefact(const fs::path &path)
+        {
+            if (!isLibddbArtefact(path))
+                throw GDALException("Refusing to open " + io::toUtf8(path) +
+                                    ": it is not a file libddb wrote (build the dataset, or copy it with the raster helper, first)");
         }
 
         bool isLibddbArtefact(const fs::path &path)

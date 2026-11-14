@@ -662,3 +662,28 @@ Registry has to adopt first.
   cubic overviews of a COG ring above the opaque value at the edge of the data (266 for 255), so a UInt32, Int16,
   Float32 or Float64 alpha band that holds 255 was opaque at 511 and its renders half transparent (a Float32 band of
   0..1 at 3).
+  The tiles (`DDBTile`, `DDBMemoryTile`, `DDBMemoryTileFmt`, `DDBMemoryTileEx*`, `ddb tile`) are rendered by
+  ddb-tilers. The tiles of a georaster are those of 2.4 in PNG (pixel for pixel) and JPEG (byte for byte); WebP
+  tiles are encoded differently. A photo is converted once to an EPSG:3857 COG and tiled from it: its tiles may
+  differ from those of 2.4. Point-cloud tiles are ddb-tilers' modern rendering (the octree depth from the density
+  of the cloud in EPSG:3857, a symmetric disc on each point with a per-pixel depth test, the same tile whatever the
+  threads, no seams at the deepest zooms): they differ from those of 2.4. A COPC at an http(s) URL is read with
+  range requests of libddb's HTTP client (206 Partial Content; the ETag, else the Last-Modified date, tells a
+  changed file); a server that does not answer them is refused with that reason. `DDB_COPC_NODE_CACHE_MB` and
+  `DDB_PCTILE_RESOLUTION_OFFSET` are no longer read (ddb-tilers' `DDBT_COPC_NODE_CACHE_MB` and
+  `DDBT_COPC_TILE_CACHE_MB` size its caches). The tile folders of `DDBTile` are named with ddb-tilers' version
+  too, so a new renderer never serves the tiles of an earlier one. Point-cloud thumbnails are drawn by ddb-tilers as its
+  modern tiles are: the whole cloud fitted and centred, in EPSG:3857 when it has a footprint, else in its own
+  coordinates; a cloud without colours is painted with the height ramp of its tiles instead of grey, and the
+  points read are those of the deepest octree levels within the budget (2 points per pixel), as before; a COPC
+  at an http(s) URL is read with the range requests of the HTTP client.
+  The COG of a GeoTIFF GeoRaster is built by ddb-tilers (JPEG 2000 keeps the GDAL build), with the layout,
+  compression, transparency and statistics sidecar of 2.4; its warp approximates the transform on a grid per
+  tile instead of per scanline, so a warped float raster can differ by about 1e-5 in a few pixels. A full disk
+  during the build is a retryable failure. The GeoTIFFs GDAL reads are read too: LZMA, CCITT, old JPEG, 12-bit
+  JPEG, packed bits, 24-bit floats, CMYK, CIELab, YCbCr without JPEG, JPEG-XL, palettes and 1-bit images. A
+  GeoTIFF georeferenced by ground control points alone is a GeoRaster (2.4: a Raster): its footprint is the image
+  of its corners through the GCP transform gdalwarp uses, its properties have `gcps` (their count) and no
+  `geotransform`, and its COG is warped with that transform. A complex raster (CInt16, CInt32, CFloat32,
+  CFloat64) keeps its samples in its COG; its statistics, tiles and thumbnail are those of the magnitude of its
+  samples (a thumbnail takes the magnitude of the nearest sample).

@@ -7,6 +7,7 @@
 #include <utility>
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <mutex>
 
@@ -155,25 +156,7 @@ namespace ddb
         void writeBytes(const std::vector<uint8_t> &bytes, const std::string &path, uint8_t **outBuffer,
                         int *outBufferSize)
         {
-            if (outBuffer != nullptr)
-            {
-                auto *data = static_cast<uint8_t *>(VSIMalloc(bytes.size()));
-                if (data == nullptr)
-                    throw AppException("Cannot allocate " + std::to_string(bytes.size()) + " bytes");
-                std::memcpy(data, bytes.data(), bytes.size());
-                *outBuffer = data;
-                *outBufferSize = static_cast<int>(bytes.size());
-                return;
-            }
-
-            VsiFilePtr f(VSIFOpenL(path.c_str(), "wb"));
-            if (!f)
-                throw GDALException("Cannot write " + path);
-            if (VSIFWriteL(bytes.data(), 1, bytes.size(), f.get()) != bytes.size())
-                throw GDALException("Cannot write " + path);
-            // The close writes what the stream still holds
-            if (VSIFCloseL(f.release()) != 0)
-                throw GDALException("Cannot write " + path);
+            TileEncoder::store(bytes.data(), bytes.size(), path, outBuffer, outBufferSize);
         }
     }
 
@@ -239,17 +222,14 @@ namespace ddb
         if (outBuffer != nullptr && outBufferSize == nullptr)
             throw InvalidArgsException("Output buffer size pointer is null");
 
-        // A tile written to a file appears whole or not at all: the tile cache serves any file that
-        // exists, and requests for the same tile run concurrently. It is encoded in memory and
-        // published by renaming a sibling onto the path (a failed write keeps the previous file).
+        // A tile written to a file is encoded in memory and stored whole (store)
         if (outBuffer == nullptr && !path.starts_with("/vsimem/"))
         {
             uint8_t *data = nullptr;
             int size = 0;
             encode(image, options, &data, &size);
             const VsiFreePtr<uint8_t> owned(data);
-            io::writeFileAtomic(io::fromUtf8(path),
-                                std::string(reinterpret_cast<const char *>(data), static_cast<size_t>(size)), "tile");
+            store(data, static_cast<size_t>(size), path);
             return;
         }
 
@@ -272,5 +252,43 @@ namespace ddb
         const VsiMemFile file =
             VsiMemFile::unique("ddb-enc-", std::string(".") + imageFormatExtension(options.format));
         write(image, options, file.path(), outBuffer, outBufferSize);
+    }
+
+    void TileEncoder::store(const uint8_t *data, size_t size, const std::string &path, uint8_t **outBuffer,
+                            int *outBufferSize)
+    {
+        if (outBuffer != nullptr)
+        {
+            if (outBufferSize == nullptr)
+                throw InvalidArgsException("Output buffer size pointer is null");
+            if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
+                throw AppException("Tile of " + std::to_string(size) + " bytes is too large");
+            auto *copy = static_cast<uint8_t *>(VSIMalloc(size == 0 ? 1 : size));
+            if (copy == nullptr)
+                throw AppException("Cannot allocate " + std::to_string(size) + " bytes");
+            if (size > 0)
+                std::memcpy(copy, data, size);
+            *outBuffer = copy;
+            *outBufferSize = static_cast<int>(size);
+            return;
+        }
+
+        // A tile written to a file appears whole or not at all: the tile cache serves any file that
+        // exists, and requests for the same tile run concurrently. It is published by renaming a
+        // sibling onto the path (a failed write keeps the previous file).
+        if (!path.starts_with("/vsimem/"))
+        {
+            io::writeFileAtomic(io::fromUtf8(path), std::string(reinterpret_cast<const char *>(data), size), "tile");
+            return;
+        }
+
+        VsiFilePtr f(VSIFOpenL(path.c_str(), "wb"));
+        if (!f)
+            throw GDALException("Cannot write " + path);
+        if (VSIFWriteL(data, 1, size, f.get()) != size)
+            throw GDALException("Cannot write " + path);
+        // The close writes what the stream still holds
+        if (VSIFCloseL(f.release()) != 0)
+            throw GDALException("Cannot write " + path);
     }
 }

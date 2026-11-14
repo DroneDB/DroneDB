@@ -72,22 +72,14 @@ else()
     message(FATAL_ERROR "spz: no usable zstd target found (expected zstd::libzstd*)")
 endif()
 
-# laz-perf (Apache 2.0), the LAZ codec vendored with Untwine. PDAL keeps its own copy
-# private, so libddb links this one to decompress COPC nodes itself (DDB-06: decoded
-# nodes are cached across point-cloud tiles). Symbols stay hidden inside libddb.
-file(GLOB LAZPERF_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/untwine/lazperf/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/untwine/lazperf/detail/*.cpp"
-)
-add_library(lazperf STATIC ${LAZPERF_SOURCES})
-target_include_directories(lazperf PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/untwine")
-set_target_properties(lazperf PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    POSITION_INDEPENDENT_CODE ON
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
-)
+# ddb-tilers (MPL-2.0): the COG and COPC builders and tilers, linked statically into libddb
+# (ddbt::ddbt). As a subproject it builds only its static library. It also provides the LAZ
+# codec libddb decodes COPC nodes with (ddbt::lazperf, its laz-perf fork, Apache-2.0).
+# Its code is compiled for plain x86-64, as libddb's, and picks its SIMD paths for the CPU at run
+# time; set here, not left to its cache entry, so a build directory configured with an older
+# ddb-tilers default (x86-64-v3, which needs AVX2) cannot keep it.
+set(DDBT_ISA_BASELINE "x86-64")
+add_subdirectory("ddb-tilers")
 
 set(SRC_LIST
     ${SRC_LIST}
@@ -96,4 +88,4 @@ set(SRC_LIST
 )
 
 # Third-party headers do not count as our warnings (cmake/Warnings.cmake)
-ddb_system_includes(spz lazperf)
+ddb_system_includes(spz ddbt ddbt_lazperf)

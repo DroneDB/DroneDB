@@ -26,11 +26,19 @@
       ]
     },
     "gtest",
+    "highway",
     "laszip",
+    "lerc",
+    "libdeflate",
     "libgeotiff",
+    {
+      "name": "libjxl",
+      "default-features": false
+    },
     "libjpeg-turbo",
     "libpng",
     "libwebp",
+    "openjpeg",
     "openssl",
     "libspatialite",
     {

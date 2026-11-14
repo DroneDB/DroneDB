@@ -15,6 +15,7 @@
 
 namespace ddb
 {
+    struct ThumbVisParams; // thumbs.h
 
     class GlobalMercator
     {
@@ -82,6 +83,11 @@ namespace ddb
         std::string writeTile(const RasterImage &image, ImageFormat format, int tz, int tx, int ty,
                               uint8_t **outBuffer, int *outBufferSize);
 
+        // Stores the bytes of tile (tz, tx, ty), already encoded in format, as writeTile stores an
+        // image
+        std::string writeEncodedTile(const uint8_t *data, size_t size, ImageFormat format, int tz, int tx, int ty,
+                                     uint8_t **outBuffer, int *outBufferSize);
+
     public:
         Tiler(const std::string &inputPath,
               const std::string &outputFolder, int tileSize = 256,
@@ -95,6 +101,10 @@ namespace ddb
         std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
         virtual std::string tile(int tz, int tx, int ty, ImageFormat format,
                                  uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) = 0;
+        // Tile with visualization parameters; a tiler that has none (point clouds) renders the
+        // plain tile
+        virtual std::string tile(int tz, int tx, int ty, const ThumbVisParams &visParams, ImageFormat format,
+                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
         std::string tile(const TileInfo &tile);
 
         std::vector<TileInfo> getTilesForZoomLevel(int tz) const;

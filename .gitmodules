@@ -22,3 +22,6 @@
 [submodule "apps/gdal-util"]
 	path = apps/gdal-util
 	url = https://github.com/DroneDB/gdal-util.git
+[submodule "vendor/ddb-tilers"]
+	path = vendor/ddb-tilers
+	url = https://github.com/DroneDB/ddb-tilers.git

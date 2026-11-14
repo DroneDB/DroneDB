@@ -80,6 +80,12 @@ namespace ddb
         /// Encodes image into a new buffer (free with VSIFree / DDBVSIFree)
         static void encode(const RasterImage &image, const EncodeOptions &options,
                            uint8_t **outBuffer, int *outBufferSize);
+
+        /// Stores bytes already encoded as write stores an image: into a new *outBuffer when it is
+        /// set (free with VSIFree / DDBVSIFree), else into path (a file appears whole, by a rename;
+        /// a /vsimem/ path is written in place).
+        static void store(const uint8_t *data, size_t size, const std::string &path, uint8_t **outBuffer = nullptr,
+                          int *outBufferSize = nullptr);
     };
 }
 

@@ -49,6 +49,10 @@ namespace ddb
         // opens with GDAL, so they are not artefacts.
         bool isLibddbArtefact(const fs::path &path);
 
+        // @throws GDALException when the file is not an artefact (the tilers and the openers
+        // below read nothing else)
+        void requireArtefact(const fs::path &path);
+
         // The name that stands for the file as it is now: CRC64 of its path, modification time
         // (to the microsecond the file system keeps) and size, in hexadecimal, so a changed file
         // gets another name.

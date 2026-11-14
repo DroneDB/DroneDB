@@ -9,15 +9,16 @@
 #include "entry.h"
 #include "entry_handlers_builtin.h"
 #include "mio.h"
-#include "pctiler.h"
 #include "pointcloud.h"
 #include "thumbs.h"
+#include "tilers_tiler.h"
 
 namespace ddb {
 
 namespace {
 
-// The COPC artifact of a point cloud: its thumbnail and its tiles
+// The COPC artifact of a point cloud: its thumbnail and its tiles (rendered by ddb-tilers, local or at
+// an http(s) URL)
 class CopcThumbnailGenerator : public ThumbnailGenerator {
   public:
     bool accepts(const fs::path& input) const override { return isCopcPath(io::toUtf8(input)); }
@@ -32,7 +33,7 @@ class CopcTilerFactory : public TilerFactory {
     bool accepts(const fs::path& tileablePath) const override { return isCopcPath(io::toUtf8(tileablePath)); }
     std::unique_ptr<Tiler> create(const fs::path& input, const fs::path& outputFolder, int tileSize,
                                   bool tms) const override {
-        return std::make_unique<PointCloudTiler>(io::toUtf8(input), io::toUtf8(outputFolder), tileSize, tms);
+        return std::make_unique<TilersTiler>(io::toUtf8(input), io::toUtf8(outputFolder), tileSize, tms);
     }
 };
 

@@ -31,7 +31,7 @@
 #include "golden_support.h"
 #include "synthetic_raster_support.h"
 #include "gdal_inc.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "mask.h"
 #include "merge_multispectral.h"
@@ -396,7 +396,7 @@ namespace
         // makes the COG again: the tiler that gives their range is closed first, since Windows
         // replaces no file a process holds open
         const auto [zooms, bounds] = [&] {
-            GDALTiler tiler(TilerHelper::toGeoTIFF(ms).string(), "", 256, false);
+            RasterTiler tiler(TilerHelper::toGeoTIFF(ms).string(), "", 256, false);
             const auto z = tiler.getMinMaxZ();
             return std::make_pair(z, tiler.getMinMaxCoordsForZ(z.max));
         }();

@@ -19,6 +19,7 @@
 #include "raster_stats.h"
 #include "exceptions.h"
 #include "json.h"
+#include "tilers_call.h"
 
 #include <fstream>
 #include <functional>
@@ -249,12 +250,70 @@ namespace ddb
         return targs;
     }
 
+    namespace
+    {
+        // A JPEG 2000 GeoRaster (the extensions of the GeoRaster entries): GDAL builds its COG
+        // (ddb-tilers reads TIFF only)
+        bool isJpeg2000(const fs::path &path) { return io::Path(path).checkExtension({"jp2", "j2k"}); }
+
+        // The COG of a GeoTIFF, built by ddb-tilers in one streamed pass (the contract of the GDAL
+        // build below: Web Mercator tiles, or the source's own grid for an optimized COG, its
+        // compression and transparency rules, the statistics sidecar), with the threads of the
+        // build and its memory budget
+        void buildCogFileWithTilers(const fs::path &path, const fs::path &outFile, const raster::CogParams &params,
+                                    const raster::ProgressCallback &reportProgress)
+        {
+            BuildOptions options;
+            options.threads = params.threads;
+            const BuildResourceBudget budget = BuildResourceBudget::fromConfig(options);
+            const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
+            // The pool of ddb-tilers takes its size before its first build (the helper runs one)
+            const std::string config = json{{"threads", cpu.threads()}}.dump();
+            if (ddbtConfigure(config.c_str()) != DDBT_ERR_NONE)
+            {
+                LOGD << "ddb-tilers keeps its pool: " << ddbtLastError();
+            }
+            const int64_t memoryMb = budget.cacheBytes / (1024 * 1024) + budget.warpMemoryMb;
+            const std::string buildOptions = json{{"memoryMb", memoryMb}}.dump();
+
+            LOGD << "Building COG from " << io::toUtf8(path) << " with ddb-tilers (" << cpu.threads()
+                 << " threads, " << memoryMb << " MB)";
+            std::atomic<int> pct{0};
+            struct Progress
+            {
+                std::atomic<int> *pct;
+                const raster::ProgressCallback *report;
+            } progress{&pct, &reportProgress};
+            const ddbtProgressCallback onProgress = [](double fraction, const char *, void *user) {
+                auto *p = static_cast<Progress *>(user);
+                reportWarpProgress(*p->pct, fraction, *p->report);
+            };
+            const ddbtErr rc = ddbtBuildCog2(io::toUtf8(path).c_str(), io::toUtf8(outFile).c_str(),
+                                             buildOptions.c_str(), onProgress, &progress);
+            if (rc == DDBT_ERR_NO_SPACE)
+                throw RetryableBuildException("The COG build ran out of space: " + std::string(ddbtLastError()),
+                                              RetryableBuildReason::NoSpaceOnDevice);
+            cancel::throwIfCanceled();
+            // An input that cannot be built (no coordinate system, no geotransform, a layout the
+            // builder does not read) is a raster that cannot be read, as GDAL's build reported it
+            if (rc == DDBT_ERR_INVALIDARGS || rc == DDBT_ERR_NOT_IMPLEMENTED)
+                throw GDALException(ddbtLastError());
+            tilers::check(rc);
+        }
+    } // namespace
+
     namespace raster
     {
 
     void buildCogFile(const fs::path &path, const fs::path &outFile, const CogParams &params,
                       const ProgressCallback &reportProgress)
     {
+        if (!isJpeg2000(path))
+        {
+            buildCogFileWithTilers(path, outFile, params, reportProgress);
+            return;
+        }
+
         const std::string input = io::toUtf8(path);
         const std::string outputCog = io::toUtf8(outFile);
         BuildOptions options;

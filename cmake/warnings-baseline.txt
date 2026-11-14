@@ -26,13 +26,10 @@ src/library/database.cpp -Wcatch-value= 1
 src/library/entry.cpp -Wshadow 1
 src/library/exif.cpp -Wconversion 5
 src/library/exifeditor.cpp -Wshadow 1
-src/library/gdaltiler.cpp -Wshadow 4
 src/library/metamanager.cpp -Wshadow 1
 src/library/mio.cpp -Wshadow 1
 src/library/mzip.cpp -Wdeprecated-declarations 1
 src/library/nxconv.cpp -Wdangling-else 1
-src/library/pctiler.cpp -Wfloat-conversion 1
-src/library/pctiler.cpp -Wshadow 4
 src/library/ply.cpp -Wdangling-else 2
 src/library/plyconv.cpp -Wdangling-else 3
 src/library/plyconv.cpp -Wshadow 5
@@ -54,7 +51,6 @@ tests/integration/multispectral_test.cpp -Wunused-result 9
 tests/integration/plyconv_test.cpp -Wdangling-else 1
 tests/integration/plyconv_test.cpp -Wrange-loop-construct 1
 tests/integration/pointcloud_render_test.cpp -Wconversion 3
-tests/integration/pointcloud_render_test.cpp -Wfloat-conversion 3
 tests/integration/rescan_test.cpp -Wunused-function 1
 tests/integration/rescan_test.cpp -Wunused-parameter 11
 tests/integration/thumbs_test.cpp -Wsign-compare 1

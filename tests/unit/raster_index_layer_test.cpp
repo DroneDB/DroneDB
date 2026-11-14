@@ -28,7 +28,7 @@
 
 #include "ddb.h"
 #include "synthetic_raster_support.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "raster_region.h"
 #include "raster_utils.h"
@@ -757,7 +757,7 @@ namespace
         // A tile of the formula: a floating-point raster has one, an integer one is refused
         for (const fs::path &raster : {f32, u16})
         {
-            GDALTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
+            RasterTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
             const auto info = tiler.getMinMaxZ();
             const auto bounds = tiler.getMinMaxCoordsForZ(info.max);
             ThumbVisParams visParams;
@@ -767,12 +767,12 @@ namespace
             int size = 0;
             if (raster == f32)
             {
-                EXPECT_NO_THROW(tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, &bytes, &size));
+                EXPECT_NO_THROW(tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &bytes, &size));
                 VSIFree(bytes);
             }
             else
             {
-                EXPECT_THROW(tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, &bytes, &size), InvalidArgsException);
+                EXPECT_THROW(tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &bytes, &size), InvalidArgsException);
             }
         }
         // And a ratio index over the same integer raster is fine

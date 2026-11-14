@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "ddb.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "mio.h"
 #include "raster_cache.h"
 #include "raster_stats.h"
@@ -41,7 +41,7 @@ namespace
     // Every tile of the deepest zoom of the raster (XYZ)
     std::vector<TileRef> maxZoomTiles(const fs::path &raster)
     {
-        GDALTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
+        RasterTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
         const int z = t.getMinMaxZ().max;
         auto b = t.getMinMaxCoordsForZ(z);
         std::vector<TileRef> tiles;
@@ -100,19 +100,15 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         auto spec = rgbGradient();
-        spec.epsg = 32633; // UTM: the tiler builds a warped VRT
+        spec.epsg = 32633; // UTM: converted to an EPSG:3857 COG once
         spec.originX = 500000;
         spec.originY = 5000000;
         const auto raster = createGeoRaster(ta.getPath("utm.tif"), spec);
         const auto tiles = maxZoomTiles(raster);
         ASSERT_GE(tiles.size(), 2u);
+        memoryTile(raster, tiles[0]);
 
-        {
-            GdalOpenCounter opens;
-            memoryTile(raster, tiles[0]);
-            EXPECT_GE(opens.count(), 1) << "the first tile opens the raster";
-        }
-
+        // The next tiles reuse the tiler; ddb-tilers reads the COG, GDAL opens nothing
         const auto before = RasterCache::instance().stats();
         GdalOpenCounter opens;
         memoryTile(raster, tiles[1]);
@@ -128,12 +124,20 @@ namespace
         const auto raster = createGeoRaster(ta.getPath("float.tif"), floatRamp(10, 500));
         const auto tiles = maxZoomTiles(raster);
 
+        // ddb-tilers computes the statistics of the stretch once per version of the COG: the
+        // tiles of every request are the same, and libddb computes none
         const auto before = RasterStatsProvider::instance().counters();
-        for (int i = 0; i < 50; i++)
-            memoryTile(raster, tiles[i % tiles.size()]);
+        std::vector<std::vector<uint8_t>> first;
+        for (size_t i = 0; i < 50; i++)
+        {
+            const auto bytes = memoryTile(raster, tiles[i % tiles.size()]);
+            if (i < tiles.size())
+                first.push_back(bytes);
+            else
+                EXPECT_EQ(bytes, first[i % tiles.size()]) << "tile " << i % tiles.size();
+        }
         const auto after = RasterStatsProvider::instance().counters();
-
-        EXPECT_EQ(after.computed - before.computed, 1u);
+        EXPECT_EQ(after.computed, before.computed);
         EXPECT_EQ(after.fromSidecar, before.fromSidecar);
     }
 
@@ -147,15 +151,10 @@ namespace
         std::ofstream(cog.string() + ".stats.json")
             << R"({"version":2,"exact":true,"bands":{"1":{"min":0,"max":1000,"mean":500,"std":100,"valid":262144,"total":262144}}})";
 
-        const auto before = RasterStatsProvider::instance().counters();
         int brightest = 0;
         for (const auto &t : maxZoomTiles(raster))
             brightest = std::max(brightest, maxOfBand(decodeImage(memoryTile(raster, t)), 0));
-        const auto after = RasterStatsProvider::instance().counters();
-
-        EXPECT_EQ(after.computed, before.computed);
-        EXPECT_EQ(after.fromSidecar - before.fromSidecar, 1u);
-        EXPECT_NEAR(brightest, 127, 2) << "500 of [0, 1000] is mid grey";
+        EXPECT_NEAR(brightest, 127, 2) << "500 of [0, 1000] is mid grey: ddb-tilers stretched with the sidecar";
     }
 
     TEST(TilerCache, concurrentTilesSameRaster)
@@ -240,6 +239,83 @@ namespace
             edgeWithAlpha |= decodeImage(memoryTile(raster, t)).hasAlpha();
         EXPECT_TRUE(edgeWithAlpha);
     }
+
+    // ddb-tilers refuses tiles that do not exist at their zoom; libddb answers them as tiles out
+    // of the raster: transparent, or "Out of bounds" with visualization parameters
+    TEST(TilerCache, aTileOutOfTheWorldIsOutOfTheRaster)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
+        for (const TileRef t : {TileRef{3, 8, 0}, TileRef{3, 0, 8}, TileRef{2, 4, 4}})
+        {
+            const auto img = decodeImage(memoryTile(raster, t));
+            ASSERT_TRUE(img.hasAlpha()) << t.z << "/" << t.x << "/" << t.y;
+            EXPECT_EQ(*std::max_element(img.alpha().begin(), img.alpha().end()), 0);
+        }
+        uint8_t *buf = nullptr;
+        int size = 0;
+        EXPECT_EQ(DDBMemoryTileEx2(raster.string().c_str(), 3, 8, 0, 256, false, true, nullptr, nullptr, nullptr, "VARI",
+                                   nullptr, nullptr, nullptr, nullptr, &buf, &size),
+                  DDBERR_EXCEPTION);
+        EXPECT_EQ(std::string(DDBGetLastError()), "Out of bounds");
+    }
+
+#ifdef __linux__
+    // Open descriptors of this process on `path` (the links of /proc/self/fd)
+    int openDescriptorsOf(const fs::path &path)
+    {
+        const auto target = fs::weakly_canonical(path);
+        int n = 0;
+        for (const auto &e : fs::directory_iterator("/proc/self/fd"))
+        {
+            std::error_code ec;
+            if (fs::read_symlink(e.path(), ec) == target && !ec)
+                ++n;
+        }
+        return n;
+    }
+
+    // ddb-tilers keeps the COG open between tiles; DDBReleaseConnections closes it
+    TEST(TilerCache, releaseConnectionsClosesTheCogOfTheTiles)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
+        memoryTile(raster, fullTile(raster));
+        const fs::path cog = TilerHelper::toGeoTIFF(raster);
+        EXPECT_GE(openDescriptorsOf(cog), 1);
+        int closed = 0;
+        ASSERT_EQ(DDBReleaseConnections(ta.getFolder().string().c_str(), &closed), DDBERR_NONE);
+        EXPECT_EQ(openDescriptorsOf(cog), 0);
+    }
+
+    // Open descriptors of this process on a file that was replaced or deleted after it was opened
+    int openReplacedFiles(const fs::path &path)
+    {
+        const std::string replaced = fs::weakly_canonical(path).string() + " (deleted)";
+        int n = 0;
+        for (const auto &e : fs::directory_iterator("/proc/self/fd"))
+        {
+            std::error_code ec;
+            if (fs::read_symlink(e.path(), ec).string() == replaced && !ec)
+                ++n;
+        }
+        return n;
+    }
+
+    // A forced conversion makes the COG again: what reads the one it replaces is closed first
+    // (Windows replaces no file a process holds open), ddb-tilers' copy of it included
+    TEST(TilerCache, aForcedConversionClosesTheCogItReplaces)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
+        memoryTile(raster, fullTile(raster));
+        const fs::path cog = TilerHelper::toGeoTIFF(raster);
+        EXPECT_GE(openDescriptorsOf(cog), 1);
+        EXPECT_EQ(TilerHelper::toGeoTIFF(raster, true), cog);
+        EXPECT_EQ(openReplacedFiles(cog), 0) << "the replaced COG is still open";
+        EXPECT_EQ(openDescriptorsOf(cog), 0);
+    }
+#endif
 
     TEST(TilerCache, webpAndJpegTiles)
     {

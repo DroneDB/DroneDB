@@ -1034,11 +1034,16 @@ namespace
         {
             area_ = new TestArea("GdalUtilSandbox.heavy", true);
             heavy_ = new fs::path(area_->getFolder() / "heavy.tif");
+            createHeavy(*heavy_, {"COMPRESS=DEFLATE", "TILED=NO", "BLOCKYSIZE=12288", "BIGTIFF=IF_SAFER"});
+        }
 
+        // A 12288 x 12288 Float32 raster of 3 bands, all 0, georeferenced in EPSG:32632
+        static void createHeavy(const fs::path &path, std::vector<const char *> options)
+        {
             constexpr int kSide = 12288;
-            const char *options[] = {"COMPRESS=DEFLATE", "TILED=NO", "BLOCKYSIZE=12288", "BIGTIFF=IF_SAFER", nullptr};
-            GDALDatasetH dataset = GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(*heavy_).c_str(), kSide, kSide, 3,
-                                              GDT_Float32, const_cast<char **>(options));
+            options.push_back(nullptr);
+            GDALDatasetH dataset = GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(path).c_str(), kSide, kSide, 3,
+                                              GDT_Float32, const_cast<char **>(options.data()));
             ASSERT_NE(dataset, nullptr);
             const double transform[6] = {500000.0, 1.0, 0.0, 5000000.0, 0.0, -1.0};
             GDALSetGeoTransform(dataset, transform);
@@ -1135,10 +1140,14 @@ namespace
         options.runner = &runner;
         raster::GdalUtilHelper helper(options);
 
+        // The same raster in tiles: the build reads it block by block (the single strip of heavy_ is a
+        // block larger than the COG builder decodes) and runs past its cpu time
         const fs::path folder = outputFolder("build");
+        const fs::path tiled = folder / "heavy-tiled.tif";
+        createHeavy(tiled, {"COMPRESS=DEFLATE", "TILED=YES", "BLOCKXSIZE=512", "BLOCKYSIZE=512"});
         try
         {
-            helper.buildCog(*heavy_, folder / "cog.tif", json::object(), raster::ProgressCallback());
+            helper.buildCog(tiled, folder / "cog.tif", json::object(), raster::ProgressCallback());
             FAIL() << "the build finished";
         }
         catch (const raster::RasterNotReadException &e)

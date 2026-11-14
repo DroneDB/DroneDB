@@ -23,7 +23,7 @@
 #include "gdal_inc.h"
 #include "gdal_open_policy.h"
 #include "gdal_raii.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "gtest/gtest.h"
 #include "json.h"
 #include "mio.h"
@@ -527,7 +527,7 @@ namespace
     // The tile at the deepest zoom of the middle of the raster, from the artefact
     TileRequest middleTile(const fs::path &source, const fs::path &artefact)
     {
-        GDALTiler tiler(io::toUtf8(artefact), "", 256);
+        RasterTiler tiler(io::toUtf8(artefact), "", 256);
         const int z = tiler.getMinMaxZ().max;
         const auto bounds = tiler.getMinMaxCoordsForZ(z);
         return testTile(source, z, (bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, 256, false, false);
@@ -565,7 +565,7 @@ namespace
         EXPECT_TRUE(helper.lastCogParams.contains("threads"));
 
         // The tiles come from the COG: the tiler of the raw file refuses it, the helper's COG serves
-        EXPECT_THROW(GDALTiler(io::toUtf8(raw), "", 256), GDALException);
+        EXPECT_THROW(RasterTiler(io::toUtf8(raw), "", 256), GDALException);
         const std::vector<uint8_t> tile = memoryTile(middleTile(raw, cog));
         EXPECT_FALSE(tile.empty());
         EXPECT_EQ(tile, memoryTile(middleTile(raw, cog)));
@@ -643,17 +643,19 @@ namespace
         EXPECT_EQ(helper.count("cog"), 2u) << "removed by the clean-up, then converted again";
     }
 
-    TEST_F(RasterArtefacts, aPhotoIsGeoprojectedIntoTheArtefactsForTheTiler)
+    TEST_F(RasterArtefacts, aPhotoIsGeoprojectedAndConvertedToACogForTheTiler)
     {
         const fs::path photo = area_->downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
 
         const fs::path projected = TilerHelper::toGeoTIFF(photo);
 
         EXPECT_EQ(projected.parent_path(), raster::artefactsDir());
-        EXPECT_EQ(projected.filename(), fs::path(raster::artefactKey(photo) + "-geoprojected.tif"));
+        EXPECT_EQ(projected.filename(), fs::path(raster::artefactKey(photo) + ".tif"));
         const auto dataset = raster::openArtefactRaster(projected);
         ASSERT_TRUE(dataset);
-        EXPECT_EQ(GDALGetRasterCount(datasetHandle(dataset)), 4) << "RGB and alpha";
+        EXPECT_EQ(GDALGetRasterCount(datasetHandle(dataset)), 3) << "RGB, the footprint in the mask";
+        OGRSpatialReference srs(GDALGetProjectionRef(datasetHandle(dataset)));
+        EXPECT_STREQ(srs.GetAuthorityCode(nullptr), "3857") << "the COG the tilers read";
         EXPECT_FALSE(memoryTile(middleTile(photo, projected)).empty());
         EXPECT_EQ(projected, TilerHelper::toGeoTIFF(photo)) << "made once";
         for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))

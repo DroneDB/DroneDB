@@ -27,7 +27,7 @@
 #include "raster_test_utils.h"
 
 #include "ddb.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "raster_utils.h"
 #include "vegetation.h"
@@ -659,7 +659,7 @@ namespace
 
         // A tile of the raster at its deepest zoom level (the tiler that gives it is closed first)
         const auto [zoom, tile] = [&] {
-            GDALTiler tiler(TilerHelper::toGeoTIFF(dem).string(), "", 256, false);
+            RasterTiler tiler(TilerHelper::toGeoTIFF(dem).string(), "", 256, false);
             const auto z = tiler.getMinMaxZ();
             return std::make_pair(z.max, tiler.getMinMaxCoordsForZ(z.max).min);
         }();
