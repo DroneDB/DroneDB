@@ -74,14 +74,15 @@ namespace
     // DDBBuildEx2, DDBGenerateContoursEx2, DDBRasterOptions.rescaleUnit and the window
     // of DDBExportRaster3 (DDB_RASTER_OPT_BBOX); 2.5 adds DDBMemoryTileEx3 (the visualization
     // tile in a chosen format) and DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (a region and an
-    // index render over a background, DDBRenderOptions, or as their RGBA pixels).
+    // index render over a background, DDBRenderOptions, or as their RGBA pixels); 2.6 adds no export (the
+    // tiles and builds of ddb-tilers, the artefactCacheMb setting of the configuration).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_5)
+    TEST(AbiVersion, is2_6)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 5);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x00020005u);
+        EXPECT_EQ(DDB_ABI_MINOR, 6);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x00020006u);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

@@ -4,13 +4,22 @@
 #ifndef GEOPROJECT_H
 #define GEOPROJECT_H
 
+#include <optional>
+#include <string>
+
 #include "database.h"
+#include "raster_protocol.h"
 
 namespace ddb
 {
 
     typedef std::function<bool(const std::string &imageWritten)>
         GeoProjectCallback;
+
+    // The georeference of a photo from its EXIF (its size and the ground position of its corners),
+    // as the raster helper takes it; none, with the reason in `problem`, for a file that is not a
+    // GeoImage or whose EXIF has no footprint
+    std::optional<raster::PhotoGeoreference> photoGeoreferenceOf(const fs::path &photo, std::string &problem);
 
     // Places photos on the ground and writes a GeoTIFF for each, to the file `output` (one photo) or
     // to a folder (several, or when `output` is one or ends with '/' or '\', <folder>/<image

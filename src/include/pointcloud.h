@@ -39,20 +39,30 @@ namespace ddb
     // analogous to the EPT span field.
     bool getCopcInfo(const std::string &copcPath, PointCloudInfo &info, int polyboundsSrs = 4326, int *span = nullptr);
 
-    // Builds a Cloud Optimized Point Cloud (COPC) file from one or more input
-    // point cloud files. Output is a single file named `cloud.copc.laz` placed inside `outdir`.
-    // Untwine builds it when it is installed (with its own fixed thread count: options do not
-    // bound it); otherwise, or when Untwine fails, PDAL's writers.copc does, on the threads of one
-    // build (DDB_BUILD_THREADS, lowered to options.threads).
+    // Builds a Cloud Optimized Point Cloud (COPC) file from one or more input point cloud files
+    // (LAS, LAZ, E57, PTS, XYZ, a PLY point cloud), merged into one. Output is a single file named
+    // `cloud.copc.laz` placed inside `outdir`. ddb-tilers builds it in the raster helper
+    // (IRasterHelper::buildCopc), on the threads of one build (DDB_BUILD_THREADS, lowered to
+    // options.threads) and within the memory of DDBT_COPC_BUILD_MEM_MB (else 4 GiB, at most half
+    // the memory of the machine). The progress goes to options with the phases of
+    // copcPhaseOfFraction.
     // The build runs in a private folder made in `outdir` (raster::makePrivateFolder), which is
     // removed with what is left in it; the COPC is moved to `outdir`/cloud.copc.laz once it is
     // whole (raster::publishArtefact), and nothing else in `outdir` is touched. Before anything
     // is read: a cloud.copc.laz that is one of the inputs is refused (InvalidArgsException), and
     // one that exists unless overwrite (OutputExistsException; true for the build handler).
+    // @throws FSException for an input that does not exist; InvalidArgsException for one that is
+    // not a point cloud, and for a cloud of fewer than 2 points or of no extent in X or Y;
+    // PDALException for a cloud that cannot be read; RetryableBuildException when the device is
+    // full; the other exceptions of IRasterHelper
     void buildCopc(const std::vector<std::string> &filenames, const std::string &outdir,
                    const BuildOptions &options = {}, bool overwrite = true);
 
-    void translateToLas(const std::string &input, const std::string &outputLas);
+    // The phase of a COPC build at a fraction of its work, as ddb-tilers reports them: "planning"
+    // (the inputs are opened and the octree planned) below 0.05, "reading" (the points are read
+    // and sorted into the octree) below 0.4, "building" (the nodes are thinned, encoded and
+    // written) below 1, "writing" (the end of the file) at 1
+    const char *copcPhaseOfFraction(double fraction);
 
     // The COPC artifact names (CopcBuildSubfolder, CopcFileName) are in build_layout.h.
 

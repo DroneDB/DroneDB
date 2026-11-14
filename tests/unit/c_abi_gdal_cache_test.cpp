@@ -6,8 +6,6 @@
 //  - set with DDBConfigure it is the size of the cache (raising it too), at once;
 //  - put back to null it restores the cache GDAL had, then bounds it by the environment variable
 //    or the default, as DDBRegisterProcess does;
-//  - a build in flight (ScopedGdalCacheMax) keeps its own size until it ends, then the cache takes
-//    the configured one;
 //  - an invalid value changes nothing.
 
 #include <cstdint>
@@ -111,25 +109,6 @@ TEST_F(GdalCacheFixture, explicitGdalCacheMaxBeatsTheBoundButNotTheHost) {
 
     ASSERT_DDB_OK(DDBConfigure(R"({"gdalCacheMb": 128})"));
     EXPECT_EQ(GDALGetCacheMax64(), 128 * MiB);
-}
-
-// A build in flight asked for its own size: the configured one comes when the last build ends
-TEST_F(GdalCacheFixture, buildInFlightKeepsItsCacheUntilItEnds) {
-    {
-        const ScopedGdalCacheMax build(512 * MiB);
-        EXPECT_EQ(GDALGetCacheMax64(), 512 * MiB);
-        ASSERT_DDB_OK(DDBConfigure(R"({"gdalCacheMb": 96})"));
-        EXPECT_EQ(GDALGetCacheMax64(), 512 * MiB);
-    }
-    EXPECT_EQ(GDALGetCacheMax64(), 96 * MiB);
-
-    // The setting put back while a build runs restores the cache when it ends
-    {
-        const ScopedGdalCacheMax build(512 * MiB);
-        ASSERT_DDB_OK(DDBConfigure(R"({"gdalCacheMb": null})"));
-        EXPECT_EQ(GDALGetCacheMax64(), 512 * MiB);
-    }
-    EXPECT_EQ(GDALGetCacheMax64(), start_);
 }
 
 TEST_F(GdalCacheFixture, invalidValueChangesNothing) {

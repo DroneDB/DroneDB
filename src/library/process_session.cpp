@@ -307,7 +307,6 @@ namespace ddb
                                                stdinPair[1].get(),
                                                outPipe[1].get(),
                                                errPipe[1].get(),
-                                               -1,
                                                false,
                                                options.maxMemoryBytes};
                     pid_ = spawnChild(request, error);

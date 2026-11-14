@@ -19,6 +19,7 @@
 #include "hash.h"
 #include "logger.h"
 #include "process_config.h"
+#include "raster_stats.h"
 #include "randomutil.h"
 #include "timeutil.h"
 #include "userprofile.h"
@@ -131,9 +132,7 @@ namespace ddb
             GDALDatasetUniquePtr openArtefact(const fs::path &path, const std::vector<std::string> &drivers,
                                               unsigned int kind, bool update)
             {
-                if (!isLibddbArtefact(path))
-                    throw GDALException("Refusing to open " + io::toUtf8(path) +
-                                        ": it is not a file libddb wrote (build the dataset, or copy it with the raster helper, first)");
+                requireArtefact(path);
                 return openWithDrivers(io::toUtf8(path), drivers, kind, update);
             }
         } // namespace
@@ -143,9 +142,21 @@ namespace ddb
             return UserProfile::get()->getCachePath("artefacts");
         }
 
+        namespace
+        {
+            constexpr const char *kNormalizedFolder = "normalized";
+        } // namespace
+
         fs::path normalizedDir()
         {
-            return UserProfile::get()->getCachePath(fs::path("artefacts") / "normalized");
+            return UserProfile::get()->getCachePath(fs::path("artefacts") / kNormalizedFolder);
+        }
+
+        void requireArtefact(const fs::path &path)
+        {
+            if (!isLibddbArtefact(path))
+                throw GDALException("Refusing to open " + io::toUtf8(path) +
+                                    ": it is not a file libddb wrote (build the dataset, or copy it with the raster helper, first)");
         }
 
         bool isLibddbArtefact(const fs::path &path)
@@ -282,12 +293,114 @@ namespace ddb
             }
         } // namespace
 
+        void publishCachedArtefact(const fs::path &produced, const fs::path &target)
+        {
+            publishArtefact(produced, target);
+            trimArtefacts(target);
+        }
+
+        namespace
+        {
+            // A file of the cache and what it takes: an artefact counts with its statistics sidecar,
+            // which goes with it
+            struct CachedFile
+            {
+                fs::path path;
+                uint64_t bytes = 0;
+                time_t used = 0;
+            };
+
+            void addCachedFiles(const fs::path &folder, std::vector<CachedFile> &files)
+            {
+                std::error_code ec;
+                for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+                {
+                    std::error_code statEc;
+                    if (!it->is_regular_file(statEc) || statEc)
+                        continue;
+                    const fs::path file = it->path();
+                    // A sidecar is counted with its raster
+                    const std::string name = io::toUtf8(file.filename());
+                    if (name.size() > 11 && name.compare(name.size() - 11, 11, ".stats.json") == 0 &&
+                        fs::exists(file.parent_path() / io::fromUtf8(name.substr(0, name.size() - 11)), statEc))
+                        continue;
+                    CachedFile entry{file, it->file_size(statEc), 0};
+                    if (statEc)
+                        continue;
+                    const fs::path sidecar = statsSidecarOf(file);
+                    if (fs::exists(sidecar, statEc))
+                        entry.bytes += fs::file_size(sidecar, statEc);
+                    try
+                    {
+                        entry.used = io::Path(file).getModifiedTime();
+                    }
+                    catch (const std::exception &)
+                    {
+                        continue; // gone meanwhile
+                    }
+                    files.push_back(std::move(entry));
+                }
+            }
+        } // namespace
+
+        void trimArtefacts(const fs::path &keep)
+        {
+            const uint64_t maxBytes = ProcessConfig::get().artefactCacheMb() * 1024 * 1024;
+            if (maxBytes == 0)
+                return;
+            std::vector<CachedFile> files;
+            // Looked at, not made: a folder that is not there holds nothing
+            const fs::path artefacts = artefactsDir();
+            addCachedFiles(artefacts, files);
+            addCachedFiles(artefacts / kNormalizedFolder, files);
+            uint64_t total = 0;
+            for (const auto &f : files)
+                total += f.bytes;
+            if (total <= maxBytes)
+                return;
+
+            // The least recently used first
+            std::sort(files.begin(), files.end(), [](const CachedFile &a, const CachedFile &b) { return a.used < b.used; });
+            const time_t inUse = currentUnixTimestamp() - kArtefactInUseSeconds;
+            uint64_t removed = 0;
+            for (const auto &f : files)
+            {
+                if (total <= maxBytes || f.used >= inUse)
+                    break;
+                if (f.path == keep)
+                    continue;
+                try
+                {
+                    io::assureIsRemoved(f.path);
+                    io::assureIsRemoved(statsSidecarOf(f.path));
+                    total -= f.bytes;
+                    removed++;
+                }
+                catch (const std::exception &e)
+                {
+                    // A file a reader still holds (Windows) stays until the next time
+                    LOGD << "Cannot remove the artefact " << io::toUtf8(f.path) << ": " << e.what();
+                }
+            }
+            if (removed != 0)
+            {
+                LOGD << "Artefact cache trimmed: " << removed << " file(s) removed, " << total / (1024 * 1024)
+                     << " MiB left (bound " << maxBytes / (1024 * 1024) << " MiB)";
+            }
+            if (total > maxBytes)
+            {
+                LOGD << "Artefact cache above its bound (" << total / (1024 * 1024)
+                     << " MiB): the rest was used in the last " << kArtefactInUseSeconds << " s";
+            }
+        }
+
         void cleanupArtefacts(time_t maxAge)
         {
             const time_t threshold = currentUnixTimestamp() - maxAge;
             // The folder of the normalized copies stays: it is the files in it that age, and it
-            // changes only when one is added or removed
-            const fs::path normalized = normalizedDir();
+            // changes only when one is added or removed. It is looked at, not made: the clean-up
+            // runs on the way of any tile request
+            const fs::path normalized = artefactsDir() / kNormalizedFolder;
             removeOlderThan(artefactsDir(), threshold, normalized);
             removeOlderThan(normalized, threshold, fs::path());
         }

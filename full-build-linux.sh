@@ -24,24 +24,6 @@ cmake .. -DCMAKE_TOOLCHAIN_FILE="../vcpkg/scripts/buildsystems/vcpkg.cmake" -DCM
 cmake --build . -- -j"$CPU_CORES"
 
 # ----------------------------------------------------------------------
-# Optional: build the Untwine COPC accelerator (vendor/untwine).
-# Delegated to scripts/build-untwine.sh so the same logic is shared with
-# CI workflows and packaging scripts. Failures NEVER abort the main
-# build; DroneDB transparently falls back to PDAL writers.copc when
-# untwine is missing.
-# ----------------------------------------------------------------------
-(
-    cd ..
-    if [ -x "./scripts/build-untwine.sh" ]; then
-        ./scripts/build-untwine.sh build "${BUILD_TYPE}" || \
-            echo "WARNING: scripts/build-untwine.sh failed (non-blocking, PDAL fallback will be used)"
-    elif [ -f "./scripts/build-untwine.sh" ]; then
-        bash ./scripts/build-untwine.sh build "${BUILD_TYPE}" || \
-            echo "WARNING: scripts/build-untwine.sh failed (non-blocking, PDAL fallback will be used)"
-    fi
-)
-
-# ----------------------------------------------------------------------
 # build-lod Gaussian Splat LOD producer (vendor/spark): MANDATORY for Gaussian
 # Splat builds. Locally failures NEVER abort the main build; Gaussian Splat
 # (RAD) builds stay deferred (BuildDepMissingException) until build-lod is

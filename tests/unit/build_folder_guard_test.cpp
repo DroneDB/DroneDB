@@ -164,6 +164,11 @@ namespace
         {
             writeFile(out, "II*\0 this is no TIFF");
         }
+        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+                       const raster::ProgressCallback &progress) override
+        {
+            real_.buildCopc(path, out, params, progress);
+        }
         void buildVector(const fs::path &path, const fs::path &out, const json &params,
                          const raster::ProgressCallback &progress) override
         {

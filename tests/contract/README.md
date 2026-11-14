@@ -662,3 +662,55 @@ Registry has to adopt first.
   cubic overviews of a COG ring above the opaque value at the edge of the data (266 for 255), so a UInt32, Int16,
   Float32 or Float64 alpha band that holds 255 was opaque at 511 and its renders half transparent (a Float32 band of
   0..1 at 3).
+
+* 2026-11-14: 2.6.0 (ABI 2.6: `capabilities` has `abi.minor` 6; no export is added or removed, the
+  effective configuration has `artefactCacheMb`).
+  The tiles (`DDBTile`, `DDBMemoryTile`, `DDBMemoryTileFmt`, `DDBMemoryTileEx*`, `ddb tile`) are rendered by
+  ddb-tilers. The tiles of a georaster are those of 2.5 in PNG (pixel for pixel) and JPEG (byte for byte); WebP
+  tiles are encoded differently. A photo is converted once to an EPSG:3857 COG and tiled from it, warped by
+  ddb-tilers from the corners of its EXIF footprint in one pass: its tiles may differ from those of
+  2.5. `ddb geoproj` (geoProject) writes its GeoTIFF with ddb-tilers too, on gdalwarp's grid in
+  EPSG:4326 with nearest resampling: a COG, JPEG with the footprint in a mask instead of an alpha
+  band for 8-bit RGB (LZW with an alpha band otherwise, so a GIF or a palette PNG, which 2.5 could
+  not write as JPEG, is projected); an `outsize` below 100% of a JPEG samples the full image, not
+  GDAL's reduced-resolution decode, so its colours differ slightly. The artefact cache (`cacheDir/artefacts`: the COG
+  made for the tiles of each photo or raster of a user, the normalized copies) has a size bound,
+  the setting `artefactCacheMb` (`DDB_ARTEFACT_CACHE_MB`, 4096 MiB by default, 0 for none; in
+  `DDBConfigure` and `DDBGetEffectiveConfig`): past it, the least recently used files are removed
+  when a new one is made, never one used in the last 5 minutes. Point-cloud tiles are ddb-tilers' modern rendering (the octree depth from the density
+  of the cloud in EPSG:3857, a symmetric disc on each point with a per-pixel depth test, the same tile whatever the
+  threads, no seams at the deepest zooms): they differ from those of 2.5. A COPC at an http(s) URL is read with
+  range requests of libddb's HTTP client (206 Partial Content; the ETag, else the Last-Modified date, tells a
+  changed file); a server that does not answer them is refused with that reason. `DDB_COPC_NODE_CACHE_MB` and
+  `DDB_PCTILE_RESOLUTION_OFFSET` are no longer read (ddb-tilers' `DDBT_COPC_NODE_CACHE_MB` and
+  `DDBT_COPC_TILE_CACHE_MB` size its caches). The tile folders of `DDBTile` are named with ddb-tilers' version
+  too, so a new renderer never serves the tiles of an earlier one. Point-cloud thumbnails are drawn by ddb-tilers as its
+  modern tiles are: the whole cloud fitted and centred, in EPSG:3857 when it has a footprint, else in its own
+  coordinates; a cloud without colours is painted with the height ramp of its tiles instead of grey, and the
+  points read are those of the deepest octree levels within the budget (2 points per pixel), as before; a COPC
+  at an http(s) URL is read with the range requests of the HTTP client.
+  The COG of a GeoRaster (GeoTIFF or JPEG 2000) is built by ddb-tilers, with the layout, compression,
+  transparency and statistics sidecar of 2.5; its warp approximates the transform on a grid per
+  tile instead of per scanline, so a warped float raster can differ by about 1e-5 in a few pixels. A full disk
+  during the build is a retryable failure. The GeoTIFFs GDAL reads are read too: LZMA, CCITT, old JPEG, 12-bit
+  JPEG, packed bits, 24-bit floats, CMYK, CIELab, YCbCr without JPEG, JPEG-XL, palettes and 1-bit images. A
+  GeoTIFF georeferenced by ground control points alone is a GeoRaster (2.5: a Raster): its footprint is the image
+  of its corners through the GCP transform gdalwarp uses, its properties have `gcps` (their count) and no
+  `geotransform`, and its COG is warped with that transform. A complex raster (CInt16, CInt32, CFloat32,
+  CFloat64) keeps its samples in its COG; its statistics, tiles and thumbnail are those of the magnitude of its
+  samples (a thumbnail takes the magnitude of the nearest sample).
+  The COPC of a point cloud (the build of a PointCloud entry, `ddb copc`) is built by ddb-tilers in the raster
+  helper (`gdal-util`, protocol 1.1, operation `copc`), on the threads of the build (`DDB_BUILD_THREADS`, lowered by
+  the `threads` of `DDBBuildEx`) and within `DDBT_COPC_BUILD_MEM_MB` (default 4 GiB, at most half the memory): a
+  larger cloud spills to the build folder. It reads LAS, LAZ, E57, PTS, XYZ and PLY point clouds itself, with no
+  conversion to a temporary LAS. The point count and the bounds are those of the sources; the file differs from the
+  COPC of 2.5: another octree (the same file whatever the threads and the memory), LAS 1.4 point format 6, 7 with
+  colours or 8 with near infrared (a cloud without colours no longer has zero colours, so its `dimensions` have no
+  `Red`, `Green`, `Blue`), the scale and offset of a single LAS source (else finer ones than the 0.01 of 2.5), and
+  the 8-bit colours and intensities of PLY, PTS and XYZ sources scaled to 16 bits. A cloud of fewer than 2 points
+  or of no extent in X or Y is refused as before (`DDBERR_INVALIDARGS`), from the count and bounds of the COPC it
+  made; a cloud without any point is a cloud that cannot be read (`DDBERR_EXCEPTION`, "the input holds no
+  points"). A full disk during the build is a retryable failure. `DDBBuildEx2` reports the phases of a point cloud
+  build: "planning" from 0, "reading" from 0.05, "building" from 0.4 and "writing" when the file is done (2.5:
+  fraction -1 until it was done). `DDB_UNTWINE_PATH`, `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose
+  between Untwine and PDAL's writers.copc in 2.5, are no longer read, and the packages have no Untwine.

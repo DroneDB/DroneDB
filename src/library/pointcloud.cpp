@@ -7,17 +7,14 @@
 
 #include <algorithm>
 #include <fstream>
-#include <limits>
 #include <mutex>
 #include <sstream>
 #include <cctype>
 
 #include "pdal_inc.h"
-#include <pdal/PipelineManager.hpp>
 #include <pdal/PointRef.hpp>
 #include <pdal/PointTable.hpp>
 #include <pdal/StageFactory.hpp>
-#include <pdal/io/LasWriter.hpp>
 #include <pdal/io/CopcReader.hpp>
 
 #include "coordstransformer.h"
@@ -25,14 +22,15 @@
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "geo.h"
-#include "hash.h"
 #include "logger.h"
 #include "build_layout.h"
 #include "mio.h"
 #include "parallel.h"
 #include "ply.h"
 #include "raster_artefacts.h"
-#include "untwine_runner.h"
+#include "raster_helper.h"
+#include "raster_ops.h"
+#include "tilers_call.h"
 
 namespace ddb {
 
@@ -484,7 +482,7 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
 // Takes the one lock that readers.e57 needs, for the files it reads (a lock that holds nothing for any
 // other format). libE57Format shares state between the readers of one process: several E57 files
 // read at once (indexing in parallel) crash it, so one file at a time goes through it, from the
-// preview of its header to the end of the translation of its points. Keep the returned lock for as
+// preview of its header to the end of the reading of its points. Keep the returned lock for as
 // long as the reader of the file is used.
 std::unique_lock<std::mutex> lockForReaderOf(const std::string& filename) {
     static std::mutex e57Mutex;
@@ -624,9 +622,8 @@ bool getCopcInfo(const std::string& copcPath, PointCloudInfo& info, int polyBoun
         populatePointCloudInfoFromQuickInfo(qi, info);
         populatePointCloudBoundsFromQuickInfo(qi, info, polyBoundsSrs);
 
-        // COPC tile-zoom heuristic: writers.copc emits hierarchies whose root tile is
-        // sized to a power-of-two voxel grid; PDAL's default is 128 along each side.
-        // This matches the conventional EPT span used elsewhere in the code.
+        // COPC tile-zoom heuristic: the root node of a COPC is taken as a voxel grid of 128
+        // along each side, the conventional EPT span used elsewhere in the code.
         if (span != nullptr)
             *span = 128;
 
@@ -640,144 +637,83 @@ bool getCopcInfo(const std::string& copcPath, PointCloudInfo& info, int polyBoun
     }
 }
 
-// Helper function to update global bounds from point cloud info
-inline void updateGlobalBounds(const PointCloudInfo& info,
-                               double& globalMinX, double& globalMinY,
-                               double& globalMaxX, double& globalMaxY) {
-    if (info.bounds.size() >= 6) {
-        globalMinX = std::min(globalMinX, info.bounds[0]);
-        globalMinY = std::min(globalMinY, info.bounds[1]);
-        globalMaxX = std::max(globalMaxX, info.bounds[3]);
-        globalMaxY = std::max(globalMaxY, info.bounds[4]);
-    }
-}
-
 bool isCopcPath(const std::string& filename) {
     return str::endsWithCI(filename, ".copc.laz");
 }
 
-// PDAL-based COPC builder: classic readers.las -> writers.copc pipeline.
-// Used as the default fallback when Untwine is not available or fails.
-// writers.copc runs a pool of its own threads (its "threads" option, 10 when unset): it gets the
-// threads of one build (DDB_BUILD_THREADS lowered to options.threads) that the CPU pool has
-// free, and the tokens are held until the pipeline ends.
-static void buildCopcPdal(const std::vector<std::string>& inputFiles,
-                          const fs::path& outPath,
-                          const fs::path& tmpDir,
-                          const BuildOptions& options) {
-    try {
-        const auto cpu =
-            parallel::tryAcquireThreads(static_cast<size_t>(BuildResourceBudget::fromConfig(options).threads));
-        // Build a PDAL pipeline: one or more LAS readers -> writers.copc.
-        // When there's a single input we attach the writer directly; when there are
-        // multiple inputs, PDAL's writers.copc expects a single stream, which we get
-        // by chaining all readers as inputs of a no-op merge filter.
-        pdal::PipelineManager mgr;
-
-        std::vector<pdal::Stage*> readers;
-        for (const auto& f : inputFiles) {
-            pdal::Options ro;
-            ro.add("filename", f);
-            pdal::Stage& r = mgr.makeReader(f, "readers.las", ro);
-            readers.push_back(&r);
-        }
-
-        pdal::Stage* tail = readers.front();
-        if (readers.size() > 1) {
-            pdal::Stage& merge = mgr.makeFilter("filters.merge");
-            for (auto* r : readers) merge.setInput(*r);
-            tail = &merge;
-        }
-
-        pdal::Options wo;
-        wo.add("filename", io::toUtf8(outPath));
-        wo.add("forward", "all");
-        // Preserve any extra dimensions present in the source.
-        wo.add("extra_dims", "all");
-        wo.add("threads", static_cast<int>(cpu.threads()));
-        LOGD << "PDAL writers.copc of " << io::toUtf8(outPath) << " on " << cpu.threads() << " threads";
-        pdal::Stage& writer = mgr.makeWriter(io::toUtf8(outPath), "writers.copc", *tail, wo);
-        (void)writer;
-
-        mgr.execute();
-
-        io::assureIsRemoved(tmpDir);
-    } catch (const FSException&) {
-        io::assureIsRemoved(tmpDir);
-        throw;
-    } catch (const fs::filesystem_error& e) {
-        io::assureIsRemoved(tmpDir);
-        throw FSException(std::string("COPC build failed: ") + e.what(), e.code());
-    } catch (const pdal::pdal_error& e) {
-        io::assureIsRemoved(tmpDir);
-        throw PDALException(std::string("COPC build failed: ") + e.what());
-    } catch (const std::exception& e) {
-        io::assureIsRemoved(tmpDir);
-        throw PDALException(std::string("COPC build failed: ") + e.what());
-    }
-
-    if (!fs::exists(outPath))
-        throw PDALException("COPC build did not produce output file: " + io::toUtf8(outPath));
+const char* copcPhaseOfFraction(double fraction) {
+    if (fraction < 0.05) return "planning";
+    if (fraction < 0.4) return "reading";
+    if (fraction < 1.0) return "building";
+    return "writing";
 }
 
-// The number of points of the sources of a COPC build and the XY extent they cover
-struct SourceBounds {
-    size_t pointCount = 0;
-    double minX = std::numeric_limits<double>::max();
-    double minY = std::numeric_limits<double>::max();
-    double maxX = std::numeric_limits<double>::lowest();
-    double maxY = std::numeric_limits<double>::lowest();
+namespace raster {
 
-    void add(const PointCloudInfo& info) { updateGlobalBounds(info, minX, minY, maxX, maxY); }
-};
+void buildCopcFile(const fs::path& path, const fs::path& outFile, const CopcParams& params,
+                   const ProgressCallback& progress) {
+    // The builder runs a pool of its own of the threads it is given, the calling one included
+    const auto cpu = acquireBuildThreads(params.threads);
+    json options = {{"threads", cpu.threads()}, {"metadata", false}};
+    if (!params.inputs.empty()) {
+        json inputs = json::array();
+        for (const fs::path& input : params.inputs)
+            inputs.push_back(io::toUtf8(input));
+        options["inputs"] = std::move(inputs);
+    }
 
-// Checks that every source is a point cloud that exists and measures them
-static SourceBounds measureSources(const std::vector<std::string>& filenames) {
-    SourceBounds bounds;
+    LOGD << "Building COPC from " << io::toUtf8(path) << " and " << params.inputs.size()
+         << " more file(s) with ddb-tilers (" << cpu.threads() << " threads)";
+    tilers::BuildProgress forward("COPC", progress);
+    const ddbtErr rc = ddbtBuildCopc2(io::toUtf8(path).c_str(), io::toUtf8(outFile).c_str(), options.dump().c_str(),
+                                      &tilers::BuildProgress::forward, &forward);
+    // An input the builder cannot read (a file that is no point cloud it knows, one without
+    // points, a coordinate it cannot store) is a file the helper cannot read
+    tilers::checkBuild(rc, "The COPC build",
+                       [](const std::string& message) { throw RasterOpException(ErrorCode::Unreadable, message); });
+}
+
+}  // namespace raster
+
+namespace {
+
+// Every source of a COPC build exists and is a point cloud
+void checkSources(const std::vector<std::string>& filenames) {
+    if (filenames.empty())
+        throw InvalidArgsException("No point cloud to build a COPC of");
     for (const std::string& f : filenames) {
         if (!fs::exists(io::fromUtf8(f)))
             throw FSException(f + " does not exist");
-
-        const EntryType type = fingerprint(io::fromUtf8(f));
-        if (type != EntryType::PointCloud)
+        if (fingerprint(io::fromUtf8(f)) != EntryType::PointCloud)
             throw InvalidArgsException(f + " is not a supported point cloud file");
-
-        // Get point cloud info for validation
-        PointCloudInfo pcInfo;
-        if (getPointCloudInfo(f, pcInfo)) {
-            bounds.pointCount += pcInfo.pointCount;
-            bounds.add(pcInfo);
-        }
     }
-    return bounds;
 }
 
-// The sources as the files both COPC backends accept (they accept only formats supported by PDAL's
-// LAS reader, LAS/LAZ natively): the non-LAS sources are converted to a temporary LAS in tmpDir,
-// and their bounds are read back from it into `bounds`
-static std::vector<std::string> lasInputs(const std::vector<std::string>& filenames, const fs::path& tmpDir,
-                                          SourceBounds& bounds) {
-    std::vector<std::string> inputFiles;
-    for (const auto& f : filenames) {
-        auto p = io::Path(io::fromUtf8(f));
-        if (p.checkExtension({"ply", "e57", "pts", "xyz"})) {
-            std::string lasF = io::toUtf8(tmpDir / Hash::strCRC64(f)) + ".las";
-            LOGD << "Converting " << f << " to " << lasF;
-            translateToLas(f, lasF);
-            inputFiles.push_back(lasF);
+// The COPC the helper wrote is published as the point cloud of the build and then trusted by its
+// place: it has to read here as a COPC first. Its header has the exact count and bounds of the
+// points of every source, whatever their format: a cloud of fewer than 2 points, or of no extent in
+// X or Y, has no COPC.
+void checkBuiltCopc(const fs::path& produced) {
+    constexpr size_t MinPointCount = 2;
+    // In the point cloud's native units
+    constexpr double MinExtent = 1e-10;
 
-            // PLY/PTS/XYZ/E57 don't have reliable bounds in their headers; read them
-            // back from the converted LAS so the extent validation has something to chew on.
-            PointCloudInfo lasInfo;
-            if (getPointCloudInfo(lasF, lasInfo)) {
-                bounds.add(lasInfo);
-            }
-        } else {
-            inputFiles.push_back(f);
-        }
-    }
-    return inputFiles;
+    PointCloudInfo info;
+    if (!getCopcInfo(io::toUtf8(produced), info) || info.bounds.size() < 6)
+        throw PDALException(std::string(raster::kGdalUtilName) + " wrote a COPC that cannot be read");
+    if (info.pointCount < MinPointCount)
+        throw InvalidArgsException("Point cloud has insufficient points (" + std::to_string(info.pointCount) +
+                                   "). At least " + std::to_string(MinPointCount) +
+                                   " points are required for COPC generation.");
+    const double extentX = info.bounds[3] - info.bounds[0];
+    const double extentY = info.bounds[4] - info.bounds[1];
+    if (extentX < MinExtent || extentY < MinExtent)
+        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " + std::to_string(extentX) +
+                                   ", Y: " + std::to_string(extentY) +
+                                   "). Point cloud must have spatial extent for COPC generation.");
 }
+
+}  // namespace
 
 void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir, const BuildOptions& options,
                bool overwrite) {
@@ -786,61 +722,39 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     // Before anything is read or written: the COPC replaces only cloud.copc.laz in dest
     io::assureReplaceable(outPath, overwrite, io::fromUtf8(filenames));
     io::assureFolderExists(dest);
+    checkSources(filenames);
 
-    // The folder of the output is the caller's (a "tmp" in it is somebody's): the conversions
-    // and the build go to a private folder made in it, removed with whatever is left in it, and
-    // the COPC is moved to its name once it is whole
-    const io::ScopedTempDir staging = raster::makePrivateFolder(dest, CopcStagingPrefix, raster::PrivateFolderWriter::Host);
-    const fs::path tmpDir = staging.path() / "tmp";
-    io::assureFolderExists(tmpDir);
+    // The folder of the output is the caller's: the helper writes the COPC and its temporary files
+    // in a private folder made in it, removed with whatever is left in it, and the COPC is moved to
+    // its name once it is whole
+    const io::ScopedTempDir staging = raster::makePrivateFolder(dest, CopcStagingPrefix);
     const fs::path produced = staging.path() / CopcFileName;
 
-    // Minimum epsilon for extent validation (in the point cloud's native units)
-    // This prevents degenerate output for zero-extent or near-zero-extent inputs.
-    constexpr double MIN_EXTENT_EPSILON = 1e-10;
-    constexpr size_t MIN_POINT_COUNT = 2;
+    // The threads of the build come from the CPU pool of this process, which bounds all the builds
+    // it runs: the helper has a pool of its own and is told how many it may use. The tokens are
+    // held until the helper is done.
+    const auto cpu =
+        parallel::tryAcquireThreads(static_cast<size_t>(BuildResourceBudget::fromConfig(options).threads));
+    raster::CopcParams params;
+    params.threads = static_cast<int>(cpu.threads());
+    for (size_t i = 1; i < filenames.size(); i++)
+        params.inputs.push_back(fs::absolute(io::fromUtf8(filenames[i])).lexically_normal());
 
-    SourceBounds bounds = measureSources(filenames);
-
-    if (bounds.pointCount < MIN_POINT_COUNT) {
-        throw InvalidArgsException("Point cloud has insufficient points (" +
-                                   std::to_string(bounds.pointCount) +
-                                   "). At least " + std::to_string(MIN_POINT_COUNT) +
-                                   " points are required for COPC generation.");
+    // The plan is announced when it starts: the helper forwards a fraction only once it passes a
+    // whole percent, and the builder reports 0.05 next
+    options.reportProgress(0.0, copcPhaseOfFraction(0.0));
+    const raster::ProgressCallback report = [&options](double fraction) {
+        options.reportProgress(fraction, copcPhaseOfFraction(fraction));
+    };
+    try {
+        raster::rasterHelper().buildCopc(io::fromUtf8(filenames.front()), produced, raster::toJson(params), report);
+    } catch (const raster::RasterOpException& e) {
+        // A point cloud the helper cannot read, as PDAL's build reported it
+        throw PDALException(std::string("COPC build failed: ") + e.what());
     }
+    checkBuiltCopc(produced);
 
-    const std::vector<std::string> inputFiles = lasInputs(filenames, tmpDir, bounds);
-
-    double extentX = bounds.maxX - bounds.minX;
-    double extentY = bounds.maxY - bounds.minY;
-    if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
-        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
-                                   std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
-                                   "). Point cloud must have spatial extent for COPC generation.");
-    }
-
-    CopcBackend backend = untwine::resolveBackend(CopcBackend::Auto);
-
-    if (backend == CopcBackend::Untwine) {
-        // Dedicated temp dir to keep parallel builds isolated.
-        fs::path untwineTemp = tmpDir / "untwine";
-        const auto result = untwine::runUntwineResult(inputFiles, produced, untwineTemp);
-        if (result.succeeded && fs::exists(produced)) {
-            // The output may have appeared while the COPC was built: replaced only when asked
-            io::assureReplaceable(outPath, overwrite);
-            raster::publishArtefact(produced, outPath);
-            return;
-        }
-        // Idle timeout/identifiable ENOSPC abort this primary attempt and preserve
-        // its pending marker rather than starting another large writer immediately.
-        result.throwIfRetryable("Untwine COPC build failed: ");
-        // Auto fallback: log a warning and try PDAL for ordinary failures.
-        LOGD << "Untwine COPC build failed (" << result.error << "), falling back to PDAL writers.copc";
-        // Make sure no half-written output is left behind before the fallback runs.
-        io::assureIsRemoved(produced);
-    }
-
-    buildCopcPdal(inputFiles, produced, tmpDir, options);
+    // The output may have appeared while the COPC was built: replaced only when asked
     io::assureReplaceable(outPath, overwrite);
     raster::publishArtefact(produced, outPath);
 }
@@ -850,34 +764,6 @@ void to_json(json& j, const PointCloudInfo& info) {
     j["pointCount"] = info.pointCount;
     j["projection"] = info.wktProjection;
     j["dimensions"] = info.dimensions;
-}
-
-void translateToLas(const std::string& input, const std::string& outputLas) {
-    if (!fs::exists(io::fromUtf8(input)))
-        throw FSException(input + " does not exist");
-
-    try {
-        const auto readerLock = lockForReaderOf(input);
-
-        pdal::StageFactory factory;
-        pdal::Stage* reader = createPointCloudReader(factory, input);
-        if (!reader)
-            throw PDALException("Cannot infer reader driver for " + input);
-
-        pdal::PointTable table;
-        pdal::Options outLasOpts;
-        outLasOpts.add("filename", outputLas);
-        outLasOpts.add("minor_version", 2);
-        outLasOpts.add("dataformat_id", 3);
-
-        pdal::LasWriter writer;
-        writer.setOptions(outLasOpts);
-        writer.setInput(*reader);
-        writer.prepare(table);
-        writer.execute(table);
-    } catch (pdal::pdal_error& e) {
-        throw PDALException(e.what());
-    }
 }
 
 }  // namespace ddb

@@ -19,13 +19,11 @@ namespace ddb
 {
 
     // Hardened child-process launcher shared by the external tool runners
-    // (Obj2Tiles, Untwine, build-lod).
+    // (Obj2Tiles, build-lod, bm3d, dwg2dxf).
     //
     // The child gets:
     //   - stdin connected to the null device (/dev/null, NUL);
     //   - stdout and stderr merged into one pipe read by the parent;
-    //   - optionally one extra "channel" pipe (write end) the parent reads too
-    //     (Untwine's --progress_fd);
     //   - no other inherited descriptor/handle (POSIX: every other fd is closed
     //     in the child; Windows: explicit PROC_THREAD_ATTRIBUTE_HANDLE_LIST);
     //   - the parent's environment, with optional per-child overrides (the
@@ -47,9 +45,8 @@ namespace ddb
     // posix_spawn_file_actions_addclosefrom_np (glibc 2.34) if that ever shows up
     // in the field; only PR_SET_PDEATHSIG would be lost.
     //
-    // The parent reads both pipes until EOF and kills the child (its whole
-    // process group / job) when no byte arrives on ANY monitored pipe for the
-    // idle timeout. run() blocks the calling thread (the child is forked on it)
+    // The parent reads the output pipe until EOF and kills the child (its whole
+    // process group / job) when no byte arrives on it for the idle timeout. run() blocks the calling thread (the child is forked on it)
     // and never throws for child failures: everything is reported in Result.
     // It checks the cancellation of the calling thread's work (cancellation.h)
     // at least every 500 ms: when it is canceled, the child is killed and
@@ -61,8 +58,8 @@ namespace ddb
         // Result::outputTail). Older bytes are discarded.
         constexpr size_t kDefaultOutputCapacity = 64 * 1024;
 
-        // Default idle timeout: the child is killed when it produces no output on
-        // any monitored pipe for this long. Deliberately generous; tools that are
+        // Default idle timeout: the child is killed when it produces no output
+        // for this long. Deliberately generous; tools that are
         // silent for an hour are considered hung.
         constexpr std::chrono::milliseconds kDefaultIdleTimeout = std::chrono::minutes(60);
 
@@ -71,16 +68,6 @@ namespace ddb
         // then killed so a stray grandchild cannot block the caller.
         constexpr std::chrono::milliseconds kExitDrainGrace = std::chrono::seconds(5);
 
-        // Argument placeholder replaced by the extra channel identifier: the fixed
-        // descriptor number (kExtraChannelFd) on POSIX, the decimal HANDLE value of
-        // the inherited write end on Windows.
-        constexpr const char *kExtraChannelPlaceholder = "{ddb:extra-channel}";
-
-#ifndef _WIN32
-        // Descriptor number of the extra channel write end inside the child.
-        constexpr int kExtraChannelFd = 3;
-#endif
-
         struct Options
         {
             // Per-child environment overrides (name, value). Each replaces an
@@ -88,7 +75,7 @@ namespace ddb
             // or is added. Empty: the child inherits the environment unchanged.
             std::vector<std::pair<std::string, std::string>> envOverrides;
 
-            // Kill the child when no output arrives on any monitored pipe for this
+            // Kill the child when no output arrives for this
             // long. Zero or negative disables the timeout.
             std::chrono::milliseconds idleTimeout = kDefaultIdleTimeout;
 
@@ -103,12 +90,6 @@ namespace ddb
             // Optional: called with each complete line of stdout/stderr (without the
             // terminator; '\n' and '\r' both end a line, empty lines are skipped).
             std::function<void(const std::string &)> onOutputLine;
-
-            // When true an extra pipe is created; its write end is passed to the
-            // child (see kExtraChannelPlaceholder) and every byte read from it is
-            // passed to onExtraData. Activity on it resets the idle timer.
-            bool extraChannel = false;
-            std::function<void(const char *, size_t)> onExtraData;
 
             // Upper bound on the address space of the child (POSIX: RLIMIT_AS; Windows: the
             // per-process memory limit of the job the child runs in), in bytes. A child that
@@ -159,7 +140,7 @@ namespace ddb
                    const std::vector<std::string> &args,
                    const Options &options = Options());
 
-        // The seam of the tool runners (Obj2Tiles, Untwine, build-lod, dwg2dxf): they start their
+        // The seam of the tool runners (Obj2Tiles, build-lod, bm3d, dwg2dxf): they start their
         // child through this interface, so a test substitutes a fake that returns the Result it
         // wants (an exit code, a timeout, a missing binary) or throws CanceledException, and
         // checks the arguments and options it was given, without running a tool. Same contract

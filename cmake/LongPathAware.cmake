@@ -7,7 +7,7 @@
 #
 # The setting belongs to the process, not to a library: the manifest of the executable that
 # starts the process decides, and a manifest in a DLL such as ddb.dll counts for nothing. Every
-# program of the package that opens the files of a dataset (ddbcmd, the helper programs, Untwine)
+# program of the package that opens the files of a dataset (ddbcmd, the helper programs)
 # and every test binary needs it. It does not change the code that fixes the length of a path
 # (a MAX_PATH buffer), and where Windows has long paths off (LongPathsEnabled) it does nothing.
 set(DDB_LONG_PATH_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/long-path-aware.manifest")

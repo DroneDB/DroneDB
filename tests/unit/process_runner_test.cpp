@@ -74,11 +74,8 @@ using std::chrono::milliseconds;
 
 const fs::path kSh = "/bin/sh";
 
-process::Result sh(const std::string& script, process::Options opts = process::Options(),
-                   const std::vector<std::string>& extraArgs = {}) {
-    std::vector<std::string> args = {"-c", script, "sh"};
-    args.insert(args.end(), extraArgs.begin(), extraArgs.end());
-    return process::run(kSh, args, opts);
+process::Result sh(const std::string& script, process::Options opts = process::Options()) {
+    return process::run(kSh, {"-c", script, "sh"}, opts);
 }
 
 std::string readText(const fs::path& p) {
@@ -242,22 +239,6 @@ TEST(processRunner, onlyStandardFdsInherited) {
     for (const auto& l : splitLines(r.outputTail)) fds.insert(std::stoi(l));
     EXPECT_EQ(fds, (std::set<int>{0, 1, 2})) << r.outputTail;
 
-    // With the extra channel, exactly one more descriptor (the fixed number).
-    process::Options opts;
-    opts.extraChannel = true;
-    const auto r2 = sh(listFds + "; echo fd=$1", opts, {process::kExtraChannelPlaceholder});
-    ASSERT_TRUE(r2.success()) << r2.describe();
-    std::set<int> fds2;
-    std::string fdArg;
-    for (const auto& l : splitLines(r2.outputTail)) {
-        if (l.rfind("fd=", 0) == 0)
-            fdArg = l.substr(3);
-        else
-            fds2.insert(std::stoi(l));
-    }
-    EXPECT_EQ(fds2, (std::set<int>{0, 1, 2, process::kExtraChannelFd})) << r2.outputTail;
-    EXPECT_EQ(fdArg, std::to_string(process::kExtraChannelFd));
-
     ::close(leaked);
 #endif
 }
@@ -313,13 +294,6 @@ TEST(processRunner, idleTimeoutAppliesAfterPipesClosed) {
     EXPECT_FALSE(quick.timedOut) << quick.describe();
     EXPECT_TRUE(quick.exited);
     EXPECT_EQ(quick.exitCode, 4);
-
-    // Exercise closure of the progress channel as well as stdout/stderr.
-    opts.extraChannel = true;
-    const auto extra = process::run(testChildPath(),
-        {"close-output", "30000", "0", process::kExtraChannelPlaceholder}, opts);
-    EXPECT_TRUE(extra.timedOut) << extra.describe();
-    EXPECT_LT(extra.duration, std::chrono::seconds(10));
 }
 
 // A child that never stops writing never trips the idle timeout; maxRuntime
@@ -356,33 +330,6 @@ TEST(processRunner, maxRuntimeAppliesAfterPipesClosed) {
     // Control: a quick child finishes normally under the same limit.
     const auto quick = process::run(testChildPath(), {"exit", "0"}, opts);
     EXPECT_TRUE(quick.success()) << quick.describe();
-}
-
-// Activity on the extra channel alone keeps the child alive.
-TEST(processRunner, extraChannelActivityResetsIdleTimer) {
-    std::string extra;
-    process::Options opts;
-    opts.extraChannel = true;
-    opts.idleTimeout = milliseconds(700);
-    opts.onExtraData = [&extra](const char* d, size_t n) { extra.append(d, n); };
-
-    const auto start = std::chrono::steady_clock::now();
-    const auto r = process::run(testChildPath(), {"extra-ticks", process::kExtraChannelPlaceholder}, opts);
-    const auto elapsed = std::chrono::steady_clock::now() - start;
-
-    EXPECT_FALSE(r.timedOut) << r.describe();
-    EXPECT_TRUE(r.success()) << r.describe();
-    EXPECT_EQ(r.totalBytes, 0u); // nothing on stdout/stderr
-    std::string expectedTicks;
-    for (int i = 0; i < 8; ++i) expectedTicks += "tick\n";
-    EXPECT_EQ(extra, expectedTicks);
-    // The child outlived the idle timeout several times over.
-    EXPECT_GT(elapsed, milliseconds(1000));
-
-    // Control: the same idle timeout kills a child that is silent everywhere.
-    const auto silent = process::run(testChildPath(),
-        {"close-output", "5000", "0", process::kExtraChannelPlaceholder}, opts);
-    EXPECT_TRUE(silent.timedOut);
 }
 
 TEST(processRunner, ringBufferKeepsTail) {
@@ -453,7 +400,7 @@ TEST(processRunner, execFailureReported) {
 }
 
 // The parent's pipe ends and /dev/null are owned by UniqueFd, so every exit path of
-// run() (success, extra channel, exec failure, timeout kill) closes all of them.
+// run() (success, exec failure, timeout kill) closes all of them.
 TEST(processRunner, parentDescriptorsClosedOnEveryPath) {
     SKIP_ON_WINDOWS();
     SKIP_WITHOUT_PROC();
@@ -463,10 +410,6 @@ TEST(processRunner, parentDescriptorsClosedOnEveryPath) {
     const auto before = openDescriptors();
 
     EXPECT_TRUE(sh("echo out").success());
-
-    process::Options extra;
-    extra.extraChannel = true;
-    EXPECT_TRUE(sh("echo progress >&$1", extra, {process::kExtraChannelPlaceholder}).success());
 
     EXPECT_FALSE(process::run("/nonexistent/ddb_missing_tool", {}).started);
 
@@ -525,11 +468,7 @@ TEST_P(ProcessRunnerDescendant, successPreservedAndDrainDeadlineEnforced) {
     io::assureIsRemoved(pidFile);
     process::Options opts;
     opts.idleTimeout = milliseconds(800);
-    opts.extraChannel = GetParam() == "extra";
-    size_t extraBytes = 0;
-    opts.onExtraData = [&extraBytes](const char*, size_t n) { extraBytes += n; };
-    std::vector<std::string> args = {"descendant", pidFile.string(), GetParam(), "0", "0"};
-    if (opts.extraChannel) args.push_back(process::kExtraChannelPlaceholder);
+    const std::vector<std::string> args = {"descendant", pidFile.string(), GetParam(), "0", "0"};
     const auto start = std::chrono::steady_clock::now();
     const auto r = process::run(testChildPath(), args, opts);
     const auto elapsed = std::chrono::steady_clock::now() - start;
@@ -541,14 +480,13 @@ TEST_P(ProcessRunnerDescendant, successPreservedAndDrainDeadlineEnforced) {
     EXPECT_GE(elapsed, process::kExitDrainGrace);
     EXPECT_LT(elapsed, process::kExitDrainGrace + std::chrono::seconds(2));
     if (GetParam() == "streaming") EXPECT_GT(r.totalBytes, 0u);
-    if (GetParam() == "extra") EXPECT_GT(extraBytes, 0u);
     ASSERT_TRUE(waitForFile(pidFile, milliseconds(2000)));
     const auto stray = std::stoul(readText(pidFile));
     EXPECT_TRUE(processGone(stray, milliseconds(3000))) << "descendant " << stray << " survived";
 }
 
 INSTANTIATE_TEST_SUITE_P(portable, ProcessRunnerDescendant,
-                        ::testing::Values("silent", "streaming", "extra"));
+                        ::testing::Values("silent", "streaming"));
 
 // Linux PR_SET_PDEATHSIG: when the process that spawned the child dies, the child
 // is killed too. An intermediate process (forked from the test) runs the helper

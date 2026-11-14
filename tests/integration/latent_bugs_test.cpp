@@ -24,7 +24,7 @@
 #include "entry.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "mio.h"
 #include "pointcloud.h"
@@ -91,7 +91,7 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createNegativeRaster(ta.getPath("neg.tif"), 512, 512);
-        GDALTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
+        RasterTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
         const int tz = t.getMinMaxZ().max;
         const auto b = t.getMinMaxCoordsForZ(tz);
         // The brightest valid pixel over all tiles must be stretched to (close to)

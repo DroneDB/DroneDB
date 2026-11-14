@@ -4,8 +4,8 @@
 
 // The options of a build (BuildOptions, DDBBuildEx): the cap on the threads of one build is
 // checked where it is read, refused when it is not a whole number from 1 to 4096, and followed
-// from the C export through the entry handler down to GDAL (raster), PDAL (point cloud without
-// Untwine) and the tools a model build runs.
+// from the C export through the entry handler down to ddb-tilers (raster, point cloud) and the tools
+// a model build runs.
 
 #include <algorithm>
 #include <fstream>
@@ -140,7 +140,7 @@ TEST(DDBBuildEx, keepsTheCodesAndTheArgumentRulesOfDDBBuild) {
     EXPECT_EQ(DDBBuild(nullptr, nullptr, nullptr, false, false), DDBERR_EXCEPTION);
 }
 
-// ------------------------------------------------------------------------ the cap reaches GDAL and PDAL
+// ------------------------------------------------------------------------ the cap reaches ddb-tilers
 
 // The debug records of libddb while in scope, through the host's log callback
 class DebugLog {
@@ -178,11 +178,14 @@ private:
     std::vector<std::string> messages_;
 };
 
-// The NUM_THREADS of the COG warps of the builds while the log was in scope
-std::vector<std::string> cogThreads(DebugLog &log) {
+// The threads of the builds of ddb-tilers (COG, COPC) while the log was in scope, in their order
+// ("... with ddb-tilers (N threads...")
+std::vector<std::string> tilersThreads(DebugLog &log) {
     std::vector<std::string> out;
-    for (const auto &m : log.matching("COG warp and compression of "))
-        out.push_back(m.substr(m.rfind(' ') + 1));
+    for (const auto &m : log.matching(" with ddb-tilers (")) {
+        const size_t from = m.find(" with ddb-tilers (") + 18;
+        out.push_back(m.substr(from, m.find(' ', from) - from));
+    }
     return out;
 }
 
@@ -202,9 +205,9 @@ struct RasterDataset {
     std::string root() const { return index.root.string(); }
 };
 
-USER_OPEN_TEST(DDBBuildEx, theCapReachesTheGdalThreadsOfARasterBuildThroughTheEntryHandler) {
+USER_OPEN_TEST(DDBBuildEx, theCapReachesTheThreadsOfARasterBuildThroughTheEntryHandler) {
     RasterDataset ds(TEST_NAME);
-    // The test reads the GDAL options of the warp from the log of the process that builds
+    // The test reads the threads of the COG build from the log of the process that builds
     testutils::InProcessRasterHelper helper;
     const raster::ScopedRasterHelper installed(helper);
     const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
@@ -213,37 +216,32 @@ USER_OPEN_TEST(DDBBuildEx, theCapReachesTheGdalThreadsOfARasterBuildThroughTheEn
     {
         DebugLog log;
         ASSERT_DDB_OK(DDBBuildEx(ds.root().c_str(), "ortho.tif", nullptr, true, false, R"({"threads": 2})"));
-        EXPECT_EQ(cogThreads(log), std::vector<std::string>{"NUM_THREADS=2"});
+        EXPECT_EQ(tilersThreads(log), std::vector<std::string>{"2"});
     }
     {
         DebugLog log;
         ASSERT_DDB_OK(DDBBuildEx(ds.root().c_str(), "ortho.tif", nullptr, true, false, nullptr));
-        EXPECT_EQ(cogThreads(log), std::vector<std::string>{"NUM_THREADS=4"}) << "without a cap, the budget";
+        EXPECT_EQ(tilersThreads(log), std::vector<std::string>{"4"}) << "without a cap, the budget";
     }
 }
 
-// Without Untwine (the PDAL backend is chosen here), writers.copc runs on the threads of the build.
-// The test area has a short name: the build converts cloud.xyz to a LAS about 130 characters below
-// the root, and the temporary folder of the runner and a test area named after the test (over 70
-// characters) took that path to 265, over the 260 of Windows, so PDAL could not create the file.
-TEST(DDBBuildEx, theCapReachesTheThreadsOfPdalWritersCopcThroughTheEntryHandler) {
+TEST(DDBBuildEx, theCapReachesTheThreadsOfACopcBuildThroughTheEntryHandler) {
     PointCloudDataset ds("DDBBuildEx.copc");
+    // The test reads the threads of the COPC build from the log of the process that builds
+    testutils::InProcessRasterHelper helper;
+    const raster::ScopedRasterHelper installed(helper);
     const ScopedProcessConfig pool(R"({"cpuPoolSize": 4096})");
     EnvVarGuard budget("DDB_BUILD_THREADS", "4");
 
     {
         DebugLog log;
         ASSERT_DDB_OK(DDBBuildEx(ds.root().c_str(), "cloud.xyz", nullptr, true, false, R"({"threads": 2})"));
-        const auto runs = log.matching("PDAL writers.copc of ");
-        ASSERT_EQ(runs.size(), 1u);
-        EXPECT_NE(runs[0].find(" on 2 threads"), std::string::npos) << runs[0];
+        EXPECT_EQ(tilersThreads(log), std::vector<std::string>{"2"});
     }
     {
         DebugLog log;
         ASSERT_DDB_OK(DDBBuildEx(ds.root().c_str(), "cloud.xyz", nullptr, true, false, nullptr));
-        const auto runs = log.matching("PDAL writers.copc of ");
-        ASSERT_EQ(runs.size(), 1u);
-        EXPECT_NE(runs[0].find(" on 4 threads"), std::string::npos) << "without a cap, the budget: " << runs[0];
+        EXPECT_EQ(tilersThreads(log), std::vector<std::string>{"4"}) << "without a cap, the budget";
     }
 }
 

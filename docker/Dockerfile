@@ -15,14 +15,6 @@ RUN cd /workspace && mkdir -p build && \
 RUN cd /workspace/build && \
     make -j$(nproc)
 
-# Optional: build the Untwine COPC accelerator (vendor/untwine submodule).
-# Failure is non-blocking; DroneDB falls back to PDAL writers.copc when
-# untwine is missing.
-RUN cd /workspace && \
-    chmod +x scripts/build-untwine.sh && \
-    ./scripts/build-untwine.sh build Release || \
-    echo "WARNING: untwine build failed (non-blocking, PDAL fallback will be used)"
-
 # build-lod Gaussian Splat LOD producer (vendor/spark submodule): MANDATORY
 # dependency of Gaussian Splat builds - failure aborts the image build.
 # Requires a Rust toolchain (installed above if missing).

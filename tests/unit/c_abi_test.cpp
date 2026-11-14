@@ -22,7 +22,7 @@
 
 #include "ddb.h"
 #include "gdal_inc.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "gtest/gtest.h"
 #include "json.h"
@@ -554,7 +554,7 @@ namespace
         // other runs nor leaves its own in the user's profile
         const ScopedProcessConfig cache(json{{"cacheDir", ta.getPath("cache").string()}}.dump());
         const auto raster = smallRaster(ta.getPath("ortho.tif"), 3, 512).string();
-        GDALTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256);
+        RasterTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256);
         const int z = tiler.getMinMaxZ().max;
         const auto bounds = tiler.getMinMaxCoordsForZ(z);
         const int x = bounds.min.x;

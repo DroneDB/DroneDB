@@ -28,6 +28,7 @@
 #include "json.h"
 #include "json_schema_check.h"
 #include "mio.h"
+#include "pointcloud.h"
 #include "process_runner.h"
 #include "cad.h"
 #include "cog.h"
@@ -343,6 +344,50 @@ namespace
         EXPECT_EQ(result.type, "Raster");
         EXPECT_TRUE(result.wkt.empty());
         EXPECT_TRUE(result.polygonGeom.empty());
+    }
+
+    // A raster georeferenced by ground control points alone is a GeoRaster: its projection is that
+    // of its GCPs, its footprint the image of its corners through their transform (4 GCPs: the
+    // homography gdalwarp uses), here the corners themselves
+    TEST_F(GdalUtilToolTest, probeOfARasterGeoreferencedByGcpsAloneIsAGeoRaster)
+    {
+        const fs::path gcps = area_->getFolder() / "gcps.tif";
+        {
+            GDALDatasetH ds = GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(gcps).c_str(), 100, 50, 1, GDT_Byte, nullptr);
+            ASSERT_NE(ds, nullptr);
+            GDAL_GCP list[4];
+            GDALInitGCPs(4, list);
+            const double corners[4][4] = {{0, 0, 9.0, 45.2}, {100, 0, 9.2, 45.2}, {100, 50, 9.2, 45.1}, {0, 50, 9.0, 45.1}};
+            for (int i = 0; i < 4; i++)
+            {
+                list[i].dfGCPPixel = corners[i][0];
+                list[i].dfGCPLine = corners[i][1];
+                list[i].dfGCPX = corners[i][2];
+                list[i].dfGCPY = corners[i][3];
+            }
+            OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
+            OSRImportFromEPSG(srs, 4326);
+            ASSERT_EQ(GDALSetGCPs2(ds, 4, list, srs), CE_None);
+            OSRDestroySpatialReference(srs);
+            GDALDeinitGCPs(4, list);
+            GDALClose(ds);
+        }
+        Server server;
+        const auto response = server.ask(probeRequest(1, gcps));
+        ASSERT_TRUE(response.ok) << response.message;
+        const raster::ProbeResult result = raster::probeResultFromJson(response.result);
+        EXPECT_EQ(result.type, "GeoRaster");
+        EXPECT_EQ(result.properties.at("gcps"), 4);
+        EXPECT_FALSE(result.properties.contains("geotransform"));
+        EXPECT_NE(result.wkt.find("4326"), std::string::npos) << result.wkt;
+        ASSERT_EQ(result.polygonGeom.points.size(), 5u);
+        EXPECT_NEAR(result.polygonGeom.points[0].x, 9.0, 1e-9);
+        EXPECT_NEAR(result.polygonGeom.points[0].y, 45.2, 1e-9);
+        EXPECT_NEAR(result.polygonGeom.points[2].x, 9.2, 1e-9);
+        EXPECT_NEAR(result.polygonGeom.points[2].y, 45.1, 1e-9);
+        ASSERT_EQ(result.pointGeom.points.size(), 1u);
+        EXPECT_NEAR(result.pointGeom.points[0].x, 9.1, 1e-9);
+        EXPECT_NEAR(result.pointGeom.points[0].y, 45.15, 1e-9);
     }
 
     TEST_F(GdalUtilToolTest, probeOfAFileThatIsNoRasterIsUnreadable)
@@ -1142,6 +1187,7 @@ namespace
                        {"geotransform", std::vector<double>(gt, gt + 6)},
                        {"projection", GDALGetProjectionRef(dataset)},
                        {"overviews", GDALGetOverviewCount(GDALGetRasterBand(dataset, 1))},
+                       {"maskFlags", GDALGetMaskFlags(GDALGetRasterBand(dataset, 1))},
                        {"bands", bands}};
         GDALClose(dataset);
         return result;
@@ -1348,10 +1394,80 @@ namespace
         EXPECT_EQ(run.exitCode, 1);
     }
 
+    // The files of a folder with their sizes, relative to it, with '/' separators
+    std::map<std::string, std::uintmax_t> filesOf(const fs::path &folder)
+    {
+        std::map<std::string, std::uintmax_t> files;
+        for (const auto &entry : fs::recursive_directory_iterator(folder))
+            if (entry.is_regular_file())
+                files[io::toGenericUtf8(entry.path().lexically_relative(folder))] = entry.file_size();
+        return files;
+    }
+
+    // A text cloud of `points` points over a 10 x 10 square
+    fs::path writeTextCloud(const fs::path &file, int points)
+    {
+        std::ofstream xyz(file);
+        for (int i = 0; i < points; i++)
+            xyz << i % 11 << " " << (i * 7) % 11 << " " << i % 3 << "\n";
+        return file;
+    }
+
+    // The program builds the COPC that the operation builds in the process, of the clouds of the
+    // request wherever they lie, and reports its progress before its response
+    TEST_F(GdalUtilToolTest, theCopcOfTheProgramIsTheOneBuiltInTheProcess)
+    {
+        // Three folders side by side: a confined program reads the second cloud only when it is told
+        const fs::path first = writeTextCloud(area_->getFolder("a") / "first.xyz", 50);
+        const fs::path second = writeTextCloud(area_->getFolder("b") / "second.xyz", 30);
+        raster::CopcParams params;
+        params.inputs = {second};
+        params.threads = 2;
+
+        const fs::path inProcess = area_->getFolder("process") / "cloud.copc.laz";
+        raster::buildCopcFile(first, inProcess, params, raster::ProgressCallback());
+
+        const fs::path byProgram = area_->getFolder("program") / "cloud.copc.laz";
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(57, raster::op::kCopc, first, byProgram,
+                                                                                    raster::toJson(params)))});
+        ASSERT_GE(run.lines.size(), 2u) << run.stderrText;
+        ASSERT_TRUE(raster::decodeResponse(run.lines.back()).ok) << run.lines.back();
+        std::vector<double> progress;
+        for (size_t i = 0; i + 1 < run.lines.size(); i++)
+        {
+            const auto fraction = raster::decodeProgress(run.lines[i]);
+            ASSERT_TRUE(fraction.has_value()) << "only progress lines come before the response: " << run.lines[i];
+            progress.push_back(*fraction);
+        }
+        EXPECT_TRUE(std::is_sorted(progress.begin(), progress.end()));
+        EXPECT_DOUBLE_EQ(progress.back(), 1.0);
+
+        EXPECT_EQ(readFile(byProgram), readFile(inProcess)) << "the build is the same whatever runs it";
+        PointCloudInfo info;
+        ASSERT_TRUE(getCopcInfo(io::toUtf8(byProgram), info));
+        EXPECT_EQ(info.pointCount, 80u);
+        EXPECT_EQ(filesOf(byProgram.parent_path()).size(), 1u) << "the COPC alone, no sidecar";
+    }
+
+    TEST_F(GdalUtilToolTest, aCopcOfAFileThatIsNoPointCloudIsUnreadableAndLeavesNothing)
+    {
+        const fs::path stage = area_->getFolder("stage-copc");
+        const fs::path junk = area_->getFolder() / "junk.las";
+        writeFile(junk, "this is not a point cloud");
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(58, raster::op::kCopc, junk,
+                                                                                    stage / "cloud.copc.laz", json::object()))});
+        ASSERT_FALSE(run.lines.empty());
+        const auto response = raster::decodeResponse(run.lines.back());
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Unreadable) << response.message;
+        EXPECT_EQ(run.exitCode, 1);
+        EXPECT_TRUE(filesOf(stage).empty()) << "nothing is left to publish";
+    }
+
     TEST_F(GdalUtilToolTest, theLongBuildsRunOnlyOneShot)
     {
         Server server;
-        for (const char *op : {"cog", "vector"})
+        for (const char *op : {"cog", "copc", "vector", "geoproject"})
         {
             SCOPED_TRACE(op);
             const auto response = server.ask(buildRequest(1, op, geotiff_, area_->getFolder() / "never", json::object()));
@@ -1362,15 +1478,6 @@ namespace
         EXPECT_FALSE(fs::exists(area_->getFolder() / "never"));
     }
 
-    // The files of a folder with their sizes, relative to it, with '/' separators
-    std::map<std::string, std::uintmax_t> filesOf(const fs::path &folder)
-    {
-        std::map<std::string, std::uintmax_t> files;
-        for (const auto &entry : fs::recursive_directory_iterator(folder))
-            if (entry.is_regular_file())
-                files[io::toGenericUtf8(entry.path().lexically_relative(folder))] = entry.file_size();
-        return files;
-    }
 
     USER_OPEN_TEST_F(GdalUtilToolTest, theVectorOutputsOfTheProgramAreTheOnesBuiltInTheProcess)
     {
@@ -1462,21 +1569,27 @@ namespace
         raster::geoprojectImage(jpeg_, inProcess, photoParams());
 
         const fs::path byProgram = area_->getFolder() / "projected-program.tif";
-        Server server;
-        const auto response = server.ask(buildRequest(57, raster::op::kGeoproject, jpeg_, byProgram, raster::toJson(photoParams())));
+        const ToolRun run =
+            runTool({"--request", raster::encodeRequest(buildRequest(57, raster::op::kGeoproject, jpeg_, byProgram,
+                                                                     raster::toJson(photoParams())))});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        const auto response = raster::decodeResponse(run.lines.back());
         ASSERT_TRUE(response.ok) << response.message;
 
         const json expected = describeRaster(inProcess);
         EXPECT_EQ(describeRaster(byProgram), expected);
-        EXPECT_EQ(expected.at("bands").size(), 4u) << "RGB and alpha";
+        EXPECT_EQ(expected.at("bands").size(), 3u) << "RGB, the footprint in the mask";
+        EXPECT_EQ(expected.at("maskFlags"), GMF_PER_DATASET);
         EXPECT_NE(expected.at("projection").get<std::string>().find("4326"), std::string::npos);
     }
 
     TEST_F(GdalUtilToolTest, aGeoprojectRequestWithoutTheFootprintOfThePhotoIsRefused)
     {
-        Server server;
-        const auto response = server.ask(buildRequest(58, raster::op::kGeoproject, jpeg_, area_->getFolder() / "none.tif",
-                                                      json{{"width", 96}, {"height", 64}}));
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(58, raster::op::kGeoproject, jpeg_,
+                                                                                     area_->getFolder() / "none.tif",
+                                                                                     json{{"width", 96}, {"height", 64}}))});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        const auto response = raster::decodeResponse(run.lines.back());
         EXPECT_FALSE(response.ok);
         EXPECT_EQ(response.error, raster::ErrorCode::Internal);
         EXPECT_FALSE(fs::exists(area_->getFolder() / "none.tif"));

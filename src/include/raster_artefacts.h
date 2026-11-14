@@ -49,6 +49,10 @@ namespace ddb
         // opens with GDAL, so they are not artefacts.
         bool isLibddbArtefact(const fs::path &path);
 
+        // @throws GDALException when the file is not an artefact (the tilers and the openers
+        // below read nothing else)
+        void requireArtefact(const fs::path &path);
+
         // The name that stands for the file as it is now: CRC64 of its path, modification time
         // (to the microsecond the file system keeps) and size, in hexadecimal, so a changed file
         // gets another name.
@@ -88,7 +92,7 @@ namespace ddb
         {
             // The confined raster helper (gdal-util), at low integrity on Windows
             Helper,
-            // This process, or a program it runs unconfined (bm3d, untwine, PDAL)
+            // This process, or a program it runs unconfined (bm3d)
             Host
         };
 
@@ -116,6 +120,19 @@ namespace ddb
         // Removes the artefacts that were not touched for `maxAge` seconds: files, the normalized
         // copies, and the folders of requests that were left behind
         void cleanupArtefacts(time_t maxAge);
+
+        // publishArtefact into the artefact cache (artefactsDir(), normalizedDir()), then
+        // trimArtefacts(target): the cache stays within its bound whatever is asked for
+        // @throws FSException
+        void publishCachedArtefact(const fs::path &produced, const fs::path &target);
+
+        // Keeps the artefact cache within artefactCacheMb (ProcessConfig, DDB_ARTEFACT_CACHE_MB;
+        // 0: no bound): while its files (the artefacts, their statistics sidecars, the normalized
+        // copies) take more, removes the least recently used ones, never `keep` nor a file used in
+        // the last kArtefactInUseSeconds (a tile request may be about to open it). The folders of
+        // requests in progress do not count. A file a reader holds open on Windows stays.
+        void trimArtefacts(const fs::path &keep);
+        inline constexpr time_t kArtefactInUseSeconds = 300;
 
     } // namespace raster
 } // namespace ddb

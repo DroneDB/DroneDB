@@ -5,7 +5,7 @@ Windows takes a path of 260 characters or more only in a process whose executabl
 with <longPathAware>true</longPathAware> (and only where the system allows long paths:
 LongPathsEnabled=1). The setting belongs to the executable that starts the process, so every
 program that opens the files of a dataset needs it: the CLI, the helper programs of
-scripts/helper-tools.txt, Untwine and the test binaries (cmake/LongPathAware.cmake). A link that
+scripts/helper-tools.txt and the test binaries (cmake/LongPathAware.cmake). A link that
 leaves the manifest out, or a CMake change that stops merging it, is not seen by any run on a
 machine with short paths, so this reads the manifest embedded in each file.
 

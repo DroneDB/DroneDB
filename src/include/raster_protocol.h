@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "basicgeometry.h"
 #include "exif_protocol.h"
@@ -30,7 +31,7 @@ namespace ddb
         // The version this side implements. A helper is accepted when its major version is the
         // same and its minor version is not lower.
         constexpr int kMajorVersion = 1;
-        constexpr int kMinorVersion = 0;
+        constexpr int kMinorVersion = 1;
 
         // The longest line of either side
         constexpr size_t kMaxLineBytes = 16 * 1024 * 1024;
@@ -80,6 +81,7 @@ namespace ddb
             constexpr const char *kNormalize = "normalize";
             constexpr const char *kGeoproject = "geoproject";
             constexpr const char *kCog = "cog";
+            constexpr const char *kCopc = "copc";
             constexpr const char *kVector = "vector";
         } // namespace op
 
@@ -233,22 +235,47 @@ namespace ddb
         // object with `ok` that is not a valid response
         std::optional<Response> responseOfOutputLine(std::string_view line);
 
-        // The `threads` member of the params of a build (`cog`, `vector`): the threads of one
+        // The `threads` member of the params of a build (`cog`, `copc`, `vector`): the threads of one
         // build. The host holds the tokens of the CPU pool for them (parallel.h) and says how
         // many it got, since the helper has a pool of its own and could not know. Without it the
         // build takes what the configuration (DDB_BUILD_THREADS) allows.
         // @throws ProtocolError for a member that is not an integer from 1 to 4096
         std::optional<int> buildThreadsFromJson(const json &params);
 
-        // The params of a `cog`: the warp and the compression of the COG use `threads`
+        // What the host knows of a photo from its EXIF, since the helper reads none: `footprint` is
+        // the ground position of the corners of the picture (upper left, lower left, lower right,
+        // upper right) as longitude and latitude in EPSG:4326, `width` and `height` its size in
+        // pixels. The photo is placed on the ground by these four corners as ground control points.
+        struct PhotoGeoreference
+        {
+            int width = 0;
+            int height = 0;
+            std::array<std::array<double, 2>, 4> footprint{};
+        };
+
+        // The params of a `cog`: the warp and the compression of the COG use `threads`; `photo`
+        // places a photo, which has no georeferencing of its own, on the ground
         struct CogParams
         {
             std::optional<int> threads;
+            std::optional<PhotoGeoreference> photo;
         };
 
         json toJson(const CogParams &params);
         // @throws ProtocolError
         CogParams cogParamsFromJson(const json &params);
+
+        // The params of a `copc`: the point clouds merged with `path` into one, in their order
+        // after it (`inputs`), and the threads of the build
+        struct CopcParams
+        {
+            std::vector<fs::path> inputs;
+            std::optional<int> threads;
+        };
+
+        json toJson(const CopcParams &params);
+        // @throws ProtocolError
+        CopcParams copcParamsFromJson(const json &params);
 
         // The params of a `vector` build. `source` is the file the user named when `path` is a
         // conversion of it (a DWG converted to a DXF by the host): its sidecars give the drawing
@@ -264,17 +291,11 @@ namespace ddb
         // @throws ProtocolError
         VectorParams vectorParamsFromJson(const json &params);
 
-        // The params of a `geoproject`: what the host knows of a photo from its EXIF, since the
-        // helper reads none. `footprint` is the ground position of the corners of the picture
-        // (upper left, lower left, lower right, upper right) as longitude and latitude in
-        // EPSG:4326, `width` and `height` its size in pixels, `outsize` the size of the result
-        // as gdal_translate -outsize takes it ("100%" or a number of pixels of width; empty: as
-        // the picture).
-        struct GeoprojectParams
+        // The params of a `geoproject`: the photo's georeference and `outsize`, the size of the
+        // result as gdal_translate -outsize takes it ("100%" or a number of pixels of width; empty:
+        // as the picture)
+        struct GeoprojectParams : PhotoGeoreference
         {
-            int width = 0;
-            int height = 0;
-            std::array<std::array<double, 2>, 4> footprint{};
             std::string outsize;
         };
 

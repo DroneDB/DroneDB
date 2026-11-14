@@ -1,5 +1,6 @@
-# Licence texts of the helper executables (metadata-util, bm3d, gdal-util) and of the code built into
-# them from this repository's submodules, one per line:
+# Licence texts of the helper executables (metadata-util, bm3d, gdal-util), of the code built into
+# them from this repository's submodules, and of the submodule code built into libddb itself
+# (ddb-tilers), one per line:
 #
 #   <file name in the package> | <source path, relative to the repository root>
 #
@@ -23,3 +24,11 @@ bm3d.NOTICE.LICENSE | vendor/bm3d/NOTICE
 Nexus.LICENSE | vendor/bm3d/licenses/Nexus.LICENSE
 vcglib.LICENSE | vendor/bm3d/licenses/vcglib.LICENSE
 corto.LICENSE | vendor/bm3d/licenses/corto.LICENSE
+# ddb-tilers (MPL-2.0, the submodule vendor/ddb-tilers), linked into libddb and the programs that embed
+# it: its licence, its list of third-party notices, and the texts of the code it contains (its laz-perf
+# fork, Apache-2.0, with the NOTICE of the fork, and fpnge, Apache-2.0).
+ddb-tilers.LICENSE | vendor/ddb-tilers/LICENSE
+ddb-tilers.THIRD_PARTY_NOTICES.LICENSE | vendor/ddb-tilers/THIRD_PARTY_NOTICES.md
+laz-perf.LICENSE | vendor/ddb-tilers/third_party/lazperf/LICENSE
+laz-perf.NOTICE.LICENSE | vendor/ddb-tilers/third_party/lazperf/NOTICE
+fpnge.LICENSE | vendor/ddb-tilers/third_party/fpnge/LICENSE

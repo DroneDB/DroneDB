@@ -167,14 +167,11 @@ public:
 // ------------------------------------------------------------------------------ point cloud
 
 // A fresh index (folder `folder` of the test area `testArea`, as IndexFixture) with one point
-// cloud added, cloud.xyz (a few points over a 10 x 10 square), and the environment set so that a
-// build converts it with PDAL writers.copc in the process, not with Untwine. For as long as it
-// lives. The build writes under <root>/.ddb/build/<hash>/copc-temp-<rand>/tmp/<crc>.las, about
-// 130 characters below the root.
+// cloud added, cloud.xyz (a few points over a 10 x 10 square). The build writes its COPC in a
+// private folder (.copc-stage-<rand>) of the temporary folder of the build, under <root>/.ddb/build.
 struct PointCloudDataset
 {
     IndexFixture index;
-    EnvVarGuard backend{"DDB_COPC_BACKEND", "pdal"}, forcePdal{"DDB_USE_PDAL_COPC"};
 
     explicit PointCloudDataset(const std::string &testArea, const std::filesystem::path &folder = "");
 

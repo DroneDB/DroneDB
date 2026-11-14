@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -25,19 +27,22 @@
 
 namespace testutils
 {
-    // Answers each connection with the next scripted reply (the last repeats), keeps what it
-    // received, and closes: HTTP/1.1 with Connection: close. An empty reply closes the
-    // connection without answering; Hang keeps it open, silent, until the client leaves.
+    // Answers each connection with the next scripted reply (the last repeats), or with the reply a
+    // function makes of the request, keeps what it received, and closes: HTTP/1.1 with
+    // Connection: close. An empty reply closes the connection without answering; Hang keeps it
+    // open, silent, until the client leaves.
     class LoopbackServer
     {
     public:
         static constexpr const char *Hang = "<hang>";
+        using Responder = std::function<std::string(const std::string &request)>;
 
     private:
         int listener = -1;
         std::thread worker;
         std::atomic<bool> stopping{false};
-        std::vector<std::string> replies;
+        Responder respond;
+        std::mutex requestsMutex;
 
         static std::string readRequest(int fd)
         {
@@ -66,7 +71,14 @@ namespace testutils
         int port = 0;
         std::vector<std::string> requests;
 
-        explicit LoopbackServer(std::vector<std::string> scripted) : replies(std::move(scripted))
+        explicit LoopbackServer(std::vector<std::string> scripted)
+            : LoopbackServer(Responder([replies = std::move(scripted), i = size_t{0}](const std::string &) mutable {
+                  return replies[std::min(i++, replies.size() - 1)];
+              }))
+        {
+        }
+
+        explicit LoopbackServer(Responder responder) : respond(std::move(responder))
         {
             listener = ::socket(AF_INET, SOCK_STREAM, 0);
             sockaddr_in addr{};
@@ -79,14 +91,17 @@ namespace testutils
             ::getsockname(listener, reinterpret_cast<sockaddr *>(&addr), &len);
             port = ntohs(addr.sin_port);
             worker = std::thread([this] {
-                size_t i = 0;
                 while (!stopping)
                 {
                     const int fd = ::accept(listener, nullptr, nullptr);
                     if (fd < 0)
                         break;
-                    requests.push_back(readRequest(fd));
-                    const std::string &reply = this->replies[std::min(i++, this->replies.size() - 1)];
+                    const std::string request = readRequest(fd);
+                    {
+                        std::lock_guard lock(requestsMutex);
+                        requests.push_back(request);
+                    }
+                    const std::string reply = stopping ? std::string() : respond(request);
                     if (reply == Hang)
                     {
                         char byte;
@@ -118,6 +133,13 @@ namespace testutils
         }
 
         std::string url(const std::string &path = "/") const { return "http://127.0.0.1:" + std::to_string(port) + path; }
+
+        // The requests received so far
+        std::vector<std::string> received()
+        {
+            std::lock_guard lock(requestsMutex);
+            return requests;
+        }
     };
 
     // A whole HTTP/1.1 reply with its Content-Length

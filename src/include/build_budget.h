@@ -23,12 +23,12 @@ using BuildProgressCallback = std::function<void(double fraction, std::string_vi
 // process-wide state, so concurrent builds keep their own.
 struct BuildOptions {
     // The most threads this build may use; it only lowers. The GDAL warps of a raster build,
-    // bm3d and PDAL's writers.copc get the lower of it and the DDB_BUILD_THREADS budget
-    // (BuildResourceBudget::fromConfig). Obj2Tiles is not under that budget: it runs on the
+    // bm3d and the COPC build of a point cloud get the lower of it and the DDB_BUILD_THREADS
+    // budget (BuildResourceBudget::fromConfig). Obj2Tiles is not under that budget: it runs on the
     // lowest of it, DDB_OBJ2TILES_MAX_CORES (else an inherited DOTNET_PROCESSOR_COUNT) and the
     // host cores, and a cap that does not lower that count is no cap (obj2tiles_runner.h).
-    // Nothing: each tool as without a cap. Untwine (point clouds) and build-lod (splats) have no
-    // thread option: the cap does not bound them.
+    // Nothing: each tool as without a cap. build-lod (splats) has no thread option: the cap does
+    // not bound it.
     std::optional<int> threads;
 
     // Where the build reports its progress (DDBBuildEx2); empty: nowhere. A build of several entries
@@ -62,8 +62,8 @@ struct BuildOptions {
 //   DDB_COG_CACHE_MB    GDAL block cache while a raster build runs (default 1024)
 //   DDB_WARP_MEMORY_MB  GDALWarp working memory, -wm (default 512)
 //   DDB_BUILD_THREADS   threads one build wants: GDAL's for a raster build, bm3d's for a
-//                       model build, PDAL writers.copc's for a point cloud build without
-//                       Untwine; 0 = all cores (default min(8, cores)).
+//                       model build, the COPC builder's for a point cloud build; 0 = all cores
+//                       (default min(8, cores)).
 //                       The CPU token pool (parallel.h) decides how many run.
 // A BuildOptions cap lowers the threads: the one place that decides how many threads a build
 // asks the pool for.
@@ -76,31 +76,12 @@ struct BuildResourceBudget {
 };
 
 // Applies the gdalCacheMb setting (process_config.h) to GDAL's process-wide block cache (GDAL
-// default: 5% of RAM). Set with DDBConfigure, it is the size of the cache: exactly that, at once
-// (a ScopedGdalCacheMax guard alive keeps its size, and the cache takes the new one when the
-// last guard ends). From DDB_GDAL_CACHE_MB or the default (1024 MB) it is a bound: it lowers the
+// default: 5% of RAM). Set with DDBConfigure, it is the size of the cache: exactly that, at once.
+// From DDB_GDAL_CACHE_MB or the default (1024 MB) it is a bound: it lowers the
 // cache, never raises it, and does nothing when GDAL_CACHEMAX is set explicitly. The setting put
 // back to null undoes what DDBConfigure did, then bounds the cache as above.
 // Called by ddb::registerProcess, and by ProcessConfig::configure when the setting changes.
 void applyGdalCacheSetting();
-
-// Sets GDAL's block cache to `bytes` while the guard is alive. The cache is
-// process-wide, so all guards share one state: while any guard is alive the
-// cache is the largest value requested by the live guards, and the value that
-// was in effect before the first guard is restored when the last one ends.
-// This keeps concurrent builds bounded: one build ending never restores the
-// unbounded default under another build that is still running.
-class ScopedGdalCacheMax {
-public:
-    explicit ScopedGdalCacheMax(int64_t bytes);
-    ~ScopedGdalCacheMax();
-
-    ScopedGdalCacheMax(const ScopedGdalCacheMax&) = delete;
-    ScopedGdalCacheMax& operator=(const ScopedGdalCacheMax&) = delete;
-
-private:
-    int64_t bytes_;
-};
 
 }  // namespace ddb
 

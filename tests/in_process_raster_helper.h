@@ -43,6 +43,11 @@ namespace testutils
         {
             ddb::raster::buildCogFile(path, out, ddb::raster::cogParamsFromJson(params), progress);
         }
+        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+                       const ddb::raster::ProgressCallback &progress) override
+        {
+            ddb::raster::buildCopcFile(path, out, ddb::raster::copcParamsFromJson(params), progress);
+        }
         void buildVector(const fs::path &path, const fs::path &out, const json &params,
                          const ddb::raster::ProgressCallback &) override
         {

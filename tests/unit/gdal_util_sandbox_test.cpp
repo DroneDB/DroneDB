@@ -902,9 +902,6 @@ namespace
     {
         if (std::string(op) == raster::op::kThumbnail)
             return json{{"size", 32}};
-        if (std::string(op) == raster::op::kGeoproject)
-            return json{{"width", 100}, {"height", 80}, {"footprint", json::array({json::array({9.1, 45.3}), json::array({9.1, 45.2}),
-                                                                                   json::array({9.2, 45.2}), json::array({9.2, 45.3})})}};
         if (std::string(op) == raster::op::kProbe)
             return json{{"kind", "raster"}};
         return json::object();
@@ -946,7 +943,6 @@ namespace
             {raster::op::kProbe, 25, 16 * kMiB, 256, 2 * kGiB},
             {raster::op::kThumbnail, 25, 64 * kMiB, 256, 2 * kGiB},
             {raster::op::kNormalize, 110, 128 * kGiB, 1024, 4 * kGiB},
-            {raster::op::kGeoproject, 110, 16 * kGiB, 1024, 4 * kGiB},
         };
         for (const auto &expected : table)
         {
@@ -1022,6 +1018,55 @@ namespace
         session.kill();
     }
 
+    // The address space of a process held while it opens the input of its build
+    uint64_t addressSpaceOfABuild(const fs::path &folder, const char *op, const fs::path &input, const json &params)
+    {
+        HeldInput held(folder / input);
+        Session session;
+        process::SessionOptions options;
+        options.envOverrides = {{kSandboxEnv, "strict"}};
+        const raster::Request build = request(1, op, folder / input, folder / "out" / "built", params);
+        fs::create_directories(folder / "out");
+        if (!session.start(tool(), {"--request", raster::encodeRequest(build)}, options))
+        {
+            ADD_FAILURE() << session.startError();
+            return 0;
+        }
+        if (!held.waitForReader())
+        {
+            ADD_FAILURE() << session.stderrTail();
+            return 0;
+        }
+        const uint64_t bytes = limitOf(session.pid(), "Max address space").softValue();
+        session.kill();
+        return bytes;
+    }
+
+    // The builder of a COPC maps the clouds it parses in place, and a mapping counts in the address
+    // space: a COPC build has the address space of the other builds plus the size of its clouds
+    TEST_F(GdalUtilSandboxFiles, aCopcBuildHasTheAddressSpaceOfABuildAndTheSizeOfItsCloudsBesides)
+    {
+        if (!hostOffers("landlock") || !hostOffers("seccomp"))
+            GTEST_SKIP() << (hostOffers("landlock") ? kNeedsSeccomp : kNeedsLandlock);
+        if (sandbox::sanitizerAllowances().unlimitedAddressSpace)
+            GTEST_SKIP() << "a " << sandbox::sanitizerAllowances().runtime << " build has no address space limit";
+
+        // A sparse cloud of 64 GiB, far more than the memory share of any machine the tests run on
+        constexpr uint64_t kCloudBytes = 64 * kGiB;
+        const fs::path cloud = area_->getFolder("large-cloud") / "large.xyz";
+        std::ofstream(cloud).close();
+        fs::resize_file(cloud, kCloudBytes);
+
+        const uint64_t cog = addressSpaceOfABuild(area_->getFolder("held-cog"), raster::op::kCog, "held.tif", json{{"threads", 1}});
+        raster::CopcParams params;
+        params.inputs = {cloud};
+        params.threads = 1;
+        const uint64_t copc =
+            addressSpaceOfABuild(area_->getFolder("held-copc"), raster::op::kCopc, "held.laz", raster::toJson(params));
+        ASSERT_GT(cog, 0u);
+        EXPECT_EQ(copc, cog + kCloudBytes);
+    }
+
     // ------------------------------------------------------------------ the limits end in `limit`
 
     // A raster whose blocks are large and cost a lot of cpu time: three bands of 12288 x 12288
@@ -1034,11 +1079,16 @@ namespace
         {
             area_ = new TestArea("GdalUtilSandbox.heavy", true);
             heavy_ = new fs::path(area_->getFolder() / "heavy.tif");
+            createHeavy(*heavy_, {"COMPRESS=DEFLATE", "TILED=NO", "BLOCKYSIZE=12288", "BIGTIFF=IF_SAFER"});
+        }
 
+        // A 12288 x 12288 Float32 raster of 3 bands, all 0, georeferenced in EPSG:32632
+        static void createHeavy(const fs::path &path, std::vector<const char *> options)
+        {
             constexpr int kSide = 12288;
-            const char *options[] = {"COMPRESS=DEFLATE", "TILED=NO", "BLOCKYSIZE=12288", "BIGTIFF=IF_SAFER", nullptr};
-            GDALDatasetH dataset = GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(*heavy_).c_str(), kSide, kSide, 3,
-                                              GDT_Float32, const_cast<char **>(options));
+            options.push_back(nullptr);
+            GDALDatasetH dataset = GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(path).c_str(), kSide, kSide, 3,
+                                              GDT_Float32, const_cast<char **>(options.data()));
             ASSERT_NE(dataset, nullptr);
             const double transform[6] = {500000.0, 1.0, 0.0, 5000000.0, 0.0, -1.0};
             GDALSetGeoTransform(dataset, transform);
@@ -1135,10 +1185,14 @@ namespace
         options.runner = &runner;
         raster::GdalUtilHelper helper(options);
 
+        // The same raster in tiles: the build reads it block by block (the single strip of heavy_ is a
+        // block larger than the COG builder decodes) and runs past its cpu time
         const fs::path folder = outputFolder("build");
+        const fs::path tiled = folder / "heavy-tiled.tif";
+        createHeavy(tiled, {"COMPRESS=DEFLATE", "TILED=YES", "BLOCKXSIZE=512", "BLOCKYSIZE=512"});
         try
         {
-            helper.buildCog(*heavy_, folder / "cog.tif", json::object(), raster::ProgressCallback());
+            helper.buildCog(tiled, folder / "cog.tif", json::object(), raster::ProgressCallback());
             FAIL() << "the build finished";
         }
         catch (const raster::RasterNotReadException &e)

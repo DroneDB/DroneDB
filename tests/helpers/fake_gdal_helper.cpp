@@ -27,7 +27,7 @@
 //
 // Environment, read when the program starts:
 //   DDB_FAKE_GDAL_MODE          the mode of the requests whose file name names none
-//   DDB_FAKE_GDAL_PROTOCOL      the protocol `--version` reports (default "1.0")
+//   DDB_FAKE_GDAL_PROTOCOL      the protocol `--version` reports (default "1.1")
 //   DDB_FAKE_GDAL_LOG           a file where every request is appended as "<pid> <op> <file name>"
 //   DDB_FAKE_GDAL_VERSION_LOG   a file where every run of `--version` appends "<pid> --version"
 //   DDB_FAKE_GDAL_ENV_LOG       a file where the helper appends "<pid> <NAME>=<value>" for the
@@ -298,7 +298,7 @@ int main(int argc, char **argv) {
     if (mode == "--version") {
         const std::string log = envOr("DDB_FAKE_GDAL_VERSION_LOG", "");
         if (!log.empty()) appendToLog(log, "--version");
-        std::printf("gdal-util fake protocol %s\n", envOr("DDB_FAKE_GDAL_PROTOCOL", "1.0").c_str());
+        std::printf("gdal-util fake protocol %s\n", envOr("DDB_FAKE_GDAL_PROTOCOL", "1.1").c_str());
         return 0;
     }
     if (mode == "--serve") return serve();

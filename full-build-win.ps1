@@ -160,8 +160,8 @@ function Test-DdbFilesInUse {
 
 function Clean-BuildDirectory {
     # Removes the root CMake cache, built binaries, and nested sub-project build
-    # directories that pin a compiler in their own CMakeCache.txt (e.g.
-    # build\untwine, produced by scripts\build-untwine.ps1). Those nested caches
+    # directories that pin a compiler in their own CMakeCache.txt (sub-builds that
+    # earlier versions of this script made in build\). Those nested caches
     # survive a root clean, and after a Visual Studio / compiler upgrade they
     # cause STL1001 "Unexpected compiler version" failures.
     Write-Info "Cleaning build directory..."
@@ -468,28 +468,6 @@ try {
     }
 
     Write-Success "Build completed successfully!"
-
-    # ----------------------------------------------------------------------
-    # Optional: build the Untwine COPC accelerator (vendor/untwine).
-    # Delegated to scripts/build-untwine.ps1 so that the same logic is shared
-    # with the CI workflow and packaging scripts. Failures NEVER block the
-    # main build: DroneDB falls back to PDAL writers.copc when untwine.exe
-    # is missing.
-    # ----------------------------------------------------------------------
-    $untwineScript = Join-Path $PSScriptRoot "scripts\build-untwine.ps1"
-    if (Test-Path $untwineScript) {
-        try {
-            & $untwineScript -BuildDir $buildDir -Config $BuildType -Builder $Builder `
-                -VcpkgRoot $vcpkgRoot -Jobs $Jobs
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "WARNING: scripts/build-untwine.ps1 returned exit $LASTEXITCODE (non-blocking)." -ForegroundColor Yellow
-                Write-Host "DroneDB will use the PDAL writers.copc fallback at runtime." -ForegroundColor Yellow
-            }
-        } catch {
-            Write-Host "WARNING: Untwine build failed (non-blocking): $($_.Exception.Message)" -ForegroundColor Yellow
-            Write-Host "DroneDB will use the PDAL writers.copc fallback at runtime." -ForegroundColor Yellow
-        }
-    }
 
     # ----------------------------------------------------------------------
     # build-lod Gaussian Splat LOD producer (vendor/spark): MANDATORY for

@@ -520,7 +520,6 @@ bool windowsLongPathsEnabled()
 PointCloudDataset::PointCloudDataset(const std::string &testArea, const std::filesystem::path &folder)
     : index(testArea, folder)
 {
-    unsetEnv("DDB_USE_PDAL_COPC");
     std::ofstream xyz(index.root / "cloud.xyz");
     for (int i = 0; i <= 10; i++)
         xyz << i << " " << (i * 7) % 11 << " " << i % 3 << "\n";

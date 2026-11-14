@@ -760,8 +760,6 @@ TEST(CliOutputSafety, gsplatReplacesAnExistingSpzOnlyWithOverwrite) {
 // and legacy EPT files of the folder before it read its inputs (which could be one of them)
 TEST(CliOutputSafety, copcTouchesNothingButItsOutput) {
     TestArea ta("cli_copc_output", true);
-    EnvVarGuard backend("DDB_COPC_BACKEND", "pdal"), forcePdal("DDB_USE_PDAL_COPC");
-    unsetEnv("DDB_USE_PDAL_COPC");
     const auto project = ta.getFolder("project");
     std::string points;
     for (int i = 0; i <= 10; i++)

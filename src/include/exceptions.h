@@ -134,10 +134,6 @@ namespace ddb
     {
         using AppException::AppException;
     };
-    class UntwineException : public AppException
-    {
-        using AppException::AppException;
-    };
     class Obj2TilesException : public AppException
     {
         using AppException::AppException;

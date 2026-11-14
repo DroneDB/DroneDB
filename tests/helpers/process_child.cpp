@@ -48,17 +48,6 @@ void closeOutput() {
 #endif
 }
 
-void writeExtra(const std::string& id, const char* data, size_t length) {
-#ifdef _WIN32
-    HANDLE h = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(std::stoull(id)));
-    DWORD written = 0;
-    WriteFile(h, data, static_cast<DWORD>(length), &written, nullptr);
-#else
-    const ssize_t written = ::write(std::stoi(id), data, length);
-    (void)written;
-#endif
-}
-
 // Line server for the session tests: one reply per request line, flushed at once, until
 // stdin reaches EOF (the way a persistent helper ends). `stderrBytes` > 0: each request first
 // makes the child write that many bytes of numbered 64-byte lines to stderr, which the parent
@@ -123,24 +112,21 @@ int allocateMemory(size_t mib) {
     return 0;
 }
 
-int descendantWorker(const std::string& activity, const std::string& extraId) {
+int descendantWorker(const std::string& activity) {
     const std::string chunk(64 * 1024, 'x');
     for (;;) {
         if (activity == "streaming") {
             std::fwrite(chunk.data(), 1, chunk.size(), stdout);
             std::fflush(stdout);
-        } else if (activity == "extra") {
-            writeExtra(extraId, chunk.data(), chunk.size());
         }
         delay(1);
     }
 }
 
-unsigned long spawnDescendant(const fs::path& self, const std::string& activity,
-                              const std::string& extraId) {
+unsigned long spawnDescendant(const fs::path& self, const std::string& activity) {
 #ifdef _WIN32
     const std::wstring executable = fs::absolute(self).wstring();
-    const std::string mode = " descendant-worker " + activity + " " + extraId;
+    const std::string mode = " descendant-worker " + activity;
     std::wstring command = L"\"" + executable + L"\"" + std::wstring(mode.begin(), mode.end());
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
@@ -158,7 +144,7 @@ unsigned long spawnDescendant(const fs::path& self, const std::string& activity,
 #else
     (void)self;
     const pid_t child = ::fork();
-    if (child == 0) ::_exit(descendantWorker(activity, extraId));
+    if (child == 0) ::_exit(descendantWorker(activity));
     return child < 0 ? 0 : static_cast<unsigned long>(child);
 #endif
 }
@@ -192,31 +178,15 @@ int main(int argc, char** argv) {
         std::fputs("before-close\n", stdout);
         std::fflush(stdout);
         closeOutput();
-        if (argc > 4) {
-#ifdef _WIN32
-            CloseHandle(reinterpret_cast<HANDLE>(static_cast<uintptr_t>(std::stoull(argv[4]))));
-#else
-            ::close(std::stoi(argv[4]));
-#endif
-        }
         delay(std::stoi(argv[2]));
         return std::stoi(argv[3]);
     }
-    if (mode == "extra-ticks") {
-        if (argc < 3) return 2;
-        for (int i = 0; i < 8; ++i) {
-            writeExtra(argv[2], "tick\n", 5);
-            delay(200);
-        }
-        return 0;
-    }
     if (mode == "descendant-worker")
-        return argc < 3 ? 2 : descendantWorker(argv[2], argc > 3 ? argv[3] : "");
+        return argc < 3 ? 2 : descendantWorker(argv[2]);
     if (mode == "descendant") {
-        // descendant PID file, output mode, direct-child lifetime, direct exit code,
-        // optional inherited extra-channel handle/fd.
+        // descendant PID file, output mode, direct-child lifetime, direct exit code.
         if (argc < 6) return 2;
-        const auto pid = spawnDescendant(argv[0], argv[3], argc > 6 ? argv[6] : "");
+        const auto pid = spawnDescendant(argv[0], argv[3]);
         if (!pid) return 3;
         {
             std::ofstream ready(argv[2]);

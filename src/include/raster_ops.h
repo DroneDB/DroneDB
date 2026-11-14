@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <optional>
 
 #include "entry.h"
@@ -114,6 +115,17 @@ namespace ddb
         void buildCogFile(const fs::path &path, const fs::path &outFile, const CogParams &params,
                           const ProgressCallback &progress);
 
+        // Builds the COPC outFile of the point cloud `path` and of the ones of params.inputs, merged
+        // into one, with ddb-tilers: on the threads of the build (acquireBuildThreads), within the
+        // memory of DDBT_COPC_BUILD_MEM_MB (else 4 GiB, at most half the memory of the machine),
+        // with its temporary files in the folder of outFile. `progress` is called at most once per
+        // percent.
+        // @throws RasterOpException (Unreadable) for an input the builder cannot read or that has
+        // no points; RetryableBuildException when the device is full; FSException for an input
+        // that does not exist
+        void buildCopcFile(const fs::path &path, const fs::path &outFile, const CopcParams &params,
+                           const ProgressCallback &progress);
+
         // Builds the vector outputs of a file in the folder outFolder, which exists and is
         // empty: vec/source.gpkg and, unless the file is a CAD drawing without a coordinate
         // system, the MVT tiles in mvt/ (a drawing without one gets vec/local.json instead).
@@ -123,10 +135,24 @@ namespace ddb
         void buildVectorFiles(const fs::path &path, const fs::path &outFolder, const VectorParams &params);
 
         // Writes the GeoTIFF outFile of a photo placed on the ground by the corners of
-        // GeoprojectParams (JPEG compressed, with an alpha band)
-        // @throws RasterOpException when the file cannot be opened; GDALException,
+        // GeoprojectParams, in EPSG:4326 on gdalwarp's grid with its nearest resampling (a COG,
+        // JPEG with a mask for 8-bit RGB, LZW with an alpha band otherwise)
+        // @throws RasterOpException when the file cannot be read; GDALException,
         // InvalidArgsException for an outsize that is not a positive number
         void geoprojectImage(const fs::path &path, const fs::path &outFile, const GeoprojectParams &params);
+
+        // The ground control points of a photo for ddb-tilers ([[pixel, line, longitude, latitude],
+        // ...]): its corners, of the photo scaled by `scale`, at the corners of its footprint
+        json photoGcps(const PhotoGeoreference &photo, double scale);
+
+        // Builds outFile from the raster `path` with ddb-tilers' COG builder (ddbtBuildCog2) and
+        // its `options`, with the threads (`threads`, lowered by DDB_BUILD_THREADS, from the CPU
+        // pool) and the memory (DDB_COG_CACHE_MB + DDB_WARP_MEMORY_MB) of a build. A full device
+        // is a RetryableBuildException; an input the builder cannot read is passed to `unreadable`,
+        // which throws
+        void buildWithTilers(const fs::path &path, const fs::path &outFile, const std::optional<int> &threads,
+                             json options, const ProgressCallback &reportProgress,
+                             const std::function<void(const std::string &)> &unreadable);
 
     } // namespace raster
 } // namespace ddb

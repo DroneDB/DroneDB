@@ -3,7 +3,6 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_cache.h"
 
-#include "copc_node_cache.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -17,6 +16,7 @@
 #include "raster_artefacts.h"
 #include "raster_utils.h"
 #include "tiler.h"
+#include "tilers_call.h"
 #include "mio.h"
 
 namespace ddb
@@ -299,7 +299,7 @@ namespace ddb
 
     size_t releaseCachedFiles(const fs::path &path)
     {
-        CopcNodeCache::instance().release(path);
+        tilers::check(ddbtReleaseSources());
         return RasterCache::instance().release(path);
     }
 }

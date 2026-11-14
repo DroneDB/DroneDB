@@ -103,7 +103,6 @@ namespace ddb
                 int stdinFd = -1;
                 int stdoutFd = -1;
                 int stderrFd = -1;
-                int extraWrite = -1; // -1 when no extra channel
                 int statusWrite = -1;
                 long maxFd = 1024;  // upper bound for the close() fallback loop
                 pid_t parentPid = 0;
@@ -155,16 +154,14 @@ namespace ddb
                 const int stdinSrc = moveUp(p.stdinFd);
                 const int stdoutSrc = moveUp(p.stdoutFd);
                 const int stderrSrc = p.stderrFd == p.stdoutFd ? stdoutSrc : moveUp(p.stderrFd);
-                int extraW = -1;
-                if (p.extraWrite >= 0) extraW = moveUp(p.extraWrite);
-                const int statusTarget = p.extraWrite >= 0 ? kExtraChannelFd + 1 : kExtraChannelFd;
+                // The exec status goes right above the standard streams
+                const int statusTarget = STDERR_FILENO + 1;
                 const int statusW = moveUp(p.statusWrite);
 
                 // dup2 creates the targets without FD_CLOEXEC (inherited by exec).
                 if (::dup2(stdinSrc, STDIN_FILENO) < 0) fail(errno);
                 if (::dup2(stdoutSrc, STDOUT_FILENO) < 0) fail(errno);
                 if (::dup2(stderrSrc, STDERR_FILENO) < 0) fail(errno);
-                if (extraW >= 0 && ::dup2(extraW, kExtraChannelFd) < 0) fail(errno);
                 if (::dup2(statusW, statusTarget) < 0) fail(errno);
                 statusFd = statusTarget;
                 // The status pipe must close on a successful exec.
@@ -420,7 +417,6 @@ namespace ddb
                 plan.stdinFd = req.stdinFd;
                 plan.stdoutFd = req.stdoutFd;
                 plan.stderrFd = req.stderrFd;
-                plan.extraWrite = req.extraWriteFd;
                 plan.statusWrite = statusPipe[1].get();
                 plan.maxFd = computeMaxFd();
                 plan.parentPid = ::getpid();

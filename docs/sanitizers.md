@@ -41,9 +41,9 @@ once for both test binaries.
 
 For TSan, use `-B build-tsan -DDDB_ENABLE_TSAN=ON` instead of the two ASan/UBSan options.
 `-O1` keeps the instrumented test suite reasonably fast; the module adds
-`-fno-omit-frame-pointer` for readable stacks. The external tools (Obj2Tiles, build-lod,
-untwine) are not built by CMake: copy them next to `ddbtest` if the integration tests that use
-them should run. The unit tests need none of them.
+`-fno-omit-frame-pointer` for readable stacks. The external tools (Obj2Tiles, build-lod) are
+not built by CMake: copy them next to `ddbtest` if the integration tests that use them should
+run. The unit tests need none of them.
 
 ## Running
 

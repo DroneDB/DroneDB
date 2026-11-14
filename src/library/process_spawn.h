@@ -5,7 +5,7 @@
 #define PROCESS_SPAWN_H
 
 // What process::run() and process::Session share and process_runner.h does not export: starting
-// a child with exactly the standard streams (and the extra channel) it is given and nothing else,
+// a child with exactly the standard streams it is given and nothing else,
 // reaping and killing it, and collecting what it prints.
 
 #include <chrono>
@@ -184,7 +184,7 @@ namespace ddb
             std::string errnoMessage(const char *what);
 
             // What the child gets: the three standard streams (the same descriptor may serve
-            // stdout and stderr), an optional extra channel at kExtraChannelFd, and nothing else.
+            // stdout and stderr), and nothing else.
             struct SpawnRequest
             {
                 const std::string &path;
@@ -193,7 +193,6 @@ namespace ddb
                 int stdinFd;
                 int stdoutFd;
                 int stderrFd;
-                int extraWriteFd; // -1: none
                 // Linux: SIGKILL the child when the spawning thread exits (one-shot runs, which
                 // are supervised by that thread). Long-lived children must not use it: hosts
                 // spawn from pool threads that come and go.

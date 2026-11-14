@@ -126,7 +126,8 @@ extern "C"
      * ABI 2.4 (libddb 2.4.0) is the ABI after 2.0: every export, field and JSON member documented as new in 2.4
      * is missing from a 2.0 library, so a host checks DDBGetAbiVersion() for 2.4 (0x00020004) before it calls
      * them or sets them, and the DDBGetCapabilities() "symbols" tell which exports the library has. ABI 2.5
-     * (libddb 2.5.0) adds DDBMemoryTileEx3, DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (0x00020005). */
+     * (libddb 2.5.0) adds DDBMemoryTileEx3, DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (0x00020005).
+     * ABI 2.6 (libddb 2.6.0, 0x00020006) adds no export: the DDBConfigure setting "artefactCacheMb". */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -154,8 +155,8 @@ extern "C"
      *   "cpuPoolSize"    integer 0..4096, env DDB_CPU_POOL_SIZE, default cores - 1.
      *                    The process-wide CPU token pool: the worker threads libddb may run at
      *                    once beside the calling threads, across every call (parallel indexing,
-     *                    GDAL NUM_THREADS, PDAL readers, the cores given to Obj2Tiles and those
-     *                    counted for untwine). A calling thread always works and never needs a
+     *                    GDAL NUM_THREADS, PDAL readers, the threads of a COPC build, the cores
+     *                    given to Obj2Tiles). A calling thread always works and never needs a
      *                    token; a section gets the tokens that are free and never waits for one,
      *                    so 0 runs every call on its calling thread only. The calls a host runs
      *                    at once plus cpuPoolSize bound libddb's busy CPU threads.
@@ -170,12 +171,18 @@ extern "C"
      *                    The size in MiB of GDAL's block cache, which the whole process shares
      *                    (tiles, renders, thumbnails, statistics, builds). Set with DDBConfigure
      *                    it is the size of the cache, at once, raising or lowering GDAL's own
-     *                    default (5% of the RAM; a GDAL_CACHEMAX set explicitly does not matter);
-     *                    a build in flight keeps the cache it asked for (DDB_COG_CACHE_MB) until
-     *                    it ends. From the environment variable or the default it is an upper
+     *                    default (5% of the RAM; a GDAL_CACHEMAX set explicitly does not matter).
+     *                    From the environment variable or the default it is an upper
      *                    bound only: DDBRegisterProcess lowers GDAL's cache to it, never raises
      *                    it, and leaves a GDAL_CACHEMAX set explicitly alone. Put back to null,
      *                    the cache GDAL had before DDBConfigure is restored and bounded again.
+     *   "artefactCacheMb" integer 0..10^13, env DDB_ARTEFACT_CACHE_MB, default 4096.
+     *                    The bound in MiB of the artefact cache (cacheDir/artefacts): the COG
+     *                    the raster helper writes for the tiles of each photo or raster of a user
+     *                    shown on a map, and the normalized copies of rasters. When a new one
+     *                    takes it past the bound, the least recently used files are removed (not
+     *                    one used in the last 5 minutes). 0: no bound; files not used for 5 days
+     *                    are removed either way.
      *   "cacheDir"       absolute folder path (UTF-8), default the profile folder: DDB_HOME/.ddb
      *                    when DDB_HOME is set (source "environment"), else the home folder's .ddb.
      *                    Where libddb caches thumbnails, tiles, index templates and DSM tiles
@@ -807,12 +814,8 @@ extern "C"
      *                         that count drops the texture encoder threads as that variable
      *                         does; a cap at or above it limits nothing and the run is that of
      *                         no cap (the encoder keeps its threads);
-     *                       point cloud, Untwine: not bounded. Untwine has no thread option: it
-     *                         keeps its own fixed thread count and keeps holding 10 CPU pool
-     *                         tokens whatever the cap is;
-     *                       point cloud, PDAL writers.copc (when Untwine is not installed or
-     *                         fails): its threads, the lower of the cap and the
-     *                         DDB_BUILD_THREADS budget;
+     *                       point cloud (COPC): the threads of the builder, the lower of the
+     *                         cap and the DDB_BUILD_THREADS budget;
      *                       Gaussian splat (build-lod): not bounded, it has no thread option.
      *        The threads a build gets still come from the CPU pool (cpuPoolSize), which may give
      *        fewer. A cap does not change what is built.
@@ -848,8 +851,12 @@ extern "C"
      *                         of GDAL's COG driver scaled to 0 to 0.5, the statistics from 0.5 with the
      *                         fraction of the raster read; a raster that is on the tile grid already has no
      *                         warp and never reports "warping" (its phases are "overviews", "compressing"
-     *                         and "statistics"); the other kinds report no phase of their own and keep
-     *                         fraction -1 until they are done;
+     *                         and "statistics"); for a point cloud (COPC) build, "planning" (the inputs
+     *                         are opened and the octree is planned) from 0, "reading" (the points are read
+     *                         and sorted) from 0.05, "building" (the nodes are thinned, encoded and
+     *                         written) from 0.4, rising as the parts of the cloud are done, and "writing"
+     *                         (the end of the file) when the builder is done; the other kinds
+     *                         report no phase of their own and keep fraction -1 until they are done;
      *                      3. "publishing" with the last fraction reported (never 1) when the output is
      *                         made and moves into place: a cancel at this report stops the build before
      *                         anything is published;

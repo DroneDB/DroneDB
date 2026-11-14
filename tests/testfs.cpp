@@ -18,7 +18,7 @@
 namespace
 {
     // Downloads verify the server certificate against the CA bundle libddb ships next to the
-    // library (curl-ca-bundle.crt, found like thumbs.cpp and pctiler.cpp find it), so they do not
+    // library (curl-ca-bundle.crt, found like thumbs.cpp and thumb_pointcloud.cpp find it), so they do not
     // depend on the system store libcurl was built for (none on Windows CI). Without the bundle
     // libcurl's default store is used, still verified.
     cpr::SslOptions verifiedSslOptions()

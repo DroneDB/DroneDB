@@ -26,6 +26,9 @@
 #include "thumb_internal.h"
 #include "vis_render.h"
 
+#include <gdal_vrt.h>
+#include <vrtdataset.h>
+
 namespace ddb {
 
 namespace {
@@ -71,6 +74,41 @@ GDALDatasetUniquePtr openImageThumbSource(const fs::path& imagePath, int thumbSi
     frameWidth = src->GetRasterXSize();
     frameHeight = src->GetRasterYSize();
     return src;
+}
+
+// The bands of a complex raster as their tiles and statistics show them: the magnitude
+// sqrt(re^2 + im^2) of each sample, Float64 bands of a VRT that reads `src` (which the caller keeps
+// open), with its NoData value and its mask; nullptr when the raster is not complex. A smaller
+// image takes the magnitude of the nearest sample, as the overviews the tiles read do: an average of
+// complex samples cancels their phases (and the VRT resamples its sources before the magnitude)
+GDALDatasetUniquePtr complexMagnitudesOf(GDALDatasetH src) {
+    const int bandCount = GDALGetRasterCount(src);
+    if (bandCount <= 0 || !GDALDataTypeIsComplex(GDALGetRasterDataType(GDALGetRasterBand(src, 1))))
+        return nullptr;
+    const int w = GDALGetRasterXSize(src), h = GDALGetRasterYSize(src);
+    GDALDatasetUniquePtr vrt(GDALDataset::FromHandle(VRTCreate(w, h)));
+    GDALDatasetH hVrt = datasetHandle(vrt);
+    const char* const derived[] = {"subClass=VRTDerivedRasterBand", "PixelFunctionType=mod", nullptr};
+    for (int b = 1; b <= bandCount; ++b) {
+        GDALRasterBandH from = GDALGetRasterBand(src, b);
+        if (GDALAddBand(hVrt, GDT_Float64, const_cast<char**>(derived)) != CE_None)
+            throw GDALException("Cannot read the magnitudes of the complex band " + std::to_string(b));
+        GDALRasterBandH to = GDALGetRasterBand(hVrt, b);
+        // The C API ignores a resampling other than an average: the source is set to the nearest
+        VRTAddSimpleSource(to, from, 0, 0, w, h, 0, 0, w, h, nullptr, VRT_NODATA_UNSET);
+        auto* sources = static_cast<VRTSourcedRasterBand*>(GDALRasterBand::FromHandle(to));
+        if (auto* simple = dynamic_cast<VRTSimpleSource*>(sources->m_papoSources.back().get()))
+            simple->SetResampling("near");
+        int hasNodata = FALSE;
+        const double nodata = GDALGetRasterNoDataValue(from, &hasNodata);
+        if (hasNodata)
+            GDALSetRasterNoDataValue(to, std::abs(nodata));
+    }
+    GDALRasterBandH first = GDALGetRasterBand(src, 1);
+    if (GDALGetMaskFlags(first) == GMF_PER_DATASET && GDALCreateDatasetMaskBand(hVrt, GMF_PER_DATASET) == CE_None)
+        VRTAddSimpleSource(GDALGetMaskBand(GDALGetRasterBand(hVrt, 1)), GDALGetMaskBand(first), 0, 0, w, h, 0, 0, w,
+                           h, nullptr, VRT_NODATA_UNSET);
+    return vrt;
 }
 
 // Compute thumbnail target dimensions preserving aspect ratio.
@@ -268,7 +306,8 @@ RasterImage renderPlainThumbnail(const fs::path& imagePath, int thumbSize) {
     std::string openPath;
     int frameWidth = 0, frameHeight = 0;
     const auto src = openImageThumbSource(imagePath, thumbSize, openPath, frameWidth, frameHeight);
-    GDALDatasetH hSrc = datasetHandle(src);
+    const auto magnitudes = complexMagnitudesOf(datasetHandle(src));
+    GDALDatasetH hSrc = datasetHandle(magnitudes ? magnitudes : src);
 
     const int srcWidth = GDALGetRasterXSize(hSrc);
     const int srcHeight = GDALGetRasterYSize(hSrc);

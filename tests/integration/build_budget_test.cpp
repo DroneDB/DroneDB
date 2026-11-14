@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// The GDAL block cache is bounded during COG builds and by default
-// in the process, and the build thread budget is configurable.
+// The GDAL block cache is bounded by default in the process, and the build budget (cache,
+// warp memory, threads) is configurable.
 
 #include <mutex>
 #include <string>
@@ -17,6 +17,7 @@
 #include "in_process_raster_helper.h"
 #include "parallel.h"
 #include "raster_helper.h"
+#include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
@@ -83,33 +84,6 @@ namespace
         EXPECT_GE(b.threads, 1);
     }
 
-    TEST(GdalCacheBudget, scopedCacheLowersAndRestores)
-    {
-        ConfigSnapshot snap({});
-        GDALSetCacheMax64(8192 * MiB);
-        {
-            const ScopedGdalCacheMax guard(1024 * MiB);
-            EXPECT_EQ(GDALGetCacheMax64(), 1024 * MiB);
-        }
-        EXPECT_EQ(GDALGetCacheMax64(), 8192 * MiB);
-    }
-
-    // Two builds overlap in one process: the first one to finish must not put the
-    // unbounded cache back while the second one is still running.
-    TEST(GdalCacheBudget, overlappingGuardsStayBoundedUntilTheLastEnds)
-    {
-        ConfigSnapshot snap({});
-        GDALSetCacheMax64(8192 * MiB);
-
-        auto *a = new ScopedGdalCacheMax(1024 * MiB);
-        auto *b = new ScopedGdalCacheMax(512 * MiB);
-        EXPECT_EQ(GDALGetCacheMax64(), 1024 * MiB);   // largest live request
-        delete a;
-        EXPECT_EQ(GDALGetCacheMax64(), 512 * MiB);    // b still running: stays bounded
-        delete b;
-        EXPECT_EQ(GDALGetCacheMax64(), 8192 * MiB);   // last guard restores the original
-    }
-
     TEST(GdalCacheBudget, defaultBoundLowersLargeCache)
     {
         ConfigSnapshot snap({"GDAL_CACHEMAX", "DDB_GDAL_CACHE_MB"});
@@ -132,48 +106,5 @@ namespace
         GDALSetCacheMax64(8192 * MiB);
         applyGdalCacheSetting();
         EXPECT_EQ(GDALGetCacheMax64(), 8192 * MiB);
-    }
-
-    // Samples GDALGetCacheMax64() from GDAL debug messages emitted inside the
-    // warp kernel, i.e. while the warp is running, on whichever thread runs it.
-    struct WarpCacheProbe
-    {
-        static std::mutex mutex;
-        static std::vector<GIntBig> samples;
-        static void CPL_STDCALL handler(CPLErr cls, CPLErrorNum, const char *msg)
-        {
-            if (cls != CE_Debug || msg == nullptr || std::string(msg).find("GDALWarpKernel") == std::string::npos)
-                return;
-            std::lock_guard<std::mutex> lock(mutex);
-            samples.push_back(GDALGetCacheMax64());
-        }
-    };
-    std::mutex WarpCacheProbe::mutex;
-    std::vector<GIntBig> WarpCacheProbe::samples;
-
-    USER_OPEN_TEST(CogCacheBudget, cacheIsBoundedDuringBuild)
-    {
-        TestArea ta(TEST_NAME, true);
-        const fs::path input = ta.downloadTestAsset(
-            testDataUrl("ortho/brighton-beach.tif"), "brighton-beach.tif");
-
-        // The cache of GDAL is the one of the process that builds: this one
-        testutils::InProcessRasterHelper helper;
-        const raster::ScopedRasterHelper installed(helper);
-
-        ConfigSnapshot snap({"DDB_COG_CACHE_MB", "CPL_DEBUG"});
-        CPLSetConfigOption("DDB_COG_CACHE_MB", "64");
-        CPLSetConfigOption("CPL_DEBUG", "ON");
-        GDALSetCacheMax64(8192 * MiB);
-
-        WarpCacheProbe::samples.clear();
-        CPLErrorHandler prev = CPLSetErrorHandler(WarpCacheProbe::handler);
-        buildCog(input.string(), ta.getPath("cog.tif").string());
-        CPLSetErrorHandler(prev);
-
-        ASSERT_FALSE(WarpCacheProbe::samples.empty()) << "no warp kernel debug message observed";
-        for (const auto v : WarpCacheProbe::samples)
-            EXPECT_EQ(v, 64 * MiB);
-        EXPECT_EQ(GDALGetCacheMax64(), 8192 * MiB) << "previous cache size must be restored";
     }
 } // namespace

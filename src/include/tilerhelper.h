@@ -13,7 +13,7 @@
 
 #include "fs.h"
 #include "geo.h"
-#include "gdaltiler.h"
+#include "tiler.h"
 #include "output_format.h"
 #include "thumbs.h"
 
@@ -62,7 +62,8 @@ namespace ddb
         // two ints (min,max)
         static BoundingBox<int> parseZRange(const std::string &zRange);
 
-        // Where to store local cache tiles
+        // Where to store local cache tiles: a folder per file version, tile size and version of
+        // ddb-tilers (which renders them), so a new renderer never serves the tiles of an old one
         static fs::path getCacheFolderName(const fs::path &tileablePath,
                                            time_t modifiedTime, int tileSize);
 
@@ -94,7 +95,8 @@ namespace ddb
         //  - a file that is one already (the COG of a build) is returned as it is;
         //  - a georaster is converted by the raster helper into a COG of the artefacts folder of
         //    the cache (without a limit on its size); the same state of the file is converted once;
-        //  - a geoimage that can be tiled is geoprojected into the same folder;
+        //  - a geoimage that can be tiled is geoprojected, and the result converted the same way
+        //    (the tilers read EPSG:3857 COGs only);
         //  - a URL is downloaded first (toLocalFile) and the download converted the same way.
         // forceRecreate makes the conversion again.
         static fs::path toGeoTIFF(const fs::path &tileablePath, bool forceRecreate = false,

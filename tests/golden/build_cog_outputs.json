@@ -65,7 +65,7 @@
   "driver": "GTiff",
   "height": 256,
   "optimized": false,
-  "pixels": "cebe21eb33a0ce3b",
+  "pixels": "e0025d80bd243894",
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {
    "COMPRESSION": "LZW",
@@ -147,7 +147,7 @@
   "driver": "GTiff",
   "height": 256,
   "optimized": false,
-  "pixels": "3a656a51e001dd08",
+  "pixels": "ca64722de2d0c71c",
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {
    "COMPRESSION": "YCbCr JPEG",
@@ -193,7 +193,7 @@
   "driver": "GTiff",
   "height": 256,
   "optimized": false,
-  "pixels": "683d33a3ce914b32",
+  "pixels": "f63a785a1ab5c620",
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {
    "COMPRESSION": "LZW",
@@ -234,7 +234,7 @@
   "driver": "GTiff",
   "height": 256,
   "optimized": false,
-  "pixels": "3a656a51e001dd08",
+  "pixels": "ca64722de2d0c71c",
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {
    "COMPRESSION": "YCbCr JPEG",
@@ -285,7 +285,7 @@
   "driver": "GTiff",
   "height": 256,
   "optimized": false,
-  "pixels": "a7586f113b694b29",
+  "pixels": "d6a01c1ac448157c",
   "srs": "WGS 84 / Pseudo-Mercator",
   "structure": {
    "COMPRESSION": "LZW",

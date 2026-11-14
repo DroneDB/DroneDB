@@ -8,7 +8,9 @@
 // coordinate system.
 
 #include <algorithm>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <system_error>
 #include <vector>
@@ -20,6 +22,7 @@
 #include "entry.h"
 #include "exceptions.h"
 #include "gdal_open_policy.h"
+#include "gdal_alg.h"
 #include "gdal_priv.h"
 #include "gdal_raii.h"
 #include "geo.h"
@@ -41,9 +44,13 @@ RasterOpException cannotOpen(const fs::path &path)
 
 // ---- rasters
 
+// Raster pixel / line -> the coordinates of its CRS: its geotransform, or (a raster georeferenced
+// by ground control points alone) the GCP transform gdalwarp would use. False when a point fails.
+using PixelToCrs = std::function<bool(double &x, double &y)>;
+
 // The WGS84 footprint (polygon) and center (point) of the raster, from its projection (WKT, not
-// empty) and geotransform. The footprint is left out when GDAL cannot transform the CRS.
-void addFootprint(ProbeResult &result, const std::string &wkt, const double *geotransform, int width, int height,
+// empty) and its pixel-to-CRS mapping. The footprint is left out when GDAL cannot transform the CRS.
+void addFootprint(ProbeResult &result, const std::string &wkt, const PixelToCrs &pixelToCrs, int width, int height,
                   const fs::path &path)
 {
     LOGV << "Setting projection property";
@@ -51,8 +58,6 @@ void addFootprint(ProbeResult &result, const std::string &wkt, const double *geo
 
     // Get lat/lon extent of raster
     const SrsPtr srs = srsFromWkt(wkt.c_str());
-    LOGV << "OSRImportFromWkt result: " << (srs ? "Success" : "Failed");
-
     if (!srs)
         throw GDALException("Cannot read spatial reference system for " + io::toUtf8(path) + ". Is PROJ available?");
 
@@ -60,42 +65,39 @@ void addFootprint(ProbeResult &result, const std::string &wkt, const double *geo
     if (!wgs84)
         throw GDALException("Cannot read WGS84 spatial reference system for " + io::toUtf8(path) + ". Is PROJ available?");
 
-    LOGV << "OSRImportFromEPSG result: Success";
-
     const auto transform = CoordsTransformer::tryCreate(srsOf(srs), srsOf(wgs84));
-    LOGV << "Created coordinate transformation: " << (transform ? "Success" : "Failed");
-
     if (!transform)
     {
         LOGV << "Failed to create coordinate transformation";
         return;
     }
-
     OGRCoordinateTransformationH hTransform = OGRCoordinateTransformation::ToHandle(transform->get());
-    LOGV << "Computing corner coordinates";
 
-    auto ul = getRasterCoordinate(hTransform, geotransform, 0.0, 0.0);
-    LOGV << "Upper Left: " << ul.longitude << ", " << ul.latitude;
-
-    auto ur = getRasterCoordinate(hTransform, geotransform, width, 0);
-    LOGV << "Upper Right: " << ur.longitude << ", " << ur.latitude;
-
-    auto lr = getRasterCoordinate(hTransform, geotransform, width, height);
-    LOGV << "Lower Right: " << lr.longitude << ", " << lr.latitude;
-
-    auto ll = getRasterCoordinate(hTransform, geotransform, 0.0, height);
-    LOGV << "Lower Left: " << ll.longitude << ", " << ll.latitude;
-
-    LOGV << "Adding points to polygon geometry";
+    const auto corner = [&](double x, double y) {
+        if (!pixelToCrs(x, y) || !OCTTransform(hTransform, 1, &x, &y, nullptr))
+            throw GDALException("Cannot get raster coordinates of corner " + std::to_string(x) + "," + std::to_string(y));
+        return Geographic2D(x, y);
+    };
+    const auto ul = corner(0.0, 0.0), ur = corner(width, 0.0), lr = corner(width, height), ll = corner(0.0, height);
     result.polygonGeom.addPoint(ul.longitude, ul.latitude, 0.0);
     result.polygonGeom.addPoint(ur.longitude, ur.latitude, 0.0);
     result.polygonGeom.addPoint(lr.longitude, lr.latitude, 0.0);
     result.polygonGeom.addPoint(ll.longitude, ll.latitude, 0.0);
     result.polygonGeom.addPoint(ul.longitude, ul.latitude, 0.0);
 
-    auto center = getRasterCoordinate(hTransform, geotransform, width / 2.0, height / 2.0);
-    LOGV << "Center point: " << center.longitude << ", " << center.latitude;
+    const auto center = corner(width / 2.0, height / 2.0);
     result.pointGeom.addPoint(center.longitude, center.latitude, 0.0);
+}
+
+// The projection of a raster georeferenced by ground control points alone (no geotransform): the
+// CRS of its GCPs, "" when it has none
+std::string gcpProjection(GDALDatasetH hDataset)
+{
+    double geotransform[6];
+    if (GDALGetGeoTransform(hDataset, geotransform) == CE_None || GDALGetGCPCount(hDataset) == 0)
+        return {};
+    const char *wkt = GDALGetGCPProjection(hDataset);
+    return wkt != nullptr ? std::string(wkt) : std::string();
 }
 
 // The data type and color interpretation of every band
@@ -160,10 +162,33 @@ void describeGeoRaster(GDALDatasetH hDataset, const fs::path &path, ProbeResult 
             result.properties["geotransform"].push_back(geotransform[i]);
 
         const char *projectionRef = GDALGetProjectionRef(hDataset);
+        const auto applyGeotransform = [&geotransform](double &x, double &y) {
+            const double gx = geotransform[0] + geotransform[1] * x + geotransform[2] * y;
+            y = geotransform[3] + geotransform[4] * x + geotransform[5] * y;
+            x = gx;
+            return true;
+        };
         if (projectionRef != nullptr && projectionRef[0] != '\0')
-            addFootprint(result, projectionRef, geotransform, width, height, path);
+            addFootprint(result, projectionRef, applyGeotransform, width, height, path);
         else
             LOGD << "Projection is empty";
+    }
+    else if (const std::string gcpWkt = gcpProjection(hDataset); !gcpWkt.empty())
+    {
+        // Georeferenced by its GCPs: the footprint through the transform gdalwarp builds from them
+        LOGV << "No geotransform: " << GDALGetGCPCount(hDataset) << " GCPs";
+        result.properties["gcps"] = GDALGetGCPCount(hDataset);
+        const std::unique_ptr<void, decltype(&GDALDestroyGenImgProjTransformer)> gcpTransform(
+            GDALCreateGenImgProjTransformer2(hDataset, nullptr, nullptr), &GDALDestroyGenImgProjTransformer);
+        if (!gcpTransform)
+            throw GDALException("Cannot build the transform of the GCPs of " + io::toUtf8(path) + ": " +
+                                CPLGetLastErrorMsg());
+        const auto applyGcps = [transform = gcpTransform.get()](double &x, double &y) {
+            double z = 0;
+            int ok = FALSE;
+            return GDALGenImgProjTransform(transform, FALSE, 1, &x, &y, &z, &ok) && ok;
+        };
+        addFootprint(result, gcpWkt, applyGcps, width, height, path);
     }
     else
     {
@@ -184,8 +209,9 @@ ProbeResult probeRaster(const fs::path &path)
             throw cannotOpen(path);
 
         GDALDatasetH hDataset = datasetHandle(dataset);
+        // A projection, or GCPs with theirs, make a GeoRaster
         const char *projectionRef = GDALGetProjectionRef(hDataset);
-        if (projectionRef == nullptr || projectionRef[0] == '\0')
+        if ((projectionRef == nullptr || projectionRef[0] == '\0') && gcpProjection(hDataset).empty())
         {
             result.type = "Raster";
             return result;

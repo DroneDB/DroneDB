@@ -15,7 +15,6 @@
 #include "mio.h"
 #include "gdal_priv.h"
 #include "cpl_conv.h"
-#include "ogr_spatialref.h"
 #include "ogr_api.h"
 
 namespace ddb
@@ -94,22 +93,6 @@ namespace ddb
             entry.type = fingerprint(p.get(), ctx);
 
             entryHandler(entry.type).parseMetadata(path, entry, ctx);
-        }
-    }
-
-    Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, const double *geotransform, double x, double y)
-    {
-        double dfGeoX = geotransform[0] + geotransform[1] * x + geotransform[2] * y;
-        double dfGeoY = geotransform[3] + geotransform[4] * x + geotransform[5] * y;
-
-        if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr))
-        {
-
-            return Geographic2D(dfGeoX, dfGeoY);
-        }
-        else
-        {
-            throw GDALException("Cannot get raster coordinates of corner " + std::to_string(x) + "," + std::to_string(y));
         }
     }
 

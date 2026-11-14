@@ -4,9 +4,6 @@
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/microsoft/vcpkg.git
-[submodule "untwine"]
-	path = vendor/untwine
-	url = https://github.com/DroneDB/untwine.git
 [submodule "vendor/spz"]
 	path = vendor/spz
 	url = https://github.com/nianticlabs/spz.git
@@ -22,3 +19,6 @@
 [submodule "apps/gdal-util"]
 	path = apps/gdal-util
 	url = https://github.com/DroneDB/gdal-util.git
+[submodule "vendor/ddb-tilers"]
+	path = vendor/ddb-tilers
+	url = https://github.com/DroneDB/ddb-tilers.git

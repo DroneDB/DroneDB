@@ -4,20 +4,19 @@
 
 // The integrity label of a published output (Windows). A private folder made for the confined
 // raster helper has a low integrity label, and what is made in it keeps the label when it is
-// renamed to its place. The writers that never run the helper (mask, merge, bm3d, COPC) stage in
-// a folder without it: their outputs are files that a low integrity process cannot change.
+// renamed to its place, as a COG or a COPC the helper builds does. The writers that never run the
+// helper (mask, merge, bm3d) stage in a folder without it: their outputs are files that a low
+// integrity process cannot change.
 
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "3d.h"
-#include "build_layout.h"
 #include "gtest/gtest.h"
 #include "mask.h"
 #include "merge_multispectral.h"
 #include "mio.h"
-#include "pointcloud.h"
 #include "raster_artefacts.h"
 #include "raster_test_utils.h"
 #include "test.h"
@@ -98,19 +97,6 @@ namespace
         std::ofstream(model) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
         const fs::path output = ta.getPath("model.bm3d");
         buildBm3d(io::toUtf8(model), io::toUtf8(output));
-        ASSERT_TRUE(fs::exists(output));
-        EXPECT_FALSE(lowLabelled(output));
-    }
-
-    TEST(OutputLabel, aCopcHasNoLowLabel)
-    {
-        TestArea ta(TEST_NAME, true);
-        const fs::path cloud = ta.getPath("cloud.ply");
-        std::ofstream(cloud) << "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\n"
-                                "property float z\nend_header\n0 0 0\n10 0 1\n10 10 2\n0 10 3\n";
-        const fs::path folder = ta.getFolder("copc");
-        buildCopc({io::toUtf8(cloud)}, io::toUtf8(folder));
-        const fs::path output = folder / CopcFileName;
         ASSERT_TRUE(fs::exists(output));
         EXPECT_FALSE(lowLabelled(output));
     }

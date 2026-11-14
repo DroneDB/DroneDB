@@ -105,6 +105,11 @@ namespace
             cogRequests++;
             real_.buildCog(path, out, params, progress);
         }
+        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+                       const raster::ProgressCallback &progress) override
+        {
+            real_.buildCopc(path, out, params, progress);
+        }
         void buildVector(const fs::path &path, const fs::path &out, const json &params,
                          const raster::ProgressCallback &progress) override
         {

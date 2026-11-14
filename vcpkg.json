@@ -1,6 +1,6 @@
 {
   "name": "ddb",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "dependencies": [
     "boolinq",
     "cctz",
@@ -26,11 +26,19 @@
       ]
     },
     "gtest",
+    "highway",
     "laszip",
+    "lerc",
+    "libdeflate",
     "libgeotiff",
+    {
+      "name": "libjxl",
+      "default-features": false
+    },
     "libjpeg-turbo",
     "libpng",
     "libwebp",
+    "openjpeg",
     "openssl",
     "libspatialite",
     {
