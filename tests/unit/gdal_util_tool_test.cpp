@@ -345,6 +345,50 @@ namespace
         EXPECT_TRUE(result.polygonGeom.empty());
     }
 
+    // A raster georeferenced by ground control points alone is a GeoRaster: its projection is that
+    // of its GCPs, its footprint the image of its corners through their transform (4 GCPs: the
+    // homography gdalwarp uses), here the corners themselves
+    TEST_F(GdalUtilToolTest, probeOfARasterGeoreferencedByGcpsAloneIsAGeoRaster)
+    {
+        const fs::path gcps = area_->getFolder() / "gcps.tif";
+        {
+            GDALDatasetH ds = GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(gcps).c_str(), 100, 50, 1, GDT_Byte, nullptr);
+            ASSERT_NE(ds, nullptr);
+            GDAL_GCP list[4];
+            GDALInitGCPs(4, list);
+            const double corners[4][4] = {{0, 0, 9.0, 45.2}, {100, 0, 9.2, 45.2}, {100, 50, 9.2, 45.1}, {0, 50, 9.0, 45.1}};
+            for (int i = 0; i < 4; i++)
+            {
+                list[i].dfGCPPixel = corners[i][0];
+                list[i].dfGCPLine = corners[i][1];
+                list[i].dfGCPX = corners[i][2];
+                list[i].dfGCPY = corners[i][3];
+            }
+            OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
+            OSRImportFromEPSG(srs, 4326);
+            ASSERT_EQ(GDALSetGCPs2(ds, 4, list, srs), CE_None);
+            OSRDestroySpatialReference(srs);
+            GDALDeinitGCPs(4, list);
+            GDALClose(ds);
+        }
+        Server server;
+        const auto response = server.ask(probeRequest(1, gcps));
+        ASSERT_TRUE(response.ok) << response.message;
+        const raster::ProbeResult result = raster::probeResultFromJson(response.result);
+        EXPECT_EQ(result.type, "GeoRaster");
+        EXPECT_EQ(result.properties.at("gcps"), 4);
+        EXPECT_FALSE(result.properties.contains("geotransform"));
+        EXPECT_NE(result.wkt.find("4326"), std::string::npos) << result.wkt;
+        ASSERT_EQ(result.polygonGeom.points.size(), 5u);
+        EXPECT_NEAR(result.polygonGeom.points[0].x, 9.0, 1e-9);
+        EXPECT_NEAR(result.polygonGeom.points[0].y, 45.2, 1e-9);
+        EXPECT_NEAR(result.polygonGeom.points[2].x, 9.2, 1e-9);
+        EXPECT_NEAR(result.polygonGeom.points[2].y, 45.1, 1e-9);
+        ASSERT_EQ(result.pointGeom.points.size(), 1u);
+        EXPECT_NEAR(result.pointGeom.points[0].x, 9.1, 1e-9);
+        EXPECT_NEAR(result.pointGeom.points[0].y, 45.15, 1e-9);
+    }
+
     TEST_F(GdalUtilToolTest, probeOfAFileThatIsNoRasterIsUnreadable)
     {
         Server server;
