@@ -5,6 +5,7 @@
 #include "tilerhelper.h"
 #include "timeutil.h"
 #include "raster_tiler.h"
+#include "tilers_call.h"
 #include "threadlock.h"
 #include "raster_cache.h"
 #include "randomutil.h"
@@ -275,13 +276,16 @@ namespace ddb
             return target;
         }
 
-        // Closes the idle tilers that read `artefact`, the file made from `source`, before it is
-        // replaced: Windows replaces no file a process holds open. A tiler is cached under the
-        // path it was asked for (the file of the user), not the artefact it opened, so both go.
+        // Closes what reads `artefact`, the file made from `source`, before it is replaced:
+        // Windows replaces no file a process holds open. The idle tilers are cached under the
+        // path they were asked for (the file of the user), not the artefact they opened, so both
+        // go; ddb-tilers keeps the COG itself open between tiles, and closes every file it keeps
+        // (it has no release by file: the next tiles open theirs again).
         void releaseTilersOf(const fs::path &source, const fs::path &artefact)
         {
             RasterCache::instance().release(source);
             RasterCache::instance().release(artefact);
+            tilers::check(ddbtReleaseSources());
         }
 
         // The COG of `raster` (a raster of the user `source`, or the geoprojection of a photo of

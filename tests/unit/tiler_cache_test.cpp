@@ -287,6 +287,34 @@ namespace
         ASSERT_EQ(DDBReleaseConnections(ta.getFolder().string().c_str(), &closed), DDBERR_NONE);
         EXPECT_EQ(openDescriptorsOf(cog), 0);
     }
+
+    // Open descriptors of this process on a file that was replaced or deleted after it was opened
+    int openReplacedFiles(const fs::path &path)
+    {
+        const std::string replaced = fs::weakly_canonical(path).string() + " (deleted)";
+        int n = 0;
+        for (const auto &e : fs::directory_iterator("/proc/self/fd"))
+        {
+            std::error_code ec;
+            if (fs::read_symlink(e.path(), ec).string() == replaced && !ec)
+                ++n;
+        }
+        return n;
+    }
+
+    // A forced conversion makes the COG again: what reads the one it replaces is closed first
+    // (Windows replaces no file a process holds open), ddb-tilers' copy of it included
+    TEST(TilerCache, aForcedConversionClosesTheCogItReplaces)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
+        memoryTile(raster, fullTile(raster));
+        const fs::path cog = TilerHelper::toGeoTIFF(raster);
+        EXPECT_GE(openDescriptorsOf(cog), 1);
+        EXPECT_EQ(TilerHelper::toGeoTIFF(raster, true), cog);
+        EXPECT_EQ(openReplacedFiles(cog), 0) << "the replaced COG is still open";
+        EXPECT_EQ(openDescriptorsOf(cog), 0);
+    }
 #endif
 
     TEST(TilerCache, webpAndJpegTiles)
