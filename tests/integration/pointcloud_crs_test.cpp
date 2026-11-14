@@ -22,13 +22,13 @@
 #include <pdal/PointTable.hpp>
 #include <pdal/io/BufferReader.hpp>
 #include <pdal/io/LasWriter.hpp>
-#include "pctiler.h"
 #include "pointcloud.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
 #include "tile_test_support.h"
 #include "tilerhelper.h"
+#include "tilers_tiler.h"
 #include "utils.h"
 
 namespace
@@ -270,7 +270,7 @@ namespace
         EXPECT_TRUE(fs::exists(copc));
 
         // No output folder: the tiles are encoded in memory, into the buffers asked for
-        PointCloudTiler tiler(io::toUtf8(copc), "", 256, false);
+        TilersTiler tiler(io::toUtf8(copc), "", 256, false);
         const int minZ = tiler.getMinMaxZ().min;
         for (const auto &t : tiler.getTilesForZoomLevel(minZ))
         {

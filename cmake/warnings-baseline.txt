@@ -30,8 +30,6 @@ src/library/metamanager.cpp -Wshadow 1
 src/library/mio.cpp -Wshadow 1
 src/library/mzip.cpp -Wdeprecated-declarations 1
 src/library/nxconv.cpp -Wdangling-else 1
-src/library/pctiler.cpp -Wfloat-conversion 1
-src/library/pctiler.cpp -Wshadow 4
 src/library/ply.cpp -Wdangling-else 2
 src/library/plyconv.cpp -Wdangling-else 3
 src/library/plyconv.cpp -Wshadow 5

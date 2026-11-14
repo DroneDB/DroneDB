@@ -63,7 +63,7 @@ namespace ddb
     };
 
     /**
-     * Process-wide cache of prepared rasters: tilers (RasterTiler, PointCloudTiler) and
+     * Process-wide cache of prepared rasters: tilers (RasterTiler, TilersTiler) and
      * read-only GDAL datasets (rasters, and the vector GeoPackages that WFS/OGC API
      * Features queries read), keyed by file and kept idle between calls.
      *
@@ -210,9 +210,8 @@ namespace ddb
     using DatasetLease = RasterCache::Lease<OpenedDataset>;
 
     /// Releases what this process keeps of the files under path (a file or a folder):
-    /// idle rasters and tilers (RasterCache), decoded point-cloud nodes (CopcNodeCache) and the
-    /// files ddb-tilers keeps open (every one of them: it has no release by folder; the next
-    /// tile opens its file again). Call it before replacing or deleting those files. Returns the
+    /// idle rasters and tilers (RasterCache) and the files ddb-tilers keeps open (every one of
+    /// them: it has no release by folder; the next tile opens its file again). Call it before replacing or deleting those files. Returns the
     /// rasters closed.
     size_t releaseCachedFiles(const fs::path &path);
 }

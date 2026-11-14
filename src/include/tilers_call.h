@@ -18,6 +18,11 @@ namespace ddb::tilers
     // read or render). Nothing when rc is DDBT_ERR_NONE.
     void check(ddbtErr rc);
 
+    // Makes ddb-tilers read the files it tiles at http(s) URLs (COPC point clouds) with range
+    // requests of libddb's HTTP client (defaultHttpClient): the version of a file is its ETag, else
+    // its Last-Modified date, so a changed file is opened again. Called once by registerProcess.
+    void useHttpClientForRemoteReads();
+
     // A buffer or string ddb-tilers returned, released with ddbtFree
     struct FreeBuffer
     {

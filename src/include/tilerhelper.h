@@ -62,7 +62,8 @@ namespace ddb
         // two ints (min,max)
         static BoundingBox<int> parseZRange(const std::string &zRange);
 
-        // Where to store local cache tiles
+        // Where to store local cache tiles: a folder per file version, tile size and version of
+        // ddb-tilers (which renders them), so a new renderer never serves the tiles of an old one
         static fs::path getCacheFolderName(const fs::path &tileablePath,
                                            time_t modifiedTime, int tileSize);
 

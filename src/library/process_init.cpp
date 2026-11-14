@@ -31,6 +31,7 @@
 #include "mio.h"
 #include "raster_cache.h"
 #include "raster_helper.h"
+#include "tilers_call.h"
 #include "diagnostics.h"
 
 using namespace ddb;
@@ -79,12 +80,11 @@ static bool hostSetEnv(const char* name) {
 //
 // The argument is the folder of the executable, which the data lookup finds by itself; it stays
 // for the exported signature.
-// ddb-tilers (the COG and COPC tilers and builders) makes its own PROJ contexts: it gets the same
-// proj.db folder. Without one it uses PROJ's own search, which reads PROJ_DATA / PROJ_LIB.
-static void configureTilers(const std::string& projDataDir) {
-    const std::string config = json{{"projDataDir", projDataDir}}.dump();
+// Process-wide settings of ddb-tilers (the COG and COPC tilers and builders); a failure is logged
+static void configureTilers(const json& settings) {
+    const std::string config = settings.dump();
     if (ddbtConfigure(config.c_str()) != DDBT_ERR_NONE) {
-        LOGW << "Cannot configure ddb-tilers: " << ddbtLastError();
+        LOGW << "Cannot configure ddb-tilers (" << config << "): " << ddbtLastError();
     }
 }
 
@@ -104,7 +104,9 @@ void setupEnvironmentVariables(const std::string&) {
     const std::string dataDir = io::toUtf8(dataFolder);
     const char* const searchPaths[] = {dataDir.c_str(), nullptr};
     OSRSetPROJSearchPaths(searchPaths);
-    configureTilers(dataDir);
+    // ddb-tilers makes its own PROJ contexts: it gets the same proj.db folder. Without one it uses
+    // PROJ's own search, which reads PROJ_DATA / PROJ_LIB.
+    configureTilers(json{{"projDataDir", dataDir}});
     LOGD << "Set the PROJ search path: " << dataDir;
 
     // Debug: Print proj.db hash
@@ -283,6 +285,16 @@ namespace ddb
                      << sqliteConfigRc << "): concurrent index opens will contend on its allocator mutex";
             }
             initializeGDALandPROJ();
+            // Point-cloud tiles: ddb-tilers' "modern" rendering (the depth read from the density of the
+            // cloud in EPSG:3857, a symmetric disc on each point with a per-pixel depth test, the
+            // same tile whatever the threads, no seams between tiles at the deepest zooms); remote
+            // clouds through libddb's HTTP client
+            configureTilers(json{{"copcTilerMode", "modern"}});
+            try {
+                tilers::useHttpClientForRemoteReads();
+            } catch (const std::exception& e) {
+                LOGW << "Remote point clouds cannot be tiled: " << e.what();
+            }
             // No signal or crash handlers here: this runs inside host processes (the .NET
             // Registry, tests) whose runtimes own SIGSEGV/SIGFPE/SIGTERM. The ddb CLI installs
             // its own in apps/crash_handlers.cpp.

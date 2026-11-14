@@ -66,7 +66,6 @@ set(COMMON_LIBS
     draco::draco
     spz
     ddbt::ddbt
-    ddbt::lazperf
     ZLIB::ZLIB
 )
 
@@ -334,7 +333,7 @@ if (WIN32)
 endif()
 
 
-# CA bundle for libcurl (remote reads in thumbs.cpp and pctiler.cpp, found via getDataPath):
+# CA bundle for libcurl (remote reads in thumbs.cpp and thumb_pointcloud.cpp, found via getDataPath):
 # Mozilla's roots as published by curl.se, pinned by date and SHA-256 so every build ships the
 # same file. It is fetched at configure time, only when the file is missing or differs.
 # To update: take the newest dated file and its SHA-256 from https://curl.se/docs/caextract.html

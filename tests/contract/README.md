@@ -662,3 +662,14 @@ Registry has to adopt first.
   cubic overviews of a COG ring above the opaque value at the edge of the data (266 for 255), so a UInt32, Int16,
   Float32 or Float64 alpha band that holds 255 was opaque at 511 and its renders half transparent (a Float32 band of
   0..1 at 3).
+  The tiles (`DDBTile`, `DDBMemoryTile`, `DDBMemoryTileFmt`, `DDBMemoryTileEx*`, `ddb tile`) are rendered by
+  ddb-tilers. The tiles of a georaster are those of 2.4 in PNG (pixel for pixel) and JPEG (byte for byte); WebP
+  tiles are encoded differently. A photo is converted once to an EPSG:3857 COG and tiled from it: its tiles may
+  differ from those of 2.4. Point-cloud tiles are ddb-tilers' modern rendering (the octree depth from the density
+  of the cloud in EPSG:3857, a symmetric disc on each point with a per-pixel depth test, the same tile whatever the
+  threads, no seams at the deepest zooms): they differ from those of 2.4. A COPC at an http(s) URL is read with
+  range requests of libddb's HTTP client (206 Partial Content; the ETag, else the Last-Modified date, tells a
+  changed file); a server that does not answer them is refused with that reason. `DDB_COPC_NODE_CACHE_MB` and
+  `DDB_PCTILE_RESOLUTION_OFFSET` are no longer read (ddb-tilers' `DDBT_COPC_NODE_CACHE_MB` and
+  `DDBT_COPC_TILE_CACHE_MB` size its caches). The tile folders of `DDBTile` are named with ddb-tilers' version
+  too, so a new renderer never serves the tiles of an earlier one.

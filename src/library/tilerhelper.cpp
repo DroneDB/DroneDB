@@ -86,7 +86,7 @@ namespace ddb
                                              time_t modifiedTime, int tileSize)
     {
         std::ostringstream os;
-        os << io::toUtf8(tileablePath) << "*" << modifiedTime << "*" << tileSize;
+        os << io::toUtf8(tileablePath) << "*" << modifiedTime << "*" << tileSize << "*" << ddbtVersion();
         return Hash::strCRC64(os.str());
     }
 

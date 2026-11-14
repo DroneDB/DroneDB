@@ -7,7 +7,6 @@
 #include <cstdint>
 
 #include "exceptions.h"
-#include "json.h"
 #include "raster_artefacts.h"
 #include "thumbs.h"
 #include "tilers_call.h"
@@ -33,23 +32,18 @@ namespace ddb
             return !v.preset.empty() || !v.bands.empty() || !v.formula.empty() || !v.bandFilter.empty() ||
                    !v.colormap.empty() || !v.rescale.empty() || v.nodata.has_value();
         }
+
+        // cogPath, once it is known to be an artefact (before ddb-tilers opens it)
+        const std::string &artefact(const std::string &cogPath)
+        {
+            raster::requireArtefact(io::fromUtf8(cogPath));
+            return cogPath;
+        }
     } // namespace
 
     RasterTiler::RasterTiler(const std::string &cogPath, const std::string &tilesFolder, int size, bool tmsRows)
-        : Tiler(cogPath, tilesFolder, size, tmsRows)
+        : TilersTiler(artefact(cogPath), tilesFolder, size, tmsRows)
     {
-        raster::requireArtefact(io::fromUtf8(cogPath));
-        char *raw = nullptr;
-        tilers::check(ddbtTileInfo(cogPath.c_str(), size, &raw));
-        const tilers::String text(raw);
-        const json info = json::parse(text.get());
-        oMinX = info.at("minX").get<double>();
-        oMinY = info.at("minY").get<double>();
-        oMaxX = info.at("maxX").get<double>();
-        oMaxY = info.at("maxY").get<double>();
-        tMinZ = info.at("minZoom").get<int>();
-        tMaxZ = info.at("maxZoom").get<int>();
-        nBands = 0; // not used: ddb-tilers chooses the bands of every tile
     }
 
     std::string RasterTiler::tile(int tz, int tx, int ty, ImageFormat format, uint8_t **outBuffer, int *outBufferSize)
@@ -57,13 +51,7 @@ namespace ddb
         // Out of the world is out of the raster: the transparent tile
         if (!inWorld(tz, tx, ty))
             return writeTile(RasterImage(tileSize, tileSize, 3, true), format, tz, tx, ty, outBuffer, outBufferSize);
-
-        uint8_t *raw = nullptr;
-        int size = 0;
-        tilers::check(ddbtMemoryTileFmt(inputPath.c_str(), tz, tx, ty, &raw, &size, tileSize, tms, false, nullptr,
-                                        imageFormatExtension(format)));
-        const tilers::Bytes bytes(raw);
-        return writeEncodedTile(bytes.get(), static_cast<size_t>(size), format, tz, tx, ty, outBuffer, outBufferSize);
+        return TilersTiler::tile(tz, tx, ty, format, outBuffer, outBufferSize);
     }
 
     std::string RasterTiler::tile(int tz, int tx, int ty, const ThumbVisParams &visParams, ImageFormat format,
