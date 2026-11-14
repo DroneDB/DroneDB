@@ -25,7 +25,7 @@
 #include "golden_support.h"
 #include "entry.h"
 #include "gdal_inc.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "raster_region.h"
 #include "vector.h"
@@ -121,7 +121,7 @@ namespace
             // The tiles below are forced, so each one makes the COG again: the tiler that gives
             // their range is closed first, since Windows replaces no file a process holds open
             const auto [zooms, ranges] = [&] {
-                GDALTiler tiler(TilerHelper::toGeoTIFF(ortho).string(), "", 256, false);
+                RasterTiler tiler(TilerHelper::toGeoTIFF(ortho).string(), "", 256, false);
                 const auto z = tiler.getMinMaxZ();
                 return std::make_pair(z, std::vector{tiler.getMinMaxCoordsForZ(z.min), tiler.getMinMaxCoordsForZ(z.max)});
             }();

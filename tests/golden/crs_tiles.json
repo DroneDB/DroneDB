@@ -11,7 +11,7 @@
    "1080_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "12d7a722abc85037",
+    "pixels": "f7c93f4a3fcb4faf",
     "transparent": 32512,
     "width": 256
    },
@@ -25,7 +25,7 @@
    "1081_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "52e1529421a8e0e3",
+    "pixels": "88f948eb2c33c80a",
     "transparent": 32768,
     "width": 256
    }
@@ -108,7 +108,7 @@
    "1079_1316": {
     "bands": 4,
     "height": 256,
-    "pixels": "fb2704b1115d5332",
+    "pixels": "e455512c07368948",
     "transparent": 32768,
     "width": 256
    }
@@ -165,14 +165,14 @@
    "1080_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "20d54ac1df8fbc0f",
+    "pixels": "e783515900f09d86",
     "transparent": 49024,
     "width": 256
    },
    "1081_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "4efdb8d5c8cf811e",
+    "pixels": "0179d4a389572d06",
     "transparent": 49152,
     "width": 256
    }
@@ -236,7 +236,7 @@
    "1080_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "467d06d1d6c6c6a5",
+    "pixels": "4ce6f868f89512d6",
     "transparent": 32512,
     "width": 256
    },
@@ -250,7 +250,7 @@
    "1081_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "b29f92a62bd0458a",
+    "pixels": "6837c0f856f620b5",
     "transparent": 32768,
     "width": 256
    }
@@ -333,7 +333,7 @@
    "1080_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "12d7a722abc85037",
+    "pixels": "f7c93f4a3fcb4faf",
     "transparent": 32512,
     "width": 256
    },
@@ -347,7 +347,7 @@
    "1081_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "52e1529421a8e0e3",
+    "pixels": "88f948eb2c33c80a",
     "transparent": 32768,
     "width": 256
    }

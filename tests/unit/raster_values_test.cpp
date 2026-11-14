@@ -25,7 +25,7 @@
 #include "raster_profile.h"
 #include "contour.h"
 #include "cog.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "raster_artefacts.h"
 #include "raster_stats.h"
 #include "tilerhelper.h"
@@ -1569,7 +1569,7 @@ namespace
         int z = 0;
         BoundingBox<Projected2Di> b;
         {
-            GDALTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
+            RasterTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
             z = t.getMinMaxZ().max;
             b = t.getMinMaxCoordsForZ(z);
         }

@@ -14,7 +14,7 @@
 #include "merge_multispectral.h"
 #include "cog.h"
 #include "thumbs.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "gdal_inc.h"
 #include "mio.h"
@@ -705,7 +705,7 @@ TEST(multispectral, cApiGetRasterInfo) {
 }
 
 // ============================================================
-// GDALTiler Band-Aware Tile Tests
+// RasterTiler Band-Aware Tile Tests
 // ============================================================
 
 // Helper: create a georeferenced multi-band GeoTIFF with pixel data
@@ -745,7 +745,7 @@ TEST(multispectral, tileWithBandSelection) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_tile.tif", 256, 256, 5, GDT_UInt16);
     // Use empty outputFolder for in-memory tile generation
-    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
+    RasterTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
 
     // Get valid tile coords from tiler info
     auto info = tiler.getMinMaxZ();
@@ -760,7 +760,7 @@ TEST(multispectral, tileWithBandSelection) {
     auto bounds = tiler.getMinMaxCoordsForZ(info.max);
 
     try {
-        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, &outBuffer, &outBufferSize);
+        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
         if (outBuffer) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
@@ -803,7 +803,7 @@ TEST(multispectral, tileWithFormula) {
     }
 
     // Use empty outputFolder for in-memory tile generation
-    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
+    RasterTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
     auto info = tiler.getMinMaxZ();
 
     ThumbVisParams visParams;
@@ -818,7 +818,7 @@ TEST(multispectral, tileWithFormula) {
     int outBufferSize = 0;
 
     try {
-        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, &outBuffer, &outBufferSize);
+        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
         if (outBuffer) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
@@ -834,7 +834,7 @@ TEST(multispectral, tileNoVisParamsFallback) {
     fs::path rasterPath = createGeoRaster(ta, "rgb_tile.tif", 256, 256, 3, GDT_Byte);
 
     // Use empty outputFolder for in-memory tile generation
-    GDALTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
+    RasterTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
     auto info = tiler.getMinMaxZ();
 
     // Empty vis params should fall through to standard tile
@@ -846,7 +846,7 @@ TEST(multispectral, tileNoVisParamsFallback) {
     int outBufferSize = 0;
 
     try {
-        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, &outBuffer, &outBufferSize);
+        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
         if (outBuffer) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
@@ -861,7 +861,7 @@ TEST(multispectral, tileNoVisParamsFallback) {
 // closed on return: a forced tile makes the COG again, and Windows replaces no file a tiler
 // holds open
 std::pair<int, BoundingBox<Projected2Di>> deepestTilesOf(const fs::path& raster) {
-    GDALTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
+    RasterTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
     const int z = tiler.getMinMaxZ().max;
     return {z, tiler.getMinMaxCoordsForZ(z)};
 }

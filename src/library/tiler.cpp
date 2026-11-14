@@ -72,21 +72,48 @@ namespace ddb
 
     std::string Tiler::tile(const TileInfo &t) { return tile(t.tz, t.tx, t.ty); }
 
+    std::string Tiler::tile(int tz, int tx, int ty, const ThumbVisParams &, ImageFormat format, uint8_t **outBuffer,
+                            int *outBufferSize)
+    {
+        return tile(tz, tx, ty, format, outBuffer, outBufferSize);
+    }
+
+    namespace
+    {
+        // The tile path of getTilePath with the extension of format
+        std::string withFormatExtension(std::string tilePath, ImageFormat format)
+        {
+            if (format != ImageFormat::Png)
+            {
+                const auto pos = tilePath.rfind(".png");
+                if (pos != std::string::npos)
+                    tilePath.replace(pos, 4, std::string(".") + imageFormatExtension(format));
+            }
+            return tilePath;
+        }
+    } // namespace
+
     std::string Tiler::writeTile(const RasterImage &image, ImageFormat format, int tz, int tx, int ty,
                                  uint8_t **outBuffer, int *outBufferSize)
     {
-        std::string tilePath = getTilePath(tz, tx, ty, true);
-        if (format != ImageFormat::Png)
-        {
-            const auto pos = tilePath.rfind(".png");
-            if (pos != std::string::npos)
-                tilePath.replace(pos, 4, std::string(".") + imageFormatExtension(format));
-        }
-
+        const std::string tilePath = withFormatExtension(getTilePath(tz, tx, ty, true), format);
         EncodeOptions options;
         options.format = format;
         TileEncoder::write(image, options, tilePath, outBuffer, outBufferSize);
         return outBuffer != nullptr ? "" : tilePath;
+    }
+
+    std::string Tiler::writeEncodedTile(const uint8_t *data, size_t size, ImageFormat format, int tz, int tx, int ty,
+                                        uint8_t **outBuffer, int *outBufferSize)
+    {
+        if (outBuffer != nullptr)
+        {
+            TileEncoder::store(data, size, "", outBuffer, outBufferSize);
+            return "";
+        }
+        const std::string tilePath = withFormatExtension(getTilePath(tz, tx, ty, true), format);
+        TileEncoder::store(data, size, tilePath);
+        return tilePath;
     }
 
     std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const

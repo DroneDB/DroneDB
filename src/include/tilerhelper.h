@@ -13,7 +13,7 @@
 
 #include "fs.h"
 #include "geo.h"
-#include "gdaltiler.h"
+#include "tiler.h"
 #include "output_format.h"
 #include "thumbs.h"
 
@@ -94,7 +94,8 @@ namespace ddb
         //  - a file that is one already (the COG of a build) is returned as it is;
         //  - a georaster is converted by the raster helper into a COG of the artefacts folder of
         //    the cache (without a limit on its size); the same state of the file is converted once;
-        //  - a geoimage that can be tiled is geoprojected into the same folder;
+        //  - a geoimage that can be tiled is geoprojected, and the result converted the same way
+        //    (the tilers read EPSG:3857 COGs only);
         //  - a URL is downloaded first (toLocalFile) and the download converted the same way.
         // forceRecreate makes the conversion again.
         static fs::path toGeoTIFF(const fs::path &tileablePath, bool forceRecreate = false,

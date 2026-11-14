@@ -4,7 +4,7 @@
 
 #include "tilerhelper.h"
 #include "timeutil.h"
-#include "gdaltiler.h"
+#include "raster_tiler.h"
 #include "threadlock.h"
 #include "raster_cache.h"
 #include "randomutil.h"
@@ -123,8 +123,8 @@ namespace ddb
     {
         const fs::path &tileablePath = source.path;
         // Files an entry handler tiles itself (COPC point clouds) are read in place; the
-        // others are downloaded when remote and tiled by GDAL. Each step checks whether the
-        // call was canceled; the GDAL steps also while they run.
+        // others are downloaded when remote, converted to a COG and tiled by ddb-tilers. Each
+        // step checks whether the call was canceled; the conversions also while they run.
         cancel::throwIfCanceled();
         const TilerFactory *factory = findTilerFactory(tileablePath);
         const fs::path localPath = factory != nullptr ? tileablePath : toLocalFile(tileablePath, source.pathHash);
@@ -140,8 +140,8 @@ namespace ddb
                 return factory->create(localPath, source.outputFolder, source.tileSize, source.tms);
 
             const fs::path fileToTile = toGeoTIFF(localPath, source.forceRecreate, source.pathHash);
-            return std::make_unique<GDALTiler>(io::toUtf8(fileToTile), io::toUtf8(source.outputFolder), source.tileSize,
-                                               source.tms);
+            return std::make_unique<RasterTiler>(io::toUtf8(fileToTile), io::toUtf8(source.outputFolder),
+                                                 source.tileSize, source.tms);
         });
         cancel::throwIfCanceled();
         return render(*tiler);
@@ -159,11 +159,9 @@ namespace ddb
         if (request.visParams)
         {
             const ThumbVisParams &visParams = *request.visParams;
+            // Visualization parameters apply to rasters; point clouds render as usual
             return io::fromUtf8(withTiler(request.source, [&](Tiler &t) {
-                // Visualization parameters apply to rasters; point clouds render as usual
-                if (auto *raster = dynamic_cast<GDALTiler *>(&t))
-                    return raster->tile(tz, tx, ty, visParams, format, outBuffer, outBufferSize);
-                return t.tile(tz, tx, ty, format, outBuffer, outBufferSize);
+                return t.tile(tz, tx, ty, visParams, format, outBuffer, outBufferSize);
             }));
         }
 
@@ -286,18 +284,19 @@ namespace ddb
             RasterCache::instance().release(artefact);
         }
 
-        // The COG of a raster of a user, in the artefacts of the cache: built by the raster
-        // helper, checked, and moved to the name the raster and its state give. Its statistics
-        // stay behind: the tiles are stretched with statistics computed on the whole COG, as
-        // they are for any raster without a sidecar, not with the approximate ones of a build.
-        void produceCogArtefact(const fs::path &raster, const fs::path &target)
+        // The COG of `raster` (a raster of the user `source`, or the geoprojection of a photo of
+        // it), in the artefacts of the cache: built by the raster helper, checked, and moved to
+        // the name the source and its state give. Its statistics stay behind: the tiles are
+        // stretched with statistics computed on the whole COG, as they are for any raster without
+        // a sidecar, not with the approximate ones of a build.
+        void produceCogArtefact(const fs::path &raster, const fs::path &source, const fs::path &target)
         {
             const io::ScopedTempDir request = raster::makeArtefactRequestFolder("cog-");
             const fs::path produced = request.path() / "cog.tif";
             // The build refuses an output that does not open as a raster
             buildCogInPrivateFolder(io::toUtf8(raster), produced);
 
-            releaseTilersOf(raster, target);
+            releaseTilersOf(source, target);
             raster::publishArtefact(produced, target);
         }
     } // namespace
@@ -315,21 +314,18 @@ namespace ddb
 
         // The tiler reads only what libddb wrote, so a file of a user (or a download) is read
         // once, by the raster helper, and the tiles come from what it writes
-        const fs::path key = raster::artefactsDir() / raster::artefactKey(localTileablePath);
+        // Georasters are converted to a COG; other images are geoprojected first, and the
+        // geoprojection converted. artefactOnce makes it once (a lock, then a rename)
+        const fs::path target = io::concat(raster::artefactsDir() / raster::artefactKey(localTileablePath), ".tif");
         if (entryHandler(fingerprint(localTileablePath)).tilesWithoutReprojection())
-        {
-            // Georasters are converted to a COG
-            const fs::path target = io::concat(key, ".tif");
-            return artefactOnce(target, forceRecreate, [&] { produceCogArtefact(localTileablePath, target); });
-        }
+            return artefactOnce(target, forceRecreate,
+                                [&] { produceCogArtefact(localTileablePath, localTileablePath, target); });
 
-        // Other images are geoprojected first. Multiple threads could be generating the
-        // geoprojected file at the same time, so artefactOnce places a lock (geoProject
-        // publishes it via an atomic rename)
-        const fs::path target = io::concat(key, "-geoprojected.tif");
         return artefactOnce(target, forceRecreate, [&] {
-            releaseTilersOf(localTileablePath, target);
-            ddb::geoProject({io::toUtf8(localTileablePath)}, io::toUtf8(target), "100%", true);
+            const io::ScopedTempDir request = raster::makeArtefactRequestFolder("geoproject-");
+            const fs::path projected = request.path() / "geoprojected.tif";
+            ddb::geoProject({io::toUtf8(localTileablePath)}, io::toUtf8(projected), "100%", true);
+            produceCogArtefact(projected, localTileablePath, target);
         });
     }
 
@@ -412,9 +408,9 @@ namespace ddb
         }
         else
         {
-            // Assume image/geotiff
-            fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input);
-            tiler = std::make_unique<GDALTiler>(io::toUtf8(geotiff), io::toUtf8(output), run.tileSize, run.tms);
+            // A raster or a photo: the COG toGeoTIFF makes of it
+            const fs::path cog = ddb::TilerHelper::toGeoTIFF(input);
+            tiler = std::make_unique<RasterTiler>(io::toUtf8(cog), io::toUtf8(output), run.tileSize, run.tms);
         }
 
         BoundingBox<int> zb;

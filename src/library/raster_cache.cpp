@@ -17,6 +17,7 @@
 #include "raster_artefacts.h"
 #include "raster_utils.h"
 #include "tiler.h"
+#include "tilers_call.h"
 #include "mio.h"
 
 namespace ddb
@@ -300,6 +301,7 @@ namespace ddb
     size_t releaseCachedFiles(const fs::path &path)
     {
         CopcNodeCache::instance().release(path);
+        tilers::check(ddbtReleaseSources());
         return RasterCache::instance().release(path);
     }
 }
