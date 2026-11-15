@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "vis_render.h"
+#include "tilers_raster.h"
 #include <cstdio>
 
 #include <algorithm>
@@ -123,6 +124,14 @@ namespace ddb
             return bandsCount - 1;
         }
 
+        return bandsCount;
+    }
+
+    int dataBandCount(const tilers::Raster &raster)
+    {
+        const int bandsCount = raster.bandCount();
+        if (bandsCount == 4 || bandsCount == 2 || raster.band(bandsCount).colorInterp == "Alpha")
+            return bandsCount - 1;
         return bandsCount;
     }
 

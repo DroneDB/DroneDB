@@ -40,6 +40,9 @@ namespace ddb
     /// The bands of ds that hold data: all but a last band that is alpha (by its color
     /// interpretation or the mask of the raster, or the 2nd of 2 and the 4th of 4 bands)
     int dataBandCount(GDALDatasetH ds);
+    /// The same of a raster ddb-tilers reads: GDAL takes the mask of the raster for alpha only for the 2nd of 2
+    /// and the 4th of 4 bands, which the band count already says
+    int dataBandCount(const tilers::Raster &raster);
 
     /// How a raster shows without visualisation parameters: the map tiles and the WMS map draw
     /// its first three data bands as RGB (its first band as grey when it has fewer), and when they

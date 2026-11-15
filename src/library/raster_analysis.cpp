@@ -848,7 +848,7 @@ PhysicalStats physicalStats(const BandStatistics &s, const tilers::Raster::Band 
 // of several bands (an RGB image has no stretch). A single band (a DEM, a thermal raster) is stretched from
 // its minimum to its maximum; the bands of a raster that is not Byte each over the mean +- 2.33 standard
 // deviations, clamped to the minimum and the maximum (stretchRange).
-json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const DemContext &dem,
+json defaultStretchJson(const std::string &filePath, const StatsSource &source, const DemContext &dem,
                         const std::optional<ThermalCalibration> &cal, const RasterValueOptions &options,
                         const ValueFormula &unit) {
     auto &ve = VegetationEngine::instance();
@@ -856,7 +856,7 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
     if (isThermalFormulaId(options.formula)) {
         const std::optional<double> nodataOverride =
             dem.nodataOverridden ? std::optional<double>(dem.nodata.value) : std::nullopt;
-        const PhysicalStats p = physicalStats(RasterStatsProvider::instance().get(filePath, hDs, 1, nodataOverride),
+        const PhysicalStats p = physicalStats(RasterStatsProvider::instance().get(filePath, source, 1, nodataOverride),
                                               dem.raster->band(1), cal);
         const double lo = unit.apply(p.min);
         double hi = unit.apply(p.max);
@@ -868,7 +868,10 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
         // A thermal formula keeps the stretch of the band; an index has its own
         if (formula != nullptr && formula->requiredBands != "T") {
             const BandFilter filter = ve.autoDetectFilter(filePath);
-            const json stats = formulaRasterStatistics(hDs, options.formula, filter);
+            // The values of a formula are GDAL's reads of the file
+            const GDALDatasetUniquePtr dataset = raster::openInputRaster(filePath);
+            if (!dataset) throw GDALException("Cannot open raster: " + filePath);
+            const json stats = formulaRasterStatistics(GDALDataset::ToHandle(dataset.get()), options.formula, filter);
             if (stats.is_null() || !stats.contains("1"))
                 return json::array();
             const json &s = stats["1"];
@@ -883,19 +886,19 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
         }
     }
 
-    const int dataBands = dataBandCount(hDs);
+    const int dataBands = dataBandCount(*dem.raster);
     const bool isByte = dem.dataType == GDT_Byte;
     auto &provider = RasterStatsProvider::instance();
     const std::optional<double> nodata = dem.nodataOverridden ? std::optional<double>(dem.nodata.value) : std::nullopt;
     json stretch = json::array();
     if (dataBands <= 1) {
-        const PhysicalStats p = physicalStats(provider.get(filePath, hDs, 1, nodata), dem.raster->band(1), cal);
+        const PhysicalStats p = physicalStats(provider.get(filePath, source, 1, nodata), dem.raster->band(1), cal);
         double hi = p.max;
         if (!(hi > p.min)) hi = p.min + 1.0;
         stretch.push_back(stretchEntry(p.min, hi));
     } else if (!isByte) {
         for (int b = 1; b <= dataBands; b++) {
-            const BandStatistics raw = provider.get(filePath, hDs, b, nodata);
+            const BandStatistics raw = provider.get(filePath, source, b, nodata);
             const PhysicalStats p = physicalStats(raw, dem.raster->band(b), b == 1 ? cal : std::nullopt);
             BandStatistics physical;
             physical.min = p.min;
@@ -983,10 +986,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
         // The values of the raster come from this file (the source file the Registry names), as the band
         // model reads them: the NoData value of the caller, the scale and the offset (FR-XC-24)
         const DemContext dem = openDem(filePath, 1, BandValueOptions{options.nodata}, false);
-        // The statistics are GDAL's reads of the same file
-        const GDALDatasetUniquePtr statsDataset = raster::openInputRaster(filePath);
-        if (!statsDataset) throw GDALException("Cannot open raster: " + filePath);
-        const GDALDatasetH hDs = GDALDataset::ToHandle(statsDataset.get());
+        const auto source = statsSourceOf(*dem.raster);
         const GDALDataType dt = dem.dataType;
         // A UInt16 band with a scale or an offset holds physical values, not raw counts (rawCalibrationOf)
         const std::optional<ThermalCalibration> rawCal = (isThermal && dt == GDT_UInt16 && !dem.hasScale && cal.valid)
@@ -995,7 +995,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
 
         // The exact statistics of the pixels that have a value: the range of the whole raster
         // (FR-RAS-07), through the provider
-        const BandStatistics raw = RasterStatsProvider::instance().get(filePath, hDs, 1, options.nodata);
+        const BandStatistics raw = RasterStatsProvider::instance().get(filePath, *source, 1, options.nodata);
         const PhysicalStats p = physicalStats(raw, dem.raster->band(1), rawCal);
 
         // The unit of the values: the band's, else degrees Celsius for a thermal raster that has none; a thermal
@@ -1045,7 +1045,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
             result["windowPixelCount"] = static_cast<uint64_t>(cols * rows);
         }
 
-        result["stretch"] = defaultStretchJson(filePath, hDs, dem, rawCal, options, unit);
+        result["stretch"] = defaultStretchJson(filePath, *source, dem, rawCal, options, unit);
         hasStats = true;
     } catch (const GDALException &e) {
         // A file GDAL cannot read, or no pixel with a value: the R-JPEG fallback below, else the failure

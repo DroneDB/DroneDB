@@ -45,6 +45,8 @@ namespace ddb::tilers
         Raster(const Raster &) = delete;
         Raster &operator=(const Raster &) = delete;
 
+        // The file read: the artefact of the path openInput was given
+        const fs::path &file() const { return file_; }
         int width() const { return width_; }
         int height() const { return height_; }
         int bandCount() const { return static_cast<int>(bands_.size()); }
@@ -53,6 +55,8 @@ namespace ddb::tilers
         int blockWidth() const { return blockWidth_; }
         int blockHeight() const { return blockHeight_; }
         const Band &band(int band1) const { return bands_.at(static_cast<size_t>(band1 - 1)); }
+        // The sizes (width, height) of the overviews, largest first (GDALGetOverview(band, i))
+        const std::vector<std::array<int, 2>> &overviews() const { return overviews_; }
         const std::optional<std::array<double, 6>> &geoTransform() const { return geoTransform_; }
         // The CRS as WKT1 GDAL; empty without one
         const std::string &wkt() const { return wkt_; }
@@ -67,15 +71,25 @@ namespace ddb::tilers
 
         // Whether `band1` has a mask that is not its NoData value (GDALGetMaskFlags with GMF_ALPHA or
         // GMF_PER_DATASET and without GMF_NODATA or GMF_ALL_VALID): the mask of the file, or the alpha band
-        // of an RGBA or grey + alpha raster for its other bands
+        // of an RGBA or grey + alpha raster for its other bands. The bands that have one share it.
         bool hasMask(int band1) const;
-        // Reads the window of `band1` as read() does, and in `mask` (when the band hasMask, else left
-        // untouched) the samples of its mask band as GDAL's RasterIO reads them into Byte: 0 where a
-        // pixel is transparent. @throws InvalidArgsException, GDALException
+
+        // read() of `bands`, and in `mask` (when one of them hasMask, else left untouched) the samples of
+        // their mask band as GDAL's RasterIO reads it into Byte: 0 where a pixel is transparent.
+        // @throws InvalidArgsException, GDALException
+        void readMasked(int x, int y, int width, int height, int bufWidth, int bufHeight, std::span<const int> bands,
+                        float *out, uint8_t *mask) const;
+        void readMasked(int x, int y, int width, int height, int bufWidth, int bufHeight, std::span<const int> bands,
+                        double *out, uint8_t *mask) const;
+        // readMasked() of one band
         void readBand(int band1, int x, int y, int width, int height, int bufWidth, int bufHeight, float *out,
                       uint8_t *mask) const;
         void readBand(int band1, int x, int y, int width, int height, int bufWidth, int bufHeight, double *out,
                       uint8_t *mask) const;
+        // The window (x, y, width, height) of level `level` (0: the raster, i: overviews()[i - 1]) of `bands`,
+        // pixel for pixel, with their mask as readMasked() gives it. @throws InvalidArgsException, GDALException
+        void readLevel(int level, int x, int y, int width, int height, std::span<const int> bands, double *out,
+                       uint8_t *mask) const;
 
       private:
         // What GDALGetMaskFlags says of band 1
@@ -87,18 +101,21 @@ namespace ddb::tilers
             Alpha
         };
 
-        explicit Raster(ddbtRaster *handle);
-        template <typename T>
-        void readBandAs(int band1, int x, int y, int width, int height, int bufWidth, int bufHeight, T *out,
-                        uint8_t *mask) const;
+        Raster(ddbtRaster *handle, fs::path file);
+        // Calls read(bands, sampleType, out, datasetMask) for `bands` (then for the alpha band, in its own type,
+        // when it is their mask), and fills `mask` as readMasked() does; `count` is the samples of a band
+        template <typename T, typename Read>
+        void readWithMask(std::span<const int> bands, size_t count, T *out, uint8_t *mask, const Read &read) const;
 
         ddbtRaster *handle_;
+        fs::path file_;
         int width_ = 0, height_ = 0;
         std::string dataType_;
         int blockWidth_ = 0, blockHeight_ = 0;
         Mask mask_ = Mask::AllValid;
         int alphaBand_ = 0;
         std::vector<Band> bands_;
+        std::vector<std::array<int, 2>> overviews_;
         std::optional<std::array<double, 6>> geoTransform_;
         std::string wkt_;
     };

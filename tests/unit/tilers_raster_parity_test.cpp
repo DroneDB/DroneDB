@@ -18,6 +18,7 @@
 #include "gdal_raii.h"
 #include "json.h"
 #include "mio.h"
+#include "raster_stats.h"
 #include "test.h"
 #include "testarea.h"
 #include "tilers_raster.h"
@@ -315,6 +316,97 @@ namespace
                 }
             }
             ddbtRasterClose(raster);
+        }
+    }
+
+    // The statistics a pass reads through ddb-tilers (the host) are those it reads through GDAL (the raster
+    // helper), to the bit: the exact pass, the overview and the block lattice of a bounded sample, the plan of
+    // the sample, with the NoData value of the band and an override
+    std::vector<std::optional<BandStatistics>> statisticsOf(const std::function<std::vector<BandStatistics>()> &compute,
+                                                            size_t bands)
+    {
+        try
+        {
+            const auto stats = compute();
+            return {stats.begin(), stats.end()};
+        }
+        catch (const NoValidPixelsException &)
+        {
+            return std::vector<std::optional<BandStatistics>>(bands);
+        }
+    }
+
+    void expectSameStatistics(const std::vector<std::optional<BandStatistics>> &got,
+                              const std::vector<std::optional<BandStatistics>> &want)
+    {
+        ASSERT_EQ(got.size(), want.size());
+        for (size_t i = 0; i < got.size(); i++)
+        {
+            ASSERT_EQ(got[i].has_value(), want[i].has_value()) << "band " << i;
+            if (!got[i])
+                continue;
+            EXPECT_EQ(got[i]->min, want[i]->min) << "band " << i;
+            EXPECT_EQ(got[i]->max, want[i]->max) << "band " << i;
+            EXPECT_EQ(got[i]->mean, want[i]->mean) << "band " << i;
+            EXPECT_EQ(got[i]->stdDev, want[i]->stdDev) << "band " << i;
+            EXPECT_EQ(got[i]->validCount, want[i]->validCount) << "band " << i;
+            EXPECT_EQ(got[i]->pixelCount, want[i]->pixelCount) << "band " << i;
+            EXPECT_EQ(got[i]->sampled, want[i]->sampled) << "band " << i;
+        }
+    }
+
+    TEST(TilersRasterParity, theStatisticsOfEveryPassAreWhatGdalReads)
+    {
+        TestArea ta(TEST_NAME, true);
+        const std::vector<Case> cases = {
+            {"byte-rgba-alpha", GDT_Byte, 4, true, false, false, false, false, true, true},
+            {"uint16-rgba-alpha-overviews", GDT_UInt16, 4, true, false, false, false, false, true, true},
+            {"uint16-strips-band", GDT_UInt16, 2, false, true, true},
+            {"int16-scaled", GDT_Int16, 1, true, false, true, true},
+            {"uint32-mask", GDT_UInt32, 1, true, false, false, false, true},
+            {"float32-dem", GDT_Float32, 1, true, false, true, true, false, false, true, 32633},
+            {"float64-mask-overviews", GDT_Float64, 3, true, false, false, false, true, false, true},
+            {"float32-ms-6", GDT_Float32, 6, true, true, true, false, false, false, true, 4326},
+        };
+        const int width = 333, height = 257;
+        for (const Case &c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            const fs::path file = writeRaster(ta.getPath(c.name + ".tif"), c, width, height);
+            const auto ds = adoptDataset(GDALOpen(io::toUtf8(file).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(ds);
+            const auto raster = tilers::Raster::open(file);
+            const auto gdal = statsSourceOf(datasetHandle(ds));
+            const auto tilers = statsSourceOf(*raster);
+            std::vector<int> bands;
+            for (int b = 1; b <= c.bands; b++)
+                bands.push_back(b);
+
+            for (const std::optional<double> nodata : {std::optional<double>(), std::optional<double>(sampleOf(c, 1, 5, 5))})
+            {
+                SCOPED_TRACE(nodata ? "override" : "the NoData of the band");
+                expectSameStatistics(statisticsOf([&] { return computeBandStatistics(*tilers, bands, nodata); }, bands.size()),
+                                     statisticsOf([&] { return computeBandStatistics(*gdal, bands, nodata); }, bands.size()));
+                // A budget that an overview holds (the variants with overviews), and one that only whole blocks
+                // on a lattice fit in
+                for (const uint64_t budget : {uint64_t{30000}, uint64_t{9000}})
+                {
+                    SCOPED_TRACE("budget " + std::to_string(budget));
+                    const RasterWindow whole{0, 0, width, height, width, height};
+                    const BoundedSample got = planBoundedSample(*tilers, bands, whole, budget);
+                    const BoundedSample want = planBoundedSample(*gdal, bands, whole, budget);
+                    EXPECT_EQ(static_cast<int>(got.kind), static_cast<int>(want.kind));
+                    EXPECT_EQ(got.overview, want.overview);
+                    EXPECT_EQ(got.outWidth, want.outWidth);
+                    EXPECT_EQ(got.outHeight, want.outHeight);
+                    EXPECT_EQ(got.blockWidth, want.blockWidth);
+                    EXPECT_EQ(got.blockHeight, want.blockHeight);
+                    EXPECT_EQ(got.step, want.step);
+                    expectSameStatistics(
+                        statisticsOf([&] { return sampleBandStatistics(*tilers, bands, nodata, budget); }, bands.size()),
+                        statisticsOf([&] { return sampleBandStatistics(*gdal, bands, nodata, budget); }, bands.size()));
+                }
+            }
         }
     }
 }

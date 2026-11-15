@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "contour.h"
-#include "artefact_cache.h"
 #include "cancellation.h"
 #include "dem.h"
 #include "raster_stats.h"
@@ -423,10 +422,8 @@ std::string generateContoursJson(const std::string &rasterPath,
 
     // Band statistics drive interval-from-count and JSON metadata: the exact statistics of the pixels that
     // have a value, in physical values (RasterStatsProvider, FR-RAS-07; a pass that stops when the call is canceled)
-    const GDALDatasetUniquePtr statsDataset = raster::openInputRaster(rasterPath);
-    if (!statsDataset) throw GDALException("Cannot open raster: " + rasterPath);
-    const BandStatistics stats = RasterStatsProvider::instance().get(
-        rasterPath, GDALDataset::ToHandle(statsDataset.get()), options.bandIndex, options.nodata);
+    const BandStatistics stats = RasterStatsProvider::instance().get(rasterPath, *statsSourceOf(*dem.raster),
+                                                                     options.bandIndex, options.nodata);
     double bMin = dem.toPhysical(stats.min);
     double bMax = dem.toPhysical(stats.max);
     if (bMin > bMax) std::swap(bMin, bMax);

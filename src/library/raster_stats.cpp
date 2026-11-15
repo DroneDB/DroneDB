@@ -25,6 +25,7 @@
 #include "mio.h"
 #include "raster_artefacts.h"
 #include "raster_utils.h"
+#include "tilers_raster.h"
 
 namespace ddb
 {
@@ -95,12 +96,12 @@ namespace ddb
         }
 
         // The file whose pixels the statistics describe: the dataset when it is a file, else path
-        std::string statsFileOf(const std::string &path, GDALDatasetH ds)
+        std::string statsFileOf(const std::string &path, const StatsSource &source)
         {
-            const char *description = ds != nullptr ? GDALGetDescription(ds) : nullptr;
+            const std::string file = source.file();
             std::error_code ec;
-            if (description != nullptr && *description != '\0' && fs::exists(io::fromUtf8(description), ec))
-                return description;
+            if (!file.empty() && fs::exists(io::fromUtf8(file), ec))
+                return file;
             return path;
         }
 
@@ -147,23 +148,224 @@ namespace ddb
 
     namespace
     {
+        // A dataset GDAL opened
+        class GdalStatsSource final : public StatsSource
+        {
+        public:
+            explicit GdalStatsSource(GDALDatasetH ds) : ds_(ds) {}
+
+            std::string file() const override
+            {
+                const char *description = GDALGetDescription(ds_);
+                return description != nullptr ? description : "";
+            }
+            int width() const override { return GDALGetRasterXSize(ds_); }
+            int height() const override { return GDALGetRasterYSize(ds_); }
+            int bandCount() const override { return GDALGetRasterCount(ds_); }
+            BandNodata nodata(int band) const override { return readBandNodata(bandOf(band)); }
+            bool isFloat32(int band) const override { return GDALGetRasterDataType(bandOf(band)) == GDT_Float32; }
+            bool hasMask(int band) const override { return maskBandOf(bandOf(band)) != nullptr; }
+            void blockSize(int &width, int &height) const override { GDALGetBlockSize(bandOf(1), &width, &height); }
+            int overviewCount() const override { return GDALGetOverviewCount(bandOf(1)); }
+
+            std::optional<std::pair<int, int>> overviewSize(const std::vector<int> &bands, int index) const override
+            {
+                std::optional<std::pair<int, int>> size;
+                for (const int b : bands)
+                {
+                    const GDALRasterBandH ov = GDALGetOverview(bandOf(b), index);
+                    if (ov == nullptr)
+                        return std::nullopt;
+                    const std::pair<int, int> s{GDALGetRasterBandXSize(ov), GDALGetRasterBandYSize(ov)};
+                    if (size && *size != s)
+                        return std::nullopt;
+                    size = s;
+                }
+                return size;
+            }
+
+            void read(int level, const RasterWindow &w, const std::vector<int> &bands, double *samples,
+                      uint8_t *mask) const override
+            {
+                std::vector<GDALRasterBandH> levelBands;
+                for (const int b : bands)
+                    levelBands.push_back(level == 0 ? bandOf(b) : GDALGetOverview(bandOf(b), level - 1));
+                const size_t count = w.outPixels();
+                cancel::GdalProgress progress;
+                // One read when the bands are the bands of one dataset (the raster, or the overview level of a
+                // GeoTIFF): a file whose blocks hold every band is decoded once
+                GDALDatasetH levelDs = level == 0 ? ds_ : GDALGetBandDataset(levelBands.front());
+                std::vector<int> numbers;
+                for (size_t i = 0; levelDs != nullptr && i < levelBands.size(); i++)
+                {
+                    const int number = GDALGetBandNumber(levelBands[i]);
+                    if (GDALGetBandDataset(levelBands[i]) != levelDs || number <= 0 ||
+                        GDALGetRasterBand(levelDs, number) != levelBands[i])
+                        levelDs = nullptr;
+                    else
+                        numbers.push_back(number);
+                }
+                if (levelDs != nullptr)
+                {
+                    GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
+                    if (GDALDatasetRasterIOEx(levelDs, GF_Read, w.x, w.y, w.xsize, w.ysize, samples, w.outWidth,
+                                              w.outHeight, GDT_Float64, static_cast<int>(numbers.size()),
+                                              numbers.data(), 0, 0, 0, &extra) != CE_None)
+                    {
+                        cancel::throwIfCanceled();
+                        throw GDALException("Cannot read the bands to compute their statistics");
+                    }
+                }
+                else
+                {
+                    for (size_t i = 0; i < levelBands.size(); i++)
+                    {
+                        GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
+                        if (GDALRasterIOEx(levelBands[i], GF_Read, w.x, w.y, w.xsize, w.ysize, samples + i * count,
+                                           w.outWidth, w.outHeight, GDT_Float64, 0, 0, &extra) != CE_None)
+                        {
+                            cancel::throwIfCanceled();
+                            throw GDALException("Cannot read a band to compute its statistics");
+                        }
+                    }
+                }
+
+                // The mask the masked bands share (GMF_PER_DATASET); all valid when a level has none
+                if (mask == nullptr)
+                    return;
+                std::fill(mask, mask + count, uint8_t{255});
+                for (const GDALRasterBandH band : levelBands)
+                {
+                    const GDALRasterBandH maskBand = maskBandOf(band);
+                    if (maskBand == nullptr)
+                        continue;
+                    GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
+                    if (GDALRasterIOEx(maskBand, GF_Read, w.x, w.y, w.xsize, w.ysize, mask, w.outWidth, w.outHeight,
+                                       GDT_Byte, 0, 0, &extra) != CE_None)
+                    {
+                        cancel::throwIfCanceled();
+                        throw GDALException("Cannot read the mask of a band to compute its statistics");
+                    }
+                    break;
+                }
+            }
+
+        private:
+            GDALRasterBandH bandOf(int band) const
+            {
+                const GDALRasterBandH hBand = GDALGetRasterBand(ds_, band);
+                if (hBand == nullptr)
+                    throw GDALException("Cannot read band " + std::to_string(band) + " to compute its statistics");
+                return hBand;
+            }
+
+            // The transparency that is not the NoData value: an alpha band or a mask of the dataset
+            static GDALRasterBandH maskBandOf(GDALRasterBandH band)
+            {
+                const int flags = GDALGetMaskFlags(band);
+                if ((flags & (GMF_ALPHA | GMF_PER_DATASET)) != 0 && (flags & (GMF_NODATA | GMF_ALL_VALID)) == 0)
+                    return GDALGetMaskBand(band);
+                return nullptr;
+            }
+
+            GDALDatasetH ds_;
+        };
+
+        // A raster ddb-tilers reads
+        class TilersStatsSource final : public StatsSource
+        {
+        public:
+            explicit TilersStatsSource(const tilers::Raster &raster) : raster_(raster) {}
+
+            std::string file() const override { return io::toUtf8(raster_.file()); }
+            int width() const override { return raster_.width(); }
+            int height() const override { return raster_.height(); }
+            int bandCount() const override { return raster_.bandCount(); }
+            BandNodata nodata(int band) const override
+            {
+                const auto &nd = bandOf(band).nodata;
+                return nd ? BandNodata{true, *nd} : BandNodata{};
+            }
+            bool isFloat32(int band) const override
+            {
+                bandOf(band);
+                return raster_.dataType() == "Float32";
+            }
+            bool hasMask(int band) const override
+            {
+                bandOf(band);
+                return raster_.hasMask(band);
+            }
+            void blockSize(int &width, int &height) const override
+            {
+                width = raster_.blockWidth();
+                height = raster_.blockHeight();
+            }
+            int overviewCount() const override { return static_cast<int>(raster_.overviews().size()); }
+
+            std::optional<std::pair<int, int>> overviewSize(const std::vector<int> &bands, int index) const override
+            {
+                for (const int b : bands)
+                    bandOf(b);
+                // The overviews of a TIFF are levels of the whole file: every band has them
+                if (index < 0 || index >= overviewCount())
+                    return std::nullopt;
+                const auto &size = raster_.overviews()[static_cast<size_t>(index)];
+                return std::pair<int, int>{size[0], size[1]};
+            }
+
+            void read(int level, const RasterWindow &w, const std::vector<int> &bands, double *samples,
+                      uint8_t *mask) const override
+            {
+                try
+                {
+                    if (level == 0)
+                        raster_.readMasked(w.x, w.y, w.xsize, w.ysize, w.outWidth, w.outHeight, bands, samples, mask);
+                    else
+                        raster_.readLevel(level, w.x, w.y, w.xsize, w.ysize, bands, samples, mask);
+                }
+                catch (const GDALException &)
+                {
+                    throw;
+                }
+                catch (const std::exception &e)
+                {
+                    throw GDALException(std::string("Cannot read the bands to compute their statistics: ") + e.what());
+                }
+            }
+
+        private:
+            const tilers::Raster::Band &bandOf(int band) const
+            {
+                if (band < 1 || band > raster_.bandCount())
+                    throw GDALException("Cannot read band " + std::to_string(band) + " to compute its statistics");
+                return raster_.band(band);
+            }
+
+            const tilers::Raster &raster_;
+        };
+    }
+
+    std::unique_ptr<StatsSource> statsSourceOf(GDALDatasetH ds) { return std::make_unique<GdalStatsSource>(ds); }
+
+    std::unique_ptr<StatsSource> statsSourceOf(const tilers::Raster &raster)
+    {
+        return std::make_unique<TilersStatsSource>(raster);
+    }
+
+    namespace
+    {
         // The pixels of a band that have a value (not NoData, not masked, finite), accumulated as they are read
         class BandAccumulator
         {
         public:
-            BandAccumulator(GDALRasterBandH hBand, const std::optional<double> &nodata)
-                : nd_(readBandNodata(hBand)), floatSamples_(GDALGetRasterDataType(hBand) == GDT_Float32)
+            BandAccumulator(const StatsSource &source, int band, const std::optional<double> &nodata)
+                : nd_(nodata ? BandNodata{true, *nodata} : source.nodata(band)),
+                  floatSamples_(source.isFloat32(band)), masked_(source.hasMask(band))
             {
-                if (nodata)
-                    nd_ = BandNodata{true, *nodata};
-
-                // The transparency that is not the NoData value: an alpha band or a mask of the dataset
-                const int maskFlags = GDALGetMaskFlags(hBand);
-                if ((maskFlags & (GMF_ALPHA | GMF_PER_DATASET)) != 0 && (maskFlags & (GMF_NODATA | GMF_ALL_VALID)) == 0)
-                    maskBand_ = GDALGetMaskBand(hBand);
             }
 
-            GDALRasterBandH maskBand() const { return maskBand_; }
+            bool masked() const { return masked_; }
 
             void add(const double *samples, const uint8_t *mask, size_t count)
             {
@@ -205,7 +407,7 @@ namespace ddb
         private:
             BandNodata nd_;
             bool floatSamples_;
-            GDALRasterBandH maskBand_ = nullptr;
+            bool masked_;
             double mean_ = 0.0, m2_ = 0.0;
             double lo_ = std::numeric_limits<double>::infinity();
             double hi_ = -std::numeric_limits<double>::infinity();
@@ -218,70 +420,32 @@ namespace ddb
         // How much larger the second sample of the stretch is when the first has no pixel with a value
         constexpr uint64_t SparseSampleFactor = 16;
 
-        // Bands read together: in one read of `ds` when it holds them all (a file whose blocks hold every
-        // band, pixel interleaving, is then decoded once and not once per band), else band by band
+        // Bands read together, at a level of the source (0: the raster, i: overview i - 1), in one read
         struct BandSet
         {
-            GDALDatasetH ds = nullptr;
-            std::vector<int> numbers;            // in ds
-            std::vector<GDALRasterBandH> bands;  // the same bands
+            const StatsSource *source = nullptr;
+            std::vector<int> bands;
+            int level = 0;
             int width = 0;
             int height = 0;
         };
 
-        // The bands of ds that `bands` names
-        BandSet bandSetOf(GDALDatasetH ds, const std::vector<int> &bands)
+        // The bands of the source that `bands` names, at full resolution
+        BandSet bandSetOf(const StatsSource &source, const std::vector<int> &bands)
         {
-            BandSet set;
-            set.ds = ds;
-            set.numbers = bands;
-            set.width = GDALGetRasterXSize(ds);
-            set.height = GDALGetRasterYSize(ds);
             for (const int b : bands)
-            {
-                const GDALRasterBandH hBand = GDALGetRasterBand(ds, b);
-                if (hBand == nullptr)
+                if (b < 1 || b > source.bandCount())
                     throw GDALException("Cannot read band " + std::to_string(b) + " to compute its statistics");
-                set.bands.push_back(hBand);
-            }
-            return set;
+            return BandSet{&source, bands, 0, source.width(), source.height()};
         }
 
         // Overview `index` of every band of `full`, or nothing when a band lacks it or has it in another size
         std::optional<BandSet> overviewSetOf(const BandSet &full, int index)
         {
-            BandSet set;
-            for (const GDALRasterBandH hBand : full.bands)
-            {
-                const GDALRasterBandH ov = GDALGetOverview(hBand, index);
-                if (ov == nullptr)
-                    return std::nullopt;
-                if (set.bands.empty())
-                {
-                    set.width = GDALGetRasterBandXSize(ov);
-                    set.height = GDALGetRasterBandYSize(ov);
-                }
-                else if (GDALGetRasterBandXSize(ov) != set.width || GDALGetRasterBandYSize(ov) != set.height)
-                {
-                    return std::nullopt;
-                }
-                set.bands.push_back(ov);
-            }
-            // One read when the overviews are the bands of one dataset (the overview level of a GeoTIFF)
-            GDALDatasetH ovDs = GDALGetBandDataset(set.bands.front());
-            for (size_t i = 0; ovDs != nullptr && i < set.bands.size(); i++)
-            {
-                const int number = GDALGetBandNumber(set.bands[i]);
-                if (GDALGetBandDataset(set.bands[i]) != ovDs || number <= 0 ||
-                    GDALGetRasterBand(ovDs, number) != set.bands[i])
-                    ovDs = nullptr;
-                else
-                    set.numbers.push_back(number);
-            }
-            set.ds = ovDs;
-            if (ovDs == nullptr)
-                set.numbers.clear();
-            return set;
+            const auto size = full.source->overviewSize(full.bands, index);
+            if (!size)
+                return std::nullopt;
+            return BandSet{full.source, full.bands, index + 1, size->first, size->second};
         }
 
         // Reads the window of the bands of `set` into their accumulators
@@ -291,58 +455,23 @@ namespace ddb
             const size_t count = static_cast<size_t>(w) * static_cast<size_t>(h);
             const size_t bandCount = set.bands.size();
             samples.resize(count * bandCount);
-            cancel::GdalProgress progress;
-            GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
-            if (set.ds != nullptr)
-            {
-                std::vector<int> numbers(set.numbers);
-                if (GDALDatasetRasterIOEx(set.ds, GF_Read, x, y, w, h, samples.data(), w, h, GDT_Float64,
-                                          static_cast<int>(bandCount), numbers.data(), 0, 0, 0, &extra) != CE_None)
-                {
-                    cancel::throwIfCanceled();
-                    throw GDALException("Cannot read the bands to compute their statistics");
-                }
-            }
-            else
-            {
-                for (size_t i = 0; i < bandCount; i++)
-                {
-                    GDALRasterIOExtraArg bandExtra = progress.rasterIOExtraArg();
-                    if (GDALRasterIOEx(set.bands[i], GF_Read, x, y, w, h, samples.data() + i * count, w, h,
-                                       GDT_Float64, 0, 0, &bandExtra) != CE_None)
-                    {
-                        cancel::throwIfCanceled();
-                        throw GDALException("Cannot read a band to compute its statistics");
-                    }
-                }
-            }
-
-            GDALRasterBandH maskRead = nullptr; // the mask in `mask`: bands that share one read it once
+            const bool masked = std::any_of(accumulators.begin(), accumulators.end(),
+                                            [](const BandAccumulator &a) { return a.masked(); });
+            if (masked)
+                mask.resize(count);
+            set.source->read(set.level, RasterWindow{x, y, w, h, w, h}, set.bands, samples.data(),
+                             masked ? mask.data() : nullptr);
             for (size_t i = 0; i < bandCount; i++)
-            {
-                const GDALRasterBandH maskBand = accumulators[i].maskBand();
-                if (maskBand != nullptr && maskBand != maskRead)
-                {
-                    mask.resize(count);
-                    GDALRasterIOExtraArg maskExtra = progress.rasterIOExtraArg();
-                    if (GDALRasterIOEx(maskBand, GF_Read, x, y, w, h, mask.data(), w, h, GDT_Byte, 0, 0,
-                                       &maskExtra) != CE_None)
-                    {
-                        cancel::throwIfCanceled();
-                        throw GDALException("Cannot read the mask of a band to compute its statistics");
-                    }
-                    maskRead = maskBand;
-                }
-                accumulators[i].add(samples.data() + i * count, maskBand != nullptr ? mask.data() : nullptr, count);
-            }
+                accumulators[i].add(samples.data() + i * count, accumulators[i].masked() ? mask.data() : nullptr,
+                                    count);
         }
 
         std::vector<BandAccumulator> accumulatorsOf(const BandSet &set, const std::optional<double> &nodata)
         {
             std::vector<BandAccumulator> accumulators;
             accumulators.reserve(set.bands.size());
-            for (const GDALRasterBandH hBand : set.bands)
-                accumulators.emplace_back(hBand, nodata);
+            for (const int b : set.bands)
+                accumulators.emplace_back(*set.source, b, nodata);
             return accumulators;
         }
 
@@ -395,23 +524,12 @@ namespace ddb
         }
     }
 
-    BandStatistics computeExactStatistics(GDALRasterBandH hBand, const std::optional<double> &nodata)
-    {
-        BandSet set;
-        set.bands = {hBand};
-        set.width = GDALGetRasterBandXSize(hBand);
-        set.height = GDALGetRasterBandYSize(hBand);
-        auto accumulators = accumulatorsOf(set, nodata);
-        accumulateAll(set, accumulators);
-        return accumulators.front().finish(static_cast<uint64_t>(set.width) * static_cast<uint64_t>(set.height), false);
-    }
-
-    std::vector<BandStatistics> computeBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
+    std::vector<BandStatistics> computeBandStatistics(const StatsSource &source, const std::vector<int> &bands,
                                                       const std::optional<double> &nodata)
     {
         if (bands.empty())
             return {};
-        const BandSet set = bandSetOf(ds, bands);
+        const BandSet set = bandSetOf(source, bands);
         auto accumulators = accumulatorsOf(set, nodata);
         accumulateAll(set, accumulators);
         return finishAll(accumulators, static_cast<uint64_t>(set.width) * static_cast<uint64_t>(set.height), false);
@@ -503,11 +621,11 @@ namespace ddb
         }
     }
 
-    BoundedSample planBoundedSample(GDALDatasetH ds, const std::vector<int> &bands, const RasterWindow &part,
-                                    uint64_t maxPixels, BoundedSample::Fallback fallback)
+    BoundedSample planBoundedSample(const StatsSource &source, const std::vector<int> &bands,
+                                    const RasterWindow &part, uint64_t maxPixels, BoundedSample::Fallback fallback)
     {
         maxPixels = std::max<uint64_t>(1, maxPixels);
-        const BandSet full = bandSetOf(ds, bands);
+        const BandSet full = bandSetOf(source, bands);
         BoundedSample sample;
         sample.part = part;
         const uint64_t partWidth = static_cast<uint64_t>(std::max(0, part.xsize));
@@ -516,7 +634,7 @@ namespace ddb
             return sample; // small enough to be read whole
 
         // The largest overview in which the window is within the budget
-        const int overviewCount = GDALGetOverviewCount(full.bands.front());
+        const int overviewCount = source.overviewCount();
         uint64_t overviewPixels = 0;
         for (int i = 0; i < overviewCount; i++)
         {
@@ -567,7 +685,7 @@ namespace ddb
         // read are decoded (a decimated read of a raster without overviews decodes every block, and
         // some of them several times)
         int blockWidth = 0, blockHeight = 0;
-        GDALGetBlockSize(full.bands.front(), &blockWidth, &blockHeight);
+        source.blockSize(blockWidth, blockHeight);
         sample.kind = BoundedSample::Kind::Blocks;
         sample.blockWidth = std::clamp(blockWidth, 1, std::max(1, full.width));
         sample.blockHeight = std::clamp(blockHeight, 1, std::max(1, full.height));
@@ -588,15 +706,15 @@ namespace ddb
                    : maxPixels * SparseSampleFactor;
     }
 
-    std::vector<BandStatistics> sampleBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
+    std::vector<BandStatistics> sampleBandStatistics(const StatsSource &source, const std::vector<int> &bands,
                                                      const std::optional<double> &nodata, uint64_t maxPixels)
     {
         if (bands.empty())
             return {};
-        const BandSet full = bandSetOf(ds, bands);
+        const BandSet full = bandSetOf(source, bands);
         const uint64_t pixelCount = static_cast<uint64_t>(full.width) * static_cast<uint64_t>(full.height);
         const BoundedSample sample =
-            planBoundedSample(ds, bands, RasterWindow{0, 0, full.width, full.height, full.width, full.height},
+            planBoundedSample(source, bands, RasterWindow{0, 0, full.width, full.height, full.width, full.height},
                               maxPixels);
         switch (sample.kind)
         {
@@ -633,7 +751,7 @@ namespace ddb
         return finishAll(accumulators, pixelCount, true);
     }
 
-    BandStatistics RasterStatsProvider::get(const std::string &path, GDALDatasetH ds, int band,
+    BandStatistics RasterStatsProvider::get(const std::string &path, const StatsSource &source, int band,
                                             const std::optional<double> &nodata, bool persist)
     {
         const auto entry = entryFor(path);
@@ -644,21 +762,20 @@ namespace ddb
         if (cached != entry->bands.end())
             return cached->second;
 
-        const GDALRasterBandH hBand = GDALGetRasterBand(ds, band);
-        if (hBand == nullptr)
+        if (band < 1 || band > source.bandCount())
             throw GDALException("Cannot read band " + std::to_string(band) + " of " + path);
 
-        const std::string file = statsFileOf(path, ds);
+        const std::string file = statsFileOf(path, source);
         BandStatistics s;
-        Source source;
+        Source from;
         if (readStatsSidecar(file, band, s, nodata))
         {
-            source = Source::Sidecar;
+            from = Source::Sidecar;
         }
         else
         {
-            s = computeExactStatistics(hBand, nodata);
-            source = Source::Computed;
+            s = computeBandStatistics(source, {band}, nodata).front();
+            from = Source::Computed;
             LOGD << "Computed band " << band << " statistics of " << path << " (" << s.min << ", "
                  << s.max << ")";
             if (persist || raster::isLibddbArtefact(io::fromUtf8(file)))
@@ -668,7 +785,7 @@ namespace ddb
         entry->bands[key] = s;
 
         std::lock_guard<std::mutex> countersLock(mutex_);
-        switch (source)
+        switch (from)
         {
         case Source::Sidecar:
             counters_.fromSidecar++;
@@ -680,7 +797,8 @@ namespace ddb
         return s;
     }
 
-    std::vector<std::optional<BandStatistics>> RasterStatsProvider::getAll(const std::string &path, GDALDatasetH ds,
+    std::vector<std::optional<BandStatistics>> RasterStatsProvider::getAll(const std::string &path,
+                                                                          const StatsSource &source,
                                                                           const std::vector<int> &bands,
                                                                           const std::optional<double> &nodata,
                                                                           bool persist,
@@ -689,7 +807,7 @@ namespace ddb
         const auto entry = entryFor(path);
         std::lock_guard<std::mutex> lock(entry->mutex);
 
-        const std::string file = statsFileOf(path, ds);
+        const std::string file = statsFileOf(path, source);
         const auto keyOf = [&nodata](int band) { return std::to_string(band) + "|" + nodataKey(nodata); };
 
         std::vector<std::optional<BandStatistics>> result(bands.size());
@@ -699,7 +817,7 @@ namespace ddb
         for (size_t i = 0; i < bands.size(); i++)
         {
             const int b = bands[i];
-            if (GDALGetRasterBand(ds, b) == nullptr)
+            if (b < 1 || b > source.bandCount())
                 throw GDALException("Cannot read band " + std::to_string(b) + " of " + path);
 
             const auto cached = entry->bands.find(keyOf(b));
@@ -725,7 +843,7 @@ namespace ddb
         {
             // The pass of computeBandStatistics, but each band finished on its own: a band without a pixel
             // that has a value does not lose the statistics of the others
-            const BandSet set = bandSetOf(ds, missing);
+            const BandSet set = bandSetOf(source, missing);
             auto accumulators = accumulatorsOf(set, nodata);
             accumulateAll(set, accumulators, progress);
             const uint64_t pixelCount = static_cast<uint64_t>(set.width) * static_cast<uint64_t>(set.height);
@@ -760,7 +878,8 @@ namespace ddb
         return result;
     }
 
-    std::vector<BandStatistics> RasterStatsProvider::getStretchStatistics(const std::string &path, GDALDatasetH ds,
+    std::vector<BandStatistics> RasterStatsProvider::getStretchStatistics(const std::string &path,
+                                                                          const StatsSource &source,
                                                                           const std::vector<int> &bands,
                                                                           const std::optional<double> &nodata,
                                                                           uint64_t maxPixels)
@@ -768,7 +887,7 @@ namespace ddb
         const auto entry = entryFor(path);
         std::lock_guard<std::mutex> lock(entry->mutex);
 
-        const std::string file = statsFileOf(path, ds);
+        const std::string file = statsFileOf(path, source);
         const auto keyOf = [&nodata](int band) { return std::to_string(band) + "|" + nodataKey(nodata); };
         // A sample is kept under its own key: get() (value info, contours) never returns it
         const auto sampledKeyOf = [&keyOf](int band) { return keyOf(band) + "|sampled"; };
@@ -780,7 +899,7 @@ namespace ddb
         {
             if (known.count(b) != 0 || std::find(missing.begin(), missing.end(), b) != missing.end())
                 continue;
-            if (GDALGetRasterBand(ds, b) == nullptr)
+            if (b < 1 || b > source.bandCount())
                 throw GDALException("Cannot read band " + std::to_string(b) + " of " + path);
 
             // The exact statistics when they are known, else a sample read before
@@ -813,7 +932,7 @@ namespace ddb
             std::vector<BandStatistics> stats;
             try
             {
-                stats = sampleBandStatistics(ds, missing, nodata, maxPixels);
+                stats = sampleBandStatistics(source, missing, nodata, maxPixels);
             }
             catch (const GDALException &)
             {
@@ -821,7 +940,7 @@ namespace ddb
                 // No pixel of the sample has a value (a sparse raster): once more with a larger budget,
                 // still bounded (the exact statistics when the band fits in it)
                 LOGD << "No pixel of the sample of the bands of " << path << " has a value: a larger sample";
-                stats = sampleBandStatistics(ds, missing, nodata, sparseSampleBudget(maxPixels));
+                stats = sampleBandStatistics(source, missing, nodata, sparseSampleBudget(maxPixels));
             }
             for (size_t i = 0; i < missing.size(); i++)
             {
