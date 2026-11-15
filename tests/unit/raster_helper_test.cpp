@@ -1443,18 +1443,47 @@ namespace
     // back one per photo
     TEST(RasterBuildParams, thePhotosOfAnExportAreTheOnesTheHostSent)
     {
-        ImageSizesParams sizes;
+        RasterShapesParams sizes;
         sizes.inputs = {"/data/odm/images/a.JPG", "/data/odm/images/b.JPG"};
-        EXPECT_EQ(imageSizesParamsFromJson(toJson(sizes)).inputs, sizes.inputs);
-        const std::vector<PhotoSize> read = {{4000, 3000, ""}, {0, 0, "Cannot open b.JPG"}};
-        const auto back = photoSizesFromJson(toJson(read), 2);
-        ASSERT_EQ(back.size(), 2u);
+        EXPECT_EQ(rasterShapesParamsFromJson(toJson(sizes)).inputs, sizes.inputs);
+        RasterShape photo;
+        photo.width = 4000;
+        photo.height = 3000;
+        photo.bands = 3;
+        photo.type = "Byte";
+        photo.descriptions = {"", "", ""};
+        RasterShape band = photo;
+        band.bands = 1;
+        band.descriptions = {"NIR"};
+        band.xmp = "<x:xmpmeta><Camera:BandName>NIR</Camera:BandName></x:xmpmeta>";
+        band.type = "UInt16";
+        band.geoTransform = std::array<double, 6>{500000.0, 0.05, 0.0, 5000000.0, 0.0, -0.05};
+        band.wkt = "PROJCS[\"WGS 84 / UTM zone 32N\"]";
+        RasterShape unreadable;
+        unreadable.error = "Cannot open b.JPG";
+        const std::vector<RasterShape> read = {photo, band, unreadable};
+        const auto back = rasterShapesFromJson(toJson(read), 3);
+        ASSERT_EQ(back.size(), 3u);
         EXPECT_EQ(back[0].width, 4000);
         EXPECT_EQ(back[0].height, 3000);
+        EXPECT_EQ(back[0].bands, 3);
+        EXPECT_EQ(back[0].type, "Byte");
+        EXPECT_FALSE(back[0].geoTransform);
+        EXPECT_TRUE(back[0].wkt.empty());
         EXPECT_TRUE(back[0].error.empty());
-        EXPECT_EQ(back[1].error, "Cannot open b.JPG");
-        EXPECT_THROW(photoSizesFromJson(toJson(read), 3), ProtocolError) << "a size per photo";
-        EXPECT_THROW(photoSizesFromJson(json{{"sizes", json::array({json{{"width", 0}, {"height", 3}}})}}, 1), ProtocolError);
+        EXPECT_EQ(back[1].type, "UInt16");
+        EXPECT_EQ(back[1].geoTransform, band.geoTransform);
+        EXPECT_EQ(back[1].wkt, band.wkt);
+        EXPECT_EQ(back[1].descriptions, (std::vector<std::string>{"NIR"}));
+        EXPECT_EQ(back[0].descriptions.size(), 3u);
+        EXPECT_EQ(back[1].xmp, band.xmp);
+        EXPECT_TRUE(back[0].xmp.empty());
+        EXPECT_FALSE(rasterShapesParamsFromJson(toJson(sizes)).xmp) << "the XMP only when asked for";
+        sizes.xmp = true;
+        EXPECT_TRUE(rasterShapesParamsFromJson(toJson(sizes)).xmp);
+        EXPECT_EQ(back[2].error, "Cannot open b.JPG");
+        EXPECT_THROW(rasterShapesFromJson(toJson(read), 2), ProtocolError) << "a shape per raster";
+        EXPECT_THROW(rasterShapesFromJson(json{{"shapes", json::array({json{{"width", 0}, {"height", 3}}})}}, 1), ProtocolError);
 
         ResizeImagesParams resize;
         resize.images = {{"/data/odm/images/a.JPG", "a.JPG", 64, 48}, {"/data/odm/images/c.tif", "c.tif.jpg", 48, 64}};
@@ -1489,11 +1518,70 @@ namespace
         request.params = toJson(resize);
         EXPECT_EQ(helperOperationInputs(request),
                   (std::vector<fs::path>{"/data/odm/images/a.JPG", "/data/odm/images/c.tif"}));
-        request.op = op::kImageSizes;
+        request.op = op::kRasterShapes;
         request.params = toJson(sizes);
         EXPECT_EQ(helperOperationInputs(request), sizes.inputs);
         EXPECT_TRUE(outIsFolder(op::kResizeImages));
         EXPECT_FALSE(outIsFolder(op::kMask));
+    }
+
+    // The bands of a merge travel in their order, with the crop that shifts them into place, the names
+    // of the merged bands and its XMP
+    TEST(RasterBuildParams, theBandsOfAMergeAreTheOnesTheHostSent)
+    {
+        MergeBandsParams merge;
+        merge.inputs = {"/data/ms/IMG_0001_1.tif", "/data/ms/IMG_0001_2.tif"};
+        AlignmentCrop crop;
+        crop.dx = {0, -3};
+        crop.dy = {0, 2};
+        crop.padLeft = 3;
+        crop.padTop = 2;
+        crop.outW = 1277;
+        crop.outH = 958;
+        merge.crop = crop;
+        merge.names = {"Blue", "Green"};
+        merge.xmp = "<x:xmpmeta/>";
+        merge.threads = 6;
+        const auto back = mergeBandsParamsFromJson(toJson(merge));
+        EXPECT_EQ(back.inputs, merge.inputs);
+        ASSERT_TRUE(back.crop);
+        EXPECT_EQ(back.crop->dx, crop.dx);
+        EXPECT_EQ(back.crop->dy, crop.dy);
+        EXPECT_EQ(back.crop->padLeft, 3);
+        EXPECT_EQ(back.crop->padTop, 2);
+        EXPECT_EQ(back.crop->outW, 1277);
+        EXPECT_EQ(back.crop->outH, 958);
+        EXPECT_EQ(back.names, merge.names);
+        EXPECT_EQ(back.xmp, merge.xmp);
+        EXPECT_EQ(back.threads, std::optional<int>(6));
+        merge.crop.reset();
+        EXPECT_FALSE(mergeBandsParamsFromJson(toJson(merge)).crop);
+
+        json oneInput = toJson(merge);
+        oneInput["inputs"].erase(1);
+        EXPECT_THROW(mergeBandsParamsFromJson(oneInput), ProtocolError);
+        merge.crop = crop;
+        json shortCrop = toJson(merge);
+        shortCrop["crop"]["dx"].erase(1);
+        EXPECT_THROW(mergeBandsParamsFromJson(shortCrop), ProtocolError) << "a shift per input";
+
+        MergePreviewParams preview;
+        preview.inputs = merge.inputs;
+        preview.bands = {3, 2, 1};
+        preview.size = 512;
+        const auto previewBack = mergePreviewParamsFromJson(toJson(preview));
+        EXPECT_EQ(previewBack.inputs, preview.inputs);
+        EXPECT_EQ(previewBack.bands, preview.bands);
+        EXPECT_EQ(previewBack.size, 512);
+        preview.bands = {1, 2};
+        EXPECT_THROW(mergePreviewParamsFromJson(toJson(preview)), ProtocolError);
+        preview.bands = {0, 1, 2};
+        EXPECT_THROW(mergePreviewParamsFromJson(toJson(preview)), ProtocolError);
+
+        Request request;
+        request.op = op::kMergeBands;
+        request.params = toJson(merge);
+        EXPECT_EQ(helperOperationInputs(request), merge.inputs);
     }
 
     TEST(RasterBuildParams, paramsThatAreNotWhatTheOperationTakesAreRefused)

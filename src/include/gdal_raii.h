@@ -137,6 +137,10 @@ namespace ddb
     // an int (the buffer is freed).
     VsiFreePtr<GByte> stealMemFileBuffer(const std::string &path, int &size);
 
+    // A copy of `bytes` in a buffer of GDAL's allocator (VSIMalloc), which the caller of the C API frees
+    // as the buffers of the encoder. @throws AppException when it cannot be allocated
+    uint8_t *vsiMallocCopy(const std::string &bytes);
+
     struct SrsDeleter
     {
         using pointer = OGRSpatialReferenceH;

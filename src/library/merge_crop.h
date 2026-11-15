@@ -4,24 +4,16 @@
 #ifndef MERGE_CROP_H
 #define MERGE_CROP_H
 
-// The crop of a multispectral merge that shifts the bands into place: shared by the validation,
-// which reports the size of the merged raster, and the merge, which writes it
-// (merge_multispectral_validate.cpp, merge_multispectral.cpp). Not installed.
+// The plan of the crop of a multispectral merge that shifts the bands into place (AlignmentCrop):
+// shared by the validation, which reports the size of the merged raster, and the merge. Not installed.
 
 #include <optional>
 #include <vector>
 
+#include "alignment_crop.h"
 #include "merge_multispectral.h"
 
 namespace ddb {
-
-// The integer shift of every band against the reference band, and the margins that cropping to
-// the area all bands cover takes off each side
-struct AlignmentCrop {
-    std::vector<int> dx, dy;
-    int padLeft = 0, padRight = 0, padTop = 0, padBottom = 0;
-    int outW = 0, outH = 0;
-};
 
 // Plans the crop of bands of width x height pixels that the detected alignment asks for; nothing
 // when the shift is so large that no area would be left

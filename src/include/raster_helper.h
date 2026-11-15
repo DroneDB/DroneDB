@@ -237,6 +237,10 @@ namespace ddb
             std::atomic<int64_t> nextId_{1};
         };
 
+        // What GDAL reports of the shape of each of the user's rasters (and their xml:XMP when `xmp`), or
+        // why it cannot be read: the raster helper reads them, all in one run (none for no raster)
+        std::vector<RasterShape> rasterShapesOf(const std::vector<fs::path> &rasters, bool xmp = false);
+
         // Logs the progress of a long operation of the helper, every 5 percent: "<what> progress: N%".
         // Called from the thread that waits for the helper.
         class ProgressLog
@@ -310,6 +314,10 @@ namespace ddb
         // Whether the bytes are a WebP file (RIFF container whose size is the file's) at most
         // kMaxThumbnailBytes long
         bool looksLikeThumbnail(const std::string &bytes);
+
+        // The WebP the helper wrote to `file` (a thumbnail, a preview) of `source`, checked: a regular file
+        // of a thumbnail's size that is a WebP. @throws GDALException otherwise
+        std::string readHelperWebp(const fs::path &file, const std::string &source);
 
         // The largest remote file a tile or a thumbnail reads (it is downloaded first, into a
         // temporary folder or the tile cache): 8 GiB, beyond the largest orthophoto a dataset

@@ -678,19 +678,6 @@ namespace ddb
             return false;
         }
 
-        // The size of each photo, or why it cannot be read, from the raster helper: it reads the files of
-        // users, all of them in one run
-        std::vector<raster::PhotoSize> photoSizes(const std::vector<fs::path> &photos)
-        {
-            if (photos.empty())
-                return {};
-            raster::ImageSizesParams params;
-            params.inputs = photos;
-            const json result = raster::rasterHelper().operate(raster::op::kImageSizes, photos.front(), fs::path(),
-                                                               raster::toJson(params), raster::ProgressCallback());
-            return raster::photoSizesFromJson(result, photos.size());
-        }
-
         // The images of the project that can be part of the model, with their camera and pose.
         // Those that cannot are counted in `skipped`.
         std::vector<PlannedImage> planImages(const fs::path &project, const std::vector<OdmShot> &shots,
@@ -748,7 +735,7 @@ namespace ddb
             std::vector<fs::path> sources;
             for (const auto &c : candidates)
                 sources.push_back(c.image.source);
-            const std::vector<raster::PhotoSize> sizes = photoSizes(sources);
+            const std::vector<raster::RasterShape> sizes = raster::rasterShapesOf(sources);
 
             std::vector<PlannedImage> planned;
             std::set<std::string> names;
@@ -759,7 +746,7 @@ namespace ddb
                 const OdmCamera *camera = candidates[k].image.camera;
                 const std::string &note = candidates[k].note;
                 PlannedImage image = std::move(candidates[k].image);
-                const raster::PhotoSize &size = sizes[k];
+                const raster::RasterShape &size = sizes[k];
                 if (!size.error.empty())
                 {
                     skipped.add(std::string("it cannot be read (") + size.error + ")", shot.filename);

@@ -296,7 +296,8 @@ namespace ddb
 
         bool isHelperOperation(std::string_view name)
         {
-            return name == op::kMask || name == op::kImageSizes || name == op::kResizeImages;
+            return name == op::kMask || name == op::kRasterShapes || name == op::kResizeImages || name == op::kMergeBands ||
+                   name == op::kMergePreview;
         }
 
         bool outIsFolder(std::string_view name)
@@ -882,49 +883,99 @@ namespace ddb
             return result;
         }
 
-        json toJson(const ImageSizesParams &params)
+        json toJson(const RasterShapesParams &params)
         {
             json result = json::object();
             setInputs(result, params.inputs);
+            if (params.xmp)
+                result["xmp"] = true;
             return result;
         }
 
-        ImageSizesParams imageSizesParamsFromJson(const json &params)
+        RasterShapesParams rasterShapesParamsFromJson(const json &params)
         {
             if (!params.is_object())
-                throw ProtocolError("the imageSizes params are not an object");
-            ImageSizesParams result;
+                throw ProtocolError("the rasterShapes params are not an object");
+            RasterShapesParams result;
             result.inputs = getInputs(params);
+            result.xmp = optionalBool(params, "xmp", false);
             return result;
         }
 
-        json toJson(const std::vector<PhotoSize> &sizes)
+        json toJson(const std::vector<RasterShape> &shapes)
         {
             json items = json::array();
-            for (const PhotoSize &size : sizes)
-                items.push_back(size.error.empty() ? json{{"width", size.width}, {"height", size.height}}
-                                                   : json{{"error", size.error}});
-            return {{"sizes", std::move(items)}};
+            for (const RasterShape &shape : shapes)
+            {
+                if (!shape.error.empty())
+                {
+                    items.push_back({{"error", shape.error}});
+                    continue;
+                }
+                json item = {{"width", shape.width}, {"height", shape.height}, {"bands", shape.bands}, {"type", shape.type}};
+                if (shape.geoTransform)
+                    item["geoTransform"] = *shape.geoTransform;
+                // The CRS is text of the file (a WKT), which goes as base64 when it is no UTF-8
+                setText(item, "wkt", shape.wkt);
+                json descriptions = json::array();
+                for (const std::string &description : shape.descriptions)
+                {
+                    json band = json::object();
+                    setText(band, "description", description);
+                    descriptions.push_back(std::move(band));
+                }
+                item["descriptions"] = std::move(descriptions);
+                if (!shape.xmp.empty())
+                    setText(item, "xmp", shape.xmp);
+                items.push_back(std::move(item));
+            }
+            return {{"shapes", std::move(items)}};
         }
 
-        std::vector<PhotoSize> photoSizesFromJson(const json &result, size_t count)
+        std::vector<RasterShape> rasterShapesFromJson(const json &result, size_t count)
         {
-            std::vector<PhotoSize> sizes;
-            for (const json &item : arrayOf(result, "sizes", count))
+            std::vector<RasterShape> shapes;
+            for (const json &item : arrayOf(result, "shapes", count))
             {
                 if (!item.is_object())
-                    throw ProtocolError("a size is not an object");
-                PhotoSize size;
+                    throw ProtocolError("a shape is not an object");
+                RasterShape shape;
                 if (member(item, "error") != nullptr)
-                    size.error = requiredString(item, "error");
+                    shape.error = requiredString(item, "error");
                 else
                 {
-                    size.width = positiveInt(item, "width");
-                    size.height = positiveInt(item, "height");
+                    shape.width = positiveInt(item, "width");
+                    shape.height = positiveInt(item, "height");
+                    shape.bands = positiveInt(item, "bands");
+                    shape.type = requiredString(item, "type");
+                    if (const json *gt = member(item, "geoTransform"))
+                    {
+                        if (!gt->is_array() || gt->size() != 6)
+                            throw ProtocolError("'geoTransform' is not an array of 6 numbers");
+                        std::array<double, 6> values{};
+                        for (size_t i = 0; i < 6; ++i)
+                        {
+                            if (!(*gt)[i].is_number())
+                                throw ProtocolError("'geoTransform' holds a value that is not a number");
+                            values[i] = (*gt)[i].get<double>();
+                        }
+                        shape.geoTransform = values;
+                    }
+                    shape.wkt = getText(item, "wkt").value_or("");
+                    const json &descriptions = required(item, "descriptions");
+                    if (!descriptions.is_array() || descriptions.size() != static_cast<size_t>(shape.bands))
+                        throw ProtocolError("'descriptions' is not an array of a description per band");
+                    for (const json &band : descriptions)
+                    {
+                        if (!band.is_object())
+                            throw ProtocolError("a description is not an object");
+                        shape.descriptions.push_back(getText(band, "description").value_or(""));
+                    }
+                    shape.xmp = getText(item, "xmp").value_or("");
                 }
-                sizes.push_back(std::move(size));
+                shapes.push_back(std::move(shape));
             }
-            return sizes;
+            return shapes;
         }
 
         json toJson(const ResizeImagesParams &params)
@@ -993,10 +1044,132 @@ namespace ddb
             return errors;
         }
 
+        namespace
+        {
+            json intArray(const std::vector<int> &values) { return values; }
+
+            std::vector<int> getInts(const json &object, const char *name)
+            {
+                const json &values = required(object, name);
+                if (!values.is_array())
+                    throw ProtocolError(std::string("'") + name + "' is not an array");
+                std::vector<int> result;
+                for (const json &v : values)
+                {
+                    if (!v.is_number_integer() || v.get<int64_t>() < std::numeric_limits<int>::min() ||
+                        v.get<int64_t>() > std::numeric_limits<int>::max())
+                        throw ProtocolError(std::string("'") + name + "' holds a value that is not an integer");
+                    result.push_back(v.get<int>());
+                }
+                return result;
+            }
+
+            int getInt(const json &object, const char *name)
+            {
+                const json &value = required(object, name);
+                if (!value.is_number_integer() || value.get<int64_t>() < std::numeric_limits<int>::min() ||
+                    value.get<int64_t>() > std::numeric_limits<int>::max())
+                    throw ProtocolError(std::string("'") + name + "' is not an integer");
+                return value.get<int>();
+            }
+        } // namespace
+
+        json toJson(const MergeBandsParams &params)
+        {
+            json result = json::object();
+            setInputs(result, params.inputs);
+            if (params.crop)
+            {
+                const AlignmentCrop &c = *params.crop;
+                result["crop"] = {{"dx", intArray(c.dx)},       {"dy", intArray(c.dy)},       {"padLeft", c.padLeft},
+                                  {"padRight", c.padRight},     {"padTop", c.padTop},         {"padBottom", c.padBottom},
+                                  {"outW", c.outW},             {"outH", c.outH}};
+            }
+            json names = json::array();
+            for (const std::string &name : params.names)
+            {
+                json band = json::object();
+                setText(band, "name", name);
+                names.push_back(std::move(band));
+            }
+            result["names"] = std::move(names);
+            setText(result, "xmp", params.xmp);
+            setBuildThreads(result, params.threads);
+            return result;
+        }
+
+        MergeBandsParams mergeBandsParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the mergeBands params are not an object");
+            MergeBandsParams result;
+            result.inputs = getInputs(params);
+            if (result.inputs.size() < 2)
+                throw ProtocolError("a merge has at least 2 inputs");
+            if (const json *crop = member(params, "crop"))
+            {
+                if (!crop->is_object())
+                    throw ProtocolError("'crop' is not an object");
+                AlignmentCrop c;
+                c.dx = getInts(*crop, "dx");
+                c.dy = getInts(*crop, "dy");
+                if (c.dx.size() != result.inputs.size() || c.dy.size() != result.inputs.size())
+                    throw ProtocolError("the crop has not a shift per input");
+                c.padLeft = getInt(*crop, "padLeft");
+                c.padRight = getInt(*crop, "padRight");
+                c.padTop = getInt(*crop, "padTop");
+                c.padBottom = getInt(*crop, "padBottom");
+                c.outW = positiveInt(*crop, "outW");
+                c.outH = positiveInt(*crop, "outH");
+                result.crop = std::move(c);
+            }
+            const json &names = required(params, "names");
+            if (!names.is_array())
+                throw ProtocolError("'names' is not an array");
+            for (const json &band : names)
+            {
+                if (!band.is_object())
+                    throw ProtocolError("a name is not an object");
+                result.names.push_back(getText(band, "name").value_or(""));
+            }
+            result.xmp = getText(params, "xmp").value_or("");
+            result.threads = buildThreadsFromJson(params);
+            return result;
+        }
+
+        json toJson(const MergePreviewParams &params)
+        {
+            json result = {{"bands", intArray(params.bands)}, {"size", params.size}};
+            setInputs(result, params.inputs);
+            return result;
+        }
+
+        MergePreviewParams mergePreviewParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the mergePreview params are not an object");
+            MergePreviewParams result;
+            result.inputs = getInputs(params);
+            if (result.inputs.empty())
+                throw ProtocolError("a preview has inputs");
+            result.bands = getInts(params, "bands");
+            if (result.bands.size() < 3)
+                throw ProtocolError("a preview has at least 3 bands");
+            for (const int band : result.bands)
+                if (band < 1)
+                    throw ProtocolError("'bands' holds a band that is not 1-based");
+            result.size = positiveInt(params, "size");
+            return result;
+        }
+
         std::vector<fs::path> helperOperationInputs(const Request &request)
         {
-            if (request.op == op::kImageSizes)
-                return imageSizesParamsFromJson(request.params).inputs;
+            if (request.op == op::kMergeBands)
+                return mergeBandsParamsFromJson(request.params).inputs;
+            if (request.op == op::kMergePreview)
+                return mergePreviewParamsFromJson(request.params).inputs;
+            if (request.op == op::kRasterShapes)
+                return rasterShapesParamsFromJson(request.params).inputs;
             std::vector<fs::path> inputs;
             if (request.op == op::kResizeImages)
                 for (const auto &image : resizeImagesParamsFromJson(request.params).images)

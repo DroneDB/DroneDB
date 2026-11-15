@@ -484,6 +484,18 @@ namespace ddb
             raiseFailure(op, path, limitSignal(result.termSignal) ? ErrorCode::Limit : ErrorCode::Crashed, text);
         }
 
+        std::vector<RasterShape> rasterShapesOf(const std::vector<fs::path> &rasters, bool xmp)
+        {
+            if (rasters.empty())
+                return {};
+            RasterShapesParams params;
+            params.inputs = rasters;
+            params.xmp = xmp;
+            const json result =
+                rasterHelper().operate(op::kRasterShapes, rasters.front(), fs::path(), toJson(params), ProgressCallback());
+            return rasterShapesFromJson(result, rasters.size());
+        }
+
         void ProgressLog::operator()(double fraction)
         {
             const int pct = static_cast<int>(fraction * 100.0);
@@ -732,10 +744,15 @@ namespace ddb
             const fs::path output = outputFolder.path() / "thumbnail.webp";
             rasterHelper().thumbnail(input, output, sent);
 
-            std::string bytes = readHelperOutput(output);
+            return readHelperWebp(output, utf8);
+        }
+
+        std::string readHelperWebp(const fs::path &file, const std::string &source)
+        {
+            std::string bytes = readHelperOutput(file);
             if (!looksLikeThumbnail(bytes))
             {
-                LOGW << kGdalUtilName << " thumbnail of " << utf8 << " is not a WebP file; it is dropped";
+                LOGW << kGdalUtilName << " thumbnail of " << source << " is not a WebP file; it is dropped";
                 throw GDALException(std::string(kGdalUtilName) + " wrote a file that is not a thumbnail");
             }
             return bytes;

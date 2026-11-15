@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_raii.h"
+
+#include <cstring>
 #include "randomutil.h"
 
 #include <cerrno>
@@ -202,5 +204,13 @@ namespace ddb
     ScopedThreadConfigOption::~ScopedThreadConfigOption()
     {
         CPLSetThreadLocalConfigOption(key_.c_str(), hadPrevious_ ? previous_.c_str() : nullptr);
+    }
+    uint8_t *vsiMallocCopy(const std::string &bytes)
+    {
+        auto *data = static_cast<uint8_t *>(VSIMalloc(bytes.empty() ? 1 : bytes.size()));
+        if (data == nullptr)
+            throw AppException("Cannot allocate " + std::to_string(bytes.size()) + " bytes");
+        std::memcpy(data, bytes.data(), bytes.size());
+        return data;
     }
 }

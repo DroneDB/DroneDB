@@ -7,6 +7,7 @@
 
 #include "cpl_conv.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "mio.h"
 #include "raster_helper.h"
 #include "thumb_internal.h"
@@ -26,12 +27,7 @@ void publish(const std::string& webp,
     if (outImagePath.empty() && outBuffer != nullptr) {
         if (outBufferSize == nullptr)
             throw InvalidArgsException("Output buffer size pointer is null");
-        // The caller frees the buffer with GDAL's allocator, like the buffers of the encoder
-        auto* data = static_cast<uint8_t*>(VSIMalloc(webp.size()));
-        if (data == nullptr)
-            throw AppException("Cannot allocate " + std::to_string(webp.size()) + " bytes");
-        std::memcpy(data, webp.data(), webp.size());
-        *outBuffer = data;
+        *outBuffer = vsiMallocCopy(webp);
         *outBufferSize = static_cast<int>(webp.size());
         return;
     }

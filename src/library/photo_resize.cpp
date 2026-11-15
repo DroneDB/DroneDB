@@ -21,24 +21,6 @@ namespace ddb::raster
         // The photos resized at once when the host says nothing
         constexpr size_t kDefaultThreads = 8;
 
-        PhotoSize sizeOf(const fs::path &photo)
-        {
-            PhotoSize size;
-            try
-            {
-                const auto ds = openInputRaster(io::toUtf8(photo));
-                if (!ds)
-                    throw GDALException("Cannot open " + io::toUtf8(photo));
-                size.width = GDALGetRasterXSize(datasetHandle(ds));
-                size.height = GDALGetRasterYSize(datasetHandle(ds));
-            }
-            catch (const GDALException &e)
-            {
-                size.error = e.what();
-            }
-            return size;
-        }
-
         // Writes the photo resampled to a JPEG of the given size
         void resizeToJpeg(const ResizeImagesParams::Image &image, const fs::path &target, int quality)
         {
@@ -87,15 +69,6 @@ namespace ddb::raster
                 throw GDALException("Cannot write " + image.name + ": " + CPLGetLastErrorMsg());
         }
     } // namespace
-
-    std::vector<PhotoSize> readPhotoSizes(const std::vector<fs::path> &photos)
-    {
-        std::vector<PhotoSize> sizes;
-        sizes.reserve(photos.size());
-        for (const fs::path &photo : photos)
-            sizes.push_back(sizeOf(photo));
-        return sizes;
-    }
 
     std::vector<std::string> resizePhotos(const ResizeImagesParams &params, const fs::path &folder,
                                           const ProgressCallback &progress)

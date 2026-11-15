@@ -7,6 +7,7 @@
 
 #include "exceptions.h"
 #include "mask.h"
+#include "merge_multispectral.h"
 #include "photo_resize.h"
 #include "raster_ops.h"
 
@@ -22,8 +23,18 @@ namespace ddb::raster
                 maskRasterFile(path, out, maskParamsFromJson(params), progress);
                 return json::object();
             }
-            if (op == op::kImageSizes)
-                return toJson(readPhotoSizes(imageSizesParamsFromJson(params).inputs));
+            if (op == op::kRasterShapes)
+            {
+                const RasterShapesParams shapes = rasterShapesParamsFromJson(params);
+                return toJson(readRasterShapes(shapes.inputs, shapes.xmp));
+            }
+            if (op == op::kMergeBands)
+                return mergeBandsFile(mergeBandsParamsFromJson(params), out);
+            if (op == op::kMergePreview)
+            {
+                mergePreviewFile(mergePreviewParamsFromJson(params), out);
+                return json::object();
+            }
             if (op == op::kResizeImages)
                 return resizeResultsToJson(resizePhotos(resizeImagesParamsFromJson(params), out, progress));
             throw ProtocolError("'" + std::string(op) + "' is not an operation of the helper");

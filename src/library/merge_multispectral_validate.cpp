@@ -10,6 +10,7 @@
 
 #include "artefact_cache.h"
 #include "exif.h"
+#include "raster_helper.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "merge_crop.h"
@@ -46,19 +47,20 @@ struct ReferenceRaster {
 };
 
 // Reads the reference and records its summary, its warnings and its errors in result
-ReferenceRaster checkReference(GDALDatasetH hRef, const std::string &displayName, MergeValidationResult &result) {
+ReferenceRaster checkReference(const raster::RasterShape &shape, const std::string &displayName,
+                               MergeValidationResult &result) {
     ReferenceRaster ref;
-    ref.width = GDALGetRasterXSize(hRef);
-    ref.height = GDALGetRasterYSize(hRef);
-    ref.type = GDALGetRasterDataType(GDALGetRasterBand(hRef, 1));
+    ref.width = shape.width;
+    ref.height = shape.height;
+    ref.type = GDALGetDataTypeByName(shape.type.c_str());
 
     // A file without a geotransform is reported once for all the files (reportGeoTransforms)
-    ref.hasGeoTransform = (GDALGetGeoTransform(hRef, ref.gt) == CE_None);
+    ref.hasGeoTransform = shape.geoTransform.has_value();
+    if (shape.geoTransform)
+        std::copy(shape.geoTransform->begin(), shape.geoTransform->end(), ref.gt);
 
-    const char *refProj = GDALGetProjectionRef(hRef);
-    ref.srs.reset(OSRNewSpatialReference(refProj));
-    // A copy: the pointer belongs to the dataset, which is closed before the alignment check
-    ref.projection = refProj ? std::string(refProj) : "";
+    ref.srs.reset(OSRNewSpatialReference(shape.wkt.c_str()));
+    ref.projection = shape.wkt;
 
     result.summary.crs = ref.projection;
     result.summary.width = ref.width;
@@ -75,23 +77,23 @@ ReferenceRaster checkReference(GDALDatasetH hRef, const std::string &displayName
         result.errors.push_back("Reference file has non-zero skew (rotation not supported)");
     }
 
-    ref.bands = GDALGetRasterCount(hRef);
+    ref.bands = shape.bands;
 
-    if (GDALGetRasterCount(hRef) > 1) {
-        result.warnings.push_back(displayName + " has " + std::to_string(GDALGetRasterCount(hRef)) + " bands");
+    if (shape.bands > 1) {
+        result.warnings.push_back(displayName + " has " + std::to_string(shape.bands) + " bands");
     }
     return ref;
 }
 
 // Compares the grid of one file with the reference's: the pixel size and the origin. A file
 // without a geotransform has none to compare: its name goes to withoutGeoTransform.
-void checkGeoTransform(GDALDatasetH hDs, const ReferenceRaster &ref, const std::string &displayName,
+void checkGeoTransform(const raster::RasterShape &shape, const ReferenceRaster &ref, const std::string &displayName,
                        MergeValidationResult &result, std::vector<std::string> &withoutGeoTransform) {
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None) {
+    if (!shape.geoTransform) {
         withoutGeoTransform.push_back(displayName);
         return;
     }
+    const auto &gt = *shape.geoTransform;
 
     // Skew check
     if (gt[2] != 0 || gt[4] != 0) {
@@ -119,36 +121,35 @@ void checkGeoTransform(GDALDatasetH hDs, const ReferenceRaster &ref, const std::
 }
 
 // Compares one more file with the reference; returns how many bands it adds
-int checkAgainstReference(GDALDatasetH hDs, const ReferenceRaster &ref, const std::string &displayName,
+int checkAgainstReference(const raster::RasterShape &shape, const ReferenceRaster &ref, const std::string &displayName,
                           MergeValidationResult &result, std::vector<std::string> &withoutGeoTransform) {
     // CRS check
-    const char *proj = GDALGetProjectionRef(hDs);
-    const SrsPtr srs(OSRNewSpatialReference(proj));
+    const SrsPtr srs(OSRNewSpatialReference(shape.wkt.c_str()));
     if (!OSRIsSame(ref.srs.get(), srs.get())) {
         result.errors.push_back("CRS mismatch: " + displayName);
     }
 
     // Dimension check
-    if (GDALGetRasterXSize(hDs) != ref.width || GDALGetRasterYSize(hDs) != ref.height) {
+    if (shape.width != ref.width || shape.height != ref.height) {
         result.errors.push_back("Dimension mismatch: " + displayName +
-            " (" + std::to_string(GDALGetRasterXSize(hDs)) + "x" + std::to_string(GDALGetRasterYSize(hDs)) +
+            " (" + std::to_string(shape.width) + "x" + std::to_string(shape.height) +
             " vs " + std::to_string(ref.width) + "x" + std::to_string(ref.height) + ")");
     }
 
     // Data type check
-    GDALDataType dt = GDALGetRasterDataType(GDALGetRasterBand(hDs, 1));
+    GDALDataType dt = GDALGetDataTypeByName(shape.type.c_str());
     if (dt != ref.type) {
         result.errors.push_back("Data type mismatch: " + displayName +
             " (" + gdalTypeName(dt) + " vs " + gdalTypeName(ref.type) + ")");
     }
 
-    checkGeoTransform(hDs, ref, displayName, result, withoutGeoTransform);
+    checkGeoTransform(shape, ref, displayName, result, withoutGeoTransform);
 
-    if (GDALGetRasterCount(hDs) > 1) {
-        result.warnings.push_back(displayName + " has " + std::to_string(GDALGetRasterCount(hDs)) + " bands");
+    if (shape.bands > 1) {
+        result.warnings.push_back(displayName + " has " + std::to_string(shape.bands) + " bands");
     }
 
-    return GDALGetRasterCount(hDs);
+    return shape.bands;
 }
 
 // Whether the first file carries a GPS position: the merge gives it to the result (all bands come
@@ -322,6 +323,16 @@ void assessAlignment(const std::vector<std::string> &inputPaths, const Reference
 }  // namespace
 
 MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths) {
+    if (inputPaths.size() < 2) {
+        MergeValidationResult result;
+        result.errors.push_back("At least 2 files required");
+        return result;
+    }
+    return validateMergeMultispectral(inputPaths, raster::rasterShapesOf(io::fromUtf8(inputPaths)));
+}
+
+MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths,
+                                                 const std::vector<raster::RasterShape> &shapes) {
     MergeValidationResult result;
 
     if (inputPaths.size() < 2) {
@@ -336,27 +347,23 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
         displayNames.push_back(io::toUtf8(io::fromUtf8(p).filename()));
     }
 
-    // Open first file as reference
-    auto refDs = raster::openInputRaster(inputPaths[0]);
-    if (!refDs) {
+    // The first file is the reference
+    if (!shapes[0].error.empty()) {
         result.errors.push_back("Cannot open " + displayNames[0]);
         return result;
     }
-    ReferenceRaster ref = checkReference(datasetHandle(refDs), displayNames[0], result);
+    ReferenceRaster ref = checkReference(shapes[0], displayNames[0], result);
     int totalBands = ref.bands;
     std::vector<std::string> withoutGeoTransform;
     if (!ref.hasGeoTransform) withoutGeoTransform.push_back(displayNames[0]);
 
     for (size_t i = 1; i < inputPaths.size(); i++) {
-        const auto dataset = raster::openInputRaster(inputPaths[i]);
-        if (!dataset) {
+        if (!shapes[i].error.empty()) {
             result.errors.push_back("Cannot open " + displayNames[i]);
             continue;
         }
-        totalBands += checkAgainstReference(datasetHandle(dataset), ref, displayNames[i], result, withoutGeoTransform);
+        totalBands += checkAgainstReference(shapes[i], ref, displayNames[i], result, withoutGeoTransform);
     }
-
-    refDs.reset();
 
     reportGeoTransforms(withoutGeoTransform, inputPaths, result);
 

@@ -8,8 +8,47 @@
 #include "gdal_raii.h"
 #include "merge_multispectral.h"
 #include "merge_vrt.h"
+#include "mio.h"
+#include "raster_artefacts.h"
+#include "raster_helper.h"
 
 namespace ddb {
+
+namespace raster {
+
+void mergePreviewFile(const MergePreviewParams &params, const fs::path &out) {
+    std::vector<std::string> inputs;
+    for (const fs::path &input : params.inputs) inputs.push_back(io::toUtf8(input));
+
+    // Build VRT with separate=TRUE
+    const merge::SeparateVrt merged = merge::buildSeparateVrt(merge::openAll(inputs), {}, ".vrt", "Cannot build VRT");
+
+    // Translate with band selection and scaling
+    CPLStringList tArgs;
+    tArgs.AddString("-of");
+    tArgs.AddString("WEBP");
+    tArgs.AddString("-outsize");
+    tArgs.AddString(std::to_string(params.size).c_str());
+    tArgs.AddString(std::to_string(params.size).c_str());
+    tArgs.AddString("-ot");
+    tArgs.AddString("Byte");
+    tArgs.AddString("-scale");
+
+    for (int band : params.bands) {
+        tArgs.AddString("-b");
+        tArgs.AddString(std::to_string(band).c_str());
+    }
+
+    const GdalOptionsPtr<GDALTranslateOptions> transOpts(GDALTranslateOptionsNew(tArgs.List(), nullptr));
+
+    auto result = adoptDataset(GDALTranslate(io::toUtf8(out).c_str(), merged.handle(), transOpts.get(), nullptr));
+    if (!result)
+        throw GDALException("Cannot generate preview");
+
+    closeOutputOrThrow(std::move(result), "the preview");
+}
+
+}  // namespace raster
 
 void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
                                 const std::vector<int> &previewBands,
@@ -18,41 +57,20 @@ void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
     if (inputPaths.empty()) throw InvalidArgsException("No input paths");
     if (previewBands.size() < 3) throw InvalidArgsException("Need at least 3 preview bands");
 
-    // Build VRT with separate=TRUE
-    const merge::SeparateVrt merged =
-        merge::buildSeparateVrt(merge::openAll(inputPaths), {}, ".vrt", "Cannot build VRT");
+    raster::MergePreviewParams params;
+    params.inputs = io::fromUtf8(inputPaths);
+    params.bands = previewBands;
+    params.size = thumbSize;
 
-    // Translate with band selection and scaling
-    CPLStringList tArgs;
-    tArgs.AddString("-of");
-    tArgs.AddString("WEBP");
-    tArgs.AddString("-outsize");
-    tArgs.AddString(std::to_string(thumbSize).c_str());
-    tArgs.AddString(std::to_string(thumbSize).c_str());
-    tArgs.AddString("-ot");
-    tArgs.AddString("Byte");
-    tArgs.AddString("-scale");
+    // The raster helper reads the files (a user's) and writes the preview in a private folder
+    const io::ScopedTempDir request = raster::makePrivateFolder(fs::temp_directory_path(), "ddb-merge-preview-");
+    const fs::path output = request.path() / "preview.webp";
+    raster::rasterHelper().operate(raster::op::kMergePreview, params.inputs.front(), output, raster::toJson(params),
+                                   raster::ProgressCallback());
 
-    for (int band : previewBands) {
-        tArgs.AddString("-b");
-        tArgs.AddString(std::to_string(band).c_str());
-    }
-
-    const GdalOptionsPtr<GDALTranslateOptions> transOpts(
-        GDALTranslateOptionsNew(tArgs.List(), nullptr));
-
-    const VsiMemFile outFile = VsiMemFile::unique("", ".webp");
-    auto out = adoptDataset(
-        GDALTranslate(outFile.c_str(), merged.handle(), transOpts.get(), nullptr));
-    if (!out)
-        throw GDALException("Cannot generate preview");
-
-    closeOutputOrThrow(std::move(out), "the preview");
-
-    // Read memory buffer
-    int bufSize = 0;
-    *outBuffer = stealMemFileBuffer(outFile.path(), bufSize).release();
-    *outBufferSize = bufSize;
+    const std::string webp = raster::readHelperWebp(output, inputPaths.front());
+    *outBuffer = vsiMallocCopy(webp);
+    *outBufferSize = static_cast<int>(webp.size());
 }
 
 }  // namespace ddb

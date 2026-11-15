@@ -12,6 +12,9 @@
 #include "sensorprofile.h"
 #include "vegetation.h"
 #include "merge_multispectral.h"
+#include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "real_raster_helper.h"
 #include "cog.h"
 #include "thumbs.h"
 #include "raster_tiler.h"
@@ -580,6 +583,68 @@ TEST(multispectral, mergeHappyPath) {
     ASSERT_NE(hOut, nullptr);
     EXPECT_EQ(GDALGetRasterCount(hOut), 5);
     GDALClose(hOut);
+}
+
+// The raster helper reads the bands (a user's files) and merges them: one run for what they are and
+// one for the merge, one for a preview; the host makes no copy of them
+TEST(multispectral, theBandsAreReadAndMergedInTheHelper) {
+    class Operations : public testutils::RealRasterHelper {
+    public:
+        json operate(const char* op, const fs::path& path, const fs::path& out, const json& params,
+                     const raster::ProgressCallback& progress) override {
+            ran.emplace_back(op);
+            return RealRasterHelper::operate(op, path, out, params, progress);
+        }
+        std::vector<std::string> ran;
+    } helper;
+    const raster::ScopedRasterHelper installed(helper);
+
+    TestArea ta(TEST_NAME, true);
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    double gt[6] = {0, 0.001, 0, 50, 0, -0.001};
+    const char* proj = "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 3; i++) {
+        fs::path bandPath = ta.getPath("band" + std::to_string(i + 1) + ".tif");
+        GDALDatasetH hDs = GDALCreate(tifDrv, bandPath.string().c_str(), 50, 50, 1, GDT_UInt16, nullptr);
+        ASSERT_NE(hDs, nullptr);
+        ASSERT_EQ(GDALSetGeoTransform(hDs, gt), CE_None);
+        ASSERT_EQ(GDALSetProjection(hDs, proj), CE_None);
+        GDALSetDescription(GDALGetRasterBand(hDs, 1), ("B" + std::to_string(i + 1)).c_str());
+        std::vector<uint16_t> data(50 * 50, static_cast<uint16_t>((i + 1) * 1000));
+        ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, 0, 50, 50, data.data(), 50, 50, GDT_UInt16, 0, 0),
+                  CE_None);
+        GDALClose(hDs);
+        inputs.push_back(bandPath.string());
+    }
+    const auto filesUnder = [](const fs::path& folder) {
+        size_t n = 0;
+        std::error_code ec;
+        for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+            n += it->is_regular_file() ? 1 : 0;
+        return n;
+    };
+    const size_t copiesBefore = filesUnder(raster::normalizedDir());
+
+    const fs::path outputPath = ta.getPath("merged.tif");
+    ASSERT_NO_THROW(mergeMultispectral(inputs, outputPath.string()));
+    EXPECT_EQ(helper.ran, (std::vector<std::string>{raster::op::kRasterShapes, raster::op::kMergeBands}));
+    GDALDatasetH hOut = GDALOpen(outputPath.string().c_str(), GA_ReadOnly);
+    ASSERT_NE(hOut, nullptr);
+    EXPECT_EQ(GDALGetRasterCount(hOut), 3);
+    EXPECT_STREQ(GDALGetDescription(GDALGetRasterBand(hOut, 3)), "B3") << "the names the bands give";
+    GDALClose(hOut);
+
+    helper.ran.clear();
+    uint8_t* buffer = nullptr;
+    int size = 0;
+    previewMergeMultispectral(inputs, {1, 2, 3}, 64, &buffer, &size);
+    ASSERT_NE(buffer, nullptr);
+    EXPECT_GT(size, 12);
+    EXPECT_EQ(std::memcmp(buffer, "RIFF", 4), 0);
+    VSIFree(buffer);
+    EXPECT_EQ(helper.ran, (std::vector<std::string>{raster::op::kMergePreview}));
+    EXPECT_EQ(filesUnder(raster::normalizedDir()), copiesBefore) << "the host copied a band";
 }
 
 TEST(multispectral, mergeOutputExists) {

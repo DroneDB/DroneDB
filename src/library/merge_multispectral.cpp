@@ -27,6 +27,10 @@
 #include "mio.h"
 #include "parallel.h"
 #include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "raster_ops.h"
+#include "cancellation.h"
+#include <functional>
 
 namespace ddb {
 
@@ -157,15 +161,8 @@ std::string declaredNamespace(const std::string &packet, const std::string &pref
     return to == std::string::npos ? std::string() : packet.substr(from, to - from);
 }
 
-// The XMP packet of the raster at path, as GDAL reads it (empty when it has none)
-std::string xmpPacketOf(const std::string &path) {
-    const auto dataset = raster::openInputRaster(path);
-    if (!dataset) return {};
-    const CPLStringList xmp(CSLDuplicate(GDALGetMetadata(datasetHandle(dataset), "xml:XMP")), TRUE);
-    return xmp.Count() > 0 ? std::string(xmp[0]) : std::string();
-}
-
-CameraMetadata readCameraMetadata(const std::string &path) {
+// `packet` is the XMP of the raster at path as GDAL reads it (the raster helper: RasterShape::xmp)
+CameraMetadata readCameraMetadata(const std::string &path, const std::string &packet) {
     CameraMetadata camera;
     // A file with no metadata the reader can give has none to keep
     const auto parser = readExifParser(io::fromUtf8(path));
@@ -177,7 +174,6 @@ CameraMetadata readCameraMetadata(const std::string &path) {
             camera.exifTags.emplace_back(key, tag->toString());
     }
 
-    const std::string packet = xmpPacketOf(path);
     // The band sequences of the merged raster are in the namespace that the bands declare
     const std::string cameraNamespace = declaredNamespace(packet, "Camera");
     if (!cameraNamespace.empty()) camera.namespaces["Camera"] = cameraNamespace;
@@ -201,14 +197,11 @@ struct MergedBand {
     int wavelength = 0;
 };
 
-std::vector<MergedBand> mergedBands(const std::vector<std::string> &inputPaths,
+std::vector<MergedBand> mergedBands(const std::vector<raster::RasterShape> &shapes,
                                     const std::vector<BandAlignmentInfo> &alignBands) {
     std::vector<MergedBand> bands;
-    for (size_t i = 0; i < inputPaths.size(); i++) {
-        const auto dataset = raster::openInputRaster(inputPaths[i]);
-        if (!dataset) throw GDALException("Cannot open " + inputPaths[i]);
-        GDALDatasetH hDs = datasetHandle(dataset);
-        const int count = GDALGetRasterCount(hDs);
+    for (size_t i = 0; i < shapes.size(); i++) {
+        const int count = shapes[i].bands;
         const BandAlignmentInfo *info = i < alignBands.size() ? &alignBands[i] : nullptr;
 
         for (int b = 1; b <= count; b++) {
@@ -218,10 +211,8 @@ std::vector<MergedBand> mergedBands(const std::vector<std::string> &inputPaths,
                 band.name = info->bandName;
                 band.wavelength = info->centralWavelength;
             }
-            if (band.name.empty()) {
-                const char *description = GDALGetDescription(GDALGetRasterBand(hDs, b));
-                if (description) band.name = description;
-            }
+            if (band.name.empty())
+                band.name = shapes[i].descriptions.at(static_cast<size_t>(b - 1));
             bands.push_back(band);
         }
     }
@@ -286,10 +277,10 @@ std::string mergedXmpPacket(const CameraMetadata &camera, const std::vector<Merg
 
 // Names the bands of the output and gives it the XMP of the capture: what the output has to say
 // before it is closed (GTiff writes both in its own tags)
-void describeMergedOutput(GDALDatasetH out, const std::vector<MergedBand> &bands, const std::string &xmpPacket) {
+void describeMergedOutput(GDALDatasetH out, const std::vector<std::string> &names, const std::string &xmpPacket) {
     const int count = GDALGetRasterCount(out);
-    for (int i = 0; i < count && i < static_cast<int>(bands.size()); i++) {
-        if (!bands[i].name.empty()) GDALSetDescription(GDALGetRasterBand(out, i + 1), bands[i].name.c_str());
+    for (int i = 0; i < count && i < static_cast<int>(names.size()); i++) {
+        if (!names[i].empty()) GDALSetDescription(GDALGetRasterBand(out, i + 1), names[i].c_str());
     }
     if (!xmpPacket.empty()) {
         char *list[2] = {const_cast<char *>(xmpPacket.c_str()), nullptr};
@@ -398,6 +389,66 @@ GDALDatasetUniquePtr translateMerge(GDALDatasetH hVrt, const std::string &output
 
 }  // namespace
 
+namespace raster {
+
+json mergeBandsFile(const MergeBandsParams &params, const fs::path &out) {
+    const std::vector<std::string> inputs = [&] {
+        std::vector<std::string> paths;
+        for (const fs::path &input : params.inputs) paths.push_back(io::toUtf8(input));
+        return paths;
+    }();
+    const std::string produced = io::toUtf8(out);
+    const std::string name = io::toUtf8(out.filename());
+
+    // Build VRT with separate=TRUE
+    merge::SeparateVrt merged = merge::buildSeparateVrt(merge::openAll(inputs), {}, ".vrt", "Cannot build VRT for merge");
+    GDALDatasetH hVrt = merged.handle();
+
+    // Check if inputs have geotransform
+    double checkGt[6];
+    const bool hasGeoTransform = (GDALGetGeoTransform(hVrt, checkGt) == CE_None);
+
+    // Determine compression
+    const GDALDataType dt = GDALGetRasterDataType(GDALGetRasterBand(hVrt, 1));
+    const int nBands = GDALGetRasterCount(hVrt);
+    const bool useJpeg = (dt == GDT_Byte && (nBands == 3 || nBands == 4));
+
+    // Warp and compression threads: those the host holds CPU tokens for
+    const BuildThreads threads(params.threads);
+    const MergeEncoding encoding{dt, useJpeg, "NUM_THREADS=" + std::to_string(threads.threads())};
+    GDALDatasetUniquePtr result;
+    bool cropped = false;
+
+    if (hasGeoTransform) {
+        result = warpMerge(hVrt, produced, encoding);
+    } else {
+        LOGD << "No geotransform found, using GDALTranslate for merge";
+        if (params.crop) {
+            // Close the original VRT and datasets; the shifted ones replace them
+            merged.close();
+
+            merge::SeparateVrt aligned = merge::buildAlignedVrt(inputs, *params.crop);
+            result = translateMerge(aligned.handle(), produced, encoding);
+            aligned.close();
+            cropped = true;
+        } else {
+            // Standard non-shifted merge path
+            result = translateMerge(merged.handle(), produced, encoding);
+        }
+    }
+
+    if (!result) throw GDALException("Cannot create merged output: " + name);
+
+    describeMergedOutput(datasetHandle(result), params.names, params.xmp);
+    closeOutputOrThrow(std::move(result), name);
+
+    // A no-op when the shift path already closed them
+    merged.close();
+    return {{"cropped", cropped}};
+}
+
+}  // namespace raster
+
 void mergeMultispectral(const std::vector<std::string> &inputPaths,
                          const std::string &outputPath,
                          bool overwrite) {
@@ -408,7 +459,9 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
         throw InvalidArgsException("Not the path of a file for a merged raster: " + outputPath);
     io::assureReplaceable(io::fromUtf8(outputPath), overwrite, io::fromUtf8(inputPaths));
 
-    auto validation = validateMergeMultispectral(inputPaths);
+    // What the raster helper reads of the files (a user's), all of them in one run
+    const std::vector<raster::RasterShape> shapes = raster::rasterShapesOf(io::fromUtf8(inputPaths), true);
+    auto validation = validateMergeMultispectral(inputPaths, shapes);
     if (!validation.ok) {
         std::string errMsg = "Validation failed:";
         for (const auto &e : validation.errors) errMsg += "\n  - " + e;
@@ -421,75 +474,39 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
     // The camera metadata of that capture, and how each band is called: the merged raster keeps
     // them, so that it is placed on the map and opened by the tools as a band of the capture is
-    const CameraMetadata camera = readCameraMetadata(inputPaths[0]);
-    const std::vector<MergedBand> bands = mergedBands(inputPaths, validation.alignment.bands);
+    const CameraMetadata camera = readCameraMetadata(inputPaths[0], shapes[0].xmp);
+    const std::vector<MergedBand> bands = mergedBands(shapes, validation.alignment.bands);
 
-    // Build VRT with separate=TRUE
-    SeparateVrt merged =
-        buildSeparateVrt(openAll(inputPaths), {}, ".vrt", "Cannot build VRT for merge");
-    GDALDatasetH hVrt = merged.handle();
+    // The shift of the bands into place, which the helper applies to bands without a geotransform
+    raster::MergeBandsParams params;
+    params.inputs = io::fromUtf8(inputPaths);
+    if (validation.alignment.correctionApplied)
+        params.crop = planAlignmentCrop(validation.alignment.bands, validation.summary.sourceWidth,
+                                        validation.summary.sourceHeight);
+    for (const auto &band : bands) params.names.push_back(band.name);
+    params.xmp = mergedXmpPacket(camera, bands);
 
-    // Check if inputs have geotransform
-    double checkGt[6];
-    bool hasGeoTransform = (GDALGetGeoTransform(hVrt, checkGt) == CE_None);
-
-    // Determine compression
-    GDALDataType dt = GDALGetRasterDataType(GDALGetRasterBand(hVrt, 1));
-    int nBands = GDALGetRasterCount(hVrt);
-    bool useJpeg = (dt == GDT_Byte && (nBands == 3 || nBands == 4));
-
-    // The merge and its GPS go to a file of a private folder beside the output, which is removed
-    // with whatever is left in it: an existing output is replaced only by a complete merge
-    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), MergeStagingPrefix,
-                                                                raster::PrivateFolderWriter::Host);
+    // The raster helper writes the merge to a file of a private folder beside the output, which is
+    // removed with whatever is left in it: an existing output is replaced only by a complete merge
+    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), MergeStagingPrefix);
     const fs::path producedPath = staging.path() / target.filename();
     const std::string produced = io::toUtf8(producedPath);
 
-    // Warp and compression threads: this one and those the CPU pool allows, held
-    // until the output is closed
+    // Warp and compression threads: this one and those the CPU pool allows, held until the output is written
     const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
-    const MergeEncoding encoding{dt, useJpeg, parallel::gdalNumThreads(cpu)};
-    GDALDatasetUniquePtr out;
+    params.threads = static_cast<int>(cpu.threads());
+    raster::ProgressLog log("Merge bands");
+    const json result = raster::rasterHelper().operate(raster::op::kMergeBands, params.inputs.front(), producedPath,
+                                                       raster::toJson(params), std::ref(log));
+    if (!raster::writtenRasterOpens(producedPath))
+        throw GDALException(std::string(raster::kGdalUtilName) + " wrote a merge of " + inputPaths[0] +
+                            " that cannot be read");
 
-    if (hasGeoTransform) {
-        out = warpMerge(hVrt, produced, encoding);
-    } else {
-        LOGD << "No geotransform found, using GDALTranslate for merge";
-
-        // Check if alignment shift should be applied
-        std::optional<AlignmentCrop> crop;
-        if (validation.alignment.correctionApplied)
-            crop = planAlignmentCrop(validation.alignment.bands, validation.summary.sourceWidth,
-                                     validation.summary.sourceHeight);
-
-        if (crop) {
-            // Close the original VRT and datasets; the shifted ones replace them
-            merged.close();
-
-            SeparateVrt aligned = buildAlignedVrt(inputPaths, *crop);
-            out = translateMerge(aligned.handle(), produced, encoding);
-            aligned.close();
-
-            // GPS correction for center shift
-            if (srcGps.present) {
-                const auto geometry = readCameraGeometry(inputPaths[0], validation.summary.sourceWidth);
-                correctGpsForCrop(srcGps.location, *crop, geometry);
-            }
-        } else {
-            // Standard non-shifted merge path
-            out = translateMerge(merged.handle(), produced, encoding);
-        }
+    // GPS correction for the center shift of a cropped merge
+    if (result.value("cropped", false) && params.crop && srcGps.present) {
+        const auto geometry = readCameraGeometry(inputPaths[0], validation.summary.sourceWidth);
+        correctGpsForCrop(srcGps.location, *params.crop, geometry);
     }
-
-    if (!out) {
-        throw GDALException("Cannot create merged output: " + outputPath);
-    }
-
-    describeMergedOutput(datasetHandle(out), bands, mergedXmpPacket(camera, bands));
-    closeOutputOrThrow(std::move(out), outputPath);
-
-    // A no-op when the shift path already closed them
-    merged.close();
 
     // Write the EXIF of the capture and the GPS coordinates from the source to the merged output. A
     // reader that cannot work (no metadata-util) propagates; a file that cannot be written does not
@@ -529,7 +546,9 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
         }
     }
 
-    // The output may have appeared while the bands were merged: it is replaced only when asked
+    // A call canceled while the helper finished is canceled: the output stays as it was. The output
+    // may have appeared while the bands were merged: it is replaced only when asked
+    cancel::throwIfCanceled();
     io::assureReplaceable(io::fromUtf8(outputPath), overwrite);
     raster::publishArtefact(producedPath, target);
 

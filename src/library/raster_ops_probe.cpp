@@ -15,6 +15,7 @@
 #include <system_error>
 #include <vector>
 
+#include "artefact_cache.h"
 #include "cad.h"
 #include "cog_utils.h"
 #include "coordstransformer.h"
@@ -527,6 +528,45 @@ void applyProbe(const ProbeResult &result, Entry &entry)
         entry.polygon_geom.addPoint(p.x, p.y, p.z);
     if (!result.warning.empty())
         setEntryWarning(entry, result.warning);
+}
+
+std::vector<RasterShape> readRasterShapes(const std::vector<fs::path> &rasters, bool xmp) {
+    std::vector<RasterShape> shapes;
+    shapes.reserve(rasters.size());
+    for (const fs::path &file : rasters) {
+        RasterShape shape;
+        try {
+            const auto ds = openInputRaster(io::toUtf8(file));
+            if (!ds)
+                throw GDALException("Cannot open " + io::toUtf8(file));
+            GDALDatasetH h = datasetHandle(ds);
+            shape.width = GDALGetRasterXSize(h);
+            shape.height = GDALGetRasterYSize(h);
+            shape.bands = GDALGetRasterCount(h);
+            if (shape.bands < 1)
+                throw GDALException(io::toUtf8(file) + " has no band");
+            shape.type = GDALGetDataTypeName(GDALGetRasterDataType(GDALGetRasterBand(h, 1)));
+            std::array<double, 6> gt{};
+            if (GDALGetGeoTransform(h, gt.data()) == CE_None)
+                shape.geoTransform = gt;
+            const char *wkt = GDALGetProjectionRef(h);
+            shape.wkt = wkt != nullptr ? wkt : "";
+            for (int b = 1; b <= shape.bands; ++b) {
+                const char *description = GDALGetDescription(GDALGetRasterBand(h, b));
+                shape.descriptions.emplace_back(description != nullptr ? description : "");
+            }
+            if (xmp) {
+                CSLConstList packet = GDALGetMetadata(h, "xml:XMP");
+                if (packet != nullptr && packet[0] != nullptr)
+                    shape.xmp = packet[0];
+            }
+        } catch (const GDALException &e) {
+            shape = RasterShape{};
+            shape.error = e.what();
+        }
+        shapes.push_back(std::move(shape));
+    }
+    return shapes;
 }
 
 }  // namespace raster

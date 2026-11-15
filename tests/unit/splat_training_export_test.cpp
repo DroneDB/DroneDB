@@ -739,7 +739,7 @@ namespace
         options.maxImageSize = 64;
         const auto result = e.run(options);
 
-        EXPECT_EQ(helper.ran, (std::vector<std::string>{raster::op::kImageSizes, raster::op::kResizeImages}));
+        EXPECT_EQ(helper.ran, (std::vector<std::string>{raster::op::kRasterShapes, raster::op::kResizeImages}));
         EXPECT_EQ(result.images, 3u) << allWarnings(result);
         EXPECT_TRUE(hasWarning(result, "1 image left out, it cannot be read (")) << allWarnings(result);
         for (const char *name : {"a.JPG", "b.JPG", "c.JPG"})
