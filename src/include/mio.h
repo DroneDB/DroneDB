@@ -242,7 +242,7 @@ namespace ddb
         //
         // Inside libddb a path held in a std::string (or a const char *) is UTF-8, on every
         // platform: the C API receives UTF-8, the index stores UTF-8, GDAL, PROJ,
-        // SQLite, PDAL, libzip, Assimp and KTX take UTF-8 file names, and logs and JSON are
+        // SQLite, ddb-tilers, libzip, Assimp and KTX take UTF-8 file names, and logs and JSON are
         // UTF-8. A string becomes an fs::path only through fromUtf8, and an fs::path becomes a
         // string only through toUtf8 / toGenericUtf8: never fs::path(std::string), an implicit
         // std::string -> fs::path conversion (fs::exists(str), dir / str, std::ifstream(str)),

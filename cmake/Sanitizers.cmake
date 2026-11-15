@@ -16,7 +16,7 @@
 #     sanitizer runtime of the child checks the bm3d code there (and the environment, with its
 #     suppression files, is inherited from the test);
 #   * the cost is nil: we compile these sources anyway.
-# vcpkg dependencies (GDAL, PDAL, PROJ, SQLite, ...) are prebuilt with the triplet's flags
+# vcpkg dependencies (GDAL, PROJ, SQLite, ...) are prebuilt with the triplet's flags
 # and stay uninstrumented. ASan/UBSan still check the calls into them; TSan may report races
 # whose frames are all inside them: tests/tsan.supp suppresses those by third-party symbol only.
 #

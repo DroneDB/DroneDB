@@ -42,7 +42,6 @@ UNRECORDED_LICENCE = "not recorded: see the file"
 # Ports that run during the build or the tests only
 BUILD_ONLY_PORTS = {
     "gtest": "test framework, linked into the test executables only",
-    "pdal-dimbuilder": "generates a PDAL header while PDAL is built",
     "pkgconf": "pkg-config, run by the builds of other ports",
 }
 

@@ -300,7 +300,7 @@ namespace
         out.write(reinterpret_cast<const char *>(&value), sizeof value);
     }
 
-    // A LAS 1.2 file (point format 2, uncompressed: PDAL reads it by the header, whatever the
+    // A LAS 1.2 file (point format 2, uncompressed: the reader goes by the header, whatever the
     // extension) with the points in absolute coordinates; the colours are 16-bit
     void writeLas(const fs::path &file, const std::vector<OdmPointSpec> &points)
     {

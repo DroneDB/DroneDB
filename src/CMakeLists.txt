@@ -27,7 +27,6 @@ list(REMOVE_ITEM DDB_CORE_SOURCES ${DDB_CAPI_SOURCES})
 find_package(Threads REQUIRED)
 find_package(CCTZ CONFIG REQUIRED)
 find_package(GDAL CONFIG REQUIRED)
-find_package(PDAL CONFIG REQUIRED)
 find_package(PROJ CONFIG REQUIRED)
 find_package(GeoTIFF CONFIG REQUIRED)
 find_package(LibZip CONFIG REQUIRED)
@@ -48,7 +47,6 @@ find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h" REQUIRED)
 
 # Common libraries
 set(COMMON_LIBS
-    pdalcpp
     Threads::Threads
     GDAL::GDAL
     PROJ::proj
@@ -122,10 +120,7 @@ if(WIN32)
     target_link_libraries(ddb_core_usage INTERFACE ddb_sandbox)
 endif()
 
-# Library sources only: glob.hpp (path_expansion.cpp), and <prefix>/include/pdal because PDAL's own
-# headers include their siblings without the pdal/ prefix (ColorinterpFilter.hpp includes
-# <filters/StatsFilter.hpp>).
-find_path(PDAL_HEADERS_DIR "filters/StatsFilter.hpp" PATH_SUFFIXES pdal REQUIRED)
+# Library sources only: glob.hpp (path_expansion.cpp).
 
 # ddb_add_library_objects(<name> <sources>...): an object library of libddb sources with the
 # compile settings that apply to library code only: the warnings (counted by the ratchet,
@@ -147,7 +142,6 @@ function(ddb_add_library_objects name)
     target_include_directories(${name} SYSTEM PRIVATE
         ${GEOTIFF_INCLUDE_DIR}
         ${Stb_INCLUDE_DIR}
-        ${PDAL_HEADERS_DIR}
         ${CMAKE_SOURCE_DIR}/vendor/glob
     )
     # One section per function and per datum, so that --gc-sections (ddb_gc_sections) can drop what

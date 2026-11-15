@@ -740,3 +740,8 @@ Registry has to adopt first.
   or PLY file with ddb-tilers instead of PDAL and the export's own PLY reader in the process of libddb: the same
   `points3D.bin` byte for byte (4 ODM projects checked), in 40 to 71 % of the time of 2.6 (the points are decoded
   on several threads); a PLY that is not binary little-endian is now read too.
+  libddb no longer links PDAL: the info of a point cloud, the sample of the splat export and the COPC builds and
+  tiles all read clouds with ddb-tilers, and PDAL, its plugins and the vcpkg ports only it needed (libE57Format,
+  xerces-c, eigen3, h3, nanoflann, rapidxml, crcpp, json-schema-validator) leave the packages. The diagnostics
+  print the version of ddb-tilers instead of PDAL's. `PDALException` and the add error code "PDAL" stay: they
+  are what a point cloud that cannot be read throws and reports, as before.

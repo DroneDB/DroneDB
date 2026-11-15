@@ -18,7 +18,7 @@ and so `ddb`, `ddbcmd`, both test binaries (`ddb_unit_tests`, `ddbtest`) and the
 vendored code built here (spz, lazperf, zonedetect, and the `metadata-util` and `bm3d` helper
 executables (bm3d with the Nexus, corto and vcglib code in it), which the test targets build next
 to the test binaries).
-The vcpkg dependencies (GDAL, PDAL, PROJ, SQLite and the rest) are prebuilt and stay
+The vcpkg dependencies (GDAL, PROJ, SQLite and the rest) are prebuilt and stay
 uninstrumented.
 
 ## Building

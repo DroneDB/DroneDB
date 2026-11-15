@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!-- Application manifest of the Windows programs DroneDB builds (cmake/LongPathAware.cmake).
      longPathAware lets the Win32 file functions, and the C and C++ library functions and the
-     third-party libraries built on them (PDAL, GDAL, Exiv2), take a path of 260
+     third-party libraries built on them (GDAL, Exiv2, ddb-tilers), take a path of 260
      characters or more. It has an effect only where Windows allows long paths:
      LongPathsEnabled=1 in HKLM\SYSTEM\CurrentControlSet\Control\FileSystem. -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">

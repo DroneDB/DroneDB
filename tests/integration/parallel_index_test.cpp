@@ -141,11 +141,10 @@ namespace
             EXPECT_EQ(ran[i].load(), 1) << "index " << i << " must run: it comes before the failure";
     }
 
-    // PDAL replaces GDAL's process-wide error handler while one of its stages runs, and that
-    // handler writes into the running stage's log without synchronization: a GDAL error raised
-    // by an indexing thread at that moment raced with the PDAL thread (found by TSan). The calls
-    // run by forEachIndex, on every thread, must not reach the process-wide handler; the error
-    // itself is still recorded for the thread that raised it.
+    // A library may replace GDAL's process-wide error handler while it runs on another thread, and
+    // a GDAL error raised by an indexing thread at that moment would race with it. The calls run by
+    // forEachIndex, on every thread, must not reach the process-wide handler; the error itself is
+    // still recorded for the thread that raised it.
     std::atomic<int> processWideGdalErrors{0};
     void CPL_STDCALL countProcessWideGdalError(CPLErr, CPLErrorNum, const char *) { processWideGdalErrors++; }
 
@@ -358,8 +357,8 @@ namespace
     }
 #endif
 
-    // Many threads parsing the same files give the same entries as one thread (Exiv2, GDAL,
-    // PDAL and OGR state is per call)
+    // Many threads parsing the same files give the same entries as one thread (Exiv2, GDAL, OGR
+    // and ddb-tilers state is per call)
     TEST(ParallelIndex, concurrentParsesMatchSerial)
     {
         TestArea ta(TEST_NAME, true);

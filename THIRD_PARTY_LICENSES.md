@@ -8,11 +8,10 @@ to those components.
 
 DroneDB links against several open-source libraries provided through
 [vcpkg](https://github.com/microsoft/vcpkg) at build time (GDAL, PROJ,
-PDAL, SpatiaLite, libcurl, ...). On Linux they are linked **statically**
+SpatiaLite, libcurl, ...). On Linux they are linked **statically**
 (the `x64-linux-release` triplet in [`vcpkg-triplets`](vcpkg-triplets) sets
 static library linkage) into `libddb`, `ddbcmd` and the helper executables
-below; the vcpkg libraries that ship as shared libraries in the Debian
-package are PDAL (`libpdalcpp` and its plugins). On Windows
+below. On Windows
 they are DLLs in the ZIP archive. The licenses of those libraries apply
 to the redistributed binaries, and both packages ship the notice of
 every one of them (see
@@ -366,12 +365,11 @@ ddb-tilers, the laz-perf fork (with its `NOTICE`) and fpnge, listed in
 
 ## vcpkg-managed libraries
 
-The libraries vcpkg builds (GDAL, PROJ, GEOS, PDAL, SQLite, libcurl,
+The libraries vcpkg builds (GDAL, PROJ, GEOS, SQLite, libcurl,
 OpenSSL, Exiv2, expat, zlib, brotli and the others of
 [`vcpkg.json`](vcpkg.json) with their dependencies) are linked
 statically into `libddb`, `ddbcmd` and the helper executables on Linux,
-except PDAL (`libpdalcpp` and its plugins), and ship as DLLs in the
-Windows ZIP. Each is distributed under its own license (typically MIT,
+and ship as DLLs in the Windows ZIP. Each is distributed under its own license (typically MIT,
 BSD, Apache 2.0, zlib, LGPL; Exiv2 is GPL, see above).
 
 Both packages ship the notice of every vcpkg library that ends up in
@@ -382,7 +380,7 @@ which lists the ports with their versions and the licenses vcpkg
 records for them. [`scripts/collect-vcpkg-notices.py`](scripts/collect-vcpkg-notices.py)
 fills the folder from the build's vcpkg tree, leaving out only the
 ports that are never linked into a shipped binary (vcpkg's build
-helpers, `pkgconf`, `pdal-dimbuilder` and the `gtest` test framework),
+helpers, `pkgconf` and the `gtest` test framework),
 and [`scripts/check-helper-tools.py`](scripts/check-helper-tools.py)
 fails the package build when the folder is missing, empty or lacks a
 notice it lists.

@@ -174,11 +174,10 @@ TEST_F(CAbiLog, gdalErrorOnTheCallingThread) {
     CPLErrorReset();
 }
 
-// PDAL installs its own GDAL error handler while one of its stages runs. It has to give the handler
-// of the host back when the last stage stops, wherever the stages nest and however they end, or
-// the GDAL errors of everything that runs afterwards (rasters, vectors, the log callback of the
-// host) go to PDAL's log or to the default handler.
-class CAbiLogPdal : public CAbiLog {
+// The info of a point cloud is read in the raster helper. Whatever it does there, however it ends and
+// however many run at once, the GDAL errors of this process afterwards (rasters, vectors) keep
+// reaching the log callback of the host.
+class CAbiLogPointCloud : public CAbiLog {
    protected:
     Received received;
 
@@ -187,7 +186,7 @@ class CAbiLogPdal : public CAbiLog {
         ASSERT_DDB_OK(DDBSetLogCallback(&collect, DDB_LOG_TRACE, &received));
     }
 
-    // A text point cloud: its reader's preview runs a statistics filter of its own inside it
+    // A text point cloud
     static std::string writeTextCloud(const std::filesystem::path& folder, const std::string& name) {
         const auto path = folder / name;
         std::ofstream xyz(path);
@@ -206,7 +205,7 @@ class CAbiLogPdal : public CAbiLog {
     }
 };
 
-TEST_F(CAbiLogPdal, gdalErrorReachesTheCallbackAfterANestedStagePreview) {
+TEST_F(CAbiLogPointCloud, gdalErrorReachesTheCallbackAfterTheInfoOfACloud) {
     TestArea area(TEST_NAME, true);
     const std::string cloud = writeTextCloud(area.getFolder(), "cloud.xyz");
     PointCloudInfo info;
@@ -216,7 +215,7 @@ TEST_F(CAbiLogPdal, gdalErrorReachesTheCallbackAfterANestedStagePreview) {
     expectGdalFailureReachesTheCallback("log-test after preview");
 }
 
-TEST_F(CAbiLogPdal, gdalErrorReachesTheCallbackAfterAStageThatThrows) {
+TEST_F(CAbiLogPointCloud, gdalErrorReachesTheCallbackAfterACloudThatCannotBeRead) {
     TestArea area(TEST_NAME, true);
     const auto broken = area.getPath("broken.las");
     {
@@ -228,7 +227,7 @@ TEST_F(CAbiLogPdal, gdalErrorReachesTheCallbackAfterAStageThatThrows) {
     expectGdalFailureReachesTheCallback("log-test after throw");
 }
 
-TEST_F(CAbiLogPdal, gdalErrorReachesTheCallbackAfterConcurrentStages) {
+TEST_F(CAbiLogPointCloud, gdalErrorReachesTheCallbackAfterConcurrentInfos) {
     TestArea area(TEST_NAME, true);
     constexpr int kThreads = 4;
     constexpr int kRounds = 10;

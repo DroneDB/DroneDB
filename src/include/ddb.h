@@ -155,7 +155,7 @@ extern "C"
      *   "cpuPoolSize"    integer 0..4096, env DDB_CPU_POOL_SIZE, default cores - 1.
      *                    The process-wide CPU token pool: the worker threads libddb may run at
      *                    once beside the calling threads, across every call (parallel indexing,
-     *                    GDAL NUM_THREADS, PDAL readers, the threads of a COPC build, the cores
+     *                    GDAL NUM_THREADS, the threads of ddb-tilers, of a COPC build, the cores
      *                    given to Obj2Tiles). A calling thread always works and never needs a
      *                    token; a section gets the tokens that are free and never waits for one,
      *                    so 0 runs every call on its calling thread only. The calls a host runs

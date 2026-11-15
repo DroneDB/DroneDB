@@ -15,7 +15,7 @@
 
 ## Key Features
 
-- **Smart Indexing** - Automatic metadata extraction from images (EXIF), raster data (GDAL), point clouds (PDAL), and vector files
+- **Smart Indexing** - Automatic metadata extraction from images (EXIF), raster data (GDAL), point clouds (ddb-tilers), and vector files
 - **Interactive Visualization** - Web-based viewers for orthophotos, 3D point clouds, textured models, and 360° panoramas
 - **Geospatial Analysis** - Flight path visualization, EXIF metadata extraction, dataset partitioning, and STAC catalog support
 - **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Cloud-Optimized Point Clouds (COPC)

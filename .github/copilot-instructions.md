@@ -18,7 +18,7 @@ DroneDB is a free, open-source aerial data management platform built in C++. Its
 
 - **Entry Management**: File parsing and metadata extraction
   - `Entry` class represents indexed files with properties, geometry, and type
-  - Supports images (EXIF), raster data (GDAL), point clouds (PDAL), vectors
+  - Supports images (EXIF), raster data (GDAL), point clouds (ddb-tilers), vectors
   - Automatic type detection and metadata extraction
 
 - **Geospatial Processing**:
@@ -41,7 +41,7 @@ DroneDB is a free, open-source aerial data management platform built in C++. Its
 - Uses vcpkg for dependency management
 - Cross-platform CMake configuration
 - Shipped/tested platforms: Windows and Linux (some APPLE code paths exist in CMake, but no macOS release)
-- Automatic dependency resolution for GDAL, PROJ, PDAL, etc.
+- Automatic dependency resolution for GDAL, PROJ, etc.
 - Derived-product generation depends on **external out-of-process binaries** discovered at runtime (override with `DDB_OBJ2TILES_PATH`, `DDB_BUILDLOD_PATH`, `DDB_METADATA_UTIL_PATH`, `DDB_BM3D_PATH`): Obj2Tiles (downloaded by `scripts/download-obj2tiles.{sh,ps1}`, version pinned in `scripts/obj2tiles-version`), build-lod (Rust, from `vendor/spark`). Missing tools degrade gracefully with `DDBERR_BUILDDEPMISSING`
 - To build on Windows use `full-build-win.ps1` script and to build on Linux use `full-build-linux.sh` script (skip the cmake part if the build directory already exists)
 
@@ -55,7 +55,6 @@ DroneDB is a free, open-source aerial data management platform built in C++. Its
 
 ### Key Dependencies
 - **GDAL**: Raster and vector data I/O
-- **PDAL**: Point cloud processing
 - **ddb-tilers** (`vendor/ddb-tilers`): COG and COPC builds and tiles, run for builds in the `gdal-util` helper
 - **PROJ**: Coordinate system transformations
 - **SpatiaLite**: Spatial database operations
