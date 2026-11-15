@@ -43,6 +43,7 @@
 #include "raster_helper.h"
 #include "raster_ops.h"
 #include "raster_test_utils.h"
+#include "tilers_raster.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
@@ -693,7 +694,7 @@ namespace
         const fs::path copy = artefactFor(input);
 
         EXPECT_EQ(copy, normalizedDir() / (artefactKey(input) + ".tif"));
-        ASSERT_TRUE(openArtefactRaster(copy));
+        ASSERT_TRUE(tilers::Raster::open(copy));
         EXPECT_EQ(copiesInCache(), std::vector<fs::path>{copy});
         EXPECT_TRUE(requestFolders().empty());
         EXPECT_EQ(requestsFor(log_, "normalize", "ok.jpg").size(), 1u);
@@ -733,14 +734,14 @@ namespace
     TEST_F(RasterNormalizeTest, theFailuresOfTheHelperOpenAsAMissingRasterOrAreThrown)
     {
         // A raster GDAL cannot open or the policy refuses: as for any file GDAL does not read
-        EXPECT_FALSE(openInputRaster(io::toUtf8(touch("unreadable.jpg"))));
-        EXPECT_FALSE(openInputRaster(io::toUtf8(touch("policy.jpg"))));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(touch("unreadable.jpg"))));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(touch("policy.jpg"))));
         EXPECT_THROW(artefactFor(touch("unreadable2.jpg")), RasterOpException);
         // A raster the helper could not read within its limits, a full device and a broken helper are not
-        EXPECT_THROW(openInputRaster(io::toUtf8(touch("limit.jpg"))), RasterNotReadException);
-        EXPECT_THROW(openInputRaster(io::toUtf8(touch("crashed.jpg"))), RasterNotReadException);
-        EXPECT_THROW(openInputRaster(io::toUtf8(touch("garbage.jpg"))), RasterNotReadException);
-        EXPECT_THROW(openInputRaster(io::toUtf8(touch("internal.jpg"))), RasterOpException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("limit.jpg"))), RasterNotReadException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("crashed.jpg"))), RasterNotReadException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("garbage.jpg"))), RasterNotReadException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("internal.jpg"))), RasterOpException);
         try
         {
             artefactFor(touch("nospace.jpg"));
@@ -797,7 +798,7 @@ namespace
         testutils::createGeoRaster(cog, spec);
 
         EXPECT_EQ(artefactFor(cog), cog);
-        EXPECT_TRUE(openInputRaster(io::toUtf8(cog)));
+        EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(cog)));
         EXPECT_EQ(helper_->requestsSent(), 0u);
         EXPECT_EQ(helper_->startedHelpers(), 0u);
     }

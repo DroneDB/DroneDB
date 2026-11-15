@@ -3,8 +3,9 @@
 
 libddb parses the files of users (rasters, vectors, photos) in the raster helper, gdal-util, a
 process of its own that is confined and can be killed (apps/gdal-util/PROTOCOL.md). The host (the
-Registry, ddbcmd, the tests) asks the helper and opens only what the helper wrote, through
-src/include/raster_artefacts.h. Two rules keep that true, and this check enforces both on the
+Registry, ddbcmd, the tests) asks the helper, reads the rasters the helper wrote with ddb-tilers
+(tilers::Raster) and opens with GDAL only the GeoPackage of a vector build
+(src/include/raster_artefacts.h). Three rules keep that true, and this check enforces them on the
 sources:
 
   raw-open     The calls that open a file by its name (GDALOpen, GDALOpenEx, GDALOpenShared,
@@ -15,9 +16,12 @@ sources:
                /vsiswift, /vsihdfs, /vsiwebhdfs, /vsizip, /vsitar, /vsi7z, /vsirar and their
                _streaming forms) appear in src/ and apps/ (apps/gdal-util aside: it is the helper)
                only in the files of ALLOWED_FILES, each with its reason. A new
-               open goes through openUserRaster / openUserVector (the helper's operations),
-               openArtefactRaster / openArtefactVector or reopenWrittenRaster; a file that needs
-               a raw one is added to the list with a one-line reason, which a review reads.
+               open goes through openUserRaster / openUserVector (the helper's operations) or
+               openArtefactVector; a file that needs a raw one is added to the list with a one-line
+               reason, which a review reads.
+  raster-open  GDAL_OF_RASTER, the flag of a GDAL raster open, appears in src/ and apps/ (apps/gdal-util
+               aside) only in the files of RASTER_OPEN_FILES: the open policy, whose opens run only in
+               a process that declared itself the helper. The host reads no raster with GDAL.
   enable-call  enableUserFileOpens( is called only in ENABLE_CALLERS: the start of the helper and
                the one test support file that runs a test body in a child process. Anything else that
                calls it turns a host into a helper, and the gate of openUserRaster, openUserVector
@@ -49,9 +53,15 @@ ALLOWED_FILES: dict[str, str] = {
     "src/library/gdal_open_policy.cpp":
         "the open policy itself: opens a file of a user with the drivers its extension allows",
     "src/library/raster_artefacts.cpp":
-        "opens the artefacts libddb wrote (and the files it just wrote) with the drivers it writes them with",
+        "opens the GeoPackage of a vector build, which libddb wrote, with the driver it writes it with",
     "src/library/merge_vrt.cpp":
-        "GDALBuildVRT over the handles of artefacts it already opened (no file names)",
+        "GDALBuildVRT over the handles of rasters the helper already opened (no file names)",
+}
+
+# The files that may open a raster with GDAL (GDAL_OF_RASTER), with the reason
+RASTER_OPEN_FILES: dict[str, str] = {
+    "src/library/gdal_open_policy.cpp":
+        "the open policy: opens a raster of a user, only in the raster helper (enableUserFileOpens)",
 }
 
 # The files that may call enableUserFileOpens(), with the reason
@@ -76,6 +86,7 @@ RAW_OPEN = re.compile(r"(?<![\w])(GDALOpen|GDALOpenEx|GDALOpenShared|GDALDataset
 # The file systems of GDAL that reach the network or open an archive; a prefix also matches its
 # _streaming form
 VSI_PREFIX = re.compile(r"/vsi(?:curl|s3|gs|az|adls|oss|swift|hdfs|webhdfs|zip|tar|7z|rar)(?![a-z0-9])")
+RASTER_FLAG = re.compile(r"(?<![\w])GDAL_OF_RASTER(?![\w])")
 ENABLE_CALL = re.compile(r"(?<![\w])(?:\w+::)*enableUserFileOpens\s*\(")
 DECLARATION = re.compile(r"\bvoid\s+(?:\w+::)*$")
 
@@ -154,11 +165,20 @@ def enable_calls(text: str) -> list[int]:
     return lines
 
 
-def check(files: dict[str, str], allowed: dict[str, str], callers: dict[str, str]) -> list[Finding]:
+def raster_flags(text: str) -> list[int]:
+    """The lines of `text` whose code (not comments or strings) holds GDAL_OF_RASTER."""
+    code, _ = split_source(text)
+    return [number for number, line in enumerate(code.split("\n"), 1) if RASTER_FLAG.search(line)]
+
+
+def check(files: dict[str, str], allowed: dict[str, str], callers: dict[str, str],
+          raster_files: dict[str, str] | None = None) -> list[Finding]:
     """The findings for `files` (path from the repository root -> text)."""
+    raster_files = raster_files or {}
     findings: list[Finding] = []
     seen_allowed: set[str] = set()
     seen_callers: set[str] = set()
+    seen_raster: set[str] = set()
 
     for path, text in sorted(files.items()):
         in_raw_scope = path.split("/")[0] in RAW_OPEN_DIRS and not path.startswith(RAW_OPEN_EXEMPT)
@@ -168,9 +188,16 @@ def check(files: dict[str, str], allowed: dict[str, str], callers: dict[str, str
                     seen_allowed.add(path)
                 else:
                     findings.append((path, line, f"{what}: open files through openUserRaster / openUserVector "
-                                                 "(helper operations), openArtefactRaster / openArtefactVector or "
-                                                 f"reopenWrittenRaster, or add the file to ALLOWED_FILES of {Path(__file__).name} "
-                                                 "with its reason"))
+                                                 "(helper operations) or openArtefactVector, or add the file to "
+                                                 f"ALLOWED_FILES of {Path(__file__).name} with its reason"))
+            for line in raster_flags(text):
+                if path in raster_files:
+                    seen_raster.add(path)
+                else:
+                    findings.append((path, line, "GDAL_OF_RASTER: the host reads rasters with ddb-tilers "
+                                                 "(tilers::Raster), the helper reads the rasters of users "
+                                                 f"(openUserRaster); or add the file to RASTER_OPEN_FILES of "
+                                                 f"{Path(__file__).name} with its reason"))
         if path.split("/")[0] in ENABLE_DIRS:
             for line in enable_calls(text):
                 if path in callers:
@@ -181,6 +208,9 @@ def check(files: dict[str, str], allowed: dict[str, str], callers: dict[str, str
 
     for path in sorted(set(allowed) - seen_allowed):
         findings.append((path, 0, "listed in ALLOWED_FILES but it holds no raw open (or does not exist): "
+                                  "remove the entry"))
+    for path in sorted(set(raster_files) - seen_raster):
+        findings.append((path, 0, "listed in RASTER_OPEN_FILES but it opens no raster (or does not exist): "
                                   "remove the entry"))
     for path in sorted(set(callers) - seen_callers):
         findings.append((path, 0, "listed in ENABLE_CALLERS but it does not call enableUserFileOpens(): "
@@ -276,21 +306,44 @@ def self_test() -> int:
           "src/library/p.cpp": "void ddb::gdalopen::enableUserFileOpens()\n{\n}\n"}, {}, {}, []),
         ("a mention in a comment or a string is no call",
          {"src/library/a.cpp": '// enableUserFileOpens()\nconst char *s = "enableUserFileOpens()";\n'}, {}, {}, []),
+        ("a raster open in the host",
+         {"src/library/a.cpp": "auto d = GDALOpenEx(p, GDAL_OF_RASTER | GDAL_OF_READONLY, 0, 0, 0);\n"},
+         {"src/library/a.cpp": "x"}, {}, [("src/library/a.cpp", 1)]),
+        ("the flag in a comment or a string is no open, nor a longer name",
+         {"src/library/a.cpp": '// GDAL_OF_RASTER\nconst char *s = "GDAL_OF_RASTER"; int GDAL_OF_RASTER_X;\n'},
+         {}, {}, []),
+        ("a raster open in the helper's folder or a test",
+         {"apps/gdal-util/src/x.cpp": "int k = GDAL_OF_RASTER;\n", "tests/unit/x.cpp": "int k = GDAL_OF_RASTER;\n"},
+         {}, {}, []),
         ("a caller that no longer calls is stale",
          {"apps/gdal-util/src/runtime.cpp": ok_call, "tests/support.cpp": "int x;\n"}, {}, callers,
          [("tests/support.cpp", 0)]),
     ]
 
     failures = 0
+    raster_cases: list[tuple[str, dict[str, str], dict[str, str], list[tuple[str, int]]]] = [
+        ("a listed file may open a raster",
+         {"src/library/policy.cpp": "int k = GDAL_OF_RASTER;\n"}, {"src/library/policy.cpp": "the policy"}, []),
+        ("a listed file that opens no raster is stale",
+         {"src/library/policy.cpp": "int k = 0;\n"}, {"src/library/policy.cpp": "the policy"},
+         [("src/library/policy.cpp", 0)]),
+    ]
+    for name, files, raster_files, expected in raster_cases:
+        got = sorted((path, line) for path, line, _ in check(files, {}, {}, raster_files))
+        if got != sorted(expected):
+            failures += 1
+            print(f"self-test FAILED: {name}\n  expected {sorted(expected)}\n  got      {got}", file=sys.stderr)
+
     for name, files, case_allowed, case_callers, expected in cases:
         got = sorted((path, line) for path, line, _ in check(files, case_allowed, case_callers))
         if got != sorted(expected):
             failures += 1
             print(f"self-test FAILED: {name}\n  expected {sorted(expected)}\n  got      {got}", file=sys.stderr)
+    total = len(cases) + len(raster_cases)
     if failures:
-        print(f"{failures} of {len(cases)} self-test cases failed", file=sys.stderr)
+        print(f"{failures} of {total} self-test cases failed", file=sys.stderr)
         return 1
-    print(f"self-test passed ({len(cases)} cases)")
+    print(f"self-test passed ({total} cases)")
     return 0
 
 
@@ -303,13 +356,14 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    findings = check(read_tree(ROOT), ALLOWED_FILES, ENABLE_CALLERS)
+    findings = check(read_tree(ROOT), ALLOWED_FILES, ENABLE_CALLERS, RASTER_OPEN_FILES)
     for path, line, message in findings:
         print(f"{path}:{line}: {message}" if line else f"{path}: {message}", file=sys.stderr)
     if findings:
         print(f"{len(findings)} problem(s): the host must not open files of users with GDAL", file=sys.stderr)
         return 1
-    print("ok: no raw GDAL open outside the allow-list, enableUserFileOpens() called only where it may be")
+    print("ok: no raw GDAL open outside the allow-list, no GDAL raster open in the host, enableUserFileOpens() "
+          "called only where it may be")
     return 0
 
 

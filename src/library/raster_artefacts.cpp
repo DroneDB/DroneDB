@@ -40,9 +40,7 @@ namespace ddb
             // (the COG of a raster, the GeoPackage and the tiles of a vector)
             constexpr const char *kReadableRoles[] = {"raster.cog", "vector.gpkg", "vector.mvt"};
 
-            // The drivers libddb writes its artefacts with. A VRT is not among them: it lists
-            // other files to read, and an artefact is one file.
-            const std::vector<std::string> kRasterDrivers = {"GTiff", "COG"};
+            // The driver libddb writes its vector artefacts with
             const std::vector<std::string> kVectorDrivers = {"GPKG"};
 
             // A file of the memory file system of GDAL: what is in it was written by this process
@@ -106,7 +104,7 @@ namespace ddb
                 return false;
             }
 
-            // Opens `path` read-only or for update with `drivers` alone. While it opens GDAL makes
+            // Opens `path` read-only with `drivers` alone. While it opens GDAL makes
             // no HTTP request and opens no other file through its network file systems, as when
             // a file of a user opens: an artefact is a file libddb wrote, but what the helper
             // copied into it came from a file of a user. A dataset whose metadata names another
@@ -114,12 +112,12 @@ namespace ddb
             // drivers: the copy of a raster leaves none of those items, and one found here was
             // put there by something other than libddb.
             GDALDatasetUniquePtr openWithDrivers(const std::string &utf8, const std::vector<std::string> &drivers,
-                                                 unsigned int kind, bool update)
+                                                 unsigned int kind)
             {
                 const CPLStringList allowed = cslFromStrings(drivers);
                 const gdalopen::NoNetworkWhileOpening noNetwork(utf8);
                 auto dataset = adoptDataset(GDALOpenEx(
-                    utf8.c_str(), kind | (update ? GDAL_OF_UPDATE : GDAL_OF_READONLY) | GDAL_OF_VERBOSE_ERROR,
+                    utf8.c_str(), kind | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
                     allowed.List(), nullptr, nullptr));
                 if (!dataset)
                     return dataset;
@@ -132,10 +130,10 @@ namespace ddb
             }
 
             GDALDatasetUniquePtr openArtefact(const fs::path &path, const std::vector<std::string> &drivers,
-                                              unsigned int kind, bool update)
+                                              unsigned int kind)
             {
                 requireArtefact(path);
-                return openWithDrivers(io::toUtf8(path), drivers, kind, update);
+                return openWithDrivers(io::toUtf8(path), drivers, kind);
             }
         } // namespace
 
@@ -206,14 +204,9 @@ namespace ddb
             return Hash::strCRC64(key.str());
         }
 
-        GDALDatasetUniquePtr openArtefactRaster(const fs::path &path, ArtefactAccess access)
-        {
-            return openArtefact(path, kRasterDrivers, GDAL_OF_RASTER, access == ArtefactAccess::Update);
-        }
-
         GDALDatasetUniquePtr openArtefactVector(const fs::path &path)
         {
-            return openArtefact(path, kVectorDrivers, GDAL_OF_VECTOR, false);
+            return openArtefact(path, kVectorDrivers, GDAL_OF_VECTOR);
         }
 
         bool writtenRasterOpens(const fs::path &path)

@@ -13,10 +13,18 @@
 
 #include "fs.h"
 #include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "raster_region.h"
 
 namespace testutils
 {
+    /// Opens a raster with GDAL to look at what a test wrote or what libddb wrote (any driver, read-only):
+    /// the tests look at files, libddb's host reads its rasters with ddb-tilers
+    inline GDALDatasetUniquePtr openRaster(const fs::path &path)
+    {
+        return ddb::adoptDataset(GDALOpenEx(path.string().c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
+    }
+
     struct GeoRasterSpec
     {
         int width = 512;

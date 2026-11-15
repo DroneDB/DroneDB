@@ -69,25 +69,14 @@ namespace ddb
         // @throws FSException when the file cannot be read
         std::string artefactKey(const fs::path &source);
 
-        // How an artefact or a file libddb wrote is opened
-        enum class ArtefactAccess
-        {
-            ReadOnly,
-            Update
-        };
-
-        // Opens an artefact raster with the drivers libddb writes it with (GTiff, COG) and no
-        // others: a VRT, whatever its name, is not opened (a memory dataset is not opened by a
-        // path either: no caller has one). While it opens GDAL makes no HTTP request and opens
-        // no other file through its network file systems (gdalopen::NoNetworkWhileOpening). Null
-        // (as GDALOpen returns it) when GDAL cannot open the file or its metadata names another
-        // dataset (gdalopen::validateMetadataFiles).
+        // Opens a vector artefact, read-only, with the driver libddb writes it with: GeoPackage (the one a
+        // build writes, or that libddb wrote in memory). No MVT driver: the tiles of a build are served as
+        // files and no libddb code reads them with GDAL. While it opens GDAL makes no HTTP request and
+        // opens no other file through its network file systems (gdalopen::NoNetworkWhileOpening). Null (as
+        // GDALOpen returns it) when GDAL cannot open the file or its metadata names another dataset
+        // (gdalopen::validateMetadataFiles). The host reads no raster with GDAL: its rasters are read with
+        // ddb-tilers (tilers::Raster), and the raster helper reads the files of users.
         // @throws GDALException when the file is not an artefact
-        GDALDatasetUniquePtr openArtefactRaster(const fs::path &path, ArtefactAccess access = ArtefactAccess::ReadOnly);
-
-        // The same for a vector artefact, read-only: GeoPackage (the one a build writes, or
-        // that libddb wrote in memory). No MVT driver: the tiles of a build are served as files
-        // and no libddb code reads them with GDAL.
         GDALDatasetUniquePtr openArtefactVector(const fs::path &path);
 
         // Whether the raster the helper has just written for this call (the COG of a build, a

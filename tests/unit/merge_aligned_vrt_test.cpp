@@ -4,7 +4,8 @@
 
 // The merge of bands that are not aligned stacks a window of each input (merge_vrt.h
 // buildAlignedVrt): each window is a VRT that reads its input when the merge reads it, so no band
-// is copied, and its pixels are the input's. The merge of such bands writes the windows.
+// is copied, and its pixels are the input's. The merge of such bands writes the windows. It runs in
+// the raster helper, which opens the bands of users: the tests run as it (user_open_child.h).
 
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "user_open_child.h"
 
 #include "exceptions.h"
 #include "gdal_inc.h"
@@ -115,7 +117,7 @@ namespace
     // Each band of the aligned VRT is the window of its input the crop names, of its type and
     // nodata, read from the input: no band is copied to a file of its own (in /vsimem/ or
     // anywhere), the VRT of the merge is the one file
-    TEST(MergeAlignedVrt, eachBandIsAWindowOfItsInputThatCopiesNoPixel)
+    USER_OPEN_TEST(MergeAlignedVrt, eachBandIsAWindowOfItsInputThatCopiesNoPixel)
     {
         TestArea area(TEST_NAME, true);
         for (const Capture &capture : kCaptures)
@@ -161,7 +163,7 @@ namespace
     }
 
     // A window that does not lie inside its input is refused before anything is read
-    TEST(MergeAlignedVrt, aWindowOutsideItsInputIsRefused)
+    USER_OPEN_TEST(MergeAlignedVrt, aWindowOutsideItsInputIsRefused)
     {
         TestArea area(TEST_NAME, true);
         const Capture &capture = kCaptures.front();
@@ -181,7 +183,7 @@ namespace
 
     // The windows outlive nothing they read: the inputs close after the VRTs, whichever closes
     // the aligned VRT (close() or its destructor), and the merged VRT can be read to the end
-    TEST(MergeAlignedVrt, theInputsCloseAfterTheWindowsThatReadThem)
+    USER_OPEN_TEST(MergeAlignedVrt, theInputsCloseAfterTheWindowsThatReadThem)
     {
         TestArea area(TEST_NAME, true);
         const Capture &capture = kCaptures[3];

@@ -132,8 +132,9 @@ jobs:
       - name: Check that the host opens no file of a user with GDAL
         # Only gdal-util parses the files of users: fails when GDALOpen*, GDALIdentifyDriver*, OGROpen*
         # or "/vsicurl" appear in src/ or apps/ outside the allow-list of scripts/check-gdal-opens.py,
-        # or when anything but the start of gdal-util calls enableUserFileOpens(). A text search, so
-        # it runs before the build; --self-test checks the check on built-in fixtures.
+        # when GDAL_OF_RASTER (a GDAL raster open) appears outside the open policy of the helper, or
+        # when anything but the start of gdal-util calls enableUserFileOpens(). A text search, so it
+        # runs before the build; --self-test checks the check on built-in fixtures.
         shell: bash
         run: |
           python3 scripts/check-gdal-opens.py --self-test

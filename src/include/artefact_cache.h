@@ -38,14 +38,12 @@ namespace ddb
         // helper (gdalopen::userFileOpensEnabled), which never asks for a copy
         fs::path artefactFor(const fs::path &path);
 
-        // Opens the raster at `path` (UTF-8) for reading through artefactFor(): what the analyses
-        // use where they used to open the file of the user. Null (as GDALOpen returns it) when
-        // there is no such file (no artefact, for an artefact) or the raster cannot be opened; the
-        // other failures are thrown
-        // (artefactFor).
-        // In the raster helper, whose operations reach the same code (a thumbnail detects the
-        // sensor of its raster), the file itself is opened with openUserRaster: the helper reads
-        // the file of its request, never a copy that another helper would write into the cache.
+        // Opens the raster of a user at `path` (UTF-8) with GDAL, in the raster helper alone: its
+        // operations (a mask, a merge, an alignment...) and the code they reach (a thumbnail detects the
+        // sensor of its raster) read the file of the request with openUserRaster, never a copy that
+        // another helper would write into the cache. Null (as GDALOpen returns it) when the raster
+        // cannot be opened. The host reads its rasters with ddb-tilers (tilers::Raster::openInput, on
+        // the copy of artefactFor). @throws std::logic_error in the host
         GDALDatasetUniquePtr openInputRaster(const std::string &path);
     } // namespace raster
 } // namespace ddb

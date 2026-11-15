@@ -37,6 +37,7 @@
 #include "raster_helper.h"
 #include "raster_ops.h"
 #include "raster_test_utils.h"
+#include "tilers_raster.h"
 #include "test.h"
 #include "testarea.h"
 #include "tilerhelper.h"
@@ -112,10 +113,7 @@ namespace
         std::unique_ptr<raster::ScopedRasterHelper> scope_;
     };
 
-    GDALDatasetUniquePtr openPlain(const fs::path &path)
-    {
-        return adoptDataset(GDALOpenEx(io::toUtf8(path).c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
-    }
+    GDALDatasetUniquePtr openPlain(const fs::path &path) { return testutils::openRaster(path); }
 
     std::vector<uint8_t> bandBytes(GDALDataset &dataset, int band)
     {
@@ -175,7 +173,7 @@ namespace
         const fs::path copy = raster::artefactFor(source);
         EXPECT_NE(copy, source);
         const auto in = openPlain(source);
-        const auto out = raster::openArtefactRaster(copy);
+        const auto out = openPlain(copy);
         ASSERT_TRUE(in);
         ASSERT_TRUE(out);
 
@@ -244,7 +242,7 @@ namespace
             CPLFree(wkt);
         }
 
-        const auto out = raster::openArtefactRaster(raster::artefactFor(source));
+        const auto out = openPlain(raster::artefactFor(source));
         ASSERT_TRUE(out);
         EXPECT_EQ(out->GetRasterBand(1)->GetColorInterpretation(), GCI_PaletteIndex);
         ASSERT_NE(out->GetRasterBand(1)->GetColorTable(), nullptr);
@@ -274,7 +272,7 @@ namespace
         ASSERT_NE(in->GetMetadata("SUBDATASETS"), nullptr) << "the source must name its pages";
 
         const fs::path copy = raster::artefactFor(source);
-        const auto out = raster::openArtefactRaster(copy);
+        const auto out = openPlain(copy);
         ASSERT_TRUE(out);
         EXPECT_EQ(out->GetMetadata("SUBDATASETS"), nullptr);
         // Neither the domains GDAL writes from the name of the file nor any item names the source
@@ -317,7 +315,7 @@ namespace
         }
 
         const auto in = openPlain(source);
-        const auto out = raster::openArtefactRaster(raster::artefactFor(source));
+        const auto out = openPlain(raster::artefactFor(source));
         ASSERT_TRUE(in);
         ASSERT_TRUE(out);
 
@@ -347,11 +345,11 @@ namespace
         EXPECT_EQ(first.extension(), ".tif");
         EXPECT_EQ(first.stem().string(), raster::artefactKey(source));
         EXPECT_TRUE(raster::isLibddbArtefact(first));
-        EXPECT_TRUE(raster::openArtefactRaster(first));
+        EXPECT_TRUE(openPlain(first));
 
         // Asked again, also through the opening of the analyses: no request
         EXPECT_EQ(raster::artefactFor(source), first);
-        EXPECT_TRUE(raster::openInputRaster(io::toUtf8(source)));
+        EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(source)));
         EXPECT_EQ(helper_.requests, 1);
         EXPECT_EQ(normalizedFiles().size(), 1u);
     }
@@ -393,7 +391,7 @@ namespace
         }());
 
         EXPECT_EQ(raster::artefactFor(cog), cog);
-        EXPECT_TRUE(raster::openInputRaster(io::toUtf8(cog)));
+        EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(cog)));
         // A copy is an artefact too: it is not copied again
         const fs::path copy = raster::artefactFor(makeRaster("raw.tif"));
         EXPECT_EQ(raster::artefactFor(copy), copy);
@@ -470,7 +468,7 @@ namespace
         for (int i = 0; i < kCallers; i++)
             threads.emplace_back([&, i] {
                 results[i] = raster::artefactFor(source);
-                const auto dataset = raster::openArtefactRaster(results[i]);
+                const auto dataset = openPlain(results[i]);
                 opened[i] = dataset && dataset->GetRasterCount() == 3 && !bandBytes(*dataset, 3).empty();
             });
         for (auto &thread : threads)
@@ -548,7 +546,7 @@ namespace
             static_assert(raster::kMaxNormalizePixels == 1000000000, "the limit is a billion pixels");
         }
         // The analyses open it as they open anything: the limit is an error, not a missing file
-        EXPECT_THROW(raster::openInputRaster(io::toUtf8(source)), raster::RasterNotReadException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(source)), raster::RasterNotReadException);
 
         EXPECT_TRUE(normalizedFiles().empty());
         for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
@@ -592,6 +590,17 @@ namespace
         return files;
     }
 
+    // The host reads no raster with GDAL: its rasters are read with ddb-tilers, on the copy the helper
+    // writes, and a host path that would open one with GDAL fails here
+    TEST_F(ArtefactCache, theHostOpensNoRasterWithGdal)
+    {
+        const fs::path source = makeRaster("raw.tif");
+        EXPECT_THROW(raster::openInputRaster(io::toUtf8(source)), std::logic_error);
+        const auto read = tilers::Raster::openInput(io::toUtf8(source));
+        ASSERT_TRUE(read);
+        EXPECT_NE(read->file(), source) << "the host reads the copy";
+    }
+
     // The operations of the raster helper reach the code of the analyses that reads a raster by its
     // path (the thumbnail of a raster detects its sensor): in the helper, that code reads the file of
     // the request and asks no other helper for a copy in the cache, which a worker of the helper can
@@ -620,8 +629,8 @@ namespace
     {
         const fs::path text = area_->getPath("notes.tif");
         std::ofstream(text) << "this is not a TIFF";
-        EXPECT_FALSE(raster::openInputRaster(io::toUtf8(text)));
-        EXPECT_FALSE(raster::openInputRaster(io::toUtf8(area_->getPath("missing.tif"))));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(text)));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(area_->getPath("missing.tif"))));
         EXPECT_THROW(raster::artefactFor(text), raster::RasterOpException);
         EXPECT_TRUE(normalizedFiles().empty());
         EXPECT_THROW(raster::artefactFor(area_->getPath("missing.tif")), FSException);
@@ -637,7 +646,7 @@ namespace
                               "<SimpleSource><SourceFilename relativeToVRT=\"0\">"
                            << io::toUtf8(secret)
                            << "</SourceFilename><SourceBand>1</SourceBand></SimpleSource></VRTRasterBand></VRTDataset>";
-        EXPECT_FALSE(raster::openInputRaster(io::toUtf8(vrt)));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(vrt)));
         EXPECT_TRUE(normalizedFiles().empty());
     }
 

@@ -198,7 +198,7 @@ namespace
         for (const auto &file : extracted)
         {
             EXPECT_FALSE(raster::isLibddbArtefact(file)) << file;
-            EXPECT_THROW(raster::openArtefactRaster(file), GDALException) << file;
+            EXPECT_THROW(raster::requireArtefact(file), GDALException) << file;
             EXPECT_THROW(raster::openArtefactVector(file), GDALException) << file;
         }
         // Everything is in the folder of its role; the places of the other roles are empty

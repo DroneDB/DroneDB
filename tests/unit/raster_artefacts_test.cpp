@@ -34,6 +34,7 @@
 #include "raster_helper.h"
 #include "raster_stats.h"
 #include "raster_test_utils.h"
+#include "tilers_raster.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
@@ -160,7 +161,7 @@ namespace
         EXPECT_FALSE(raster::isLibddbArtefact(build_ / CogBuildSubfolder / CogFileName));
         EXPECT_FALSE(raster::isLibddbArtefact(raster::artefactsDir() / "link.tif"));
         EXPECT_FALSE(raster::isLibddbArtefact(raster::artefactsDir() / "folder" / "secret.tif"));
-        EXPECT_THROW(raster::openArtefactRaster(raster::artefactsDir() / "link.tif"), GDALException);
+        EXPECT_THROW(raster::requireArtefact(raster::artefactsDir() / "link.tif"), GDALException);
 
         // A link from outside to a file that is one is judged by the file
         const fs::path real = makeGeoTiff(raster::artefactsDir() / "real.tif");
@@ -194,7 +195,7 @@ namespace
         const fs::path raw = makeGeoTiff(area_->getPath("raw.tif"));
         try
         {
-            raster::openArtefactRaster(raw);
+            raster::requireArtefact(raw);
             FAIL() << "no exception";
         }
         catch (const GDALException &e)
@@ -203,15 +204,19 @@ namespace
         }
         EXPECT_THROW(raster::openArtefactVector(raw), GDALException);
 
-        // The same file in the place of the artefacts opens
+        // The same file in the place of the artefacts is one, and the host reads it as it is
         const fs::path copy = raster::artefactsDir() / "raw.tif";
         fs::copy_file(raw, copy);
-        const auto dataset = raster::openArtefactRaster(copy);
-        ASSERT_TRUE(dataset);
-        EXPECT_EQ(GDALGetRasterXSize(datasetHandle(dataset)), 300);
+        EXPECT_NO_THROW(raster::requireArtefact(copy));
+        const auto raster = tilers::Raster::openInput(io::toUtf8(copy));
+        ASSERT_TRUE(raster);
+        EXPECT_EQ(raster->file(), copy);
+        EXPECT_EQ(raster->width(), 300);
     }
 
-    TEST_F(RasterArtefacts, onlyTheDriversOfTheArtefactsOpenAnArtefact)
+    // The host reads an artefact as a TIFF and nothing else: a VRT (a list of other files), a PNG or a
+    // GeoPackage in the place of an artefact is no raster to it
+    TEST_F(RasterArtefacts, anArtefactThatIsNoTiffIsNoRaster)
     {
         const fs::path real = makeGeoTiff(raster::artefactsDir() / "real.tif");
 
@@ -222,8 +227,8 @@ namespace
                                 "</SourceFilename><SourceBand>1</SourceBand></SimpleSource></VRTRasterBand></VRTDataset>";
         writeFile(raster::artefactsDir() / "list.vrt", vrt);
         writeFile(raster::artefactsDir() / "disguised.tif", vrt);
-        EXPECT_FALSE(raster::openArtefactRaster(raster::artefactsDir() / "list.vrt"));
-        EXPECT_FALSE(raster::openArtefactRaster(raster::artefactsDir() / "disguised.tif"));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(raster::artefactsDir() / "list.vrt")));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(raster::artefactsDir() / "disguised.tif")));
 
         // A PNG with the name of a GeoTIFF is no GeoTIFF
         const fs::path png = raster::artefactsDir() / "image.tif";
@@ -232,7 +237,7 @@ namespace
         GDALClose(GDALCreateCopy(GDALGetDriverByName("PNG"), io::toUtf8(png).c_str(), source, FALSE, nullptr, nullptr, nullptr));
         GDALClose(source);
         ASSERT_TRUE(fs::exists(png));
-        EXPECT_FALSE(raster::openArtefactRaster(png));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(png)));
 
         // A GeoTIFF is not a vector, and a raster open does not take a GeoPackage
         EXPECT_FALSE(raster::openArtefactVector(real));
@@ -243,18 +248,19 @@ namespace
             GDALDatasetCreateLayer(dataset, "points", nullptr, wkbPoint, nullptr);
             GDALClose(dataset);
         }
-        EXPECT_FALSE(raster::openArtefactRaster(gpkg));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(gpkg)));
         const auto layers = raster::openArtefactVector(gpkg);
         ASSERT_TRUE(layers);
         EXPECT_EQ(GDALDatasetGetLayerCount(datasetHandle(layers)), 1);
 
-        EXPECT_TRUE(raster::openArtefactRaster(real));
+        EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(real)));
     }
 
-    TEST_F(RasterArtefacts, aRasterWhoseMetadataNamesAnotherDatasetIsNotOpened)
+    TEST_F(RasterArtefacts, aRasterWhoseMetadataNamesAnotherDatasetIsReadWithoutIt)
     {
-        // The metadata GDAL opens the named dataset from (the overviews of a raster, the arrays of
-        // a geolocation) came from a file of a user if it is in a copy: refused, as for a user file
+        // The metadata GDAL would open the named dataset from (the overviews of a raster, the arrays of
+        // a geolocation) came from a file of a user if it is in a copy: the host reads the raster
+        // alone, with its own overviews
         const fs::path elsewhere = makeGeoTiff(area_->getPath("elsewhere.tif"));
         const std::pair<const char *, const char *> items[] = {
             {"OVERVIEWS", "OVERVIEW_FILE"}, {"GEOLOCATION", "X_DATASET"}, {"GEOLOCATION", "Y_DATASET"}};
@@ -269,9 +275,11 @@ namespace
                 ASSERT_EQ(GDALSetMetadataItem(datasetHandle(update), item, io::toUtf8(elsewhere).c_str(), domain),
                           CE_None);
             }
-            EXPECT_FALSE(raster::openArtefactRaster(artefact));
+            const auto raster = tilers::Raster::openInput(io::toUtf8(artefact));
+            ASSERT_TRUE(raster);
+            EXPECT_TRUE(raster->overviews().empty());
+            EXPECT_EQ(raster->file(), artefact);
         }
-        EXPECT_TRUE(raster::openArtefactRaster(makeGeoTiff(raster::artefactsDir() / "plain.tif")));
     }
 
     TEST_F(RasterArtefacts, theGuardOfTheOpenPolicyIsTheOneAnArtefactOpensWith)
@@ -323,7 +331,7 @@ namespace
         fs::create_directories(build_);
         fs::create_directory_symlink(outside, build_ / CogBuildSubfolder);
         EXPECT_FALSE(raster::isLibddbArtefact(build_ / CogBuildSubfolder / CogFileName));
-        EXPECT_THROW(raster::openArtefactRaster(build_ / CogBuildSubfolder / CogFileName), GDALException);
+        EXPECT_THROW(raster::requireArtefact(build_ / CogBuildSubfolder / CogFileName), GDALException);
 
         // The build folder itself, and the dataset above it
         const fs::path real = makeGeoTiff(dataset_ / "real-build" / CogBuildSubfolder / CogFileName);
@@ -342,29 +350,14 @@ namespace
         EXPECT_FALSE(raster::isLibddbArtefact(build_ / ".." / ".." / ".." / ".." / "outside" / "x" / CogBuildSubfolder / CogFileName));
         EXPECT_FALSE(raster::isLibddbArtefact(build_ / CogBuildSubfolder / ".." / ".." / ".." / ".." / ".." / "outside" / "x" / CogBuildSubfolder / CogFileName));
         EXPECT_FALSE(raster::isLibddbArtefact(planted));
-        EXPECT_THROW(raster::openArtefactRaster(planted), GDALException);
+        EXPECT_THROW(raster::requireArtefact(planted), GDALException);
     }
 
-    TEST_F(RasterArtefacts, anArtefactOpensForUpdateAndAFileJustWrittenReopensWhereverItIs)
+    TEST_F(RasterArtefacts, aFileTheHelperJustWroteIsCheckedWhereverItIs)
     {
-        const fs::path artefact = makeGeoTiff(raster::artefactsDir() / "update.tif");
-        {
-            const auto update = raster::openArtefactRaster(artefact, raster::ArtefactAccess::Update);
-            ASSERT_TRUE(update);
-            GDALRasterBandH band = GDALGetRasterBand(datasetHandle(update), 1);
-            EXPECT_EQ(GDALSetRasterNoDataValue(band, 7.0), CE_None);
-        }
-        {
-            const auto read = raster::openArtefactRaster(artefact);
-            ASSERT_TRUE(read);
-            int hasNoData = 0;
-            EXPECT_EQ(GDALGetRasterNoDataValue(GDALGetRasterBand(datasetHandle(read), 1), &hasNoData), 7.0);
-            EXPECT_TRUE(hasNoData);
-        }
-
         // Not an artefact by place, and not refused for it: it is what the helper wrote just now
         const fs::path written = makeGeoTiff(area_->getPath("export.tif"));
-        EXPECT_THROW(raster::openArtefactRaster(written, raster::ArtefactAccess::Update), GDALException);
+        EXPECT_THROW(raster::requireArtefact(written), GDALException);
         EXPECT_TRUE(raster::writtenRasterOpens(written));
 
         // Only a regular file that is a TIFF
@@ -688,7 +681,7 @@ namespace
 
         EXPECT_EQ(projected.parent_path(), raster::artefactsDir());
         EXPECT_EQ(projected.filename(), fs::path(raster::artefactKey(photo) + ".tif"));
-        const auto dataset = raster::openArtefactRaster(projected);
+        const auto dataset = testutils::openRaster(projected);
         ASSERT_TRUE(dataset);
         EXPECT_EQ(GDALGetRasterCount(datasetHandle(dataset)), 3) << "RGB, the footprint in the mask";
         OGRSpatialReference srs(GDALGetProjectionRef(datasetHandle(dataset)));
