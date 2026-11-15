@@ -18,6 +18,7 @@
 #include "exif_protocol.h"
 #include "fs.h"
 #include "json.h"
+#include "pointcloud_info.h"
 #include "thumbs.h"
 
 namespace ddb
@@ -31,7 +32,7 @@ namespace ddb
         // The version this side implements. A helper is accepted when its major version is the
         // same and its minor version is not lower.
         constexpr int kMajorVersion = 1;
-        constexpr int kMinorVersion = 1;
+        constexpr int kMinorVersion = 2;
 
         // The longest line of either side
         constexpr size_t kMaxLineBytes = 16 * 1024 * 1024;
@@ -83,6 +84,8 @@ namespace ddb
             constexpr const char *kCog = "cog";
             constexpr const char *kCopc = "copc";
             constexpr const char *kVector = "vector";
+            // The info of a point cloud (new in 1.2): no params, the result of pointCloudInfoJson
+            constexpr const char *kPointCloudInfo = "pointCloudInfo";
         } // namespace op
 
         // A request. `path` is the file to read, `out` the file to write (operations that
@@ -191,6 +194,15 @@ namespace ddb
         json toJson(const ProbeResult &result);
         // @throws ProtocolError
         ProbeResult probeResultFromJson(const json &result);
+
+        // ---- point cloud info
+
+        // The result of kPointCloudInfo: {"pointCount", "wkt" (when the cloud has a CRS), "dimensions",
+        // "bounds" (6 numbers, when known), "pointGeom" and "polygonGeom" (its footprint in EPSG:4326),
+        // "warning" (why it has no footprint)}
+        json pointCloudInfoJson(const PointCloudInfo &info);
+        // @throws ProtocolError
+        PointCloudInfo pointCloudInfoFromJson(const json &result);
 
         // ---- thumbnail
 

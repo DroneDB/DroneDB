@@ -304,6 +304,17 @@ namespace ddb
             return result;
         }
 
+        PointCloudInfo GdalUtilHelper::pointCloudInfo(const fs::path &path)
+        {
+            PointCloudInfo result;
+            const Response response = serve(
+                op::kPointCloudInfo, path, fs::path(), json::object(), options_.probeTimeout,
+                [&result](const Response &ok) { result = pointCloudInfoFromJson(ok.result); });
+            if (!response.ok)
+                raiseFailure(op::kPointCloudInfo, path, response);
+            return result;
+        }
+
         void GdalUtilHelper::thumbnail(const fs::path &path, const fs::path &out, const ThumbnailParams &params)
         {
             const Response response =

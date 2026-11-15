@@ -148,6 +148,7 @@ namespace
         {
             return real_.probe(path, params);
         }
+        PointCloudInfo pointCloudInfo(const fs::path &path) override { return real_.pointCloudInfo(path); }
         void thumbnail(const fs::path &path, const fs::path &out, const raster::ThumbnailParams &params) override
         {
             real_.thumbnail(path, out, params);

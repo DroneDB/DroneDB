@@ -469,6 +469,11 @@ namespace
             result.type = "GeoRaster";
             return result;
         }
+        PointCloudInfo pointCloudInfo(const fs::path &) override
+        {
+            ADD_FAILURE() << "no point cloud info is asked for";
+            return PointCloudInfo();
+        }
         void thumbnail(const fs::path &, const fs::path &, const raster::ThumbnailParams &) override
         {
             ADD_FAILURE() << "no thumbnail is asked for";

@@ -11,15 +11,11 @@
 #include <sstream>
 #include <cctype>
 
-#include "pdal_inc.h"
-#include <pdal/PointRef.hpp>
-#include <pdal/PointTable.hpp>
-#include <pdal/StageFactory.hpp>
-#include <pdal/io/CopcReader.hpp>
 
 #include "coordstransformer.h"
 #include "entry.h"
 #include "exceptions.h"
+#include "gdal_open_policy.h"
 #include "gdal_raii.h"
 #include "geo.h"
 #include "logger.h"
@@ -36,376 +32,21 @@ namespace ddb {
 
 namespace {
 
-// Maximum number of lines to read for format detection
-static constexpr size_t MAX_HEADER_LINES = 20;
+// Fills the polygon and the centroid of the point cloud (in EPSG:footprintSrs) from its bounds. Only the
+// horizontal part of the CRS of the file takes part: x and y are transformed, z is not (a height
+// in the vertical unit of the CRS, converted to metres), so a vertical datum that PROJ cannot use
+// here (a geoid grid that is not installed) does not matter. Throws GDALException when the
+// horizontal CRS cannot be transformed.
+void populatePointCloudFootprint(PointCloudInfo& info, int footprintSrs) {
+    const std::vector<double>& b = info.bounds;  // minX, minY, minZ, maxX, maxY, maxZ
 
-// Comment prefix used by CloudCompare and other tools
-static constexpr const char* COMMENT_PREFIX = "//";
-
-struct TextReaderConfig {
-    std::string header;           // PDAL header option (e.g., "X, Y, Z, Red, Green, Blue")
-    int skip;                     // PDAL skip option (number of lines to skip)
-    char separator;               // PDAL separator option (space, tab, comma, semicolon)
-    bool hasHeader;               // Whether a header line was detected (needs header+skip override)
-    std::vector<std::string> detectedColumns;
-};
-
-// Trim leading/trailing whitespace and surrounding double quotes from a token
-static std::string trimAndUnquote(const std::string& token) {
-    std::string_view trimmed = str::trimView(token, " \t\r\n");
-    // Strip surrounding double quotes if present
-    if (trimmed.size() >= 2 && trimmed.front() == '"' && trimmed.back() == '"')
-        trimmed = trimmed.substr(1, trimmed.size() - 2);
-    return std::string(trimmed);
-}
-
-// Check if a line is empty or contains only whitespace
-static bool isBlankLine(const std::string& line) {
-    return line.find_first_not_of(" \t\r\n") == std::string::npos;
-}
-
-// Check if a line is a comment (starts with // after optional leading whitespace)
-static bool isCommentLine(const std::string& line) {
-    size_t start = line.find_first_not_of(" \t");
-    if (start == std::string::npos)
-        return false;
-    return line.compare(start, 2, COMMENT_PREFIX) == 0;
-}
-
-// Check if a string is a single non-negative integer (point count marker)
-static bool isSingleInteger(const std::string& line) {
-    std::string trimmed = trimAndUnquote(line);
-    if (trimmed.empty())
-        return false;
-    for (char c : trimmed) {
-        if (!str::isDigitChar(c))
-            return false;
-    }
-    return true;
-}
-
-// Check if a line contains any alphabetic characters (indicator of a header line)
-static bool containsAlpha(const std::string& line) {
-    for (char c : line) {
-        if (str::isAlphaChar(c))
-            return true;
-    }
-    return false;
-}
-
-// Split a line by a specific separator. For space, any run of whitespace is one separator.
-static std::vector<std::string> splitBySeparator(const std::string& line, char sep) {
-    // Whitespace-separated: split on runs of spaces/tabs
-    const std::vector<std::string> tokens = sep == ' ' ? str::splitWhitespace(line) : str::split(line, sep);
-
-    std::vector<std::string> result;
-    for (const std::string& token : tokens) {
-        std::string t = trimAndUnquote(token);
-        if (!t.empty())
-            result.push_back(std::move(t));
-    }
-    return result;
-}
-
-// Detect the most likely separator from a data/header line among: comma, semicolon, tab, space
-static char detectSeparator(const std::string& line) {
-    size_t tabCount = 0;
-    size_t commaCount = 0;
-    size_t semicolonCount = 0;
-
-    for (char c : line) {
-        switch (c) {
-            case '\t': tabCount++; break;
-            case ',': commaCount++; break;
-            case ';': semicolonCount++; break;
-            default: break;
-        }
-    }
-
-    // Priority: explicit separators first, fall back to space
-    if (commaCount > 0) return ',';
-    if (semicolonCount > 0) return ';';
-    if (tabCount > 0) return '\t';
-    return ' ';
-}
-
-// Map common column name variants to PDAL dimension names (alphanumeric + underscore only)
-static std::string mapColumnName(const std::string& raw) {
-    // Single-letter RGB aliases used by CloudCompare
-    if (raw == "R") return "Red";
-    if (raw == "G") return "Green";
-    if (raw == "B") return "Blue";
-    // CloudCompare uses underscores between words; PDAL canonical names are CamelCase
-    if (raw == "Return_Number") return "ReturnNumber";
-    if (raw == "Number_Of_Returns") return "NumberOfReturns";
-    if (raw == "User_Data") return "UserData";
-    if (raw == "Scan_Angle_Rank") return "ScanAngleRank";
-    if (raw == "Point_Source_ID" || raw == "Point_Source_Id") return "PointSourceId";
-    if (raw == "Gps_Time") return "GpsTime";
-    if (raw == "Scan_Direction_Flag") return "ScanDirectionFlag";
-    if (raw == "Edge_Of_Flight_Line") return "EdgeOfFlightLine";
-    if (raw == "Key_Point") return "KeyPoint";
-    if (raw == "Scan_Channel") return "ScanChannel";
-    return raw;
-}
-
-// Read up to maxLines lines from a file into memory
-static std::vector<std::string> readLeadingLines(const std::string& filename, size_t maxLines) {
-    std::vector<std::string> lines;
-    std::ifstream file(io::fromUtf8(filename));
-    if (!file.is_open())
-        return lines;
-    std::string line;
-    while (lines.size() < maxLines && std::getline(file, line))
-        lines.push_back(line);
-    return lines;
-}
-
-// Determine if a line "looks like" a header (has alphabetic characters beyond scientific notation).
-// Numeric-only data lines may contain 'e'/'E' for scientific notation, but no other letters.
-static bool looksLikeHeaderLine(const std::string& line) {
-    if (!containsAlpha(line))
-        return false;
-    // Exclude scientific-notation-only alpha (e/E) followed/preceded by digits or signs
-    // Conservative: if the line contains any letter other than e/E, it's a header
-    for (char c : line) {
-        if (str::isAlphaChar(c) && c != 'e' && c != 'E')
-            return true;
-    }
-    // Only e/E present: could be scientific notation, not a header
-    return false;
-}
-
-// Build the PDAL "header" option string from a list of column names using the given separator.
-// PDAL parses the header option using the same separator as the data, so they must agree.
-static std::string buildHeaderString(const std::vector<std::string>& columns, char sep) {
-    std::ostringstream oss;
-    for (size_t i = 0; i < columns.size(); ++i) {
-        if (i > 0) {
-            // Use ", " for comma/semicolon to match the common formatting; a plain separator
-            // works too, but a trailing space is allowed and improves readability.
-            if (sep == ',' || sep == ';')
-                oss << sep << ' ';
-            else
-                oss << sep;
-        }
-        oss << columns[i];
-    }
-    return oss.str();
-}
-
-// Return a plausible default column list for a data row with `columnCount` values.
-// These are best-effort guesses matching conventions of CloudCompare and PDAL writers.
-static std::vector<std::string> defaultColumnsForCount(size_t columnCount) {
-    // Strictly XYZ only: anything beyond the 3 positional dims is exposed as generic extras.
-    // For typical layouts we use names PDAL recognizes natively so downstream tools see colors.
-    static const std::vector<std::string> tier3 = {"X", "Y", "Z"};
-    static const std::vector<std::string> tier4 = {"X", "Y", "Z", "Intensity"};
-    static const std::vector<std::string> tier6 = {"X", "Y", "Z", "Red", "Green", "Blue"};
-    static const std::vector<std::string> tier7 = {"X", "Y", "Z", "Red", "Green", "Blue", "Intensity"};
-    static const std::vector<std::string> tier9 = {"X", "Y", "Z", "Red", "Green", "Blue",
-                                                   "ReturnNumber", "NumberOfReturns", "UserData"};
-
-    switch (columnCount) {
-        case 3: return tier3;
-        case 4: return tier4;
-        case 6: return tier6;
-        case 7: return tier7;
-        case 9: return tier9;
-        default: break;
-    }
-
-    // Fallback: X, Y, Z and generic ExtraN dimensions for the remainder
-    std::vector<std::string> cols = tier3;
-    for (size_t i = 3; i < columnCount; ++i)
-        cols.push_back("Extra" + std::to_string(i - 3));
-    return cols;
-}
-
-// The column names of the LAST comment line preceding data (CloudCompare "columns title" export
-// places column names in the comment immediately above the data rows; any earlier comments are
-// typically generator/date banners). Empty when that line does not look like a header.
-static std::vector<std::string> commentLineColumns(const std::vector<std::string>& lines) {
-    std::vector<std::string> commentColumns;
-    size_t lastCommentIdx = std::string::npos;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (isBlankLine(lines[i]))
-            continue;
-        if (!isCommentLine(lines[i]))
-            break;
-        lastCommentIdx = i;
-    }
-    if (lastCommentIdx != std::string::npos) {
-        const std::string& line = lines[lastCommentIdx];
-        size_t start = line.find_first_not_of(" \t");
-        std::string content = line.substr(start + 2);  // after "//"
-        if (looksLikeHeaderLine(content)) {
-            const char commentSeparator = detectSeparator(content);
-            commentColumns = splitBySeparator(content, commentSeparator);
-            for (auto& c : commentColumns)
-                c = mapColumnName(c);
-        }
-    }
-    return commentColumns;
-}
-
-// The best available column list, in priority order: inline in-file header > comment-line header
-// (validated by the data column count) > inferred from the data column count
-static std::vector<std::string> chooseColumns(const std::vector<std::string>& inlineColumns,
-                                       const std::vector<std::string>& commentColumns, size_t dataColCount) {
-    if (inlineColumns.size() >= 3)
-        return inlineColumns;
-    if (commentColumns.size() >= 3 && (dataColCount == 0 || commentColumns.size() == dataColCount))
-        return commentColumns;
-    if (dataColCount > 0)
-        return defaultColumnsForCount(dataColCount);
-    return {"X", "Y", "Z"};
-}
-
-// Detect the format of an XYZ text file and return the PDAL configuration needed to read it.
-// Reliability-first heuristic:
-//   1. If the first line is a "//"-prefixed comment containing alphabetic tokens, treat the
-//      content after "//" as the declared header (CloudCompare "columns title" export).
-//   2. Skip arbitrary leading comment and blank lines.
-//   3. If the next line is a single integer, treat it as a point-count marker and skip it.
-//   4. If the next line contains alphabetic tokens, treat it as an in-file header: extract
-//      column names, strip quotes, map CloudCompare aliases to PDAL names, and skip it.
-//   5. Detect the separator (comma, semicolon, tab, or space) from the header/data line.
-//   6. Always populate `config.header` so PDAL never falls back to interpreting a data row
-//      as the header line.
-TextReaderConfig detectTextFormat(const std::string& filename) {
-    TextReaderConfig config;
-    config.skip = 0;
-    config.separator = ' ';
-    config.hasHeader = false;
-    config.header = "X, Y, Z";
-
-    const std::vector<std::string> lines = readLeadingLines(filename, MAX_HEADER_LINES);
-    if (lines.empty()) {
-        LOGD << "Cannot read lines for format detection: " << filename;
-        return config;
-    }
-
-    // Step 1: column names from the LAST comment line preceding data
-    const std::vector<std::string> commentColumns = commentLineColumns(lines);
-
-    // Step 2: skip leading comment/blank lines
-    size_t idx = 0;
-    while (idx < lines.size() && (isCommentLine(lines[idx]) || isBlankLine(lines[idx])))
-        ++idx;
-    config.skip = static_cast<int>(idx);
-
-    if (idx >= lines.size()) {
-        LOGD << "No data lines found in XYZ file: " << filename;
-        return config;
-    }
-
-    // Step 3: point-count marker
-    if (isSingleInteger(lines[idx])) {
-        ++config.skip;
-        ++idx;
-    }
-
-    if (idx >= lines.size()) {
-        LOGD << "No header/data lines after skip in XYZ file: " << filename;
-        return config;
-    }
-
-    // Step 4: inline header detection
-    const std::string& candidate = lines[idx];
-    std::vector<std::string> inlineColumns;
-    char sep = detectSeparator(candidate);
-    if (looksLikeHeaderLine(candidate)) {
-        inlineColumns = splitBySeparator(candidate, sep);
-        for (auto& c : inlineColumns)
-            c = mapColumnName(c);
-        ++config.skip;  // Skip the in-file header line, we override via `header` option
-        ++idx;
-    }
-
-    // Step 5: determine the data separator from the first real data row when available;
-    // fall back to whatever we detected from the header candidate.
-    if (idx < lines.size() && !isBlankLine(lines[idx]))
-        sep = detectSeparator(lines[idx]);
-    config.separator = sep;
-
-    // Step 6: choose the best available column list, in priority order:
-    //   inline in-file header > comment-line header (validated by data column count) >
-    //   inferred from data column count
-    const size_t dataColCount =
-        (idx < lines.size()) ? splitBySeparator(lines[idx], sep).size() : 0;
-
-    const std::vector<std::string> columns = chooseColumns(inlineColumns, commentColumns, dataColCount);
-
-    config.hasHeader = true;
-    config.detectedColumns = columns;
-    config.header = buildHeaderString(columns, sep);
-
-    LOGD << "XYZ format detected for " << filename << ": columns=" << columns.size()
-         << ", separator='" << (sep == ' ' ? std::string("space")
-                                           : sep == '\t' ? std::string("tab")
-                                                         : std::string(1, sep))
-         << "', skip=" << config.skip
-         << ", header='" << config.header << "'";
-
-    return config;
-}
-
-std::string resolvePointCloudReaderDriver(const std::string& filename) {
-    const io::Path path(io::fromUtf8(filename));
-
-    if (path.checkExtension({"pts"}))
-        return "readers.pts";
-
-    if (path.checkExtension({"xyz"}))
-        return "readers.text";
-
-    return pdal::StageFactory::inferReaderDriver(filename);
-}
-
-bool suppressDirectSpatialInfo(const io::Path& path) {
-    return path.checkExtension({"pts", "xyz"});
-}
-
-void clearSpatialInfo(PointCloudInfo& info) {
-    info.bounds.clear();
-    info.centroid.clear();
-    info.polyBounds.clear();
-}
-
-void populatePointCloudDimensions(pdal::PointLayoutPtr layout, PointCloudInfo& info) {
-    info.dimensions.clear();
-
-    for (pdal::Dimension::Id dimension : layout->dims())
-        info.dimensions.push_back(layout->dimName(dimension));
-}
-
-void populatePointCloudInfoFromQuickInfo(const pdal::QuickInfo& quickInfo, PointCloudInfo& info) {
-    info.pointCount = quickInfo.m_pointCount;
-    info.wktProjection = quickInfo.m_srs.valid() ? quickInfo.m_srs.getWKT() : "";
-
-    info.dimensions.clear();
-    for (const auto& dimension : quickInfo.m_dimNames)
-        info.dimensions.push_back(dimension);
-}
-
-// Fills the polygon and the centroid of the point cloud (in EPSG:polyBoundsSrs) from the bounds of its
-// file. Only the horizontal part of the CRS of the file takes part: x and y are transformed, z is not
-// (a height in the vertical unit of the CRS, converted to metres), so a vertical datum that PROJ
-// cannot use here (a geoid grid that is not installed) does not matter. Throws GDALException when
-// the horizontal CRS cannot be transformed.
-void populatePointCloudFootprint(const pdal::QuickInfo& quickInfo, PointCloudInfo& info, int polyBoundsSrs) {
-    const pdal::BOX3D bbox = quickInfo.m_bounds;
-
-    const SrsPtr fileSrs = srsFromWkt(quickInfo.m_srs.getWKT().c_str());
+    const SrsPtr fileSrs = srsFromWkt(info.wktProjection.c_str());
     if (!fileSrs)
         throw GDALException("Cannot read the coordinate reference system of the file. Is PROJ available?");
 
-    const SrsPtr tgt = srsFromEpsg(polyBoundsSrs);
-    if (!tgt) {
-        throw GDALException("Cannot read EPSG:" + std::to_string(polyBoundsSrs) +
-                            ". Is PROJ available?");
-    }
+    const SrsPtr tgt = srsFromEpsg(footprintSrs);
+    if (!tgt)
+        throw GDALException("Cannot read EPSG:" + std::to_string(footprintSrs) + ". Is PROJ available?");
 
     const OGRSpatialReference& fullSrs = srsOf(fileSrs);
     const OGRSpatialReference horizontal = horizontalSrs(fullSrs);
@@ -414,25 +55,28 @@ void populatePointCloudFootprint(const pdal::QuickInfo& quickInfo, PointCloudInf
     const auto transform = CoordsTransformer::tryCreate(horizontal, srsOf(tgt));
     if (!transform) {
         const char* name = horizontal.GetName();
-        throw GDALException("No coordinate transformation from " + std::string(name != nullptr ? name : "the CRS of the file") +
-                            " to EPSG:" + std::to_string(polyBoundsSrs));
+        throw GDALException("No coordinate transformation from " +
+                            std::string(name != nullptr ? name : "the CRS of the file") + " to EPSG:" +
+                            std::to_string(footprintSrs));
     }
 
-    double geoMinX = bbox.minx;
-    double geoMinY = bbox.miny;
-    double geoMaxX = bbox.maxx;
-    double geoMaxY = bbox.maxy;
-    double centroidX = (bbox.minx + bbox.maxx) / 2.0;
-    double centroidY = (bbox.miny + bbox.maxy) / 2.0;
+    double geoMinX = b[0];
+    double geoMinY = b[1];
+    double geoMaxX = b[3];
+    double geoMaxY = b[4];
+    double centroidX = (b[0] + b[3]) / 2.0;
+    double centroidY = (b[1] + b[4]) / 2.0;
 
     if (!transform->tryTransform(1, &geoMinX, &geoMinY) || !transform->tryTransform(1, &geoMaxX, &geoMaxY) ||
         !transform->tryTransform(1, &centroidX, &centroidY)) {
-        throw GDALException("Cannot transform the bounds " + bbox.toWKT() + " to EPSG:" +
-                            std::to_string(polyBoundsSrs));
+        std::ostringstream bounds;
+        bounds << "[" << b[0] << ", " << b[1] << ", " << b[3] << ", " << b[4] << "]";
+        throw GDALException("Cannot transform the bounds " + bounds.str() + " to EPSG:" +
+                            std::to_string(footprintSrs));
     }
 
-    const double geoMinZ = bbox.minz * zToMeters;
-    const double geoMaxZ = bbox.maxz * zToMeters;
+    const double geoMinZ = b[2] * zToMeters;
+    const double geoMaxZ = b[5] * zToMeters;
 
     if (geoMinZ < -30000 || geoMaxZ > 30000 || (geoMinX == -90 && geoMaxX == 90)) {
         LOGD << "Strange point cloud bounds [[" << geoMinX << ", " << geoMaxX << "], [" << geoMinY << ", "
@@ -449,28 +93,17 @@ void populatePointCloudFootprint(const pdal::QuickInfo& quickInfo, PointCloudInf
     info.centroid.addPoint(centroidX, centroidY, geoMinZ);
 }
 
-void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
-                                           PointCloudInfo& info,
-                                           int polyBoundsSrs) {
-    clearSpatialInfo(info);
+// The footprint of a cloud with a CRS and bounds. A footprint that cannot be computed does not make
+// the file unreadable: it is indexed and built without one (the native bounds stay), and the
+// entry says why it has none.
+void addFootprint(PointCloudInfo& info, int footprintSrs) {
+    info.centroid.clear();
+    info.polyBounds.clear();
     info.footprintWarning.clear();
-    if (!quickInfo.m_bounds.valid())
+    if (info.bounds.size() != 6 || info.wktProjection.empty())
         return;
-
-    info.bounds.push_back(quickInfo.m_bounds.minx);
-    info.bounds.push_back(quickInfo.m_bounds.miny);
-    info.bounds.push_back(quickInfo.m_bounds.minz);
-    info.bounds.push_back(quickInfo.m_bounds.maxx);
-    info.bounds.push_back(quickInfo.m_bounds.maxy);
-    info.bounds.push_back(quickInfo.m_bounds.maxz);
-
-    if (!quickInfo.m_srs.valid())
-        return;
-
-    // A footprint that cannot be computed does not make the file unreadable: it is indexed and built
-    // without one (the native bounds above stay), and the entry says why it has none.
     try {
-        populatePointCloudFootprint(quickInfo, info, polyBoundsSrs);
+        populatePointCloudFootprint(info, footprintSrs);
     } catch (const GDALException& e) {
         LOGD << "No footprint for the point cloud: " << e.what();
         info.polyBounds.clear();
@@ -479,160 +112,74 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
     }
 }
 
-// Takes the one lock that readers.e57 needs, for the files it reads (a lock that holds nothing for any
-// other format). libE57Format shares state between the readers of one process: several E57 files
-// read at once (indexing in parallel) crash it, so one file at a time goes through it, from the
-// preview of its header to the end of the reading of its points. Keep the returned lock for as
-// long as the reader of the file is used.
-std::unique_lock<std::mutex> lockForReaderOf(const std::string& filename) {
-    static std::mutex e57Mutex;
-
-    std::unique_lock<std::mutex> lock(e57Mutex, std::defer_lock);
-    if (resolvePointCloudReaderDriver(filename) == "readers.e57")
-        lock.lock();
-    return lock;
+// The summary of ddb-tilers (ddbtPointCloudInfo) of the point cloud at `utf8Path`
+json tilersSummary(const std::string& utf8Path, bool readBounds) {
+    char* raw = nullptr;
+    tilers::check(ddbtPointCloudInfo(utf8Path.c_str(), readBounds, &raw));
+    const tilers::String owned(raw);
+    return json::parse(raw);
 }
 
-pdal::Stage* createPointCloudReader(pdal::StageFactory& factory, const std::string& filename) {
-    const std::string driver = resolvePointCloudReaderDriver(filename);
-    if (driver.empty())
-        return nullptr;
+// The info of the point cloud at `utf8Path` as ddb-tilers reads it, with the footprint of its
+// bounds in EPSG:footprintSrs when `withBounds` (the bounds are read when the cloud has a CRS and its
+// header has none)
+PointCloudInfo tilersPointCloudInfo(const std::string& utf8Path, bool withBounds, int footprintSrs) {
+    json summary = tilersSummary(utf8Path, false);
+    if (withBounds && !summary.contains("bounds") && !summary.value("wkt", std::string()).empty())
+        summary = tilersSummary(utf8Path, true);
 
-    pdal::Stage* reader = factory.createStage(driver);
-    if (!reader)
-        throw PDALException("Cannot create reader stage " + driver + " for " + filename);
-
-    pdal::Options options;
-    options.add("filename", filename);
-
-    // Apply heuristic detection for readers.text (XYZ files)
-    if (driver == "readers.text") {
-        TextReaderConfig config = detectTextFormat(filename);
-
-        // Always set the header explicitly when we've parsed one, so we control dimension naming
-        // and PDAL does not fall over quoted/aliased names it cannot canonicalize.
-        if (config.hasHeader)
-            options.add("header", config.header);
-
-        if (config.skip > 0)
-            options.add("skip", config.skip);
-
-        // Only set separator if it's not the default (space). PDAL treats runs of whitespace
-        // as a single separator when unset, which is what we want for space-separated files.
-        if (config.separator != ' ')
-            options.add("separator", std::string(1, config.separator));
-    }
-
-    reader->setOptions(options);
-
-    return reader;
+    PointCloudInfo info;
+    info.pointCount = summary.at("pointCount").get<size_t>();
+    info.wktProjection = summary.value("wkt", std::string());
+    info.dimensions = summary.at("dimensions").get<std::vector<std::string>>();
+    if (withBounds && summary.contains("bounds"))
+        info.bounds = summary.at("bounds").get<std::vector<double>>();
+    addFootprint(info, footprintSrs);
+    return info;
 }
 
-bool populatePointCloudInfoFromReaderExecution(pdal::Stage& reader, PointCloudInfo& info) {
-    pdal::PointTable table;
-    reader.prepare(table);
-
-    pdal::PointViewSet pointViewSet = reader.execute(table);
-    if (pointViewSet.empty())
-        return false;
-
-    info.pointCount = 0;
-    for (const auto& pointView : pointViewSet)
-        info.pointCount += pointView->size();
-
-    info.wktProjection = "";
-    populatePointCloudDimensions(table.layout(), info);
-    clearSpatialInfo(info);
-
-    return true;
+// The extensions of the point clouds ddb-tilers reads for an entry (a PLY point cloud is read
+// from its header), as the point cloud entries have them
+bool isTilersPointCloud(const io::Path& path) {
+    return path.checkExtension({"las", "laz", "e57", "pts", "xyz"});
 }
 
 }  // namespace
 
-bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int polyBoundsSrs) {
+PointCloudInfo readPointCloudInfo(const fs::path& path) {
+    gdalopen::requireUserFileOpens("readPointCloudInfo");
+    // The bounds of a text file (XYZ, PTS) were never kept: only a header gives them
+    const bool text = io::Path(path).checkExtension({"pts", "xyz"});
+    return tilersPointCloudInfo(io::toUtf8(path), !text, 4326);
+}
+
+bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info) {
     const io::Path path(io::fromUtf8(filename));
 
     if (path.checkExtension({"ply"})) {
         PlyInfo plyInfo;
         if (!getPlyInfo(io::fromUtf8(filename), plyInfo))
             return false;
-        else {
-            info.bounds.clear();
-            info.polyBounds.clear();
-            info.pointCount = static_cast<size_t>(plyInfo.vertexCount);
-            info.dimensions = plyInfo.dimensions;
-            return true;
-        }
+        info = PointCloudInfo();
+        info.pointCount = static_cast<size_t>(plyInfo.vertexCount);
+        info.dimensions = plyInfo.dimensions;
+        return true;
     }
 
-    // Las/Laz
-    try {
-        const auto readerLock = lockForReaderOf(filename);
-
-        pdal::StageFactory factory;
-        pdal::Stage* reader = createPointCloudReader(factory, filename);
-        if (!reader) {
-            LOGD << "Can't infer point cloud reader from " << filename;
-            return false;
-        }
-
-        if (path.checkExtension({"pts"})) {
-            if (!populatePointCloudInfoFromReaderExecution(*reader, info)) {
-                LOGD << "Cannot read point cloud info for " << filename;
-                return false;
-            }
-
-            return true;
-        }
-
-        pdal::QuickInfo qi = reader->preview();
-        if (!qi.valid()) {
-            LOGD << "Cannot get quick info for point cloud " << filename;
-            return false;
-        }
-
-        populatePointCloudInfoFromQuickInfo(qi, info);
-
-        if (suppressDirectSpatialInfo(path))
-            clearSpatialInfo(info);
-        else
-            populatePointCloudBoundsFromQuickInfo(qi, info, polyBoundsSrs);
-    } catch (pdal::pdal_error& e) {
-        LOGD << "PDAL Error: " << e.what();
-        throw PDALException(e.what());
+    if (!isTilersPointCloud(path)) {
+        LOGD << "Not a point cloud ddb-tilers reads: " << filename;
+        return false;
     }
-
+    info = raster::rasterHelper().pointCloudInfo(io::fromUtf8(filename));
     return true;
 }
 
-bool getCopcInfo(const std::string& copcPath, PointCloudInfo& info, int polyBoundsSrs, int* span) {
+bool getCopcInfo(const std::string& copcPath, PointCloudInfo& info, int footprintSrs) {
     try {
-        pdal::Options copcOpts;
-        copcOpts.add("filename", copcPath);
-
-        pdal::CopcReader reader;
-        reader.setOptions(copcOpts);
-
-        pdal::QuickInfo qi = reader.preview();
-        if (!qi.valid()) {
-            LOGD << "Cannot get quick info for COPC file " << copcPath;
-            return false;
-        }
-
-        populatePointCloudInfoFromQuickInfo(qi, info);
-        populatePointCloudBoundsFromQuickInfo(qi, info, polyBoundsSrs);
-
-        // COPC tile-zoom heuristic: the root node of a COPC is taken as a voxel grid of 128
-        // along each side, the conventional EPT span used elsewhere in the code.
-        if (span != nullptr)
-            *span = 128;
-
+        info = tilersPointCloudInfo(copcPath, true, footprintSrs);
         return true;
-    } catch (const pdal::pdal_error& e) {
-        LOGD << "PDAL error reading COPC " << copcPath << ": " << e.what();
-        return false;
     } catch (const std::exception& e) {
-        LOGD << "Error reading COPC " << copcPath << ": " << e.what();
+        LOGD << "Cannot read the COPC " << copcPath << ": " << e.what();
         return false;
     }
 }

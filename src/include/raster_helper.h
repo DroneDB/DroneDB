@@ -90,6 +90,9 @@ namespace ddb
 
             // What GDAL finds in a raster or a vector file, as the entry of the file needs it
             virtual ProbeResult probe(const fs::path &path, const ProbeParams &params) = 0;
+            // What ddb-tilers finds in a point cloud (LAS, LAZ, E57, XYZ, PTS), as the entry of the
+            // file needs it (readPointCloudInfo)
+            virtual PointCloudInfo pointCloudInfo(const fs::path &path) = 0;
             // Writes the thumbnail (WebP) of a photo or a raster to `out`, in a folder only this
             // request writes to; the caller checks the file before it trusts it (renderThumbnailWebp())
             virtual void thumbnail(const fs::path &path, const fs::path &out, const ThumbnailParams &params) = 0;
@@ -173,6 +176,7 @@ namespace ddb
             static size_t shutdownInstance();
 
             ProbeResult probe(const fs::path &path, const ProbeParams &params) override;
+            PointCloudInfo pointCloudInfo(const fs::path &path) override;
             void thumbnail(const fs::path &path, const fs::path &out, const ThumbnailParams &params) override;
             void normalize(const fs::path &path, const fs::path &out, const json &params) override;
             void geoproject(const fs::path &path, const fs::path &out, const json &params) override;

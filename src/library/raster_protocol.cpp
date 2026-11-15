@@ -538,6 +538,71 @@ namespace ddb
             return params.vis && !params.vis->formula.empty() && params.vis->bandFilter.empty();
         }
 
+        json pointCloudInfoJson(const PointCloudInfo &info)
+        {
+            json out = {{"pointCount", static_cast<uint64_t>(info.pointCount)}, {"dimensions", info.dimensions}};
+            if (!info.wktProjection.empty())
+                out["wkt"] = info.wktProjection;
+            if (info.bounds.size() == 6)
+                out["bounds"] = info.bounds;
+            if (!info.centroid.empty())
+                out["pointGeom"] = pointGeometryJson(info.centroid);
+            if (!info.polyBounds.empty())
+                out["polygonGeom"] = polygonGeometryJson(info.polyBounds);
+            if (!info.footprintWarning.empty())
+                out["warning"] = cutAtCharacter(info.footprintWarning, kMaxMessageBytes);
+            return out;
+        }
+
+        PointCloudInfo pointCloudInfoFromJson(const json &result)
+        {
+            if (!result.is_object())
+                throw ProtocolError("the point cloud info is not an object");
+            PointCloudInfo out;
+            const json &count = required(result, "pointCount");
+            if (!count.is_number_integer() || (!count.is_number_unsigned() && count.get<int64_t>() < 0))
+                throw ProtocolError("'pointCount' is not a count");
+            out.pointCount = static_cast<size_t>(count.get<uint64_t>());
+
+            const json &dimensions = required(result, "dimensions");
+            if (!dimensions.is_array())
+                throw ProtocolError("'dimensions' is not an array");
+            for (const auto &d : dimensions)
+            {
+                if (!d.is_string())
+                    throw ProtocolError("a dimension is not a string");
+                out.dimensions.push_back(d.get<std::string>());
+            }
+            if (const json *wkt = member(result, "wkt"))
+            {
+                if (!wkt->is_string())
+                    throw ProtocolError("'wkt' is not a string");
+                out.wktProjection = wkt->get<std::string>();
+            }
+            if (const json *bounds = member(result, "bounds"))
+            {
+                if (!bounds->is_array() || bounds->size() != 6)
+                    throw ProtocolError("'bounds' is not an array of 6 numbers");
+                for (const auto &v : *bounds)
+                {
+                    if (!v.is_number())
+                        throw ProtocolError("'bounds' holds a value that is not a number");
+                    out.bounds.push_back(v.get<double>());
+                }
+            }
+            if (const json *point = member(result, "pointGeom"))
+                out.centroid = pointGeometryFromJson(*point);
+            if (const json *polygon = member(result, "polygonGeom"))
+                out.polyBounds = polygonGeometryFromJson(*polygon);
+            if (const json *warning = member(result, "warning"))
+            {
+                if (!warning->is_string())
+                    throw ProtocolError("'warning' is not a string");
+                out.footprintWarning = cutAtCharacter(warning->get<std::string>(), kMaxMessageBytes);
+            }
+            return out;
+        }
+
         json toJson(const ThumbnailParams &params)
         {
             json result = {{"size", params.size}};

@@ -6,6 +6,7 @@
 
 #include "json.h"
 
+#include "pointcloud.h"
 #include "raster_helper.h"
 #include "raster_ops.h"
 
@@ -26,6 +27,7 @@ namespace testutils
         {
             return ddb::raster::probe(path, params);
         }
+        ddb::PointCloudInfo pointCloudInfo(const fs::path &path) override { return ddb::readPointCloudInfo(path); }
         void thumbnail(const fs::path &path, const fs::path &out, const ddb::raster::ThumbnailParams &params) override
         {
             ddb::raster::thumbnail(path, out, params);

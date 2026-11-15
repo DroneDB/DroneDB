@@ -981,7 +981,7 @@ namespace
         mutable std::mutex mutex_;
         mutable std::vector<fs::path> programs;
         mutable std::vector<std::vector<std::string>> calls;
-        std::string versionText = "gdal-util test protocol 1.1";
+        std::string versionText = "gdal-util test protocol 1.2";
         Handler handler;
     };
 
@@ -1259,11 +1259,12 @@ namespace
         }
     }
 
-    // The COPC build came with protocol 1.1: a program of 1.0 does not know the operation
+    // The point cloud info came with protocol 1.2: a program of an earlier minor may not know an
+    // operation this client sends, and is not run
     TEST(RasterOneShot, aProgramOfAnEarlierProtocolMinorIsNotRun)
     {
         FakeRunner runner;
-        runner.versionText = "gdal-util test protocol 1.0";
+        runner.versionText = "gdal-util test protocol 1.1";
         runner.handler = [](const std::vector<std::string> &, const process::Options &) {
             ADD_FAILURE() << "the request must not be sent";
             return exitedWith(0);
@@ -1429,6 +1430,11 @@ namespace
         {
             ADD_FAILURE() << "no probe is asked for";
             return ProbeResult();
+        }
+        PointCloudInfo pointCloudInfo(const fs::path &) override
+        {
+            ADD_FAILURE() << "no point cloud info is asked for";
+            return PointCloudInfo();
         }
         void thumbnail(const fs::path &, const fs::path &, const ThumbnailParams &) override
         {

@@ -728,3 +728,10 @@ Registry has to adopt first.
   Whether a raster is already an optimized COG (EPSG:3857, square tiles of 256 or 512 pixels, overviews), which
   names the phases a COG build reports, is the rule of ddb-tilers' builder (`ddbtIsOptimizedCog`) instead of a
   second GDAL check of the same rule, so the phases follow what the build does.
+  The info of a point cloud of a user (LAS, LAZ, E57, XYZ, PTS: its point count, CRS, dimensions and footprint)
+  is read by ddb-tilers in the raster helper (`gdal-util`, protocol 1.2, operation `pointCloudInfo`) instead of
+  PDAL in the process of libddb; a PLY point cloud is read from its header as before. The properties are those
+  of 2.6 (the same count, the dimensions PDAL names in its order, the CRS as the file states it), but for a CRS
+  of GeoTIFF keys without an EPSG code for the whole of it: the same CRS, its WKT without GDAL's AUTHORITY nodes,
+  and a GeographicType of 4978 read as WGS 84 (2.6: GDAL's geocentric CRS, whose footprint was at the pole).
+  A helper of protocol 1.1 is refused (HelperUnavailableException), as for every protocol change.
