@@ -1465,6 +1465,10 @@ namespace
             ASSERT_TRUE(onVector) << "no vector is built";
             onVector(path, out, params);
         }
+        void sampleCloud(const fs::path &, const fs::path &, const json &, const ProgressCallback &) override
+        {
+            ADD_FAILURE() << "no cloud is sampled";
+        }
     };
 
     // What a helper writes for a COG: a small GeoTIFF, which the host opens before the build

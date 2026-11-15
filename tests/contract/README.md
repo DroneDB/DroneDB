@@ -735,3 +735,8 @@ Registry has to adopt first.
   of GeoTIFF keys without an EPSG code for the whole of it: the same CRS, its WKT without GDAL's AUTHORITY nodes,
   and a GeographicType of 4978 read as WGS 84 (2.6: GDAL's geocentric CRS, whose footprint was at the pole).
   A helper of protocol 1.1 is refused (HelperUnavailableException), as for every protocol change.
+  The training export of Gaussian splats (`ddb gsplat --training-data`, `DDBExportSplatTraining`) takes the sample
+  of the point cloud of the ODM project from the raster helper (operation `sampleCloud`), which reads the LAS, LAZ
+  or PLY file with ddb-tilers instead of PDAL and the export's own PLY reader in the process of libddb: the same
+  `points3D.bin` byte for byte (4 ODM projects checked), in 40 to 71 % of the time of 2.6 (the points are decoded
+  on several threads); a PLY that is not binary little-endian is now read too.

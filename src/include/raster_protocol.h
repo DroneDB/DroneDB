@@ -18,6 +18,7 @@
 #include "exif_protocol.h"
 #include "fs.h"
 #include "json.h"
+#include "cloud_sample.h"
 #include "pointcloud_info.h"
 #include "thumbs.h"
 
@@ -86,6 +87,9 @@ namespace ddb
             constexpr const char *kVector = "vector";
             // The info of a point cloud (new in 1.2): no params, the result of pointCloudInfoJson
             constexpr const char *kPointCloudInfo = "pointCloudInfo";
+            // The sample of a point cloud (new in 1.2), one-shot with progress: params of
+            // cloudSampleParamsFromJson, the sample written to `out` (writeCloudSample)
+            constexpr const char *kSampleCloud = "sampleCloud";
         } // namespace op
 
         // A request. `path` is the file to read, `out` the file to write (operations that
@@ -203,6 +207,11 @@ namespace ddb
         json pointCloudInfoJson(const PointCloudInfo &info);
         // @throws ProtocolError
         PointCloudInfo pointCloudInfoFromJson(const json &result);
+
+        // The params of kSampleCloud: {"shift": [x, y, z], "limit": n}
+        json toJson(const CloudSampleParams &params);
+        // @throws ProtocolError
+        CloudSampleParams cloudSampleParamsFromJson(const json &params);
 
         // ---- thumbnail
 

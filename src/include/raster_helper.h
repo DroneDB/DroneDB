@@ -110,6 +110,10 @@ namespace ddb
                                    const ProgressCallback &progress) = 0;
             virtual void buildVector(const fs::path &path, const fs::path &out, const json &params,
                                      const ProgressCallback &progress) = 0;
+            // Writes the sample of a point cloud (CloudSampleParams in `params`) to `out`, which the
+            // caller reads with readCloudSample: one process, which writes progress as it goes
+            virtual void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
+                                     const ProgressCallback &progress) = 0;
         };
 
         // What a GdalUtilHelper can be told. The defaults are what the process uses; the tests
@@ -185,6 +189,8 @@ namespace ddb
             void buildCopc(const fs::path &path, const fs::path &out, const json &params,
                            const ProgressCallback &progress) override;
             void buildVector(const fs::path &path, const fs::path &out, const json &params,
+                             const ProgressCallback &progress) override;
+            void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
                              const ProgressCallback &progress) override;
 
             // Closes the idle helpers (their input first, then a kill for the ones that stay); the

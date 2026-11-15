@@ -501,6 +501,10 @@ namespace
         {
             ADD_FAILURE() << "no vector is built";
         }
+        void sampleCloud(const fs::path &, const fs::path &, const json &, const raster::ProgressCallback &) override
+        {
+            ADD_FAILURE() << "no cloud is sampled";
+        }
 
         size_t count(const std::string &op) const
         {

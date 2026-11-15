@@ -603,6 +603,32 @@ namespace ddb
             return out;
         }
 
+        json toJson(const CloudSampleParams &params)
+        {
+            return {{"shift", params.shift}, {"limit", static_cast<uint64_t>(params.limit)}};
+        }
+
+        CloudSampleParams cloudSampleParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the params of a cloud sample are not an object");
+            CloudSampleParams out;
+            const json &shift = required(params, "shift");
+            if (!shift.is_array() || shift.size() != 3)
+                throw ProtocolError("'shift' is not an array of 3 numbers");
+            for (size_t i = 0; i < 3; ++i)
+            {
+                if (!shift[i].is_number())
+                    throw ProtocolError("'shift' holds a value that is not a number");
+                out.shift[i] = shift[i].get<double>();
+            }
+            const json &limit = required(params, "limit");
+            if (!limit.is_number_integer() || (!limit.is_number_unsigned() && limit.get<int64_t>() < 0))
+                throw ProtocolError("'limit' is not a count");
+            out.limit = static_cast<size_t>(limit.get<uint64_t>());
+            return out;
+        }
+
         json toJson(const ThumbnailParams &params)
         {
             json result = {{"size", params.size}};

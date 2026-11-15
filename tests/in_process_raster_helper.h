@@ -6,6 +6,7 @@
 
 #include "json.h"
 
+#include "cloud_sample.h"
 #include "pointcloud.h"
 #include "raster_helper.h"
 #include "raster_ops.h"
@@ -54,6 +55,11 @@ namespace testutils
                          const ddb::raster::ProgressCallback &) override
         {
             ddb::raster::buildVectorFiles(path, out, ddb::raster::vectorParamsFromJson(params));
+        }
+        void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
+                         const ddb::raster::ProgressCallback &progress) override
+        {
+            ddb::writeCloudSample(out, ddb::sampleCloudFile(path, ddb::raster::cloudSampleParamsFromJson(params), progress));
         }
     };
 }

@@ -18,13 +18,9 @@
 #include <set>
 #include <unordered_map>
 
-#include "pdal_inc.h"
-#include <pdal/Options.hpp>
-#include <pdal/Stage.hpp>
-#include <pdal/StageFactory.hpp>
 
 #include "cancellation.h"
-#include "point_batch.h"
+#include "cloud_sample.h"
 #include "exceptions.h"
 #include "artefact_cache.h"
 #include "gdal_raii.h"
@@ -32,6 +28,9 @@
 #include "local_frame_georef.h"
 #include "mio.h"
 #include "parallel.h"
+#include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "raster_protocol.h"
 #include "ply.h"
 #include "stringutil.h"
 
@@ -48,11 +47,8 @@ namespace ddb
         constexpr double NadirAngleDegrees = 12.0;
         // Most of the images (more than this share) looking down is worth a warning
         constexpr double NadirShareToWarn = 0.98;
-        // The cell of the thinning grid starts at this size (meters) and grows by this factor while there
-        // are too many points: the cube root of 2, so that the points of a surface (which fall as the
-        // square of the cell) fall by about a third, not by 3/4, and the grid ends close to the limit
-        constexpr double InitialCellSize = 0.001;
-        constexpr double CellGrowth = 1.25;
+        // The private folder in the output folder where the raster helper writes the sample of the cloud
+        constexpr const char *CloudSamplePrefix = "ddb-cloud-sample-";
         // How many images are exported between two checks of the progress
         constexpr size_t ImageBatch = 16;
         constexpr size_t ImageThreads = 8;
@@ -476,223 +472,6 @@ namespace ddb
 
         // ---- The point cloud ----
 
-        struct SampledPoint
-        {
-            double x, y, z;
-            uint16_t r, g, b;
-        };
-
-        // Thins a stream of points on a 3D grid down to at most `limit`: the first point of each
-        // cell stays, and the cell grows while there are more cells than the limit. One
-        // pass, no knowledge of the cloud (its size, its extent) and memory of the limit.
-        class GridSampler
-        {
-        public:
-            explicit GridSampler(size_t limit) : limit_(limit) { points_.reserve(std::min<size_t>(limit, 1u << 20)); }
-
-            void add(double x, double y, double z, uint16_t r, uint16_t g, uint16_t b)
-            {
-                ++seen_;
-                const auto key = keyOf(x, y, z);
-                if (!key || limit_ == 0)
-                    return;
-                if (cells_.try_emplace(*key, static_cast<uint32_t>(points_.size())).second)
-                {
-                    points_.push_back({x, y, z, r, g, b});
-                    if (points_.size() > limit_)
-                        coarsen();
-                }
-            }
-
-            size_t seen() const { return seen_; }
-            const std::vector<SampledPoint> &points() const { return points_; }
-
-        private:
-            struct Key
-            {
-                int64_t x, y, z;
-                bool operator==(const Key &o) const { return x == o.x && y == o.y && z == o.z; }
-            };
-            struct KeyHash
-            {
-                size_t operator()(const Key &k) const
-                {
-                    size_t h = std::hash<int64_t>()(k.x);
-                    h = h * 0x9E3779B97F4A7C15ull + std::hash<int64_t>()(k.y);
-                    h = h * 0x9E3779B97F4A7C15ull + std::hash<int64_t>()(k.z);
-                    return h;
-                }
-            };
-
-            // Nothing for a coordinate that is not finite or too far for the grid
-            std::optional<Key> keyOf(double x, double y, double z) const
-            {
-                const double gx = std::floor(x / cell_), gy = std::floor(y / cell_), gz = std::floor(z / cell_);
-                constexpr double Limit = 4e18;
-                if (!(std::abs(gx) < Limit) || !(std::abs(gy) < Limit) || !(std::abs(gz) < Limit))
-                    return std::nullopt;
-                return Key{static_cast<int64_t>(gx), static_cast<int64_t>(gy), static_cast<int64_t>(gz)};
-            }
-
-            // Grows the cell until the points that stay fit; the first of the points that share a
-            // cell stays
-            void coarsen()
-            {
-                while (points_.size() > limit_)
-                {
-                    cell_ *= CellGrowth;
-                    cells_.clear();
-                    std::vector<SampledPoint> kept;
-                    kept.reserve(points_.size());
-                    for (const auto &p : points_)
-                        if (cells_.try_emplace(*keyOf(p.x, p.y, p.z), static_cast<uint32_t>(kept.size())).second)
-                            kept.push_back(p);
-                    points_ = std::move(kept);
-                }
-            }
-
-            size_t limit_;
-            double cell_ = InitialCellSize;
-            size_t seen_ = 0;
-            std::unordered_map<Key, uint32_t, KeyHash> cells_;
-            std::vector<SampledPoint> points_;
-        };
-
-        // The scalar at p as a double
-        double plyScalar(const char *p, PlyScalarType type)
-        {
-            switch (type)
-            {
-            case PlyScalarType::Int8:
-                return static_cast<double>(*reinterpret_cast<const int8_t *>(p));
-            case PlyScalarType::UInt8:
-                return static_cast<double>(*reinterpret_cast<const uint8_t *>(p));
-            case PlyScalarType::Int16: {
-                int16_t v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::UInt16: {
-                uint16_t v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::Int32: {
-                int32_t v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::UInt32: {
-                uint32_t v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::Float32: {
-                float v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::Float64: {
-                double v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            default:
-                return 0.0;
-            }
-        }
-
-        // The points of a binary little-endian PLY (ODM's filtered cloud), already in the local
-        // frame. Colours are read by property name: the order of red, green and blue varies.
-        void forEachPlyPoint(const fs::path &file, const std::function<void(PointBatch &)> &sink)
-        {
-            const PlyHeader header = readPlyHeader(file);
-            if (header.format != PlyFormat::BinaryLittleEndian)
-                throw AppException(io::toUtf8(file) + " is not a binary little-endian PLY");
-            const int vertexIndex = header.findElement("vertex");
-            if (vertexIndex < 0)
-                throw AppException(io::toUtf8(file) + " has no vertex element");
-            const PlyElement &vertex = header.elements[vertexIndex];
-            if (vertexIndex != 0)
-                throw AppException(io::toUtf8(file) + " has an element before its vertices");
-
-            struct Column
-            {
-                size_t offset = 0;
-                PlyScalarType type = PlyScalarType::Unknown;
-                bool present = false;
-            };
-            Column x, y, z, red, green, blue;
-            size_t stride = 0;
-            for (const auto &p : vertex.properties)
-            {
-                if (p.isList || plyScalarSize(p.type) == 0)
-                    throw AppException(io::toUtf8(file) + " has a vertex property '" + p.name +
-                                               "' that is a list or of an unknown type");
-                const Column column{stride, p.type, true};
-                if (p.name == "x") x = column;
-                else if (p.name == "y") y = column;
-                else if (p.name == "z") z = column;
-                else if (p.name == "red") red = column;
-                else if (p.name == "green") green = column;
-                else if (p.name == "blue") blue = column;
-                stride += plyScalarSize(p.type);
-            }
-            if (!x.present || !y.present || !z.present || stride == 0)
-                throw AppException(io::toUtf8(file) + " has no x, y and z vertex properties");
-
-            std::ifstream in(file, std::ios::binary);
-            in.seekg(static_cast<std::streamoff>(header.headerLength));
-            constexpr size_t RowsPerBatch = 16384;
-            std::vector<char> rows(RowsPerBatch * stride);
-            PointBatch batch;
-            batch.reserve(RowsPerBatch);
-            const bool hasColor = red.present && green.present && blue.present;
-            for (uint64_t done = 0; done < vertex.count;)
-            {
-                const size_t n = static_cast<size_t>(std::min<uint64_t>(RowsPerBatch, vertex.count - done));
-                in.read(rows.data(), static_cast<std::streamsize>(n * stride));
-                if (static_cast<size_t>(in.gcount()) != n * stride)
-                    throw AppException(io::toUtf8(file) + " ends before its " + std::to_string(vertex.count) +
-                                               " vertices");
-                batch.clear();
-                for (size_t i = 0; i < n; ++i)
-                {
-                    const char *row = rows.data() + i * stride;
-                    batch.x.push_back(plyScalar(row + x.offset, x.type));
-                    batch.y.push_back(plyScalar(row + y.offset, y.type));
-                    batch.z.push_back(plyScalar(row + z.offset, z.type));
-                    batch.red.push_back(hasColor ? static_cast<uint16_t>(plyScalar(row + red.offset, red.type)) : 0);
-                    batch.green.push_back(hasColor ? static_cast<uint16_t>(plyScalar(row + green.offset, green.type)) : 0);
-                    batch.blue.push_back(hasColor ? static_cast<uint16_t>(plyScalar(row + blue.offset, blue.type)) : 0);
-                }
-                sink(batch);
-                done += n;
-            }
-        }
-
-        // The points of a LAS or LAZ file, one batch at a time
-        void forEachLasPoint(const fs::path &file, const std::function<void(PointBatch &)> &sink, uint64_t &total)
-        {
-            pdal::StageFactory factory;
-            pdal::Stage *reader = factory.createStage("readers.las");
-            if (reader == nullptr)
-                throw PDALException("Cannot create the LAS reader");
-            pdal::Options options;
-            options.add("filename", io::toUtf8(file));
-            options.add("nosrs", true);
-            reader->setOptions(options);
-            try
-            {
-                total = reader->preview().m_pointCount;
-                forEachPointBatch(*reader, sink);
-            }
-            catch (const pdal::pdal_error &e)
-            {
-                throw PDALException("Cannot read " + io::toUtf8(file) + ": " + e.what());
-            }
-        }
-
         // The cloud to take the points of and whether its coordinates are those of the CRS (a LAS
         // file) or already shifted by the offset (ODM's filtered PLY)
         struct CloudFile
@@ -725,29 +504,24 @@ namespace ddb
             bool wide = false; // colours are 16-bit
         };
 
-        // The points of the cloud thinned to at most `limit`, in the local frame
-        Cloud sampleCloud(const CloudFile &cloud, const Vec3 &offset, size_t limit, Progress &progress)
+        // The points of the cloud thinned to at most `limit`, in the local frame: the raster helper reads
+        // the cloud of the project and writes its sample in a private folder of `workFolder`, which is
+        // read here
+        Cloud sampleCloud(const CloudFile &cloud, const Vec3 &offset, size_t limit, Progress &progress,
+                          const fs::path &workFolder)
         {
-            GridSampler sampler(limit);
-            uint64_t total = 0;
-            size_t read = 0;
-            const Vec3 shift = cloud.absolute ? offset : Vec3{0, 0, 0};
-            const auto sink = [&](PointBatch &batch) {
-                for (size_t i = 0; i < batch.size(); ++i)
-                    sampler.add(batch.x[i] - shift[0], batch.y[i] - shift[1], batch.z[i] - shift[2], batch.red[i],
-                                batch.green[i], batch.blue[i]);
-                read += batch.size();
-                progress.report(within(CamerasEnd, PointsEnd, shareOf(read, total)),
-                                "points");
-            };
-
-            if (cloud.las)
-                forEachLasPoint(cloud.path, sink, total);
-            else
-                forEachPlyPoint(cloud.path, sink);
+            CloudSampleParams params;
+            if (cloud.absolute)
+                params.shift = {offset[0], offset[1], offset[2]};
+            params.limit = limit;
+            const io::ScopedTempDir folder = raster::makePrivateFolder(workFolder, CloudSamplePrefix);
+            const fs::path sample = folder.path() / "sample.bin";
+            raster::rasterHelper().sampleCloud(cloud.path, sample, raster::toJson(params), [&progress](double f) {
+                progress.report(within(CamerasEnd, PointsEnd, f), "points");
+            });
 
             Cloud result;
-            result.points = sampler.points();
+            result.points = readCloudSample(sample);
             for (const auto &p : result.points)
             {
                 result.hasColor = result.hasColor || p.r != 0 || p.g != 0 || p.b != 0;
@@ -1189,7 +963,7 @@ namespace ddb
         }
         else if (const auto file = findCloud(odmProjectFolder))
         {
-            cloud = sampleCloud(*file, georef.offset, options.maxPoints, progress);
+            cloud = sampleCloud(*file, georef.offset, options.maxPoints, progress, outFolder);
             if (cloud.points.empty())
             {
                 result.warnings.push_back("The point cloud " + io::toUtf8(file->path) +

@@ -354,6 +354,12 @@ namespace ddb
             runOneShot(op::kVector, path, out, params, progress);
         }
 
+        void GdalUtilHelper::sampleCloud(const fs::path &path, const fs::path &out, const json &params,
+                                         const ProgressCallback &progress)
+        {
+            runOneShot(op::kSampleCloud, path, out, params, progress);
+        }
+
         // ---- one-shot requests
 
         namespace

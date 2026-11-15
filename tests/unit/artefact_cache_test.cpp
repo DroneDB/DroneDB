@@ -86,6 +86,11 @@ namespace
         {
             real_.buildVector(path, out, params, progress);
         }
+        void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
+                         const raster::ProgressCallback &progress) override
+        {
+            real_.sampleCloud(path, out, params, progress);
+        }
 
         std::atomic<int> requests{0};
 
