@@ -1584,6 +1584,25 @@ namespace
         EXPECT_EQ(helperOperationInputs(request), merge.inputs);
     }
 
+    // An alignment names its reference, which the confinement lets the helper read, and carries its options
+    TEST(RasterBuildParams, theReferenceOfAnAlignmentIsTheOneTheHostSent)
+    {
+        AlignParams align;
+        align.reference = "/data/ds/reference.tif";
+        align.options = {{"mode", "translation"}, {"minOverlap", 0.5}};
+        const auto back = alignParamsFromJson(toJson(align));
+        EXPECT_EQ(back.reference, align.reference);
+        EXPECT_EQ(back.options, align.options);
+        EXPECT_THROW(alignParamsFromJson(json{{"options", json::object()}}), ProtocolError) << "no reference";
+        EXPECT_THROW(alignParamsFromJson(json{{"reference", "/a.tif"}, {"options", 3}}), ProtocolError);
+        Request request;
+        request.op = op::kAlign;
+        request.params = toJson(align);
+        EXPECT_EQ(helperOperationInputs(request), (std::vector<fs::path>{"/data/ds/reference.tif"}));
+        request.op = op::kAlignValidation;
+        EXPECT_EQ(helperOperationInputs(request), (std::vector<fs::path>{"/data/ds/reference.tif"}));
+    }
+
     TEST(RasterBuildParams, paramsThatAreNotWhatTheOperationTakesAreRefused)
     {
         EXPECT_THROW(copcParamsFromJson(json::array()), ProtocolError);

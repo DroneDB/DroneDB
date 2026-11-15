@@ -8,6 +8,10 @@
 #include "exceptions.h"
 #include "fs.h"
 #include "testarea.h"
+#include "mio.h"
+#include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "real_raster_helper.h"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <cmath>
@@ -132,6 +136,57 @@ namespace
         EXPECT_NEAR(r.tyMapUnits, -knownTy, 1.0);
 
         EXPECT_TRUE(fs::exists(outPath));
+    }
+
+    // The raster helper reads the rasters (a user's) and aligns them: one run for the alignment, one
+    // for a validation; the host makes no copy of them, and the folder of the output gets the aligned
+    // raster alone
+    TEST_F(AlignTest, TheRastersAreReadAndAlignedInTheHelper)
+    {
+        class Operations : public testutils::RealRasterHelper
+        {
+          public:
+            json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                         const ddb::raster::ProgressCallback &progress) override
+            {
+                ran.emplace_back(op);
+                return RealRasterHelper::operate(op, path, out, params, progress);
+            }
+            std::vector<std::string> ran;
+        } helper;
+        const ddb::raster::ScopedRasterHelper installed(helper);
+
+        TestArea ta(TEST_NAME, true);
+        double refGt[6] = {500000.0, 0.5, 0, 5000000.0, 0, -0.5};
+        double srcGt[6] = {500003.0, 0.5, 0, 4999998.0, 0, -0.5};
+        const auto refPath = ta.getPath("reference.tif").string();
+        const auto srcPath = ta.getPath("source.tif").string();
+        const fs::path out = ta.getFolder("out") / "aligned.tif";
+        createSyntheticGeoTiff(refPath, 512, 512, refGt);
+        createSyntheticGeoTiff(srcPath, 512, 512, srcGt);
+        const auto filesUnder = [](const fs::path &folder) {
+            size_t n = 0;
+            std::error_code ec;
+            for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator();
+                 it.increment(ec))
+                n += it->is_regular_file() ? 1 : 0;
+            return n;
+        };
+        const size_t copiesBefore = filesUnder(ddb::raster::normalizedDir());
+
+        EXPECT_TRUE(ddb::validateAlignRaster(srcPath, refPath).ok);
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        const auto r = ddb::alignRaster(srcPath, refPath, ddb::io::toUtf8(out), opts);
+        ASSERT_TRUE(r.success);
+        EXPECT_EQ(r.mode, "translation") << "the options reach the helper";
+        EXPECT_NEAR(r.txMapUnits, -3.0, 1.0);
+        EXPECT_EQ(helper.ran, (std::vector<std::string>{ddb::raster::op::kAlignValidation, ddb::raster::op::kAlign}));
+        EXPECT_EQ(filesUnder(ddb::raster::normalizedDir()), copiesBefore) << "the host copied a raster";
+        std::vector<fs::path> left;
+        for (const auto &entry : fs::directory_iterator(out.parent_path()))
+            left.push_back(entry.path());
+        EXPECT_EQ(left, (std::vector<fs::path>{out})) << "the scratch rasters stay in the private folder, which goes";
     }
 
     // ─── Test 2: Similarity mode - valid output, low RMSE ────────────────────────

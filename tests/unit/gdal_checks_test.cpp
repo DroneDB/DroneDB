@@ -32,8 +32,7 @@ namespace
 
     constexpr int Size = 256;
 
-    // Where applyZOffset may write: the artefacts folder of the cache, where align puts the
-    // raster it shifts. Made new, since the cache of the process outlives a test.
+    // A file of the artefacts folder of the cache, made new: the cache of the process outlives a test
     fs::path artefactPath(const std::string &name)
     {
         const fs::path path = raster::artefactsDir() / name;
@@ -108,12 +107,21 @@ namespace
         return data;
     }
 
-    // Overwrites a stretch of the file between its header and the end of the first tile data
-    void corruptPixelData(const fs::path &path)
+    // Writes junk over the first block of band 1, where GDAL says it is: the header stays as it was,
+    // so the raster opens and its rows do not decode
+    void corruptFirstBlock(const fs::path &path)
     {
+        uint64_t offset = 0;
+        {
+            auto ds = adoptDataset(GDALOpen(io::toUtf8(path).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(ds);
+            const char *at = GDALGetMetadataItem(GDALGetRasterBand(datasetHandle(ds), 1), "BLOCK_OFFSET_0_0", "TIFF");
+            ASSERT_NE(at, nullptr);
+            offset = std::stoull(at);
+        }
         std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
-        f.seekp(64);
-        const std::string junk(static_cast<size_t>(Size) * 40, '\x5A');
+        f.seekp(static_cast<std::streamoff>(offset));
+        const std::string junk(64, '\x5A');
         f.write(junk.data(), static_cast<std::streamsize>(junk.size()));
     }
 
@@ -160,12 +168,28 @@ namespace
         EXPECT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
     }
 
+    // The DEM open for update, as the warp of an alignment is when its offset is applied
+    GDALDatasetUniquePtr openForUpdate(const fs::path &dem)
+    {
+        auto ds = adoptDataset(GDALOpenEx(io::toUtf8(dem).c_str(), GDAL_OF_RASTER | GDAL_OF_UPDATE, nullptr, nullptr, nullptr));
+        EXPECT_TRUE(ds) << dem;
+        return ds;
+    }
+
+    // Applies the offset to the DEM and closes it
+    void shift(const fs::path &dem, double offset)
+    {
+        auto ds = openForUpdate(dem);
+        applyZOffset(datasetHandle(ds), offset);
+        closeOutputOrThrow(std::move(ds), io::toUtf8(dem));
+    }
+
     TEST(ZOffset, ShiftsEveryValueExceptNodata)
     {
         const auto dem = writeCompressedDem(artefactPath("zoffset-shifts.tif"));
         const auto before = readRows(dem);
 
-        applyZOffset(io::toUtf8(dem), 2.5);
+        shift(dem, 2.5);
 
         const auto after = readRows(dem);
         ASSERT_EQ(before.size(), after.size());
@@ -182,32 +206,18 @@ namespace
     {
         const auto dem = writeCompressedDem(artefactPath("zoffset-tiny.tif"));
         const auto before = readRows(dem);
-        applyZOffset(io::toUtf8(dem), 1e-9);
+        shift(dem, 1e-9);
         EXPECT_EQ(readRows(dem), before);
     }
 
     TEST(ZOffset, ARasterWhoseRowsCannotBeReadIsAnErrorNotAShiftedBuffer)
     {
         const auto dem = writeCompressedDem(artefactPath("zoffset-corrupt.tif"));
-        corruptPixelData(dem);
+        corruptFirstBlock(dem);
         ASSERT_FALSE(bandIsReadable(dem)) << "the corruption must break the decoding for this test to mean anything";
 
-        EXPECT_THROW(applyZOffset(io::toUtf8(dem), 2.5), GDALException);
-    }
-
-    TEST(ZOffset, AMissingFileIsAnError)
-    {
-        EXPECT_THROW(applyZOffset(io::toUtf8(artefactPath("zoffset-missing.tif")), 2.5), GDALException);
-    }
-
-    // The raster of a user is not one of libddb's: a shift is written to the files libddb made
-    TEST(ZOffset, AFileThatIsNoArtefactIsNotOpened)
-    {
-        TestArea ta(TEST_NAME, true);
-        const auto dem = writeCompressedDem(ta.getPath("dem.tif"));
-        const auto before = readRows(dem);
-        EXPECT_THROW(applyZOffset(io::toUtf8(dem), 2.5), GDALException);
-        EXPECT_EQ(readRows(dem), before);
+        auto ds = openForUpdate(dem);
+        EXPECT_THROW(applyZOffset(datasetHandle(ds), 2.5), GDALException);
     }
 
     // An open GeoTIFF whose pixels are all still in GDAL's block cache: nothing is written until the

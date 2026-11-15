@@ -297,7 +297,7 @@ namespace ddb
         bool isHelperOperation(std::string_view name)
         {
             return name == op::kMask || name == op::kRasterShapes || name == op::kResizeImages || name == op::kMergeBands ||
-                   name == op::kMergePreview;
+                   name == op::kMergePreview || name == op::kAlign || name == op::kAlignValidation;
         }
 
         bool outIsFolder(std::string_view name)
@@ -1162,8 +1162,34 @@ namespace ddb
             return result;
         }
 
+        json toJson(const AlignParams &params)
+        {
+            json result = {{"options", params.options}};
+            setText(result, "reference", io::toUtf8(params.reference));
+            return result;
+        }
+
+        AlignParams alignParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the align params are not an object");
+            AlignParams result;
+            result.reference = getPath(params, "reference");
+            if (result.reference.empty())
+                throw ProtocolError("'reference' is missing");
+            if (const json *options = member(params, "options"))
+            {
+                if (!options->is_object())
+                    throw ProtocolError("'options' is not an object");
+                result.options = *options;
+            }
+            return result;
+        }
+
         std::vector<fs::path> helperOperationInputs(const Request &request)
         {
+            if (request.op == op::kAlign || request.op == op::kAlignValidation)
+                return {alignParamsFromJson(request.params).reference};
             if (request.op == op::kMergeBands)
                 return mergeBandsParamsFromJson(request.params).inputs;
             if (request.op == op::kMergePreview)

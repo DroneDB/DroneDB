@@ -107,6 +107,12 @@ namespace ddb
             // The preview of such a merge, a WebP (new in 1.3), one-shot: params of
             // mergePreviewParamsFromJson, the WebP written to `out`
             constexpr const char *kMergePreview = "mergePreview";
+            // A raster aligned to a reference (new in 1.3), one-shot: params of alignParamsFromJson,
+            // the aligned raster written to `out`, the result of alignResultToJson
+            constexpr const char *kAlign = "align";
+            // The check of an alignment (new in 1.3), one-shot: params of alignParamsFromJson, no
+            // `out`, the result of alignValidationToJson
+            constexpr const char *kAlignValidation = "alignValidation";
         } // namespace op
 
         // An operation on a user's raster for a call of the host (not a build, not a read): one
@@ -450,6 +456,18 @@ namespace ddb
             std::vector<int> bands;
             int size = 0;
         };
+
+        // The params of an `align` and an `alignValidation`: the raster `path` is aligned to (`reference`)
+        // and the options of the alignment (align.h, as the host and the helper of one build write them)
+        struct AlignParams
+        {
+            fs::path reference;
+            json options = json::object();
+        };
+
+        json toJson(const AlignParams &params);
+        // @throws ProtocolError
+        AlignParams alignParamsFromJson(const json &params);
 
         json toJson(const MergePreviewParams &params);
         // @throws ProtocolError
