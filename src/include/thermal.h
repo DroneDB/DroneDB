@@ -141,15 +141,15 @@ struct TemperatureData {
     std::string projection;
 };
 
-// The first band of a thermal raster GDAL reads, read a window at a time, so that what a request holds does not grow
-// with the raster (a 30000 x 30000 thermal GeoTIFF read whole took some 9 GB): the point reads its pixel, the area and
-// the value info stream their pixels (raster_analysis.cpp). The band holds temperatures (Float32 or Float64, read as
+// The first band of a thermal raster (read by ddb-tilers as GDAL reads it: tilers::Raster), read a window at a time,
+// so that what a request holds does not grow with the raster (a 30000 x 30000 thermal GeoTIFF read whole took some
+// 9 GB): the point reads its pixel, the area and the value info stream their pixels (raster_analysis.cpp). The band holds temperatures (Float32 or Float64, read as
 // Float32) or raw counts (UInt16): with the Planck constants of the file (extractThermalCalibration) the counts are
 // turned into degrees Celsius as rawToTemperatureMap turns them, else they are taken as they are. Any other band is not
 // read.
 class ThermalBandReader {
 public:
-    // The reader of the first band of the raster; nothing when GDAL cannot open it, it has no band, or its first band
+    // The reader of the first band of the raster; nothing when it cannot be opened, it has no band, or its first band
     // is neither Float32, Float64 nor UInt16
     static std::unique_ptr<ThermalBandReader> open(const std::string &filePath);
     ~ThermalBandReader();
@@ -168,7 +168,7 @@ public:
     bool hasRawCounts() const;
 
     // The temperatures of the w x h window at (x, y), row by row, and its raw counts when the band has them (empty
-    // otherwise); false when GDAL cannot read it
+    // otherwise); false when it cannot be read
     bool read(int x, int y, int w, int h, std::vector<float> &temperatures, std::vector<uint16_t> &rawCounts) const;
 
 private:

@@ -12,8 +12,8 @@
 
 #include "coordstransformer.h"
 #include "gdal_inc.h"
-#include "gdal_raii.h"
 #include "raster_utils.h"
+#include "tilers_raster.h"
 
 namespace ddb
 {
@@ -34,12 +34,15 @@ namespace ddb
     // contour analyses share, and the one band-value model of every raster value the Hub shows
     // (point, area, profile, contours, value info, statistics): the value of a pixel is
     // raw * scale + offset, and a pixel has no value when it is NoData (the override, else the NoData
-    // value of the band), masked (alpha band or dataset mask) or not finite.
-    // Movable, not copyable (it owns the dataset).
+    // value of the band), masked (alpha band or dataset mask) or not finite. The file is read by
+    // ddb-tilers as GDAL reads it (tilers::Raster). Movable, not copyable.
     struct DemContext
     {
-        GDALDatasetUniquePtr dataset;
-        GDALRasterBandH band = nullptr; // the band that was asked for, owned by the dataset
+        std::unique_ptr<tilers::Raster> raster; // the file the values are read from
+        int bandIndex = 1;              // the band that was asked for (1-based)
+        GDALDataType dataType = GDT_Unknown; // of the band
+        int blockWidth = 0;             // the blocks (tiles or strips) of the file
+        int blockHeight = 0;
         double gt[6] = {0, 1, 0, 0, 0, 1};
         bool hasGeoTransform = true;    // false for a raster opened without one (openDem with requireGeo false): gt is the identity
         int width = 0;
@@ -47,7 +50,7 @@ namespace ddb
         BandNodata nodata;              // of `band`: the override when there is one, else the NoData value of the band
         bool nodataOverridden = false;  // `nodata` is the override of the caller
         bool nodataInvalid = false;     // the NoData value of the band cannot be held by its type: no pixel can match it
-        GDALRasterBandH maskBand = nullptr; // the alpha band or dataset mask of `band` (not a NoData mask), null when none
+        bool masked = false;            // the band has an alpha band or a dataset mask (not a NoData mask)
         bool hasScale = false;          // the band declares a scale and/or an offset
         double scale = 1.0;             // physical = raw * scale + offset
         double offset = 0.0;
@@ -56,8 +59,6 @@ namespace ddb
         SrsPtr srs;                     // null when the raster has no (readable) CRS
         bool isGeographic = false;      // the CRS is geographic: pixel sizes are in degrees
         double zToMeters = 1.0;         // the factor of the elevations of `band` to meters (its unit type)
-
-        GDALDatasetH handle() const noexcept { return GDALDataset::ToHandle(dataset.get()); }
 
         // WGS84 (longitude, latitude) to the CRS of the raster, and back. Null when the raster
         // has no CRS: its map coordinates are taken as WGS84 then. Throw GDALException when
@@ -77,7 +78,7 @@ namespace ddb
         // the band): they do whenever they convert the samples
         bool readsNormalised() const noexcept
         {
-            return zToMeters != 1.0 || hasScale || nodataOverridden || maskBand != nullptr;
+            return zToMeters != 1.0 || hasScale || nodataOverridden || masked;
         }
 
         // Whether a sample is an elevation: finite, and not the nodata of the band
@@ -88,7 +89,7 @@ namespace ddb
 
         // The window (x, y, w, h) of the band, resampled to bufferW x bufferH, as the raw samples of the
         // band (floats; NaN where a pixel has no value: NoData, masked or not finite). Throws
-        // AppException("Cannot read raster data") when GDAL cannot read it.
+        // AppException("Cannot read raster data") when the window cannot be read.
         std::vector<float> readRaw(int x, int y, int w, int h, int bufferW, int bufferH) const;
         // The same in physical values (raw * scale + offset, the unit of the band)
         std::vector<float> readValues(int x, int y, int w, int h, int bufferW, int bufferH) const;
@@ -115,7 +116,7 @@ namespace ddb
 
         // The window (x, y, w, h) of the band, resampled to bufferW x bufferH, as floats, in meters
         // (the values of readValues times zToMeters; a pixel with no value reads back as NaN). Throws
-        // AppException("Cannot read raster data") when GDAL cannot read it.
+        // AppException("Cannot read raster data") when the window cannot be read.
         std::vector<float> readElevations(int x, int y, int w, int h, int bufferW, int bufferH) const;
         std::vector<float> readElevations(int x, int y, int w, int h) const { return readElevations(x, y, w, h, w, h); }
 
@@ -132,7 +133,8 @@ namespace ddb
     // "foot", "US survey foot", ...): 1 for meters, an unset unit and any unit that is not a length
     double elevationUnitToMeters(const std::string &unitType);
 
-    // Opens `path` for reading and checks that it can be used as a DEM: it has a geotransform and
+    // Opens `path` for reading (tilers::Raster::openInput: the COG of a build as it is, any other
+    // raster as its normalized copy) and checks that it can be used as a DEM: it has a geotransform and
     // the band `bandIndex` (1-based). Throws GDALException ("Cannot open raster: ...", "Raster has
     // no geotransform: ...", "Raster has no bands") and InvalidArgsException ("Invalid band index:
     // ...").

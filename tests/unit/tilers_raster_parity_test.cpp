@@ -20,6 +20,7 @@
 #include "mio.h"
 #include "test.h"
 #include "testarea.h"
+#include "tilers_raster.h"
 
 namespace
 {
@@ -43,7 +44,11 @@ namespace
     double sampleOf(const Case &c, int band, int x, int y)
     {
         if (c.alpha && band == c.bands)
-            return (x / 7 + y / 5) % 3 == 0 ? 0 : 255;
+        {
+            // UInt16: the values GDAL rescales to a mask, among them 1..256, which stay above 0
+            static const double uint16Alpha[5] = {0, 1, 256, 257, 65535};
+            return c.type == GDT_UInt16 ? uint16Alpha[(x / 7 + y / 5) % 5] : (x / 7 + y / 5) % 3 == 0 ? 0 : 255;
+        }
         const double v = (x * 37 + y * 101 + band * 13) % 251;
         switch (c.type)
         {
@@ -145,6 +150,8 @@ namespace
         const std::vector<Case> cases = {
             {"byte-rgb", GDT_Byte, 3},
             {"byte-rgba-alpha", GDT_Byte, 4, true, false, false, false, false, true, true},
+            {"byte-grey-alpha", GDT_Byte, 2, false, true, false, false, false, true},
+            {"uint16-rgba-alpha-overviews", GDT_UInt16, 4, true, false, false, false, false, true, true},
             {"uint16-strips-band", GDT_UInt16, 2, false, true, true},
             {"int16-scaled", GDT_Int16, 1, true, false, true, true},
             {"uint32-mask", GDT_UInt32, 1, true, false, false, false, true},
@@ -172,6 +179,7 @@ namespace
             ASSERT_TRUE(ds);
             GDALDatasetH h = datasetHandle(ds);
 
+            const auto tilersRaster = tilers::Raster::open(file);
             ddbtRaster *raster = nullptr;
             ASSERT_EQ(ddbtRasterOpen(io::toUtf8(file).c_str(), &raster), DDBT_ERR_NONE) << ddbtLastError();
             char *infoText = nullptr;
@@ -188,6 +196,8 @@ namespace
             GDALGetBlockSize(band1, &bx, &by);
             EXPECT_EQ(info.at("blockWidth").get<int>(), bx);
             EXPECT_EQ(info.at("blockHeight").get<int>(), by);
+            EXPECT_EQ(tilersRaster->blockWidth(), bx);
+            EXPECT_EQ(tilersRaster->blockHeight(), by);
             ASSERT_EQ(static_cast<int>(info.at("overviews").size()), GDALGetOverviewCount(band1));
             for (int o = 0; o < GDALGetOverviewCount(band1); o++)
             {
@@ -208,6 +218,8 @@ namespace
                 const SrsPtr ddbtSrs = srsFromWkt(info.at("wkt").get<std::string>().c_str());
                 ASSERT_TRUE(gdalSrs && ddbtSrs);
                 EXPECT_TRUE(OSRIsSame(gdalSrs.get(), ddbtSrs.get())) << info.at("wkt");
+                // The text too: libddb returns it (the CRS of a volume)
+                EXPECT_EQ(info.at("wkt").get<std::string>(), std::string(GDALGetProjectionRef(h)));
             }
             else
             {
@@ -276,6 +288,31 @@ namespace
                               CE_None);
                 }
                 EXPECT_EQ(gotMask, wantMask);
+
+                // Each band with its own mask (the alpha band is that of the others), as GDAL's mask band reads
+                for (int b = 1; b <= GDALGetRasterCount(h); b++)
+                {
+                    SCOPED_TRACE("band " + std::to_string(b));
+                    GDALRasterBandH band = GDALGetRasterBand(h, b);
+                    const int flags = GDALGetMaskFlags(band);
+                    const bool masked =
+                        (flags & (GMF_ALPHA | GMF_PER_DATASET)) != 0 && (flags & (GMF_NODATA | GMF_ALL_VALID)) == 0;
+                    ASSERT_EQ(tilersRaster->hasMask(b), masked);
+                    std::vector<double> samples(plane), bandWant(plane);
+                    std::vector<uint8_t> bandMask(plane, 77), bandMaskWant(plane, 77);
+                    tilersRaster->readBand(b, w.x, w.y, w.w, w.h, w.bufW, w.bufH, samples.data(), bandMask.data());
+                    ASSERT_EQ(GDALRasterIO(band, GF_Read, w.x, w.y, w.w, w.h, bandWant.data(), w.bufW, w.bufH,
+                                           GDT_Float64, 0, 0),
+                              CE_None);
+                    if (masked)
+                    {
+                        ASSERT_EQ(GDALRasterIO(GDALGetMaskBand(band), GF_Read, w.x, w.y, w.w, w.h, bandMaskWant.data(),
+                                               w.bufW, w.bufH, GDT_Byte, 0, 0),
+                                  CE_None);
+                    }
+                    EXPECT_EQ(samples, bandWant);
+                    EXPECT_EQ(bandMask, bandMaskWant) << "the mask of the band (untouched without one)";
+                }
             }
             ddbtRasterClose(raster);
         }

@@ -154,7 +154,7 @@ void requirePixelInRaster(int x, int y, int w, int h) {
 // the band-value model (scale and offset) gives. A band with a scale or an offset (the Landsat encoding of its
 // temperatures) holds physical values, not raw counts: it takes no calibration
 std::optional<ThermalCalibration> rawCalibrationOf(const DemContext &dem, bool isThermal, const std::string &filePath) {
-    if (!isThermal || GDALGetRasterDataType(dem.band) != GDT_UInt16 || dem.hasScale) return std::nullopt;
+    if (!isThermal || dem.dataType != GDT_UInt16 || dem.hasScale) return std::nullopt;
     const ThermalCalibration cal = extractThermalCalibration(filePath);
     if (!cal.valid) return std::nullopt;
     return cal;
@@ -190,7 +190,7 @@ ValueFormula valueFormulaOf(const std::string &bandUnit, const std::string &form
 // (raw * scale + offset, the Landsat encoding), not raw counts: it keeps the unit of a thermal raster
 std::string bandUnitOf(const DemContext &dem, bool isThermal, bool calibrated) {
     if (!dem.unit.empty() || !isThermal) return dem.unit;
-    const GDALDataType type = GDALGetRasterDataType(dem.band);
+    const GDALDataType type = dem.dataType;
     if (type == GDT_Byte || (type == GDT_UInt16 && !calibrated && !dem.hasScale)) return "";
     return "\xC2\xB0\x43";
 }
@@ -204,7 +204,7 @@ enum class UncalibratedValues {
 
 // The values of a thermal band without a unit (bandUnitOf): the colour preview of a picture, else raw counts
 UncalibratedValues uncalibratedValuesOf(const DemContext &dem) {
-    return GDALGetRasterDataType(dem.band) == GDT_Byte ? UncalibratedValues::ColourPreview
+    return dem.dataType == GDT_Byte ? UncalibratedValues::ColourPreview
                                                        : UncalibratedValues::RawCounts;
 }
 
@@ -459,15 +459,13 @@ void forEachAreaWindow(const AreaBounds &b, int blockHeight, Read &&read) {
 // formula. No value is a NoRasterDataException
 AreaStatistics bandAreaStatistics(const DemContext &dem, const std::optional<ThermalCalibration> &cal,
                                   const AreaBounds &b, const ValueFormula &vf) {
-    int blockWidth = 0, blockHeight = 0;
-    GDALGetBlockSize(dem.band, &blockWidth, &blockHeight);
     return areaStatistics(areaPixels(b), [&](auto &&add) {
-        forEachAreaWindow(b, blockHeight, [&](int x, int y, int w, int h) {
+        forEachAreaWindow(b, dem.blockHeight, [&](int x, int y, int w, int h) {
             const uint64_t pixels = static_cast<uint64_t>(w) * static_cast<uint64_t>(h);
             countAreaWindow(pixels);
             // What readRaw holds: the samples, and the mask of the band beside them
             AreaBufferBytes bytes;
-            bytes.set(pixels * (sizeof(float) + (dem.maskBand != nullptr ? sizeof(uint8_t) : 0)));
+            bytes.set(pixels * (sizeof(float) + (dem.masked ? sizeof(uint8_t) : 0)));
             const std::vector<float> samples = dem.readRaw(x, y, w, h, w, h);
             bytes.set(samples.capacity() * sizeof(float));
             for (const float raw : samples) {
@@ -518,7 +516,7 @@ json pointResult(const DemContext &dem, const std::optional<ThermalCalibration> 
         throw NoRasterDataException("No valid data at the point: the pixel (" + std::to_string(x) + ", " +
                                     std::to_string(y) + ") has no value");
     json result;
-    const GDALDataType type = GDALGetRasterDataType(dem.band);
+    const GDALDataType type = dem.dataType;
     const double value = valueOfRaw(dem, cal, raw);
     if (std::isnan(value))
         throw NoRasterDataException("No valid data at the point: the raw count of the pixel (" + std::to_string(x) +
@@ -824,7 +822,8 @@ struct PhysicalStats {
     double min = 0, max = 0, mean = 0, stdDev = 0;
 };
 
-PhysicalStats physicalStats(const BandStatistics &s, GDALRasterBandH band, const std::optional<ThermalCalibration> &cal) {
+PhysicalStats physicalStats(const BandStatistics &s, const tilers::Raster::Band &band,
+                            const std::optional<ThermalCalibration> &cal) {
     PhysicalStats p;
     if (cal) {
         p.min = rawToTemperature(static_cast<uint16_t>(s.min), *cal);
@@ -834,11 +833,8 @@ PhysicalStats physicalStats(const BandStatistics &s, GDALRasterBandH band, const
         p.stdDev = s.stdDev;
         return p;
     }
-    int hasScale = FALSE, hasOffset = FALSE;
-    const double scale = GDALGetRasterScale(band, &hasScale);
-    const double offset = GDALGetRasterOffset(band, &hasOffset);
-    const double m = hasScale ? scale : 1.0;
-    const double c = hasOffset ? offset : 0.0;
+    const double m = band.scale.value_or(1.0);
+    const double c = band.offset.value_or(0.0);
     p.min = s.min * m + c;
     p.max = s.max * m + c;
     if (p.min > p.max) std::swap(p.min, p.max);
@@ -861,7 +857,7 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
         const std::optional<double> nodataOverride =
             dem.nodataOverridden ? std::optional<double>(dem.nodata.value) : std::nullopt;
         const PhysicalStats p = physicalStats(RasterStatsProvider::instance().get(filePath, hDs, 1, nodataOverride),
-                                              dem.band, cal);
+                                              dem.raster->band(1), cal);
         const double lo = unit.apply(p.min);
         double hi = unit.apply(p.max);
         if (!(hi > lo)) hi = lo + 1.0;
@@ -888,20 +884,19 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
     }
 
     const int dataBands = dataBandCount(hDs);
-    const bool isByte = GDALGetRasterDataType(dem.band) == GDT_Byte;
+    const bool isByte = dem.dataType == GDT_Byte;
     auto &provider = RasterStatsProvider::instance();
     const std::optional<double> nodata = dem.nodataOverridden ? std::optional<double>(dem.nodata.value) : std::nullopt;
     json stretch = json::array();
     if (dataBands <= 1) {
-        const PhysicalStats p = physicalStats(provider.get(filePath, hDs, 1, nodata), dem.band, cal);
+        const PhysicalStats p = physicalStats(provider.get(filePath, hDs, 1, nodata), dem.raster->band(1), cal);
         double hi = p.max;
         if (!(hi > p.min)) hi = p.min + 1.0;
         stretch.push_back(stretchEntry(p.min, hi));
     } else if (!isByte) {
         for (int b = 1; b <= dataBands; b++) {
-            const GDALRasterBandH band = GDALGetRasterBand(hDs, b);
             const BandStatistics raw = provider.get(filePath, hDs, b, nodata);
-            const PhysicalStats p = physicalStats(raw, band, b == 1 ? cal : std::nullopt);
+            const PhysicalStats p = physicalStats(raw, dem.raster->band(b), b == 1 ? cal : std::nullopt);
             BandStatistics physical;
             physical.min = p.min;
             physical.max = p.max;
@@ -988,8 +983,11 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
         // The values of the raster come from this file (the source file the Registry names), as the band
         // model reads them: the NoData value of the caller, the scale and the offset (FR-XC-24)
         const DemContext dem = openDem(filePath, 1, BandValueOptions{options.nodata}, false);
-        const GDALDatasetH hDs = dem.handle();
-        const GDALDataType dt = GDALGetRasterDataType(dem.band);
+        // The statistics are GDAL's reads of the same file
+        const GDALDatasetUniquePtr statsDataset = raster::openInputRaster(filePath);
+        if (!statsDataset) throw GDALException("Cannot open raster: " + filePath);
+        const GDALDatasetH hDs = GDALDataset::ToHandle(statsDataset.get());
+        const GDALDataType dt = dem.dataType;
         // A UInt16 band with a scale or an offset holds physical values, not raw counts (rawCalibrationOf)
         const std::optional<ThermalCalibration> rawCal = (isThermal && dt == GDT_UInt16 && !dem.hasScale && cal.valid)
                                                              ? std::optional<ThermalCalibration>(cal)
@@ -998,7 +996,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
         // The exact statistics of the pixels that have a value: the range of the whole raster
         // (FR-RAS-07), through the provider
         const BandStatistics raw = RasterStatsProvider::instance().get(filePath, hDs, 1, options.nodata);
-        const PhysicalStats p = physicalStats(raw, dem.band, rawCal);
+        const PhysicalStats p = physicalStats(raw, dem.raster->band(1), rawCal);
 
         // The unit of the values: the band's, else degrees Celsius for a thermal raster that has none; a thermal
         // formula gives the range in its own unit (D-022). Values that are no temperatures (raw counts without a
@@ -1010,7 +1008,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
 
         result["width"] = dem.width;
         result["height"] = dem.height;
-        result["bandCount"] = GDALGetRasterCount(hDs);
+        result["bandCount"] = dem.raster->bandCount();
         result["dataType"] = dataTypeName(dt);
         result["valueMin"] = tidyValue(unit.apply(p.min), dt);
         result["valueMax"] = tidyValue(unit.apply(p.max), dt);
@@ -1080,10 +1078,7 @@ std::string pointAtPixel(const std::string &filePath, int x, int y, bool isTherm
     const ValueFormula vf = bandValueFormula(dem, isThermal, cal.has_value(), options.formula);
     requirePixelInRaster(x, y, dem.width, dem.height);
     json result = pointResult(dem, cal, x, y, isThermal, vf);
-    double geoTransform[6];
-    const char *proj = GDALGetProjectionRef(dem.handle());
-    setGeoPosition(result, GDALGetGeoTransform(dem.handle(), geoTransform) == CE_None, geoTransform,
-                   proj != nullptr ? proj : "", x, y);
+    setGeoPosition(result, dem.hasGeoTransform, dem.gt, dem.projection, x, y);
     return result.dump();
 }
 
@@ -1133,10 +1128,7 @@ std::string getRasterPointAtJson(const std::string &filePath, double lon, double
     requirePixelInRaster(x, y, dem.width, dem.height);
 
     json result = pointResult(dem, cal, x, y, isThermal, vf);
-    double geoTransform[6];
-    const char *proj = GDALGetProjectionRef(dem.handle());
-    setGeoPosition(result, GDALGetGeoTransform(dem.handle(), geoTransform) == CE_None, geoTransform,
-                   proj != nullptr ? proj : "", x, y);
+    setGeoPosition(result, dem.hasGeoTransform, dem.gt, dem.projection, x, y);
     // The point that was asked for
     result["lon"] = lon;
     result["lat"] = lat;
@@ -1149,7 +1141,7 @@ namespace {
 std::string areaOfBounds(const DemContext &dem, const std::optional<ThermalCalibration> &cal, bool isThermal,
                          const AreaBounds &bounds, const ValueFormula &vf) {
     return areaStatsJson(bandAreaStatistics(dem, cal, bounds, vf), bounds, vf.unit, isThermal,
-                         GDALGetRasterDataType(dem.band));
+                         dem.dataType);
 }
 
 } // anonymous namespace

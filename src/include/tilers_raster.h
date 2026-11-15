@@ -50,6 +50,8 @@ namespace ddb::tilers
         int bandCount() const { return static_cast<int>(bands_.size()); }
         // GDAL's name of the data type ("Byte", "Float32"...)
         const std::string &dataType() const { return dataType_; }
+        int blockWidth() const { return blockWidth_; }
+        int blockHeight() const { return blockHeight_; }
         const Band &band(int band1) const { return bands_.at(static_cast<size_t>(band1 - 1)); }
         const std::optional<std::array<double, 6>> &geoTransform() const { return geoTransform_; }
         // The CRS as WKT1 GDAL; empty without one
@@ -63,12 +65,39 @@ namespace ddb::tilers
         void read(int x, int y, int width, int height, int bufWidth, int bufHeight, std::span<const int> bands,
                   double *out, uint8_t *mask = nullptr) const;
 
+        // Whether `band1` has a mask that is not its NoData value (GDALGetMaskFlags with GMF_ALPHA or
+        // GMF_PER_DATASET and without GMF_NODATA or GMF_ALL_VALID): the mask of the file, or the alpha band
+        // of an RGBA or grey + alpha raster for its other bands
+        bool hasMask(int band1) const;
+        // Reads the window of `band1` as read() does, and in `mask` (when the band hasMask, else left
+        // untouched) the samples of its mask band as GDAL's RasterIO reads them into Byte: 0 where a
+        // pixel is transparent. @throws InvalidArgsException, GDALException
+        void readBand(int band1, int x, int y, int width, int height, int bufWidth, int bufHeight, float *out,
+                      uint8_t *mask) const;
+        void readBand(int band1, int x, int y, int width, int height, int bufWidth, int bufHeight, double *out,
+                      uint8_t *mask) const;
+
       private:
+        // What GDALGetMaskFlags says of band 1
+        enum class Mask
+        {
+            AllValid,
+            PerDataset,
+            Nodata,
+            Alpha
+        };
+
         explicit Raster(ddbtRaster *handle);
+        template <typename T>
+        void readBandAs(int band1, int x, int y, int width, int height, int bufWidth, int bufHeight, T *out,
+                        uint8_t *mask) const;
 
         ddbtRaster *handle_;
         int width_ = 0, height_ = 0;
         std::string dataType_;
+        int blockWidth_ = 0, blockHeight_ = 0;
+        Mask mask_ = Mask::AllValid;
+        int alphaBand_ = 0;
         std::vector<Band> bands_;
         std::optional<std::array<double, 6>> geoTransform_;
         std::string wkt_;
