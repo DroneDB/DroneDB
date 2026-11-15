@@ -11,6 +11,10 @@
 #include "ddb.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
+#include "raster_test_utils.h"
+#include "user_open_child.h"
+#include <cmath>
+#include <functional>
 
 #include <cstdint>
 #include <cstring>
@@ -225,3 +229,151 @@ TEST(mask, cogPreservesPerDatasetMask) {
 }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Rasters of one band of more than 8 bits (DEMs, thermal rasters): nearblack writes 8 bits only
+// ---------------------------------------------------------------------------
+namespace masksamples {
+
+using testutils::GeoRasterSpec;
+
+// A collar near black (0 to 10) with a concave notch and short runs of bright pixels (which
+// nearblack's -nb 2 passes over), around data from 40 up, with a black hole inside that no border
+// reaches
+double collarSample(int x, int y) {
+    const bool notch = x >= 30 && x < 40 && y < 50;
+    const bool collar = x < 9 || y < 7 || x >= 87 || y >= 90 || notch;
+    if (collar)
+        return (x * 3 + y * 5) % 11 == 0 && (x + y) % 2 == 0 ? 120 : (x + 2 * y) % 11;
+    if (x >= 60 && x < 66 && y >= 60 && y < 66)
+        return 0;  // the hole
+    return 40 + (x * 7 + y * 13) % 200;
+}
+
+// The internal mask of band 1 of `file`
+std::vector<uint8_t> maskOf(const fs::path &file) {
+    GDALDatasetH ds = GDALOpen(file.string().c_str(), GA_ReadOnly);
+    EXPECT_NE(ds, nullptr) << file;
+    GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+    EXPECT_EQ(GDALGetMaskFlags(band), GMF_PER_DATASET);
+    const int w = GDALGetRasterXSize(ds), h = GDALGetRasterYSize(ds);
+    std::vector<uint8_t> mask(static_cast<size_t>(w) * h);
+    EXPECT_EQ(GDALRasterIO(GDALGetMaskBand(band), GF_Read, 0, 0, w, h, mask.data(), w, h, GDT_Byte, 0, 0), CE_None);
+    GDALClose(ds);
+    return mask;
+}
+
+std::vector<double> samplesOf(const fs::path &file, GDALDataType *type = nullptr) {
+    GDALDatasetH ds = GDALOpen(file.string().c_str(), GA_ReadOnly);
+    EXPECT_NE(ds, nullptr) << file;
+    GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+    if (type != nullptr)
+        *type = GDALGetRasterDataType(band);
+    const int w = GDALGetRasterXSize(ds), h = GDALGetRasterYSize(ds);
+    std::vector<double> v(static_cast<size_t>(w) * h);
+    EXPECT_EQ(GDALRasterIO(band, GF_Read, 0, 0, w, h, v.data(), w, h, GDT_Float64, 0, 0), CE_None);
+    GDALClose(ds);
+    return v;
+}
+
+fs::path oneBand(const fs::path &path, GDALDataType type, const std::function<double(int, int)> &value) {
+    GeoRasterSpec spec;
+    spec.width = spec.height = 96;
+    spec.bands = 1;
+    spec.type = type;
+    spec.value = [value](int, int x, int y) { return value(x, y); };
+    return testutils::createGeoRaster(path, spec);
+}
+
+raster::MaskParams params(bool white = false, const std::string &color = "") {
+    ddb::raster::MaskParams p;
+    p.white = white;
+    p.color = color;
+    return p;
+}
+
+}  // namespace masksamples
+
+// The mask of a raster of 16 bits is the mask nearblack makes of the same samples in 8 bits: black,
+// white and a colour, the notch, the bright runs and the hole no border reaches included
+USER_OPEN_TEST(mask, aRasterOfMoreThan8BitsGetsTheMaskNearblackMakesOfItsSamples) {
+    using namespace masksamples;
+    TestArea ta(TEST_NAME, true);
+    const struct {
+        const char *name;
+        std::function<double(int, int)> value;
+        ddb::raster::MaskParams params;
+    } cases[] = {{"black", collarSample, params()},
+                 {"white", [](int x, int y) { return 255 - collarSample(x, y); }, params(true)},
+                 {"color", [](int x, int y) { const double v = collarSample(x, y); return v < 11 ? 100 + v : v; },
+                  params(false, "100")},
+                 {"color255", [](int x, int y) { return 255 - collarSample(x, y); }, params(false, "255")}};
+    for (const auto &c : cases) {
+        SCOPED_TRACE(c.name);
+        const auto bytes = oneBand(ta.getPath(std::string(c.name) + "8.tif"), GDT_Byte, c.value);
+        const auto wide = oneBand(ta.getPath(std::string(c.name) + "16.tif"), GDT_UInt16, c.value);
+        ddb::raster::maskRasterFile(bytes, ta.getPath(std::string(c.name) + "8-masked.tif"), c.params, {});
+        ddb::raster::maskRasterFile(wide, ta.getPath(std::string(c.name) + "16-masked.tif"), c.params, {});
+        const auto expected = maskOf(ta.getPath(std::string(c.name) + "8-masked.tif"));
+        EXPECT_EQ(maskOf(ta.getPath(std::string(c.name) + "16-masked.tif")), expected);
+        // The test means something: the collar is masked, the hole is not
+        EXPECT_EQ(expected[1], 0);
+        EXPECT_EQ(expected[62 * 96 + 62], 255);
+    }
+}
+
+// A DEM keeps its type and every sample (nearblack cut 1234 to 255, and refused Float32); the
+// samples that are NoData or NaN are masked as well
+USER_OPEN_TEST(mask, aDemKeepsItsTypeAndItsSamples) {
+    using namespace masksamples;
+    TestArea ta(TEST_NAME, true);
+    const auto dem = [](int x, int y) { const double v = collarSample(x, y); return v < 40 ? v : 1000 + v * 3.25; };
+    for (const GDALDataType type : {GDT_Int16, GDT_UInt16, GDT_Float32, GDT_Float64}) {
+        SCOPED_TRACE(GDALGetDataTypeName(type));
+        const std::string name = GDALGetDataTypeName(type);
+        const auto in = oneBand(ta.getPath(name + ".tif"), type, dem);
+        const bool floating = type == GDT_Float32 || type == GDT_Float64;
+        {
+            GDALDatasetH ds = GDALOpen(in.string().c_str(), GA_Update);
+            ASSERT_NE(ds, nullptr);
+            GDALRasterBandH band = GDALGetRasterBand(ds, 1);
+            ASSERT_EQ(GDALSetRasterNoDataValue(band, 7), CE_None);
+            double v = 7;
+            ASSERT_EQ(GDALRasterIO(band, GF_Write, 50, 20, 1, 1, &v, 1, 1, GDT_Float64, 0, 0), CE_None);
+            v = std::nan("");
+            if (floating) {
+                ASSERT_EQ(GDALRasterIO(band, GF_Write, 51, 20, 1, 1, &v, 1, 1, GDT_Float64, 0, 0), CE_None);
+            }
+            GDALClose(ds);
+        }
+        const auto out = ta.getPath(name + "-masked.tif");
+        ddb::raster::maskRasterFile(in, out, params(), {});
+
+        GDALDataType outType = GDT_Unknown;
+        const auto before = samplesOf(in);
+        const auto after = samplesOf(out, &outType);
+        EXPECT_EQ(outType, type);
+        ASSERT_EQ(after.size(), before.size());
+        for (size_t i = 0; i < after.size(); i++) {
+            if (!(std::isnan(before[i]) && std::isnan(after[i]))) {
+                ASSERT_EQ(after[i], before[i]) << i;
+            }
+        }
+        const auto mask = maskOf(out);
+        EXPECT_EQ(mask[1], 0) << "the collar";
+        EXPECT_EQ(mask[45 * 96 + 45], 255) << "the data";
+        EXPECT_EQ(mask[20 * 96 + 50], 0) << "NoData";
+        if (floating) {
+            EXPECT_EQ(mask[20 * 96 + 51], 0) << "NaN";
+        }
+    }
+}
+
+// The border colour of a raster of one band is one number
+USER_OPEN_TEST(mask, theColourOfARasterOfOneBandIsOneNumber) {
+    using namespace masksamples;
+    TestArea ta(TEST_NAME, true);
+    const auto in = oneBand(ta.getPath("dem.tif"), GDT_Int16, collarSample);
+    EXPECT_THROW(ddb::raster::maskRasterFile(in, ta.getPath("a.tif"), params(false, "1,2"), {}), InvalidArgsException);
+    EXPECT_THROW(ddb::raster::maskRasterFile(in, ta.getPath("b.tif"), params(false, "dark"), {}), InvalidArgsException);
+}
