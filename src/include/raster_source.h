@@ -68,6 +68,12 @@ namespace ddb
                           uint8_t *mask) const = 0;
     };
 
+    /// The source seen with the NoData value `nodata` instead of the one of every band (FR-RAS-31), as the VRT of
+    /// withNodataOverride (raster_utils.h) shows a dataset: the masks follow the new value (no band keeps an alpha or
+    /// a dataset mask: the NoData value decides), the samples are those of the source. It names no file, so its
+    /// statistics are kept in memory only. The source must outlive it.
+    std::unique_ptr<RasterSource> withNodataOverride(const RasterSource &source, double nodata);
+
     /// The alpha band, the dataset mask and the NoData value of each of the first `bandCount` bands of the source
     /// (detectBandNodata of a GDAL dataset)
     RasterBandNodata detectBandNodata(const RasterSource &source, int bandCount);

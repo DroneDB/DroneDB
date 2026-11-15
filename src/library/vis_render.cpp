@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "vis_render.h"
-#include "tilers_raster.h"
 #include <cstdio>
 
 #include <algorithm>
@@ -111,26 +110,12 @@ namespace ddb
         return {sMin, sMax};
     }
 
-    int dataBandCount(GDALDatasetH ds)
+    int dataBandCount(const RasterSource &source)
     {
-        const GDALRasterBandH raster = GDALGetRasterBand(ds, 1);
-        const GDALRasterBandH alphaBand = GDALGetMaskBand(raster);
-        const int bandsCount = GDALGetRasterCount(ds);
-        const GDALRasterBandH lastBand = GDALGetRasterBand(ds, bandsCount);
-
-        if (GDALGetMaskFlags(alphaBand) & GMF_ALPHA || bandsCount == 4 ||
-            bandsCount == 2 || GDALGetRasterColorInterpretation(lastBand) == GCI_AlphaBand)
-        {
-            return bandsCount - 1;
-        }
-
-        return bandsCount;
-    }
-
-    int dataBandCount(const tilers::Raster &raster)
-    {
-        const int bandsCount = raster.bandCount();
-        if (bandsCount == 4 || bandsCount == 2 || raster.band(bandsCount).colorInterp == "Alpha")
+        // GDAL takes the mask of the first band for an alpha band (GMF_ALPHA) only for the 2nd of 2 and the 4th of
+        // 4 bands, which the band count says: the mask needs no read
+        const int bandsCount = source.bandCount();
+        if (bandsCount == 4 || bandsCount == 2 || source.isAlpha(bandsCount))
             return bandsCount - 1;
         return bandsCount;
     }
@@ -160,18 +145,18 @@ namespace ddb
         return {lo, hi};
     }
 
-    std::vector<std::pair<double, double>> defaultStretch(const std::string &path, GDALDatasetH ds,
+    std::vector<std::pair<double, double>> defaultStretch(const std::string &path, const RasterSource &source,
                                                           const std::vector<int> &bands,
-                                                          const std::optional<double> &nodata, StretchSource source)
+                                                          const std::optional<double> &nodata, StretchSource from)
     {
         auto &provider = RasterStatsProvider::instance();
         // The statistics of the bands: exact, or those of a thumbnail (the bands in one bounded read, D-041)
         std::vector<BandStatistics> stats;
-        if (source == StretchSource::Bounded)
-            stats = provider.getStretchStatistics(path, ds, bands, nodata);
+        if (from == StretchSource::Bounded)
+            stats = provider.getStretchStatistics(path, source, bands, nodata);
         else
             for (const int b : bands)
-                stats.push_back(provider.get(path, ds, b, nodata));
+                stats.push_back(provider.get(path, source, b, nodata));
 
         std::vector<std::pair<double, double>> ranges;
         if (bands.size() == 1)
@@ -431,21 +416,21 @@ namespace ddb
         return renderPlannedFormulaRgba(ds, plan, window, visParams.rescale);
     }
 
-    int styledBand(GDALDatasetH ds, const std::string &colormap, const std::vector<int> &chosen)
+    int styledBand(const RasterSource &source, const std::string &colormap, const std::vector<int> &chosen)
     {
         if (colormap.empty())
             return 0;
         if (chosen.empty())
-            return dataBandCount(ds) == 1 ? 1 : 0;
+            return dataBandCount(source) == 1 ? 1 : 0;
         for (const int b : chosen)
             if (b != chosen.front())
                 return 0;
         return chosen.front();
     }
 
-    BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,
-                                const std::string &rescale, const std::optional<double> &nodata,
-                                StretchSource source)
+    BandStylePlan planBandStyle(const std::string &path, const RasterSource &source, int band,
+                                const std::string &colormapId, const std::string &rescale,
+                                const std::optional<double> &nodata, StretchSource from)
     {
         BandStylePlan plan;
         plan.band = band;
@@ -462,7 +447,7 @@ namespace ddb
         std::pair<double, double> stretch;
         try
         {
-            stretch = defaultStretch(path, ds, {band}, nodata, source)[0];
+            stretch = defaultStretch(path, source, {band}, nodata, from)[0];
         }
         catch (const NoValidPixelsException &e)
         {
@@ -480,11 +465,7 @@ namespace ddb
         }
         const auto [lo, hi] = stretch;
         // The stretch is in the raw values of the band
-        int hasScale = FALSE, hasOffset = FALSE;
-        const GDALRasterBandH hBand = GDALGetRasterBand(ds, band);
-        const double scale = GDALGetRasterScale(hBand, &hasScale);
-        const double offset = GDALGetRasterOffset(hBand, &hasOffset);
-        const double m = hasScale ? scale : 1.0, c = hasOffset ? offset : 0.0;
+        const double m = source.scale(band).value_or(1.0), c = source.offset(band).value_or(0.0);
         plan.range = {static_cast<float>(std::min(lo * m + c, hi * m + c)),
                       static_cast<float>(std::max(lo * m + c, hi * m + c))};
         return plan;

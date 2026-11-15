@@ -880,7 +880,7 @@ json defaultStretchJson(const std::string &filePath, const RasterSource &source,
         }
     }
 
-    const int dataBands = dataBandCount(*dem.raster);
+    const int dataBands = dataBandCount(source);
     const bool isByte = dem.dataType == GDT_Byte;
     auto &provider = RasterStatsProvider::instance();
     const std::optional<double> nodata = dem.nodataOverridden ? std::optional<double>(dem.nodata.value) : std::nullopt;

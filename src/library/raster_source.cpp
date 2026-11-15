@@ -274,6 +274,61 @@ namespace ddb
     }
 
 
+    namespace
+    {
+        class NodataOverrideSource final : public RasterSource
+        {
+        public:
+            NodataOverrideSource(const RasterSource &source, double nodata) : source_(source), nodata_(nodata) {}
+
+            std::string file() const override { return std::string(); }
+            int width() const override { return source_.width(); }
+            int height() const override { return source_.height(); }
+            int bandCount() const override { return source_.bandCount(); }
+            BandNodata nodata(int band) const override
+            {
+                source_.dataType(band);  // checks the band
+                return BandNodata{true, nodata_};
+            }
+            GDALDataType dataType(int band) const override { return source_.dataType(band); }
+            bool isAlpha(int band) const override { return source_.isAlpha(band); }
+            std::optional<double> scale(int band) const override { return source_.scale(band); }
+            std::optional<double> offset(int band) const override { return source_.offset(band); }
+            std::string unit(int band) const override { return source_.unit(band); }
+            bool hasMask(int band) const override
+            {
+                source_.dataType(band);
+                return false;
+            }
+            void blockSize(int &width, int &height) const override { source_.blockSize(width, height); }
+            int overviewCount() const override { return source_.overviewCount(); }
+            std::optional<std::pair<int, int>> overviewSize(const std::vector<int> &bands, int index) const override
+            {
+                return source_.overviewSize(bands, index);
+            }
+            // No band has a mask: none is asked for
+            void read(int level, const RasterWindow &window, const std::vector<int> &bands, double *samples,
+                      uint8_t *) const override
+            {
+                source_.read(level, window, bands, samples, nullptr);
+            }
+            void read(const RasterWindow &window, const std::vector<int> &bands, float *samples,
+                      uint8_t *) const override
+            {
+                source_.read(window, bands, samples, nullptr);
+            }
+
+        private:
+            const RasterSource &source_;
+            double nodata_;
+        };
+    }
+
+    std::unique_ptr<RasterSource> withNodataOverride(const RasterSource &source, double nodata)
+    {
+        return std::make_unique<NodataOverrideSource>(source, nodata);
+    }
+
     RasterBandNodata detectBandNodata(const RasterSource &source, int bandCount)
     {
         RasterBandNodata info;

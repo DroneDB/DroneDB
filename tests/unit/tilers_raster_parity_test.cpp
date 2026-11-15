@@ -495,4 +495,123 @@ namespace
             }
         }
     }
+
+    // What ddb-tilers writes for an export (ddbtWriteRaster) is what GDAL writes: the same pixels at full
+    // resolution and in every overview of GDALBuildOverviews AVERAGE (odd sizes: fractional weights), the
+    // same colour interpretations and masks, for an alpha band (RGBA, grey + alpha), no mask, and a nodata
+    struct WriteCase
+    {
+        std::string name;
+        std::vector<std::string> interps;
+        std::optional<uint8_t> nodata;
+    };
+
+    uint8_t exportSample(const WriteCase &c, int band, int x, int y)
+    {
+        const bool alpha = c.interps[static_cast<size_t>(band)] == "Alpha";
+        if (alpha)
+            return (x / 3 + y / 5) % 4 == 0 ? 0 : ((x + y) % 9 == 0 ? 128 : 255);
+        if (c.nodata && (x * 7 + y * 3) % 11 == 0)
+            return *c.nodata;
+        return static_cast<uint8_t>((x * 13 + y * 29 + band * 71) % 256);
+    }
+
+    int fillExport(void *userData, int x, int y, int w, int h, uint8_t *out, size_t stride)
+    {
+        const auto &c = *static_cast<const WriteCase *>(userData);
+        const int bands = static_cast<int>(c.interps.size());
+        for (int r = 0; r < h; r++)
+            for (int col = 0; col < w; col++)
+                for (int b = 0; b < bands; b++)
+                    out[static_cast<size_t>(r) * stride + static_cast<size_t>(col) * bands + b] =
+                        exportSample(c, b, x + col, y + r);
+        return 0;
+    }
+
+    TEST(TilersRasterParity, anExportIsWrittenAsGdalWritesIt)
+    {
+        TestArea ta(TEST_NAME, true);
+        const int width = 1003, height = 771;
+        std::vector<int> factors = {2, 4, 8};
+        const std::vector<WriteCase> cases = {
+            {"rgba", {"Red", "Green", "Blue", "Alpha"}, std::nullopt},
+            {"grey-alpha", {"Gray", "Alpha"}, std::nullopt},
+            {"rgb", {"Red", "Green", "Blue"}, std::nullopt},
+            {"nodata", {"Gray"}, uint8_t{7}},
+        };
+        for (const WriteCase &c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            const int bands = static_cast<int>(c.interps.size());
+            // GDAL: created band by band, then its overviews
+            const fs::path gdalFile = ta.getPath(c.name + "-gdal.tif");
+            {
+                CPLStringList options;
+                options.SetNameValue("TILED", "YES");
+                options.SetNameValue("COMPRESS", "DEFLATE");
+                options.SetNameValue("PREDICTOR", "2");
+                auto ds = adoptDataset(GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(gdalFile).c_str(), width,
+                                                  height, bands, GDT_Byte, options.List()));
+                ASSERT_TRUE(ds);
+                GDALDatasetH h = datasetHandle(ds);
+                std::vector<uint8_t> plane(static_cast<size_t>(width) * height);
+                for (int b = 0; b < bands; b++)
+                {
+                    GDALRasterBandH band = GDALGetRasterBand(h, b + 1);
+                    GDALSetRasterColorInterpretation(band, GDALGetColorInterpretationByName(c.interps[static_cast<size_t>(b)].c_str()));
+                    if (c.nodata)
+                        GDALSetRasterNoDataValue(band, *c.nodata);
+                    for (int y = 0; y < height; y++)
+                        for (int x = 0; x < width; x++)
+                            plane[static_cast<size_t>(y) * width + x] = exportSample(c, b, x, y);
+                    ASSERT_EQ(GDALRasterIO(band, GF_Write, 0, 0, width, height, plane.data(), width, height, GDT_Byte, 0, 0),
+                              CE_None);
+                }
+                ASSERT_EQ(GDALBuildOverviews(h, "AVERAGE", static_cast<int>(factors.size()), factors.data(), 0, nullptr,
+                                             nullptr, nullptr),
+                          CE_None);
+            }
+            // ddb-tilers
+            const fs::path tilersFile = ta.getPath(c.name + "-tilers.tif");
+            json options = {{"width", width}, {"height", height}, {"colorInterp", c.interps}, {"blockSize", 256},
+                            {"overviewFactors", factors}};
+            if (c.nodata)
+                options["nodata"] = *c.nodata;
+            ASSERT_EQ(ddbtWriteRaster(io::toUtf8(tilersFile).c_str(), options.dump().c_str(), fillExport,
+                                      const_cast<WriteCase *>(&c), nullptr, nullptr),
+                      DDBT_ERR_NONE)
+                << ddbtLastError();
+
+            const auto want = adoptDataset(GDALOpen(io::toUtf8(gdalFile).c_str(), GA_ReadOnly));
+            const auto got = adoptDataset(GDALOpen(io::toUtf8(tilersFile).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(want && got);
+            for (int b = 1; b <= bands; b++)
+            {
+                SCOPED_TRACE("band " + std::to_string(b));
+                GDALRasterBandH wb = GDALGetRasterBand(datasetHandle(want), b);
+                GDALRasterBandH gb = GDALGetRasterBand(datasetHandle(got), b);
+                EXPECT_EQ(GDALGetRasterColorInterpretation(gb), GDALGetRasterColorInterpretation(wb));
+                EXPECT_EQ(GDALGetMaskFlags(gb), GDALGetMaskFlags(wb));
+                int hasWant = 0, hasGot = 0;
+                EXPECT_EQ(GDALGetRasterNoDataValue(gb, &hasGot), GDALGetRasterNoDataValue(wb, &hasWant));
+                EXPECT_EQ(hasGot, hasWant);
+                ASSERT_EQ(GDALGetOverviewCount(gb), GDALGetOverviewCount(wb));
+                for (int level = -1; level < GDALGetOverviewCount(wb); level++)
+                {
+                    GDALRasterBandH w = level < 0 ? wb : GDALGetOverview(wb, level);
+                    GDALRasterBandH g = level < 0 ? gb : GDALGetOverview(gb, level);
+                    const int lw = GDALGetRasterBandXSize(w), lh = GDALGetRasterBandYSize(w);
+                    ASSERT_EQ(GDALGetRasterBandXSize(g), lw);
+                    ASSERT_EQ(GDALGetRasterBandYSize(g), lh);
+                    std::vector<uint8_t> a(static_cast<size_t>(lw) * lh), z(a.size());
+                    ASSERT_EQ(GDALRasterIO(w, GF_Read, 0, 0, lw, lh, a.data(), lw, lh, GDT_Byte, 0, 0), CE_None);
+                    ASSERT_EQ(GDALRasterIO(g, GF_Read, 0, 0, lw, lh, z.data(), lw, lh, GDT_Byte, 0, 0), CE_None);
+                    size_t differ = 0;
+                    for (size_t i = 0; i < a.size(); i++)
+                        differ += a[i] != z[i];
+                    EXPECT_EQ(differ, 0u) << "level " << level + 1 << " (" << lw << " x " << lh << ")";
+                }
+            }
+        }
+    }
 }
