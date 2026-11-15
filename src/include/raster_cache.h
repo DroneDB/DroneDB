@@ -21,35 +21,19 @@ namespace ddb
 {
     class Tiler;
 
-    /// A raster or vector read-only with GDAL, closed when destroyed. It is not the file of a user
-    /// that is opened but an artefact (raster_artefacts.h): see artefact_cache.h for a raster; a
-    /// vector must be the GeoPackage of a build.
+    /// The GeoPackage of a build read-only with GDAL, closed when destroyed (the vector queries name it; the
+    /// rasters are read by ddb-tilers)
     class OpenedDataset
     {
         GDALDatasetUniquePtr dataset_;
 
     public:
-        enum class Kind
-        {
-            Raster,
-            Vector
-        };
-
-        explicit OpenedDataset(const std::string &path, Kind kind = Kind::Raster);
+        explicit OpenedDataset(const std::string &path);
         ~OpenedDataset();
         OpenedDataset(const OpenedDataset &) = delete;
         OpenedDataset &operator=(const OpenedDataset &) = delete;
 
         GDALDatasetH handle() const { return GDALDataset::ToHandle(dataset_.get()); }
-
-        /// The value that is opaque in the alpha band `band` (1-based) of this raster
-        /// (alphaOpaqueValue), derived from its data on the first call and kept with the
-        /// handle. An instance is used by one caller at a time, so nothing is locked.
-        double alphaOpaque(int band) const;
-
-    private:
-        mutable int alphaBand_ = 0;
-        mutable double alphaOpaque_ = 0.0;
     };
 
     /// What a cached tiler was built for: the same file tiled with other settings is
@@ -158,9 +142,6 @@ namespace ddb
         /// A tiler for key: an idle one when available, otherwise one made by create
         Lease<Tiler> acquireTiler(const TilerKey &key, const TilerFactory &create);
 
-        /// The raster at path opened read-only: an idle handle when available
-        Lease<OpenedDataset> acquireDataset(const std::string &path);
-
         /// The vector file at path opened read-only: an idle handle when available. The
         /// caller must clear the filters it sets on its layers before giving it back.
         Lease<OpenedDataset> acquireVectorDataset(const std::string &path);
@@ -192,7 +173,6 @@ namespace ddb
 
         RasterCache();
 
-        Lease<OpenedDataset> acquireOpened(const std::string &file, OpenedDataset::Kind kind);
         std::shared_ptr<void> take(const std::string &key, const std::string &version);
         void giveBack(const std::string &key, const std::string &path, const std::string &version,
                       std::shared_ptr<void> object);
