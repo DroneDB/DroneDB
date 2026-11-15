@@ -7,6 +7,7 @@
 
 #include "exceptions.h"
 #include "mask.h"
+#include "photo_resize.h"
 #include "raster_ops.h"
 
 namespace ddb::raster
@@ -21,6 +22,10 @@ namespace ddb::raster
                 maskRasterFile(path, out, maskParamsFromJson(params), progress);
                 return json::object();
             }
+            if (op == op::kImageSizes)
+                return toJson(readPhotoSizes(imageSizesParamsFromJson(params).inputs));
+            if (op == op::kResizeImages)
+                return resizeResultsToJson(resizePhotos(resizeImagesParamsFromJson(params), out, progress));
             throw ProtocolError("'" + std::string(op) + "' is not an operation of the helper");
         }
     } // namespace

@@ -1439,6 +1439,63 @@ namespace
 #endif
     }
 
+    // The photos of a splat export travel in their order, each with its own path; the results come
+    // back one per photo
+    TEST(RasterBuildParams, thePhotosOfAnExportAreTheOnesTheHostSent)
+    {
+        ImageSizesParams sizes;
+        sizes.inputs = {"/data/odm/images/a.JPG", "/data/odm/images/b.JPG"};
+        EXPECT_EQ(imageSizesParamsFromJson(toJson(sizes)).inputs, sizes.inputs);
+        const std::vector<PhotoSize> read = {{4000, 3000, ""}, {0, 0, "Cannot open b.JPG"}};
+        const auto back = photoSizesFromJson(toJson(read), 2);
+        ASSERT_EQ(back.size(), 2u);
+        EXPECT_EQ(back[0].width, 4000);
+        EXPECT_EQ(back[0].height, 3000);
+        EXPECT_TRUE(back[0].error.empty());
+        EXPECT_EQ(back[1].error, "Cannot open b.JPG");
+        EXPECT_THROW(photoSizesFromJson(toJson(read), 3), ProtocolError) << "a size per photo";
+        EXPECT_THROW(photoSizesFromJson(json{{"sizes", json::array({json{{"width", 0}, {"height", 3}}})}}, 1), ProtocolError);
+
+        ResizeImagesParams resize;
+        resize.images = {{"/data/odm/images/a.JPG", "a.JPG", 64, 48}, {"/data/odm/images/c.tif", "c.tif.jpg", 48, 64}};
+        resize.quality = 90;
+        resize.threads = 4;
+        const auto resizeBack = resizeImagesParamsFromJson(toJson(resize));
+        ASSERT_EQ(resizeBack.images.size(), 2u);
+        EXPECT_EQ(resizeBack.images[1].source, fs::path("/data/odm/images/c.tif"));
+        EXPECT_EQ(resizeBack.images[1].name, "c.tif.jpg");
+        EXPECT_EQ(resizeBack.images[1].width, 48);
+        EXPECT_EQ(resizeBack.images[1].height, 64);
+        EXPECT_EQ(resizeBack.quality, 90);
+        EXPECT_EQ(resizeBack.threads, std::optional<int>(4));
+        EXPECT_EQ(resizeResultsFromJson(resizeResultsToJson({"", "it failed"}), 2), (std::vector<std::string>{"", "it failed"}));
+        EXPECT_THROW(resizeResultsFromJson(resizeResultsToJson({""}), 2), ProtocolError);
+
+        // The helper writes a JPEG into the folder of the request, nowhere else
+        for (const char *name : {"../a.jpg", "sub/a.jpg", "", ".", ".."})
+        {
+            SCOPED_TRACE(name);
+            json bad = toJson(resize);
+            bad["images"][0]["name"] = name;
+            EXPECT_THROW(resizeImagesParamsFromJson(bad), ProtocolError);
+        }
+        json badQuality = toJson(resize);
+        badQuality["quality"] = 101;
+        EXPECT_THROW(resizeImagesParamsFromJson(badQuality), ProtocolError);
+
+        // The confinement of the helper lets it read the photos
+        Request request;
+        request.op = op::kResizeImages;
+        request.params = toJson(resize);
+        EXPECT_EQ(helperOperationInputs(request),
+                  (std::vector<fs::path>{"/data/odm/images/a.JPG", "/data/odm/images/c.tif"}));
+        request.op = op::kImageSizes;
+        request.params = toJson(sizes);
+        EXPECT_EQ(helperOperationInputs(request), sizes.inputs);
+        EXPECT_TRUE(outIsFolder(op::kResizeImages));
+        EXPECT_FALSE(outIsFolder(op::kMask));
+    }
+
     TEST(RasterBuildParams, paramsThatAreNotWhatTheOperationTakesAreRefused)
     {
         EXPECT_THROW(copcParamsFromJson(json::array()), ProtocolError);

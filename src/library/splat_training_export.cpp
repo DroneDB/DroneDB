@@ -49,8 +49,9 @@ namespace ddb
         constexpr double NadirShareToWarn = 0.98;
         // The private folder in the output folder where the raster helper writes the sample of the cloud
         constexpr const char *CloudSamplePrefix = "ddb-cloud-sample-";
+        // The private folder the raster helper writes the resized images in
+        constexpr const char *ResizeStagingPrefix = "ddb-resized-images-";
         // How many images are exported between two checks of the progress
-        constexpr size_t ImageBatch = 16;
         constexpr size_t ImageThreads = 8;
         constexpr int JpegQuality = 95;
         // Files named in a warning
@@ -538,14 +539,6 @@ namespace ddb
             int height = 0;
         };
 
-        ImageSize imageSizeOf(const fs::path &file)
-        {
-            const auto ds = raster::openInputRaster(io::toUtf8(file));
-            if (!ds)
-                throw GDALException("Cannot open " + io::toUtf8(file));
-            return {GDALGetRasterXSize(datasetHandle(ds)), GDALGetRasterYSize(datasetHandle(ds))};
-        }
-
         // The size of an image once its longest side is at most maxSize; 0 keeps it
         ImageSize resizedTo(const ImageSize &size, int maxSize)
         {
@@ -555,53 +548,6 @@ namespace ddb
             const double scale = static_cast<double>(maxSize) / side;
             return {std::max(1, static_cast<int>(std::lround(size.width * scale))),
                     std::max(1, static_cast<int>(std::lround(size.height * scale)))};
-        }
-
-        // Writes the image resampled to a JPEG of the given size
-        void resizeToJpeg(const fs::path &source, const fs::path &target, const ImageSize &size)
-        {
-            const auto src = raster::openInputRaster(io::toUtf8(source));
-            if (!src)
-                throw GDALException("Cannot open " + io::toUtf8(source));
-            GDALDatasetH hSrc = datasetHandle(src);
-            const int bands = GDALGetRasterCount(hSrc);
-
-            // No EXIF: the camera's metadata (its orientation among it) does not describe the resampled pixels
-            std::vector<std::string> args = {"-of", "JPEG", "-co", "QUALITY=" + std::to_string(JpegQuality),
-                                             "-co", "WRITE_EXIF_METADATA=NO",
-                                             "-outsize", std::to_string(size.width), std::to_string(size.height),
-                                             "-r", "average"};
-            // JPEG holds bytes: 16-bit pixels (the bands of a multispectral camera) are scaled from the
-            // range of their type, the same for every image, so the images keep their relative exposure
-            const GDALDataType type = GDALGetRasterDataType(GDALGetRasterBand(hSrc, 1));
-            if (type == GDT_UInt16)
-                args.insert(args.end(), {"-ot", "Byte", "-scale", "0", "65535", "0", "255"});
-            else if (type == GDT_Int16)
-                args.insert(args.end(), {"-ot", "Byte", "-scale", "0", "32767", "0", "255"});
-            else if (type != GDT_Byte)
-                throw GDALException(io::toUtf8(source) + " has " + GDALGetDataTypeName(type) +
-                                    " pixels, which cannot be written as a JPEG");
-            // JPEG holds 1 or 3 bands: grey, or the colours of an image with an alpha or more bands
-            const int keep = bands == 2 ? 1 : std::min(bands, 3);
-            if (keep != bands)
-                for (int b = 1; b <= keep; ++b)
-                    args.insert(args.end(), {"-b", std::to_string(b)});
-
-            CPLStringList argv = cslFromStrings(args);
-            const GdalOptionsPtr<GDALTranslateOptions> options(GDALTranslateOptionsNew(argv.List(), nullptr));
-            if (!options)
-                throw GDALException("Cannot resize " + io::toUtf8(source));
-            cancel::GdalProgress progress;
-            progress.attach(options.get());
-
-            auto out = adoptDataset(GDALTranslate(io::toUtf8(target).c_str(), hSrc, options.get(), nullptr));
-            if (!out)
-            {
-                cancel::throwIfCanceled();
-                throw GDALException("Cannot resize " + io::toUtf8(source) + ": " + CPLGetLastErrorMsg());
-            }
-            if (out->Close() != CE_None)
-                throw GDALException("Cannot write " + io::toUtf8(target) + ": " + CPLGetLastErrorMsg());
         }
 
         bool isJpegName(const std::string &name)
@@ -732,6 +678,19 @@ namespace ddb
             return false;
         }
 
+        // The size of each photo, or why it cannot be read, from the raster helper: it reads the files of
+        // users, all of them in one run
+        std::vector<raster::PhotoSize> photoSizes(const std::vector<fs::path> &photos)
+        {
+            if (photos.empty())
+                return {};
+            raster::ImageSizesParams params;
+            params.inputs = photos;
+            const json result = raster::rasterHelper().operate(raster::op::kImageSizes, photos.front(), fs::path(),
+                                                               raster::toJson(params), raster::ProgressCallback());
+            return raster::photoSizesFromJson(result, photos.size());
+        }
+
         // The images of the project that can be part of the model, with their camera and pose.
         // Those that cannot are counted in `skipped`.
         std::vector<PlannedImage> planImages(const fs::path &project, const std::vector<OdmShot> &shots,
@@ -739,9 +698,15 @@ namespace ddb
                                              int maxImageSize, Skipped &skipped, std::vector<std::string> &warnings,
                                              Progress &progress)
         {
-            std::vector<PlannedImage> planned;
-            std::set<std::string> names;
-            std::set<std::string> noted;
+            // The shots whose image the checks without pixels let through: their sizes are read by the
+            // raster helper, all in one run
+            struct Candidate
+            {
+                const OdmShot *shot = nullptr;
+                PlannedImage image;
+                std::string note;
+            };
+            std::vector<Candidate> candidates;
             for (size_t i = 0; i < shots.size(); ++i)
             {
                 progress.report(within(0.0, CamerasEnd, shareOf(i, shots.size())), "cameras");
@@ -766,33 +731,49 @@ namespace ddb
                     continue;
                 }
 
-                PlannedImage image;
-                image.camera = camera;
-                image.source = project / "images" / io::fromUtf8(shot.filename);
+                Candidate candidate;
+                candidate.shot = &shot;
+                candidate.note = note;
+                candidate.image.camera = camera;
+                candidate.image.source = project / "images" / io::fromUtf8(shot.filename);
                 std::error_code ec;
-                if (!fs::is_regular_file(image.source, ec))
+                if (!fs::is_regular_file(candidate.image.source, ec))
                 {
                     skipped.add("the file is not in images/", shot.filename);
                     continue;
                 }
-                try
+                candidates.push_back(std::move(candidate));
+            }
+
+            std::vector<fs::path> sources;
+            for (const auto &c : candidates)
+                sources.push_back(c.image.source);
+            const std::vector<raster::PhotoSize> sizes = photoSizes(sources);
+
+            std::vector<PlannedImage> planned;
+            std::set<std::string> names;
+            std::set<std::string> noted;
+            for (size_t k = 0; k < candidates.size(); ++k)
+            {
+                const OdmShot &shot = *candidates[k].shot;
+                const OdmCamera *camera = candidates[k].image.camera;
+                const std::string &note = candidates[k].note;
+                PlannedImage image = std::move(candidates[k].image);
+                const raster::PhotoSize &size = sizes[k];
+                if (!size.error.empty())
                 {
-                    const ImageSize size = imageSizeOf(image.source);
-                    if (size.width != camera->width || size.height != camera->height)
-                    {
-                        skipped.add("its size is " + std::to_string(size.width) + "x" + std::to_string(size.height) +
-                                        ", not the " + std::to_string(camera->width) + "x" + std::to_string(camera->height) +
-                                        " of its camera",
-                                    shot.filename);
-                        continue;
-                    }
-                    image.size = size;
-                }
-                catch (const GDALException &e)
-                {
-                    skipped.add(std::string("it cannot be read (") + e.what() + ")", shot.filename);
+                    skipped.add(std::string("it cannot be read (") + size.error + ")", shot.filename);
                     continue;
                 }
+                if (size.width != camera->width || size.height != camera->height)
+                {
+                    skipped.add("its size is " + std::to_string(size.width) + "x" + std::to_string(size.height) +
+                                    ", not the " + std::to_string(camera->width) + "x" + std::to_string(camera->height) +
+                                    " of its camera",
+                                shot.filename);
+                    continue;
+                }
+                image.size = {size.width, size.height};
                 image.target = resizedTo(image.size, maxImageSize);
                 const bool resized = image.target.width != image.size.width || image.target.height != image.size.height;
                 image.name = resized && !isJpegName(shot.filename) ? shot.filename + ".jpg" : shot.filename;
@@ -813,41 +794,75 @@ namespace ddb
             return planned;
         }
 
-        // Links or resizes the images into outFolder/images, a few at a time; an image that cannot
-        // be written is left out (its `exported` stays false)
+        // Links the images of their own size into imagesFolder, a few at a time, and has the raster helper
+        // resize the others, all in one run, into a private folder beside it, from which they are moved
+        // there; an image that cannot be written is left out (its `exported` stays false)
         void exportImages(std::vector<PlannedImage> &images, const fs::path &imagesFolder, Skipped &skipped,
                           Progress &progress)
         {
-            for (size_t begin = 0; begin < images.size(); begin += ImageBatch)
+            std::mutex failures;
+            const auto leaveOut = [&](PlannedImage &image, const std::string &why) {
+                std::error_code ec;
+                fs::remove(imagesFolder / io::fromUtf8(image.name), ec);
+                const std::lock_guard lock(failures);
+                skipped.add("it cannot be written (" + why + ")", image.name);
+            };
+
+            std::vector<PlannedImage *> resized;
+            std::vector<PlannedImage *> linked;
+            for (auto &image : images)
+                (image.target.width != image.size.width || image.target.height != image.size.height ? resized : linked)
+                    .push_back(&image);
+
+            progress.report(PointsEnd, "images");
+            parallel::forEachIndex(linked.size(), ImageThreads, [&](size_t k) {
+                PlannedImage &image = *linked[k];
+                try
+                {
+                    io::hardlinkSafe(image.source, imagesFolder / io::fromUtf8(image.name));
+                    image.exported = true;
+                }
+                catch (const CanceledException &)
+                {
+                    throw;
+                }
+                catch (const std::exception &e)
+                {
+                    leaveOut(image, e.what());
+                }
+            });
+            if (resized.empty())
+                return;
+
+            raster::ResizeImagesParams params;
+            params.quality = JpegQuality;
+            params.threads = static_cast<int>(ImageThreads);
+            for (const PlannedImage *image : resized)
+                params.images.push_back({image->source, image->name, image->target.width, image->target.height});
+            const io::ScopedTempDir staging = raster::makePrivateFolder(imagesFolder.parent_path(), ResizeStagingPrefix);
+            const double linkedShare = shareOf(linked.size(), images.size());
+            const json result = raster::rasterHelper().operate(
+                raster::op::kResizeImages, resized.front()->source, staging.path(), raster::toJson(params),
+                [&](double f) { progress.report(within(PointsEnd, ImagesEnd, linkedShare + (1.0 - linkedShare) * f), "images"); });
+            cancel::throwIfCanceled();
+            const std::vector<std::string> errors = raster::resizeResultsFromJson(result, resized.size());
+            for (size_t k = 0; k < resized.size(); ++k)
             {
-                progress.report(within(PointsEnd, ImagesEnd, shareOf(begin, images.size())), "images");
-                const size_t end = std::min(images.size(), begin + ImageBatch);
-                std::mutex failures;
-                parallel::forEachIndex(end - begin, ImageThreads, [&](size_t k) {
-                    PlannedImage &image = images[begin + k];
-                    const fs::path target = imagesFolder / io::fromUtf8(image.name);
-                    const bool resized =
-                        image.target.width != image.size.width || image.target.height != image.size.height;
-                    try
-                    {
-                        if (resized)
-                            resizeToJpeg(image.source, target, image.target);
-                        else
-                            io::hardlinkSafe(image.source, target);
-                        image.exported = true;
-                    }
-                    catch (const CanceledException &)
-                    {
-                        throw;
-                    }
-                    catch (const std::exception &e)
-                    {
-                        std::error_code ec;
-                        fs::remove(target, ec);
-                        const std::lock_guard lock(failures);
-                        skipped.add(std::string("it cannot be written (") + e.what() + ")", image.name);
-                    }
-                });
+                PlannedImage &image = *resized[k];
+                if (!errors[k].empty())
+                {
+                    leaveOut(image, errors[k]);
+                    continue;
+                }
+                try
+                {
+                    raster::publishArtefact(staging.path() / io::fromUtf8(image.name), imagesFolder / io::fromUtf8(image.name));
+                    image.exported = true;
+                }
+                catch (const std::exception &e)
+                {
+                    leaveOut(image, e.what());
+                }
             }
         }
 

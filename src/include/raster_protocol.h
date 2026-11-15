@@ -94,11 +94,19 @@ namespace ddb
             // The borders of a raster masked (new in 1.3), one-shot: params of maskParamsFromJson,
             // the masked raster written to `out` (runHelperOperation)
             constexpr const char *kMask = "mask";
+            // The sizes of photos (new in 1.3), one-shot: params of imageSizesParamsFromJson, the
+            // result of toJson(std::vector<PhotoSize>)
+            constexpr const char *kImageSizes = "imageSizes";
+            // Photos resized to JPEGs (new in 1.3), one-shot: params of resizeImagesParamsFromJson,
+            // `out` the folder the JPEGs are written in, the result of resizeResultsToJson
+            constexpr const char *kResizeImages = "resizeImages";
         } // namespace op
 
         // An operation on a user's raster for a call of the host (not a build, not a read): one
         // process with the limits of a build, run by runHelperOperation (helper_operations.h)
         bool isHelperOperation(std::string_view op);
+        // Whether `out` of the operation is the folder it writes in (vector, resizeImages), not a file
+        bool outIsFolder(std::string_view op);
 
         // A request. `path` is the file to read, `out` the file to write (operations that
         // write). `params` is an object whose members the operation defines.
@@ -110,6 +118,11 @@ namespace ddb
             fs::path out;
             json params = json::object();
         };
+
+        // The files an operation for a call reads besides `path` (the photos of imageSizes and
+        // resizeImages), which its confinement allows
+        // @throws ProtocolError for params that are not the operation's
+        std::vector<fs::path> helperOperationInputs(const Request &request);
 
         // The request line (without the line feed), in ASCII: any other character of a text is a
         // \u escape of JSON, so the line passes unchanged through a command line in any code page.
@@ -346,6 +359,55 @@ namespace ddb
         json toJson(const MaskParams &params);
         // @throws ProtocolError
         MaskParams maskParamsFromJson(const json &params);
+
+        // The params of an `imageSizes`: the photos (`inputs`, a path each as the inputs of a copc)
+        struct ImageSizesParams
+        {
+            std::vector<fs::path> inputs;
+        };
+
+        json toJson(const ImageSizesParams &params);
+        // @throws ProtocolError
+        ImageSizesParams imageSizesParamsFromJson(const json &params);
+
+        // The size of a photo, or why it cannot be read
+        struct PhotoSize
+        {
+            int width = 0;
+            int height = 0;
+            std::string error; // not empty: the photo cannot be read
+        };
+
+        // {"sizes": [{"width", "height"} or {"error"}, ...]}, in the order of the inputs
+        json toJson(const std::vector<PhotoSize> &sizes);
+        // @throws ProtocolError for a result that is not that, or that has not `count` sizes
+        std::vector<PhotoSize> photoSizesFromJson(const json &result, size_t count);
+
+        // The params of a `resizeImages`: each photo (`source`, a path) written as a JPEG of quality
+        // `quality` and of size `width` x `height` (average resampling, the EXIF left out; 16-bit
+        // samples scaled from the range of their type) to `name`, a file name in the folder `out`
+        struct ResizeImagesParams
+        {
+            struct Image
+            {
+                fs::path source;
+                std::string name;
+                int width = 0;
+                int height = 0;
+            };
+            std::vector<Image> images;
+            int quality = 95;
+            std::optional<int> threads;
+        };
+
+        json toJson(const ResizeImagesParams &params);
+        // @throws ProtocolError (a name that is not a plain file name among them)
+        ResizeImagesParams resizeImagesParamsFromJson(const json &params);
+
+        // {"errors": ["" for a photo written, else why it was not]}, in the order of the images
+        json resizeResultsToJson(const std::vector<std::string> &errors);
+        // @throws ProtocolError for a result that is not that, or that has not `count` items
+        std::vector<std::string> resizeResultsFromJson(const json &result, size_t count);
 
     } // namespace raster
 } // namespace ddb

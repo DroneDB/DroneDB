@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "real_raster_helper.h"
 #include "build.h"
 #include "build_layout.h"
 #include "dbops.h"
@@ -141,53 +142,13 @@ namespace
     }
 
     // A raster helper that reads files as gdal-util does, and writes what is no raster for a COG
-    class GarbageCogHelper : public raster::IRasterHelper
+    class GarbageCogHelper : public testutils::RealRasterHelper
     {
       public:
-        raster::ProbeResult probe(const fs::path &path, const raster::ProbeParams &params) override
-        {
-            return real_.probe(path, params);
-        }
-        PointCloudInfo pointCloudInfo(const fs::path &path) override { return real_.pointCloudInfo(path); }
-        void thumbnail(const fs::path &path, const fs::path &out, const raster::ThumbnailParams &params) override
-        {
-            real_.thumbnail(path, out, params);
-        }
-        void normalize(const fs::path &path, const fs::path &out, const json &params) override
-        {
-            real_.normalize(path, out, params);
-        }
-        void geoproject(const fs::path &path, const fs::path &out, const json &params) override
-        {
-            real_.geoproject(path, out, params);
-        }
         void buildCog(const fs::path &, const fs::path &out, const json &, const raster::ProgressCallback &) override
         {
             writeFile(out, "II*\0 this is no TIFF");
         }
-        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
-                       const raster::ProgressCallback &progress) override
-        {
-            real_.buildCopc(path, out, params, progress);
-        }
-        void buildVector(const fs::path &path, const fs::path &out, const json &params,
-                         const raster::ProgressCallback &progress) override
-        {
-            real_.buildVector(path, out, params, progress);
-        }
-        void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
-                         const raster::ProgressCallback &progress) override
-        {
-            real_.sampleCloud(path, out, params, progress);
-        }
-        json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
-                     const raster::ProgressCallback &progress) override
-        {
-            return real_.operate(op, path, out, params, progress);
-        }
-
-      private:
-        raster::GdalUtilHelper real_;
     };
 
     // The COG the helper wrote is trusted by its place once it is published: a file that does

@@ -20,6 +20,9 @@
 #include <string>
 #include <vector>
 
+#include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "real_raster_helper.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "gdal_raii.h"
@@ -697,6 +700,54 @@ namespace
             EXPECT_NEAR(actual[0], expected[0] / 10.0, 1e-6);
             EXPECT_NEAR(actual[1], expected[1] / 10.0, 1e-6);
         }
+    }
+
+    // The raster helper reads the photos (a user's files) and resizes them: one run for their sizes and
+    // one for the JPEGs, whatever the number of photos, and the host makes no copy of them
+    TEST(SplatTrainingExport, thePhotosAreReadAndResizedInTwoRunsOfTheHelper)
+    {
+        class Operations : public testutils::RealRasterHelper
+        {
+          public:
+            json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                         const raster::ProgressCallback &progress) override
+            {
+                ran.emplace_back(op);
+                return RealRasterHelper::operate(op, path, out, params, progress);
+            }
+            std::vector<std::string> ran;
+        } helper;
+        const raster::ScopedRasterHelper installed(helper);
+
+        Exported e(TEST_NAME);
+        for (const char *name : {"c.JPG", "d.JPG"})
+        {
+            e.spec.shots.push_back(e.spec.shots[0]);
+            e.spec.shots.back().filename = name;
+        }
+        e.write();
+        std::ofstream(e.project / "images" / "d.JPG", std::ios::binary) << "not a JPEG";
+        const auto filesUnder = [](const fs::path &folder) {
+            size_t n = 0;
+            std::error_code ec;
+            for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+                n += it->is_regular_file() ? 1 : 0;
+            return n;
+        };
+        const size_t copiesBefore = filesUnder(raster::normalizedDir());
+        SplatTrainingExportOptions options;
+        options.maxImageSize = 64;
+        const auto result = e.run(options);
+
+        EXPECT_EQ(helper.ran, (std::vector<std::string>{raster::op::kImageSizes, raster::op::kResizeImages}));
+        EXPECT_EQ(result.images, 3u) << allWarnings(result);
+        EXPECT_TRUE(hasWarning(result, "1 image left out, it cannot be read (")) << allWarnings(result);
+        for (const char *name : {"a.JPG", "b.JPG", "c.JPG"})
+            EXPECT_EQ(sizeOfImage(e.out / "images" / name), (std::array<int, 2>{64, 48})) << name;
+        EXPECT_FALSE(fs::exists(e.out / "images" / "d.JPG"));
+        for (const auto &entry : fs::directory_iterator(e.out))
+            EXPECT_EQ(entry.path().filename().string().rfind("ddb-", 0), std::string::npos) << "left: " << entry.path();
+        EXPECT_EQ(filesUnder(raster::normalizedDir()), copiesBefore) << "the host copied a photo";
     }
 
     TEST(SplatTrainingExport, anImageNotLargerThanTheLimitKeepsItsSizeAndName)

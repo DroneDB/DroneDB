@@ -20,6 +20,7 @@
 #include <unistd.h>
 #endif
 
+#include "real_raster_helper.h"
 #include "artefact_cache.h"
 #include "build_layout.h"
 #include "cpl_string.h"
@@ -50,57 +51,16 @@ namespace
 
     // The real program, counting the requests for a normalized copy; the copies are made by the
     // operation itself, in gdal-util
-    class CountingHelper : public raster::IRasterHelper
+    class CountingHelper : public testutils::RealRasterHelper
     {
       public:
-        raster::ProbeResult probe(const fs::path &path, const raster::ProbeParams &params) override
-        {
-            return real_.probe(path, params);
-        }
-        PointCloudInfo pointCloudInfo(const fs::path &path) override { return real_.pointCloudInfo(path); }
-        void thumbnail(const fs::path &path, const fs::path &out, const raster::ThumbnailParams &params) override
-        {
-            real_.thumbnail(path, out, params);
-        }
         void normalize(const fs::path &path, const fs::path &out, const json &params) override
         {
             requests++;
-            real_.normalize(path, out, params);
-        }
-        void geoproject(const fs::path &path, const fs::path &out, const json &params) override
-        {
-            real_.geoproject(path, out, params);
-        }
-        void buildCog(const fs::path &path, const fs::path &out, const json &params,
-                      const raster::ProgressCallback &progress) override
-        {
-            real_.buildCog(path, out, params, progress);
-        }
-        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
-                       const raster::ProgressCallback &progress) override
-        {
-            real_.buildCopc(path, out, params, progress);
-        }
-        void buildVector(const fs::path &path, const fs::path &out, const json &params,
-                         const raster::ProgressCallback &progress) override
-        {
-            real_.buildVector(path, out, params, progress);
-        }
-        void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
-                         const raster::ProgressCallback &progress) override
-        {
-            real_.sampleCloud(path, out, params, progress);
-        }
-        json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
-                     const raster::ProgressCallback &progress) override
-        {
-            return real_.operate(op, path, out, params, progress);
+            RealRasterHelper::normalize(path, out, params);
         }
 
         std::atomic<int> requests{0};
-
-      private:
-        raster::GdalUtilHelper real_;
     };
 
     // The cache of the test, apart from the one of the user

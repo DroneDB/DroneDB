@@ -296,7 +296,12 @@ namespace ddb
 
         bool isHelperOperation(std::string_view name)
         {
-            return name == op::kMask;
+            return name == op::kMask || name == op::kImageSizes || name == op::kResizeImages;
+        }
+
+        bool outIsFolder(std::string_view name)
+        {
+            return name == op::kVector || name == op::kResizeImages;
         }
 
         const char *toString(ProbeKind kind)
@@ -802,30 +807,29 @@ namespace ddb
             return result;
         }
 
-        json toJson(const CopcParams &params)
+        namespace
         {
-            // A path each, as an object of its own: `path`, or `path64` for one that is no UTF-8
-            json inputs = json::array();
-            for (const fs::path &input : params.inputs)
+            // The `inputs` of params: a path each, as an object of its own (`path`, or `path64` for
+            // one that is no UTF-8); none when there are none
+            void setInputs(json &params, const std::vector<fs::path> &paths)
             {
-                json item = json::object();
-                setText(item, "path", io::toUtf8(input));
-                inputs.push_back(std::move(item));
+                json inputs = json::array();
+                for (const fs::path &input : paths)
+                {
+                    json item = json::object();
+                    setText(item, "path", io::toUtf8(input));
+                    inputs.push_back(std::move(item));
+                }
+                if (!inputs.empty())
+                    params["inputs"] = std::move(inputs);
             }
-            json result = json::object();
-            if (!inputs.empty())
-                result["inputs"] = std::move(inputs);
-            setBuildThreads(result, params.threads);
-            return result;
-        }
 
-        CopcParams copcParamsFromJson(const json &params)
-        {
-            if (!params.is_object())
-                throw ProtocolError("the copc params are not an object");
-            CopcParams result;
-            if (const json *inputs = member(params, "inputs"))
+            std::vector<fs::path> getInputs(const json &params)
             {
+                std::vector<fs::path> result;
+                const json *inputs = member(params, "inputs");
+                if (inputs == nullptr)
+                    return result;
                 if (!inputs->is_array())
                     throw ProtocolError("'inputs' is not an array");
                 for (const json &item : *inputs)
@@ -835,11 +839,169 @@ namespace ddb
                     fs::path input = getPath(item, "path");
                     if (input.empty())
                         throw ProtocolError("an item of 'inputs' has no path");
-                    result.inputs.push_back(std::move(input));
+                    result.push_back(std::move(input));
                 }
+                return result;
+            }
+
+            int positiveInt(const json &object, const char *name)
+            {
+                const json &value = required(object, name);
+                if (!value.is_number_integer() || value.get<int64_t>() < 1 ||
+                    value.get<int64_t>() > std::numeric_limits<int>::max())
+                    throw ProtocolError(std::string("'") + name + "' is not a positive integer");
+                return value.get<int>();
+            }
+
+            const json &arrayOf(const json &result, const char *name, size_t count)
+            {
+                if (!result.is_object())
+                    throw ProtocolError("the result is not an object");
+                const json &items = required(result, name);
+                if (!items.is_array() || items.size() != count)
+                    throw ProtocolError(std::string("'") + name + "' is not an array of " + std::to_string(count) + " items");
+                return items;
+            }
+        } // namespace
+
+        json toJson(const CopcParams &params)
+        {
+            json result = json::object();
+            setInputs(result, params.inputs);
+            setBuildThreads(result, params.threads);
+            return result;
+        }
+
+        CopcParams copcParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the copc params are not an object");
+            CopcParams result;
+            result.inputs = getInputs(params);
+            result.threads = buildThreadsFromJson(params);
+            return result;
+        }
+
+        json toJson(const ImageSizesParams &params)
+        {
+            json result = json::object();
+            setInputs(result, params.inputs);
+            return result;
+        }
+
+        ImageSizesParams imageSizesParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the imageSizes params are not an object");
+            ImageSizesParams result;
+            result.inputs = getInputs(params);
+            return result;
+        }
+
+        json toJson(const std::vector<PhotoSize> &sizes)
+        {
+            json items = json::array();
+            for (const PhotoSize &size : sizes)
+                items.push_back(size.error.empty() ? json{{"width", size.width}, {"height", size.height}}
+                                                   : json{{"error", size.error}});
+            return {{"sizes", std::move(items)}};
+        }
+
+        std::vector<PhotoSize> photoSizesFromJson(const json &result, size_t count)
+        {
+            std::vector<PhotoSize> sizes;
+            for (const json &item : arrayOf(result, "sizes", count))
+            {
+                if (!item.is_object())
+                    throw ProtocolError("a size is not an object");
+                PhotoSize size;
+                if (member(item, "error") != nullptr)
+                    size.error = requiredString(item, "error");
+                else
+                {
+                    size.width = positiveInt(item, "width");
+                    size.height = positiveInt(item, "height");
+                }
+                sizes.push_back(std::move(size));
+            }
+            return sizes;
+        }
+
+        json toJson(const ResizeImagesParams &params)
+        {
+            json images = json::array();
+            for (const auto &image : params.images)
+            {
+                json item = {{"name", image.name}, {"width", image.width}, {"height", image.height}};
+                setText(item, "source", io::toUtf8(image.source));
+                images.push_back(std::move(item));
+            }
+            json result = {{"images", std::move(images)}, {"quality", params.quality}};
+            setBuildThreads(result, params.threads);
+            return result;
+        }
+
+        ResizeImagesParams resizeImagesParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the resizeImages params are not an object");
+            ResizeImagesParams result;
+            const json &images = required(params, "images");
+            if (!images.is_array())
+                throw ProtocolError("'images' is not an array");
+            for (const json &item : images)
+            {
+                if (!item.is_object())
+                    throw ProtocolError("an image is not an object");
+                ResizeImagesParams::Image image;
+                image.source = getPath(item, "source");
+                if (image.source.empty())
+                    throw ProtocolError("an image has no source");
+                image.name = requiredString(item, "name");
+                // A file of the folder `out`, nothing else
+                const fs::path name = io::fromUtf8(image.name);
+                if (image.name.empty() || name != name.filename() || image.name == "." || image.name == "..")
+                    throw ProtocolError("'" + image.name + "' is not the name of a file");
+                image.width = positiveInt(item, "width");
+                image.height = positiveInt(item, "height");
+                result.images.push_back(std::move(image));
+            }
+            if (const json *quality = member(params, "quality"))
+            {
+                if (!quality->is_number_integer() || quality->get<int64_t>() < 1 || quality->get<int64_t>() > 100)
+                    throw ProtocolError("'quality' is not an integer from 1 to 100");
+                result.quality = quality->get<int>();
             }
             result.threads = buildThreadsFromJson(params);
             return result;
+        }
+
+        json resizeResultsToJson(const std::vector<std::string> &errors)
+        {
+            return {{"errors", errors}};
+        }
+
+        std::vector<std::string> resizeResultsFromJson(const json &result, size_t count)
+        {
+            std::vector<std::string> errors;
+            for (const json &item : arrayOf(result, "errors", count))
+            {
+                if (!item.is_string())
+                    throw ProtocolError("an error is not a string");
+                errors.push_back(item.get<std::string>());
+            }
+            return errors;
+        }
+
+        std::vector<fs::path> helperOperationInputs(const Request &request)
+        {
+            if (request.op == op::kImageSizes)
+                return imageSizesParamsFromJson(request.params).inputs;
+            std::vector<fs::path> inputs;
+            if (request.op == op::kResizeImages)
+                for (const auto &image : resizeImagesParamsFromJson(request.params).images)
+                    inputs.push_back(image.source);
+            return inputs;
         }
 
         json toJson(const VectorParams &params)
