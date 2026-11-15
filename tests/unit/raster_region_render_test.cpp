@@ -10,7 +10,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -19,6 +21,7 @@
 #include "raster_test_utils.h"
 
 #include "ddb.h"
+#include "ddbt/ddbt.h"
 #include "raster_region.h"
 #include "gdal_raii.h"
 #include "raster_stats.h"
@@ -241,5 +244,66 @@ namespace
                     }
                 }
             }
+    }
+
+    // Renders of one raster made by several threads at once are those made one at a time, with a block
+    // cache too small to keep its blocks: the warps then wait for blocks other threads decode, and a
+    // waiting thread must not start another tile in the middle of its own (the warp keeps per-thread
+    // scratch through a tile)
+    TEST_F(RasterRegionRender, concurrentRendersOfOneRasterAreThoseMadeOneAtATime)
+    {
+        TestArea ta(TEST_NAME, true);
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 2048;
+        spec.originX = kOriginX;
+        spec.originY = kOriginY;
+        spec.pixelSize = 1.0;
+        spec.value = [](int b, int x, int y) { return static_cast<double>((x * 7 + y * 13 + b * 61) % 256); };
+        const fs::path raster = testutils::createGeoRaster(ta.getPath("big.tif"), spec);
+
+        // 36 windows of 256 x 256 pixels at 1, 2 and 3 source pixels per output pixel
+        std::vector<std::array<double, 4>> boxes;
+        for (int i = 0; i < 6; i++)
+            for (int j = 0; j < 6; j++)
+            {
+                const double size = 256.0 * (1 + (i + j) % 3);
+                const double x0 = kOriginX + (2048 - size) * i / 5, y1 = kOriginY - (2048 - size) * j / 5;
+                boxes.push_back({x0, y1 - size, x0 + size, y1});
+            }
+        const auto renderBox = [&](const std::array<double, 4> &box) {
+            uint8_t *buffer = nullptr;
+            int size = 0;
+            renderRasterRegion(testutils::regionRequest(raster.string(), box.data(), "EPSG:3857", 256, 256, "rgba"), {},
+                               &buffer, &size);
+            return testutils::takeBuffer(buffer, size);
+        };
+        std::vector<std::vector<uint8_t>> want;
+        for (const auto &box : boxes)
+            want.push_back(renderBox(box));
+
+        ASSERT_EQ(ddbtConfigure("{\"blockCacheMb\": 1}"), DDBT_ERR_NONE);
+        std::atomic<int> differ{0}, failed{0};
+        std::vector<std::thread> threads;
+        for (int t = 0; t < 12; t++)
+            threads.emplace_back([&, t] {
+                for (int rep = 0; rep < 4; rep++)
+                    for (size_t i = static_cast<size_t>(t) % 3; i < boxes.size(); i += 3)
+                    {
+                        try
+                        {
+                            if (renderBox(boxes[i]) != want[i])
+                                differ++;
+                        }
+                        catch (const std::exception &)
+                        {
+                            failed++;
+                        }
+                    }
+            });
+        for (auto &thread : threads)
+            thread.join();
+        ASSERT_EQ(ddbtConfigure("{\"blockCacheMb\": 1024}"), DDBT_ERR_NONE);
+        EXPECT_EQ(differ.load(), 0);
+        EXPECT_EQ(failed.load(), 0);
     }
 }

@@ -45,7 +45,8 @@ namespace ddb
     /// How a raster shows without visualisation parameters: the map tiles and the WMS map draw
     /// its first three data bands as RGB (its first band as grey when it has fewer), and when they
     /// are not 8-bit, stretch them together over the range of their statistics (displayRange)
-    std::vector<int> defaultDisplayBands(GDALDatasetH ds);
+    std::vector<int> defaultDisplayBands(const RasterSource &source);
+    inline std::vector<int> defaultDisplayBands(GDALDatasetH ds) { return defaultDisplayBands(*rasterSourceOf(ds)); }
 
     /// The range that bands of the raster at path (ds, open) are stretched over to show them: the
     /// lowest minimum to the highest maximum of their statistics, one range for all so their

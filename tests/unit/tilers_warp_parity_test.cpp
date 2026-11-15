@@ -38,6 +38,7 @@ namespace
         std::optional<double> nodata;
         bool mask = false;
         bool overviews = false;
+        bool palette = false;  // a colour table on the band
     };
 
     double sampleOf(const Source &s, int band, int x, int y)
@@ -103,6 +104,19 @@ namespace
             EXPECT_EQ(GDALRasterIO(GDALGetMaskBand(GDALGetRasterBand(h, 1)), GF_Write, 0, 0, s.width, s.height,
                                    m.data(), s.width, s.height, GDT_Byte, 0, 0),
                       CE_None);
+        }
+        if (s.palette)
+        {
+            // 251 colours, the last one transparent where the nodata value is
+            GDALColorTableH table = GDALCreateColorTable(GPI_RGB);
+            for (int i = 0; i < 251; i++)
+            {
+                const GDALColorEntry e = {static_cast<short>(i), static_cast<short>((i * 7) % 256),
+                                          static_cast<short>((i * 13) % 256), 255};
+                GDALSetColorEntry(table, i, &e);
+            }
+            EXPECT_EQ(GDALSetRasterColorTable(GDALGetRasterBand(h, 1), table), CE_None);
+            GDALDestroyColorTable(table);
         }
         if (s.overviews)
         {
@@ -275,28 +289,44 @@ namespace
                                   << valueAt(expected.data());
         }
         ddbtFree(pixels);
+        // The colour table gdalwarp copies from the first band of the source
+        const GDALColorTableH table = GDALGetRasterColorTable(GDALGetRasterBand(w, 1));
+        ASSERT_EQ(info.contains("colorTable"), table != nullptr);
+        if (table != nullptr)
+        {
+            const auto &got = info.at("colorTable");
+            ASSERT_EQ(static_cast<int>(got.size()), GDALGetColorEntryCount(table));
+            for (int i = 0; i < GDALGetColorEntryCount(table); i++)
+            {
+                const GDALColorEntry *e = GDALGetColorEntry(table, i);
+                EXPECT_EQ(got[static_cast<size_t>(i)], json::array({e->c1, e->c2, e->c3, e->c4})) << "entry " << i;
+            }
+        }
     }
 
     TEST(TilersWarpParity, aRegionIsWarpedAsGdalWarpWarpsIt)
     {
         TestArea ta(TEST_NAME, true);
-        // name, type, colour interpretations, EPSG, size, pixel, nodata, internal mask, overviews
+        // name, type, colour interpretations, EPSG, size, pixel, nodata, internal mask, overviews, palette
         const std::vector<Source> sources = {
             {"rgb", GDT_Byte, {GCI_RedBand, GCI_GreenBand, GCI_BlueBand}, 32633, 400, 300, 0.5, std::nullopt, false,
-             false},
+             false, false},
             {"rgba", GDT_Byte, {GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand}, 32633, 400, 300, 0.5,
-             std::nullopt, false, false},
-            {"dem", GDT_Float32, {GCI_GrayIndex}, 32633, 400, 300, 0.5, -9999.0, false, false},
+             std::nullopt, false, false, false},
+            {"dem", GDT_Float32, {GCI_GrayIndex}, 32633, 400, 300, 0.5, -9999.0, false, false, false},
             {"masked", GDT_Byte, {GCI_RedBand, GCI_GreenBand, GCI_BlueBand}, 32633, 400, 300, 0.5, std::nullopt, true,
-             false},
+             false, false},
             {"big", GDT_Byte, {GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand}, 32633, 1600, 1200, 0.25,
-             std::nullopt, false, true},
+             std::nullopt, false, true, false},
             // Without masks, a downsampling of more than 2 sums the taps of each type in GDAL's order
-            {"float", GDT_Float32, {GCI_GrayIndex}, 32633, 400, 300, 0.5, std::nullopt, false, false},
-            {"double", GDT_Float64, {GCI_GrayIndex}, 32633, 400, 300, 0.5, std::nullopt, false, false},
-            {"int16", GDT_Int16, {GCI_GrayIndex}, 32633, 400, 300, 0.5, std::nullopt, false, false},
+            {"float", GDT_Float32, {GCI_GrayIndex}, 32633, 400, 300, 0.5, std::nullopt, false, false, false},
+            {"double", GDT_Float64, {GCI_GrayIndex}, 32633, 400, 300, 0.5, std::nullopt, false, false, false},
+            {"int16", GDT_Int16, {GCI_GrayIndex}, 32633, 400, 300, 0.5, std::nullopt, false, false, false},
             {"uint16", GDT_UInt16, {GCI_GrayIndex, GCI_GrayIndex, GCI_GrayIndex, GCI_GrayIndex}, 32633, 400, 300, 0.5,
-             std::nullopt, false, false},
+             std::nullopt, false, false, false},
+            // A palette band: its colour table goes to the first band of the output, the entry of the
+            // nodata value transparent
+            {"palette", GDT_Byte, {GCI_PaletteIndex}, 32633, 400, 300, 0.5, 250.0, false, false, true},
         };
         for (const Source &s : sources)
         {

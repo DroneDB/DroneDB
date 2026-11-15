@@ -120,9 +120,9 @@ namespace ddb
         return bandsCount;
     }
 
-    std::vector<int> defaultDisplayBands(GDALDatasetH ds)
+    std::vector<int> defaultDisplayBands(const RasterSource &source)
     {
-        return dataBandCount(ds) >= 3 ? std::vector<int>{1, 2, 3} : std::vector<int>{1};
+        return dataBandCount(source) >= 3 ? std::vector<int>{1, 2, 3} : std::vector<int>{1};
     }
 
     std::pair<double, double> displayRange(const std::string &path, GDALDatasetH ds, const std::vector<int> &bands)

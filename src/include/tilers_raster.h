@@ -5,6 +5,7 @@
 #define TILERS_RASTER_H
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -34,6 +35,7 @@ namespace ddb::tilers
             std::optional<double> scale, offset;
             std::string unit, description;
             std::vector<std::pair<std::string, std::string>> metadata;  // the items of its default domain
+            std::vector<std::array<uint8_t, 4>> colorTable;             // band 1: RGBA entries; empty: none
         };
 
         // The raster libddb reads for `path` (UTF-8), as raster::openInputRaster opens it: none for a
@@ -121,6 +123,48 @@ namespace ddb::tilers
         std::optional<std::array<double, 6>> geoTransform_;
         std::string wkt_;
     };
+
+    // A warp of a raster into memory on a grid, as gdalwarp -of MEM -t_srs -te [-te_srs] -ts -r [-b]
+    // [-dstalpha] [-dstnodata] makes it (ddbtWarpRaster)
+    struct WarpRequest
+    {
+        std::string targetCrs;            // -t_srs (any text PROJ reads)
+        std::array<double, 4> extent{};   // -te
+        std::string extentCrs;            // -te_srs ("": targetCrs)
+        int width = 0, height = 0;        // -ts
+        bool nearest = false;             // -r near, else bilinear
+        std::vector<int> bands;           // -b (1-based; none: every band but a last alpha band)
+        bool dstAlpha = false;            // -dstalpha
+        std::optional<double> dstNodata;  // -dstnodata
+    };
+
+    // The output of a warp: what GDAL reports of gdalwarp's MEM dataset, and its samples
+    struct WarpedImage
+    {
+        int width = 0, height = 0;
+        std::string dataType;                            // GDAL's name ("Byte", "Float32"...)
+        std::array<double, 6> geoTransform{};
+        std::vector<std::string> colorInterp;            // one per band
+        std::optional<double> nodata;                    // of every band but the alpha band
+        int alphaBand = 0;                               // 1-based, 0 when there is none
+        std::vector<std::array<uint8_t, 4>> colorTable;  // of band 1 (RGBA), empty when it has none
+        std::vector<uint8_t> pixels;                     // band after band, rows of width samples
+
+        int bandCount() const { return static_cast<int>(colorInterp.size()); }
+        size_t sampleSize() const;
+        // The samples of band `band1`
+        const uint8_t *band(int band1) const;
+        // The samples of band `band1` as floats (GDALCopyWords to Float32)
+        void readFloat(int band1, std::vector<float> &out) const;
+    };
+
+    // Warps `file` (a file of libddb: Raster::file()). @throws InvalidArgsException, GDALException
+    WarpedImage warp(const fs::path &file, const WarpRequest &request);
+
+    // Writes `image` to `output`, a tiled DEFLATE GeoTIFF in `crs` (a CRS with an EPSG code) that GDAL
+    // reads as it reads gdalwarp's GeoTIFF of the same warp: the samples, the colour interpretations,
+    // the nodata value and the colour table of band 1. @throws InvalidArgsException, GDALException
+    void writeGeoTiff(const WarpedImage &image, const std::string &crs, const fs::path &output);
 }
 
 #endif // TILERS_RASTER_H

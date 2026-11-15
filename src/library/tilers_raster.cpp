@@ -4,6 +4,9 @@
 #include "tilers_raster.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <type_traits>
 
@@ -28,6 +31,40 @@ namespace ddb::tilers
             if (it == object.end() || !it->is_number())
                 return std::nullopt;
             return it->get<double>();
+        }
+
+        // A nodata value ddb-tilers reports: a number, or null for NaN (JSON has no NaN; the member is
+        // there only when there is a nodata value)
+        std::optional<double> optionalNodata(const json &object)
+        {
+            const auto it = object.find("nodata");
+            if (it == object.end())
+                return std::nullopt;
+            return it->is_null() ? std::numeric_limits<double>::quiet_NaN() : it->get<double>();
+        }
+
+        // The size of a sample of a GDAL data type
+        size_t sampleSizeOf(const std::string &type)
+        {
+            if (type == "Byte" || type == "Int8")
+                return 1;
+            if (type == "UInt16" || type == "Int16")
+                return 2;
+            if (type == "UInt32" || type == "Int32" || type == "Float32")
+                return 4;
+            if (type == "UInt64" || type == "Int64" || type == "Float64")
+                return 8;
+            throw GDALException("Unsupported data type: " + type);
+        }
+
+        template <typename T> void toFloat(const uint8_t *in, size_t count, float *out)
+        {
+            for (size_t i = 0; i < count; i++)
+            {
+                T v;
+                std::memcpy(&v, in + i * sizeof(T), sizeof(T));
+                out[i] = static_cast<float>(v);
+            }
         }
     }
 
@@ -62,11 +99,13 @@ namespace ddb::tilers
         {
             Band band;
             band.colorInterp = b.at("colorInterp").get<std::string>();
-            band.nodata = optionalNumber(b, "nodata");
+            band.nodata = optionalNodata(b);
             band.scale = optionalNumber(b, "scale");
             band.offset = optionalNumber(b, "offset");
             band.unit = b.value("unit", std::string());
             band.description = b.value("description", std::string());
+            if (b.contains("colorTable"))
+                band.colorTable = b.at("colorTable").get<std::vector<std::array<uint8_t, 4>>>();
             for (const auto &item : b.value("metadata", json::array()))
             {
                 const std::string entry = item.get<std::string>();
@@ -226,5 +265,103 @@ namespace ddb::tilers
     {
         check(ddbtRasterRead(handle_, x, y, width, height, bufWidth, bufHeight, bands.data(),
                              static_cast<int>(bands.size()), DDBT_SAMPLE_FLOAT64, out, mask));
+    }
+
+    size_t WarpedImage::sampleSize() const { return sampleSizeOf(dataType); }
+
+    const uint8_t *WarpedImage::band(int band1) const
+    {
+        return pixels.data() + static_cast<size_t>(band1 - 1) * static_cast<size_t>(width) * height * sampleSize();
+    }
+
+    void WarpedImage::readFloat(int band1, std::vector<float> &out) const
+    {
+        const size_t count = static_cast<size_t>(width) * height;
+        out.resize(count);
+        const uint8_t *in = band(band1);
+        if (dataType == "Byte") toFloat<uint8_t>(in, count, out.data());
+        else if (dataType == "Int8") toFloat<int8_t>(in, count, out.data());
+        else if (dataType == "UInt16") toFloat<uint16_t>(in, count, out.data());
+        else if (dataType == "Int16") toFloat<int16_t>(in, count, out.data());
+        else if (dataType == "UInt32") toFloat<uint32_t>(in, count, out.data());
+        else if (dataType == "Int32") toFloat<int32_t>(in, count, out.data());
+        else if (dataType == "UInt64") toFloat<uint64_t>(in, count, out.data());
+        else if (dataType == "Int64") toFloat<int64_t>(in, count, out.data());
+        else if (dataType == "Float32") toFloat<float>(in, count, out.data());
+        else if (dataType == "Float64") toFloat<double>(in, count, out.data());
+        else throw GDALException("Unsupported data type: " + dataType);
+    }
+
+    WarpedImage warp(const fs::path &file, const WarpRequest &request)
+    {
+        json options = {{"targetCrs", request.targetCrs}, {"extent", request.extent},
+                        {"width", request.width},         {"height", request.height},
+                        {"resampling", request.nearest ? "nearest" : "bilinear"}};
+        if (!request.extentCrs.empty())
+            options["extentCrs"] = request.extentCrs;
+        if (!request.bands.empty())
+            options["bands"] = request.bands;
+        if (request.dstAlpha)
+            options["dstAlpha"] = true;
+        if (request.dstNodata)
+            options["dstNodata"] = *request.dstNodata;
+        char *infoText = nullptr;
+        uint8_t *samples = nullptr;
+        size_t size = 0;
+        check(ddbtWarpRaster(io::toUtf8(file).c_str(), options.dump().c_str(), &infoText, &samples, &size));
+        const String ownedInfo(infoText);
+        const Bytes ownedSamples(samples);
+        const json info = json::parse(infoText);
+        WarpedImage image;
+        image.width = info.at("width").get<int>();
+        image.height = info.at("height").get<int>();
+        image.dataType = info.at("type").get<std::string>();
+        image.geoTransform = info.at("geoTransform").get<std::array<double, 6>>();
+        image.colorInterp = info.at("colorInterp").get<std::vector<std::string>>();
+        image.nodata = optionalNodata(info);
+        image.alphaBand = info.value("alphaBand", 0);
+        if (info.contains("colorTable"))
+            image.colorTable = info.at("colorTable").get<std::vector<std::array<uint8_t, 4>>>();
+        image.pixels.assign(samples, samples + size);
+        return image;
+    }
+
+    void writeGeoTiff(const WarpedImage &image, const std::string &crs, const fs::path &output)
+    {
+        const bool floating = image.dataType == "Float32" || image.dataType == "Float64";
+        json options = {{"width", image.width},
+                        {"height", image.height},
+                        {"type", image.dataType},
+                        {"colorInterp", image.colorInterp},
+                        {"geoTransform", image.geoTransform},
+                        {"crs", crs},
+                        {"codec", "deflate"},
+                        {"predictor", floating ? 3 : 2}};
+        if (image.nodata)
+            options["nodata"] = std::isnan(*image.nodata) ? json("nan") : json(*image.nodata);
+        if (!image.colorTable.empty())
+            options["colorTable"] = image.colorTable;
+        // The host fills each window from the planes of the image, pixel-interleaved
+        struct Fill
+        {
+            const WarpedImage &image;
+            static int fill(void *self, int x, int y, int width, int height, uint8_t *out, size_t stride)
+            {
+                const WarpedImage &im = static_cast<Fill *>(self)->image;
+                const size_t ss = im.sampleSize(), bands = static_cast<size_t>(im.bandCount());
+                for (int r = 0; r < height; r++)
+                    for (size_t b = 0; b < bands; b++)
+                    {
+                        const uint8_t *in = im.band(static_cast<int>(b) + 1) +
+                                            (static_cast<size_t>(y + r) * im.width + static_cast<size_t>(x)) * ss;
+                        uint8_t *px = out + static_cast<size_t>(r) * stride + b * ss;
+                        for (int c = 0; c < width; c++)
+                            std::memcpy(px + static_cast<size_t>(c) * bands * ss, in + static_cast<size_t>(c) * ss, ss);
+                    }
+                return 0;
+            }
+        } fill{image};
+        check(ddbtWriteRaster(io::toUtf8(output).c_str(), options.dump().c_str(), &Fill::fill, &fill, nullptr,
+                              nullptr));
     }
 }

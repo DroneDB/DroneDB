@@ -7,8 +7,10 @@
 // the same size, type, blocks, overviews, mask, georeferencing and band metadata, and the same
 // samples for every window and buffer size (nearest resampling, GDAL's choice of overview).
 
+#include <array>
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -651,6 +653,198 @@ namespace
                     for (size_t i = 0; i < a.size(); i++)
                         differ += a[i] != z[i];
                     EXPECT_EQ(differ, 0u) << "the mask of level " << level + 1;
+                }
+            }
+        }
+    }
+
+    // A raster of another type than Byte written without overviews (the GeoTIFF of a render, which gdalwarp
+    // writes): the samples, nodata value, colour interpretations, geotransform and CRS GDAL reads back are
+    // those of a GTiff GDAL writes band by band, for integer and floating-point types and a CRS by its code
+    struct TypedCase
+    {
+        std::string name;
+        GDALDataType type;
+        std::vector<std::string> interps;
+        std::optional<double> nodata;
+        std::string crs;
+        std::string codec = "none";
+        int predictor = 1;
+        bool palette = false;  // a colour table on band 1
+    };
+
+    // The colour table of the palette cases (the ColorMap of a TIFF holds no alpha)
+    GDALColorEntry typedColor(int i)
+    {
+        return {static_cast<short>(i), static_cast<short>((i * 7) % 256), static_cast<short>((i * 13) % 256), 255};
+    }
+
+    double typedSample(const TypedCase &c, int band, int x, int y)
+    {
+        if (c.nodata && (x * 5 + y * 3) % 17 == 0)
+            return *c.nodata;
+        const double v = std::fmod(x * 1.7 + y * 2.3 + band * 31.0, 251.0);
+        if (c.interps[static_cast<size_t>(band)] == "Alpha")
+            return (x / 9 + y / 7) % 4 == 0 ? 0 : 255;
+        switch (c.type)
+        {
+        case GDT_Byte:
+            return std::floor(v);
+        case GDT_Float32:
+        case GDT_Float64:
+            return v * 3.25 - 40.0 + std::sin(x * 0.37 + y * 0.11) * 0.0137;
+        case GDT_Int16:
+            return std::floor(v * 3) - 300;
+        default:
+            return std::floor(v * 200);
+        }
+    }
+
+    int fillTyped(void *userData, int x, int y, int w, int h, uint8_t *out, size_t stride)
+    {
+        const auto &c = *static_cast<const TypedCase *>(userData);
+        const int bands = static_cast<int>(c.interps.size());
+        const int size = GDALGetDataTypeSizeBytes(c.type);
+        for (int r = 0; r < h; r++)
+            for (int col = 0; col < w; col++)
+                for (int b = 0; b < bands; b++)
+                {
+                    const double v = typedSample(c, b, x + col, y + r);
+                    uint8_t *at = out + static_cast<size_t>(r) * stride + (static_cast<size_t>(col) * bands + b) * size;
+                    GDALCopyWords(&v, GDT_Float64, 0, at, c.type, 0, 1);
+                }
+        return 0;
+    }
+
+    TEST(TilersRasterParity, aRasterOfAnyTypeIsWrittenAsGdalWritesIt)
+    {
+        TestArea ta(TEST_NAME, true);
+        const int width = 517, height = 389;
+        const std::array<double, 6> gt = {500000.0, 0.5, 0, 5000000.0, 0, -0.5};
+        const std::vector<TypedCase> cases = {
+            {"float32", GDT_Float32, {"Gray"}, -9999.0, "EPSG:32633", "none", 1, false},
+            {"float32-deflate-fp", GDT_Float32, {"Gray"}, -9999.0, "EPSG:32633", "deflate", 3, false},
+            {"float64-nan", GDT_Float64, {"Gray"}, std::nan(""), "EPSG:32633", "deflate", 3, false},
+            {"int16", GDT_Int16, {"Gray"}, -32768.0, "EPSG:3857", "none", 1, false},
+            {"uint16", GDT_UInt16, {"Undefined", "Undefined", "Undefined", "Undefined"}, std::nullopt, "EPSG:4326",
+             "lzw", 2, false},
+            // A palette band, alone and with an alpha band (a palette raster rendered with -dstalpha)
+            {"palette", GDT_Byte, {"Palette"}, 250.0, "EPSG:32633", "none", 1, true},
+            {"palette-alpha", GDT_Byte, {"Palette", "Alpha"}, std::nullopt, "EPSG:32633", "deflate", 2, true},
+        };
+        for (const TypedCase &c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            const int bands = static_cast<int>(c.interps.size());
+            const std::array<double, 6> g = c.crs == "EPSG:4326" ? std::array<double, 6>{11.5, 1e-5, 0, 45.2, 0, -1e-5}
+                                                                  : gt;
+            const fs::path gdalFile = ta.getPath(c.name + "-gdal.tif");
+            {
+                auto ds = adoptDataset(GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(gdalFile).c_str(), width,
+                                                  height, bands, c.type, nullptr));
+                ASSERT_TRUE(ds);
+                GDALDatasetH h = datasetHandle(ds);
+                GDALSetGeoTransform(h, const_cast<double *>(g.data()));
+                const SrsPtr srs = srsFromUserInput(c.crs.c_str());
+                GDALSetSpatialRef(h, srs.get());
+                std::vector<double> plane(static_cast<size_t>(width) * height);
+                for (int b = 0; b < bands; b++)
+                {
+                    GDALRasterBandH band = GDALGetRasterBand(h, b + 1);
+                    GDALSetRasterColorInterpretation(band,
+                                                     GDALGetColorInterpretationByName(c.interps[static_cast<size_t>(b)].c_str()));
+                    if (c.nodata)
+                        GDALSetRasterNoDataValue(band, *c.nodata);
+                    for (int y = 0; y < height; y++)
+                        for (int x = 0; x < width; x++)
+                            plane[static_cast<size_t>(y) * width + x] = typedSample(c, b, x, y);
+                    ASSERT_EQ(GDALRasterIO(band, GF_Write, 0, 0, width, height, plane.data(), width, height,
+                                           GDT_Float64, 0, 0),
+                              CE_None);
+                }
+                if (c.palette)
+                {
+                    GDALColorTableH table = GDALCreateColorTable(GPI_RGB);
+                    for (int i = 0; i < 256; i++)
+                    {
+                        const GDALColorEntry e = typedColor(i);
+                        GDALSetColorEntry(table, i, &e);
+                    }
+                    ASSERT_EQ(GDALSetRasterColorTable(GDALGetRasterBand(h, 1), table), CE_None);
+                    GDALDestroyColorTable(table);
+                }
+            }
+            const fs::path tilersFile = ta.getPath(c.name + "-tilers.tif");
+            json options = {{"width", width}, {"height", height}, {"type", GDALGetDataTypeName(c.type)},
+                            {"colorInterp", c.interps}, {"geoTransform", g}, {"crs", c.crs}, {"codec", c.codec},
+                            {"predictor", c.predictor}};
+            if (c.palette)
+            {
+                json table = json::array();
+                for (int i = 0; i < 256; i++)
+                {
+                    const GDALColorEntry e = typedColor(i);
+                    table.push_back({e.c1, e.c2, e.c3, e.c4});
+                }
+                options["colorTable"] = table;
+            }
+            if (c.nodata)
+            {
+                if (std::isnan(*c.nodata))
+                    options["nodata"] = "nan";
+                else
+                    options["nodata"] = *c.nodata;
+            }
+            ASSERT_EQ(ddbtWriteRaster(io::toUtf8(tilersFile).c_str(), options.dump().c_str(), fillTyped,
+                                      const_cast<TypedCase *>(&c), nullptr, nullptr),
+                      DDBT_ERR_NONE)
+                << ddbtLastError();
+
+            const auto want = adoptDataset(GDALOpen(io::toUtf8(gdalFile).c_str(), GA_ReadOnly));
+            const auto got = adoptDataset(GDALOpen(io::toUtf8(tilersFile).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(want && got);
+            EXPECT_EQ(std::string(GDALGetProjectionRef(datasetHandle(got))),
+                      std::string(GDALGetProjectionRef(datasetHandle(want))));
+            double wg[6], gg[6];
+            GDALGetGeoTransform(datasetHandle(want), wg);
+            GDALGetGeoTransform(datasetHandle(got), gg);
+            for (int i = 0; i < 6; i++)
+                EXPECT_EQ(gg[i], wg[i]);
+            const int size = GDALGetDataTypeSizeBytes(c.type);
+            for (int b = 1; b <= bands; b++)
+            {
+                SCOPED_TRACE("band " + std::to_string(b));
+                GDALRasterBandH wb = GDALGetRasterBand(datasetHandle(want), b);
+                GDALRasterBandH gb = GDALGetRasterBand(datasetHandle(got), b);
+                EXPECT_EQ(GDALGetRasterDataType(gb), c.type);
+                // Every band as it was named (GDALCreate and SetColorInterpretation, the reference, make an
+                // Undefined first band Gray)
+                EXPECT_EQ(std::string(GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(gb))),
+                          c.interps[static_cast<size_t>(b - 1)]);
+                int hasWant = 0, hasGot = 0;
+                const double ndWant = GDALGetRasterNoDataValue(wb, &hasWant), ndGot = GDALGetRasterNoDataValue(gb, &hasGot);
+                EXPECT_EQ(hasGot, hasWant);
+                if (hasWant)
+                {
+                    EXPECT_TRUE(ndGot == ndWant || (std::isnan(ndGot) && std::isnan(ndWant)));
+                }
+                EXPECT_EQ(GDALGetMaskFlags(gb), GDALGetMaskFlags(wb));
+                std::vector<uint8_t> a(static_cast<size_t>(width) * height * size), z(a.size());
+                ASSERT_EQ(GDALRasterIO(wb, GF_Read, 0, 0, width, height, a.data(), width, height, c.type, 0, 0), CE_None);
+                ASSERT_EQ(GDALRasterIO(gb, GF_Read, 0, 0, width, height, z.data(), width, height, c.type, 0, 0), CE_None);
+                EXPECT_EQ(std::memcmp(a.data(), z.data(), a.size()), 0);
+            }
+            // The colour table GDAL reads back (the alpha of the nodata entry as GDAL gives it)
+            const GDALColorTableH wt = GDALGetRasterColorTable(GDALGetRasterBand(datasetHandle(want), 1));
+            const GDALColorTableH gt2 = GDALGetRasterColorTable(GDALGetRasterBand(datasetHandle(got), 1));
+            ASSERT_EQ(gt2 != nullptr, wt != nullptr);
+            if (wt != nullptr)
+            {
+                ASSERT_EQ(GDALGetColorEntryCount(gt2), GDALGetColorEntryCount(wt));
+                for (int i = 0; i < GDALGetColorEntryCount(wt); i++)
+                {
+                    const GDALColorEntry *x = GDALGetColorEntry(wt, i), *y = GDALGetColorEntry(gt2, i);
+                    EXPECT_TRUE(x->c1 == y->c1 && x->c2 == y->c2 && x->c3 == y->c3 && x->c4 == y->c4) << "entry " << i;
                 }
             }
         }
