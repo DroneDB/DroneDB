@@ -146,8 +146,8 @@ namespace ddb
         }
 
         // The warp is announced when it starts: the helper forwards a fraction only once it passes a whole
-        // percent, and a small raster warped in one GDAL chunk goes from 0 straight to its overviews, so the
-        // phase would never be reported. 0 is the lowest known fraction: the reports stay monotonic.
+        // percent, and the builder reports a row of blocks at a time, so a small raster goes from 0 straight
+        // to its overviews and the phase would never be reported. 0 is the lowest known fraction: the reports stay monotonic.
         if (hasWarp)
             options.reportProgress(0.0, cogPhaseOfFraction(0.0, true));
 
