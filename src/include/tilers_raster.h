@@ -45,6 +45,10 @@ namespace ddb::tilers
         static std::unique_ptr<Raster> openInput(const std::string &path);
         // A file of libddb itself (a build output, an artefact). @throws GDALException, FSException
         static std::unique_ptr<Raster> open(const fs::path &file);
+        // The same, the file opened for this raster alone and closed with it (open keeps it for the
+        // next reader): for a file renamed or removed right after it is read, which Windows refuses
+        // while a process holds it open. @throws GDALException, FSException
+        static std::unique_ptr<Raster> openPrivate(const fs::path &file);
 
         ~Raster();
         Raster(const Raster &) = delete;
@@ -110,6 +114,7 @@ namespace ddb::tilers
         };
 
         Raster(ddbtRaster *handle, fs::path file);
+        static std::unique_ptr<Raster> openWithFlags(const fs::path &file, unsigned int flags);
         // Calls read(bands, sampleType, out, datasetMask) for `bands` (then for the alpha band, in its own type,
         // when it is their mask), and fills `mask` as readMasked() does; `count` is the samples of a band
         template <typename T, typename Read>

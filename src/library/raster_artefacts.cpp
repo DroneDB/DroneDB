@@ -21,6 +21,7 @@
 #include "logger.h"
 #include "process_config.h"
 #include "raster_stats.h"
+#include "tilers_raster.h"
 #include "randomutil.h"
 #include "timeutil.h"
 #include "userprofile.h"
@@ -215,15 +216,23 @@ namespace ddb
             return openArtefact(path, kVectorDrivers, GDAL_OF_VECTOR, false);
         }
 
-        GDALDatasetUniquePtr reopenWrittenRaster(const fs::path &path, ArtefactAccess access)
+        bool writtenRasterOpens(const fs::path &path)
         {
             std::error_code ec;
             if (!fs::is_regular_file(fs::symlink_status(path, ec)) || ec)
             {
-                LOGW << "Not reopening " << io::toUtf8(path) << ": it is not a regular file";
-                return nullptr;
+                LOGW << "Not reading " << io::toUtf8(path) << ": it is not a regular file";
+                return false;
             }
-            return openWithDrivers(io::toUtf8(path), kRasterDrivers, GDAL_OF_RASTER, access == ArtefactAccess::Update);
+            try
+            {
+                return tilers::Raster::openPrivate(path) != nullptr;
+            }
+            catch (const AppException &e)
+            {
+                LOGW << "Cannot read " << io::toUtf8(path) << ": " << e.what();
+                return false;
+            }
         }
 
         io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix,

@@ -163,11 +163,9 @@ namespace ddb
         raster::rasterHelper().buildCog(io::fromUtf8(input), produced, raster::toJson(params),
                                         logProgress);
 
-        // The helper read a file of a user, and what it wrote is published (as the COG of a
-        // build, a tile artefact, the output of an alignment) and then trusted by its place: it
-        // has to open here as a raster first, with the drivers of the artefacts alone. The check
-        // closes it before the caller renames it: Windows renames no file a process holds open.
-        if (!raster::reopenWrittenRaster(produced))
+        // What the helper wrote is published (as the COG of a build, a tile artefact, the output
+        // of an alignment) and then trusted by its place: it has to read as a raster first
+        if (!raster::writtenRasterOpens(produced))
             throw GDALException(std::string(raster::kGdalUtilName) + " wrote a COG of " + input +
                                 " that cannot be opened");
     }

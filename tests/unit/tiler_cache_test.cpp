@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "open_descriptors.h"
 #include "ddb.h"
 #include "raster_tiler.h"
 #include "mio.h"
@@ -261,19 +262,7 @@ namespace
     }
 
 #ifdef __linux__
-    // Open descriptors of this process on `path` (the links of /proc/self/fd)
-    int openDescriptorsOf(const fs::path &path)
-    {
-        const auto target = fs::weakly_canonical(path);
-        int n = 0;
-        for (const auto &e : fs::directory_iterator("/proc/self/fd"))
-        {
-            std::error_code ec;
-            if (fs::read_symlink(e.path(), ec) == target && !ec)
-                ++n;
-        }
-        return n;
-    }
+    using testutil::openDescriptorsOf;
 
     // ddb-tilers keeps the COG open between tiles; DDBReleaseConnections closes it
     TEST(TilerCache, releaseConnectionsClosesTheCogOfTheTiles)

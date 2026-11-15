@@ -90,12 +90,13 @@ namespace ddb
         // and no libddb code reads them with GDAL.
         GDALDatasetUniquePtr openArtefactVector(const fs::path &path);
 
-        // Opens again the raster that this call has just written (the export of a raster, the COG
-        // of a build in the helper), where it was told to write it: that is a file of the user's
-        // choosing, so it is no artefact by place. Only a regular file, with the drivers of the
-        // artefacts and the same guards on the open. Null (as GDALOpen returns it) when the path is
-        // not a regular file or GDAL cannot open it.
-        GDALDatasetUniquePtr reopenWrittenRaster(const fs::path &path, ArtefactAccess access = ArtefactAccess::ReadOnly);
+        // Whether the raster the helper has just written for this call (the COG of a build, a
+        // normalized copy, a geoprojected photo) is a regular file that libddb reads: a TIFF that
+        // ddb-tilers opens and describes. The helper read a file of a user, and what it wrote is
+        // then published and trusted by its place. The file is opened for the check alone and
+        // closed before it returns: the caller renames it next, which Windows refuses while a
+        // process holds it open.
+        bool writtenRasterOpens(const fs::path &path);
 
         // Who writes in a private folder (makePrivateFolder)
         enum class PrivateFolderWriter
@@ -118,7 +119,7 @@ namespace ddb
                                             PrivateFolderWriter writer = PrivateFolderWriter::Helper);
 
         // A private folder in artefactsDir(): what the helper writes there is an artefact, and
-        // the host checks it with openArtefactRaster before it moves it to its name
+        // the host checks it with writtenRasterOpens before it moves it to its name
         io::ScopedTempDir makeArtefactRequestFolder(const std::string &prefix);
 
         // Moves a file the helper wrote (in a folder made by makePrivateFolder) to `target`, replacing

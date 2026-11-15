@@ -130,11 +130,18 @@ namespace ddb::tilers
         return metadata;
     }
 
-    std::unique_ptr<Raster> Raster::open(const fs::path &file)
+    std::unique_ptr<Raster> Raster::openWithFlags(const fs::path &file, unsigned int flags)
     {
         ddbtRaster *handle = nullptr;
-        check(ddbtRasterOpen(io::toUtf8(file).c_str(), &handle));
+        check(ddbtRasterOpenEx(io::toUtf8(file).c_str(), flags, &handle));
         return std::unique_ptr<Raster>(new Raster(handle, file));
+    }
+
+    std::unique_ptr<Raster> Raster::open(const fs::path &file) { return openWithFlags(file, 0); }
+
+    std::unique_ptr<Raster> Raster::openPrivate(const fs::path &file)
+    {
+        return openWithFlags(file, DDBT_RASTER_OPEN_PRIVATE);
     }
 
     std::unique_ptr<Raster> Raster::openInput(const std::string &path)

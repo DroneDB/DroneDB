@@ -31,10 +31,9 @@ namespace ddb
                 const fs::path produced = request.path() / kProducedName;
                 rasterHelper().normalize(path, produced, json::object());
 
-                // What the helper wrote counts only when it opens as a GeoTIFF: it is a file that
-                // came out of a process that read a file of a user. The check closes it before the
-                // rename: Windows renames no file that a process holds open.
-                if (!openArtefactRaster(produced))
+                // What the helper wrote counts only when it reads as a GeoTIFF: it is a file that
+                // came out of a process that read a file of a user
+                if (!writtenRasterOpens(produced))
                     throw GDALException(std::string(kGdalUtilName) + " wrote a normalized copy of " +
                                         io::toUtf8(path) + " that is not a GeoTIFF");
 

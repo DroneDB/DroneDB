@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "open_descriptors.h"
 #include "build_layout.h"
 #include "cog.h"
 #include "ddb.h"
@@ -269,7 +270,6 @@ namespace
                           CE_None);
             }
             EXPECT_FALSE(raster::openArtefactRaster(artefact));
-            EXPECT_FALSE(raster::reopenWrittenRaster(artefact));
         }
         EXPECT_TRUE(raster::openArtefactRaster(makeGeoTiff(raster::artefactsDir() / "plain.tif")));
     }
@@ -362,21 +362,38 @@ namespace
             EXPECT_TRUE(hasNoData);
         }
 
-        // Not an artefact by place, and not refused for it: it is what the caller wrote just now
+        // Not an artefact by place, and not refused for it: it is what the helper wrote just now
         const fs::path written = makeGeoTiff(area_->getPath("export.tif"));
         EXPECT_THROW(raster::openArtefactRaster(written, raster::ArtefactAccess::Update), GDALException);
-        EXPECT_TRUE(raster::reopenWrittenRaster(written, raster::ArtefactAccess::Update));
-        EXPECT_TRUE(raster::reopenWrittenRaster(written));
+        EXPECT_TRUE(raster::writtenRasterOpens(written));
 
-        // Only a regular file, and with the drivers of the artefacts
-        EXPECT_FALSE(raster::reopenWrittenRaster(area_->getPath("missing.tif")));
-        EXPECT_FALSE(raster::reopenWrittenRaster(area_->getPath("outside")));
+        // Only a regular file that is a TIFF
+        EXPECT_FALSE(raster::writtenRasterOpens(area_->getPath("missing.tif")));
+        EXPECT_FALSE(raster::writtenRasterOpens(area_->getPath("outside")));
         writeFile(area_->getPath("list.vrt"), "<VRTDataset rasterXSize=\"1\" rasterYSize=\"1\"/>");
-        EXPECT_FALSE(raster::reopenWrittenRaster(area_->getPath("list.vrt")));
+        EXPECT_FALSE(raster::writtenRasterOpens(area_->getPath("list.vrt")));
+        writeFile(area_->getPath("truncated.tif"), std::string("II*\0\x08\0\0\0", 8));
+        EXPECT_FALSE(raster::writtenRasterOpens(area_->getPath("truncated.tif")));
 #ifndef _WIN32
         fs::create_symlink(written, area_->getPath("link.tif"));
-        EXPECT_FALSE(raster::reopenWrittenRaster(area_->getPath("link.tif")));
+        EXPECT_FALSE(raster::writtenRasterOpens(area_->getPath("link.tif")));
 #endif
+    }
+
+    // The check of what the helper wrote leaves the file closed: the caller renames it next, which
+    // Windows refuses while a process holds it open
+    TEST_F(RasterArtefacts, theCheckOfAWrittenRasterLeavesItClosed)
+    {
+        const fs::path written = makeGeoTiff(area_->getPath("produced.tif"));
+        ASSERT_TRUE(raster::writtenRasterOpens(written));
+        if (testutil::openDescriptorsOf(written) >= 0)
+        {
+            EXPECT_EQ(testutil::openDescriptorsOf(written), 0);
+        }
+        std::error_code ec;
+        fs::rename(written, area_->getPath("published.tif"), ec);
+        EXPECT_FALSE(ec) << ec.message();
+        EXPECT_TRUE(raster::writtenRasterOpens(area_->getPath("published.tif")));
     }
 
     // ------------------------------------------------------------------ names and folders
@@ -904,7 +921,7 @@ namespace
 #endif
         EXPECT_FALSE(fs::exists(staging)) << "the private folder is removed";
 
-        EXPECT_TRUE(raster::reopenWrittenRaster(out));
+        EXPECT_TRUE(raster::writtenRasterOpens(out));
         EXPECT_EQ(readFile(statsSidecarOf(out)), R"({"bands":{}})");
         std::vector<fs::path> entries;
         for (const auto &entry : fs::directory_iterator(folder))
@@ -926,7 +943,7 @@ namespace
 
         buildCog(io::toUtf8(input), io::toUtf8(out));
 
-        EXPECT_TRUE(raster::reopenWrittenRaster(out));
+        EXPECT_TRUE(raster::writtenRasterOpens(out));
         EXPECT_FALSE(fs::exists(statsSidecarOf(out)));
     }
 
