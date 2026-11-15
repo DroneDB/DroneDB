@@ -1,0 +1,283 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+// The rasters libddb reads in its process (the COG of a build, the normalized copy of any other
+// raster) are read by ddb-tilers (ddbtRasterOpen, ddbtRasterInfo, ddbtRasterRead) as GDAL reads them:
+// the same size, type, blocks, overviews, mask, georeferencing and band metadata, and the same
+// samples for every window and buffer size (nearest resampling, GDAL's choice of overview).
+
+#include <cmath>
+#include <cstring>
+#include <string>
+#include <vector>
+
+#include "gtest/gtest.h"
+#include "ddbt/ddbt.h"
+#include "gdal_inc.h"
+#include "gdal_raii.h"
+#include "json.h"
+#include "mio.h"
+#include "test.h"
+#include "testarea.h"
+
+namespace
+{
+    using namespace ddb;
+
+    struct Case
+    {
+        std::string name;
+        GDALDataType type = GDT_Byte;
+        int bands = 1;
+        bool tiled = true;
+        bool bandInterleaved = false;
+        bool nodata = false;
+        bool scaled = false;
+        bool internalMask = false;
+        bool alpha = false;  // the last band is alpha
+        bool overviews = false;
+        int epsg = 3857;     // 0: not georeferenced
+    };
+
+    double sampleOf(const Case &c, int band, int x, int y)
+    {
+        if (c.alpha && band == c.bands)
+            return (x / 7 + y / 5) % 3 == 0 ? 0 : 255;
+        const double v = (x * 37 + y * 101 + band * 13) % 251;
+        switch (c.type)
+        {
+        case GDT_Int16:
+        case GDT_Int32:
+            return v - 120;
+        case GDT_Float32:
+        case GDT_Float64:
+            return v / 7.0 - 11.25;
+        default:
+            return v;
+        }
+    }
+
+    fs::path writeRaster(const fs::path &path, const Case &c, int width, int height)
+    {
+        CPLStringList options;
+        options.SetNameValue("COMPRESS", "DEFLATE");
+        if (c.tiled)
+        {
+            options.SetNameValue("TILED", "YES");
+            options.SetNameValue("BLOCKXSIZE", "64");
+            options.SetNameValue("BLOCKYSIZE", "64");
+        }
+        else
+            options.SetNameValue("BLOCKYSIZE", "7");
+        options.SetNameValue("INTERLEAVE", c.bandInterleaved ? "BAND" : "PIXEL");
+        if (c.alpha)
+            options.SetNameValue("ALPHA", "YES");
+        auto ds = adoptDataset(GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(path).c_str(), width, height,
+                                          c.bands, c.type, options.List()));
+        EXPECT_TRUE(ds);
+        GDALDatasetH h = datasetHandle(ds);
+        if (c.epsg != 0)
+        {
+            const double gt[6] = {500000.0, 0.5, 0, 4500000.0, 0, -0.5};
+            GDALSetGeoTransform(h, const_cast<double *>(gt));
+            OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
+            OSRImportFromEPSG(srs, c.epsg);
+            GDALSetSpatialRef(h, srs);
+            OSRDestroySpatialReference(srs);
+        }
+        std::vector<double> values(static_cast<size_t>(width) * height);
+        for (int b = 1; b <= c.bands; b++)
+        {
+            GDALRasterBandH band = GDALGetRasterBand(h, b);
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    values[static_cast<size_t>(y) * width + x] = sampleOf(c, b, x, y);
+            EXPECT_EQ(GDALRasterIO(band, GF_Write, 0, 0, width, height, values.data(), width, height, GDT_Float64, 0, 0),
+                      CE_None);
+            if (c.nodata)
+                GDALSetRasterNoDataValue(band, sampleOf(c, b, 3, 3));
+            if (c.scaled)
+            {
+                GDALSetRasterScale(band, 0.25);
+                GDALSetRasterOffset(band, -3.5);
+                GDALSetRasterUnitType(band, "metre");
+            }
+            GDALSetDescription(band, ("band " + std::to_string(b)).c_str());
+        }
+        if (c.internalMask)
+        {
+            EXPECT_EQ(GDALCreateDatasetMaskBand(h, GMF_PER_DATASET), CE_None);
+            GDALRasterBandH mask = GDALGetMaskBand(GDALGetRasterBand(h, 1));
+            std::vector<uint8_t> m(static_cast<size_t>(width) * height);
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    m[static_cast<size_t>(y) * width + x] = (x + 2 * y) % 9 == 0 ? 0 : 255;
+            EXPECT_EQ(GDALRasterIO(mask, GF_Write, 0, 0, width, height, m.data(), width, height, GDT_Byte, 0, 0), CE_None);
+        }
+        if (c.overviews)
+        {
+            int levels[2] = {2, 4};
+            EXPECT_EQ(GDALBuildOverviews(h, "NEAREST", 2, levels, 0, nullptr, nullptr, nullptr), CE_None);
+        }
+        return path;
+    }
+
+    const char *maskKindOf(int flags)
+    {
+        if (flags & GMF_ALPHA)
+            return "alpha";
+        if (flags & GMF_NODATA)
+            return "nodata";
+        if (flags & GMF_PER_DATASET)
+            return "perDataset";
+        return "allValid";
+    }
+
+    struct Window
+    {
+        int x, y, w, h, bufW, bufH;
+    };
+
+    TEST(TilersRasterParity, everyInfoAndWindowIsWhatGdalReads)
+    {
+        TestArea ta(TEST_NAME, true);
+        const std::vector<Case> cases = {
+            {"byte-rgb", GDT_Byte, 3},
+            {"byte-rgba-alpha", GDT_Byte, 4, true, false, false, false, false, true, true},
+            {"uint16-strips-band", GDT_UInt16, 2, false, true, true},
+            {"int16-scaled", GDT_Int16, 1, true, false, true, true},
+            {"uint32-mask", GDT_UInt32, 1, true, false, false, false, true},
+            {"int32-overviews", GDT_Int32, 2, true, true, false, false, false, false, true},
+            {"float32-dem", GDT_Float32, 1, true, false, true, true, false, false, true, 32633},
+            {"float64-mask-overviews", GDT_Float64, 3, true, false, false, false, true, false, true},
+            {"byte-not-georeferenced", GDT_Byte, 3, false, false, false, false, false, false, false, 0},
+            {"float32-ms-6", GDT_Float32, 6, true, true, true, false, false, false, true, 4326},
+        };
+        const int width = 333, height = 257;
+        const std::vector<Window> windows = {
+            {0, 0, width, height, width, height},       // whole
+            {17, 29, 120, 90, 120, 90},                 // a window at full resolution
+            {0, 0, width, height, width / 2, height / 2},  // halved
+            {5, 3, 300, 250, 81, 67},                   // reduced 3.7 times: an overview when there is one
+            {0, 0, width, height, 20, 15},              // a thumbnail
+            {200, 100, 40, 30, 60, 45},                 // magnified
+            {width - 1, height - 1, 1, 1, 1, 1},        // the last pixel
+        };
+        for (const Case &c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            const fs::path file = writeRaster(ta.getPath(c.name + ".tif"), c, width, height);
+            const auto ds = adoptDataset(GDALOpen(io::toUtf8(file).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(ds);
+            GDALDatasetH h = datasetHandle(ds);
+
+            ddbtRaster *raster = nullptr;
+            ASSERT_EQ(ddbtRasterOpen(io::toUtf8(file).c_str(), &raster), DDBT_ERR_NONE) << ddbtLastError();
+            char *infoText = nullptr;
+            ASSERT_EQ(ddbtRasterInfo(raster, &infoText), DDBT_ERR_NONE) << ddbtLastError();
+            const json info = json::parse(infoText);
+            ddbtFree(infoText);
+
+            // The file
+            EXPECT_EQ(info.at("width").get<int>(), GDALGetRasterXSize(h));
+            EXPECT_EQ(info.at("height").get<int>(), GDALGetRasterYSize(h));
+            GDALRasterBandH band1 = GDALGetRasterBand(h, 1);
+            EXPECT_EQ(info.at("type").get<std::string>(), GDALGetDataTypeName(GDALGetRasterDataType(band1)));
+            int bx = 0, by = 0;
+            GDALGetBlockSize(band1, &bx, &by);
+            EXPECT_EQ(info.at("blockWidth").get<int>(), bx);
+            EXPECT_EQ(info.at("blockHeight").get<int>(), by);
+            ASSERT_EQ(static_cast<int>(info.at("overviews").size()), GDALGetOverviewCount(band1));
+            for (int o = 0; o < GDALGetOverviewCount(band1); o++)
+            {
+                GDALRasterBandH ov = GDALGetOverview(band1, o);
+                EXPECT_EQ(info.at("overviews")[o][0].get<int>(), GDALGetRasterBandXSize(ov));
+                EXPECT_EQ(info.at("overviews")[o][1].get<int>(), GDALGetRasterBandYSize(ov));
+            }
+            EXPECT_EQ(info.at("mask").get<std::string>(), maskKindOf(GDALGetMaskFlags(band1)));
+            double gt[6];
+            if (c.epsg != 0)
+            {
+                ASSERT_EQ(GDALGetGeoTransform(h, gt), CE_None);
+                ASSERT_TRUE(info.contains("geoTransform"));
+                for (int i = 0; i < 6; i++)
+                    EXPECT_EQ(info.at("geoTransform")[i].get<double>(), gt[i]);
+                ASSERT_TRUE(info.contains("wkt"));
+                const SrsPtr gdalSrs = srsFromWkt(GDALGetProjectionRef(h));
+                const SrsPtr ddbtSrs = srsFromWkt(info.at("wkt").get<std::string>().c_str());
+                ASSERT_TRUE(gdalSrs && ddbtSrs);
+                EXPECT_TRUE(OSRIsSame(gdalSrs.get(), ddbtSrs.get())) << info.at("wkt");
+            }
+            else
+            {
+                EXPECT_FALSE(info.contains("geoTransform"));
+                EXPECT_FALSE(info.contains("wkt"));
+            }
+
+            // The bands
+            ASSERT_EQ(static_cast<int>(info.at("bands").size()), GDALGetRasterCount(h));
+            for (int b = 1; b <= GDALGetRasterCount(h); b++)
+            {
+                SCOPED_TRACE(b);
+                GDALRasterBandH band = GDALGetRasterBand(h, b);
+                const json &meta = info.at("bands")[b - 1];
+                EXPECT_EQ(meta.at("colorInterp").get<std::string>(),
+                          GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(band)));
+                int has = 0;
+                const double nodata = GDALGetRasterNoDataValue(band, &has);
+                EXPECT_EQ(meta.contains("nodata"), has != 0);
+                if (has)
+                {
+                    EXPECT_EQ(meta.at("nodata").get<double>(), nodata);
+                }
+                const double scale = GDALGetRasterScale(band, &has);
+                EXPECT_EQ(meta.contains("scale"), has != 0);
+                if (has)
+                {
+                    EXPECT_EQ(meta.at("scale").get<double>(), scale);
+                }
+                const double offset = GDALGetRasterOffset(band, &has);
+                EXPECT_EQ(meta.contains("offset"), has != 0);
+                if (has)
+                {
+                    EXPECT_EQ(meta.at("offset").get<double>(), offset);
+                }
+                EXPECT_EQ(meta.value("unit", std::string()), std::string(GDALGetRasterUnitType(band)));
+                EXPECT_EQ(meta.value("description", std::string()), std::string(GDALGetDescription(band)));
+            }
+
+            // The samples of every window, every band, and the dataset mask
+            std::vector<int> bands;
+            for (int b = 1; b <= GDALGetRasterCount(h); b++)
+                bands.push_back(b);
+            for (const Window &w : windows)
+            {
+                SCOPED_TRACE(std::to_string(w.x) + "," + std::to_string(w.y) + " " + std::to_string(w.w) + "x" +
+                             std::to_string(w.h) + " -> " + std::to_string(w.bufW) + "x" + std::to_string(w.bufH));
+                const size_t plane = static_cast<size_t>(w.bufW) * w.bufH;
+                std::vector<double> got(plane * bands.size()), want(plane * bands.size());
+                std::vector<uint8_t> gotMask(plane), wantMask(plane, 255);
+                ASSERT_EQ(ddbtRasterRead(raster, w.x, w.y, w.w, w.h, w.bufW, w.bufH, bands.data(),
+                                         static_cast<int>(bands.size()), DDBT_SAMPLE_FLOAT64, got.data(), gotMask.data()),
+                          DDBT_ERR_NONE)
+                    << ddbtLastError();
+                ASSERT_EQ(GDALDatasetRasterIO(h, GF_Read, w.x, w.y, w.w, w.h, want.data(), w.bufW, w.bufH, GDT_Float64,
+                                              static_cast<int>(bands.size()), bands.data(), 0, 0, 0),
+                          CE_None);
+                size_t differ = 0;
+                for (size_t i = 0; i < got.size(); i++)
+                    differ += !(got[i] == want[i] || (std::isnan(got[i]) && std::isnan(want[i])));
+                EXPECT_EQ(differ, 0u) << "samples that differ from GDAL's";
+                if (GDALGetMaskFlags(band1) == GMF_PER_DATASET)
+                {
+                    ASSERT_EQ(GDALRasterIO(GDALGetMaskBand(band1), GF_Read, w.x, w.y, w.w, w.h, wantMask.data(), w.bufW,
+                                           w.bufH, GDT_Byte, 0, 0),
+                              CE_None);
+                }
+                EXPECT_EQ(gotMask, wantMask);
+            }
+            ddbtRasterClose(raster);
+        }
+    }
+}
