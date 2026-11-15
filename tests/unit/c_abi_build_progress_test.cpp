@@ -524,9 +524,9 @@ TEST(DDBBuildEx2, refusesWhatDDBBuildExRefuses) {
     EXPECT_TRUE(recorder.reports.empty());
 }
 
-// The phases of a COG build are those of the fraction GDAL's COG driver is at, scaled to 0 to 0.5 (3/8 of its
-// work is the warp, up to 1/2 the overviews), then the statistics of the bands up to 1
-TEST(cogPhaseOfFraction, followsTheWorkOfTheCogDriverThenTheStatistics) {
+// The phases of a COG build are spans of the fraction of its one pass: below 0.5, 3/8 is the warp and up to
+// 1/2 the overviews, then the encoding; the statistics of the bands from 0.5 up to 1
+TEST(cogPhaseOfFraction, namesTheSpansOfTheBuildThenTheStatistics) {
     EXPECT_EQ(kCogStatisticsStart, 0.5);
     EXPECT_STREQ(cogPhaseOfFraction(0.0, true), "warping");
     EXPECT_STREQ(cogPhaseOfFraction(0.187, true), "warping");

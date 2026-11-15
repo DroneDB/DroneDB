@@ -21,9 +21,10 @@ namespace ddb
 
     const char* cogPhaseOfFraction(double fraction, bool hasWarp)
     {
-        // The work of the COG driver in units of the pixels of the raster: the warp 1, the overviews 1/3,
-        // the final write 4/3. Without the warp the overviews are 1/5 of the work and no fraction is warping.
-        // The driver's work ends at kCogStatisticsStart, where the statistics of the bands begin
+        // The spans below kCogStatisticsStart are the shares of the warp (1), the overviews (1/3) and the
+        // final write (4/3, in units of the pixels of the raster) in the GDAL COG build that ddb-tilers
+        // replaced, kept so that the phases reported do not change. Without the warp the overviews are 1/5
+        // of them and no fraction is warping
         const double overviewsStart = hasWarp ? kCogStatisticsStart * 3.0 / 8.0 : 0.0;
         const double compressingStart = hasWarp ? kCogStatisticsStart / 2.0 : kCogStatisticsStart / 5.0;
         if (fraction < overviewsStart) return "warping";

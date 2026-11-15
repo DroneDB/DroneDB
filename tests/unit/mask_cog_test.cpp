@@ -197,15 +197,13 @@ TEST(mask, cogPreservesPerDatasetMask) {
     ASSERT_NO_THROW(ddb::buildCog(maskedGtiff.string(), cogOutput.string()));
     ASSERT_TRUE(fs::exists(cogOutput));
 
-    // 4. The COG must expose transparency. Depending on the GDAL version and
-    //    COG driver behaviour the transparency may appear as:
+    // 4. The COG must expose transparency, as either:
     //    a) An explicit alpha band (GMF_ALPHA set), or
     //    b) A stand-alone PER_DATASET dataset mask (GMF_PER_DATASET set,
     //       GMF_ALL_VALID NOT set, GMF_NODATA NOT set).
-    //    GDAL 3.11 with the COG driver converts the -dstalpha alpha channel
-    //    to an internal mask IFD for JPEG output, resulting in a PER_DATASET
-    //    mask rather than an alpha band on readback. Checking only for
-    //    GMF_ALPHA would produce a false-negative on that version.
+    //    A COG with JPEG tiles keeps the transparency in an internal mask
+    //    IFD, which reads back as b); checking only for GMF_ALPHA would
+    //    miss it.
     {
         GDALDatasetH hCog = GDALOpen(cogOutput.string().c_str(), GA_ReadOnly);
         ASSERT_NE(hCog, nullptr);

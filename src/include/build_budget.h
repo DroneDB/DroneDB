@@ -59,9 +59,10 @@ struct BuildOptions {
 
 // Resources one build may use. Read in one place from the config
 // options below (environment variables or CPLSetConfigOption):
-//   DDB_COG_CACHE_MB    GDAL block cache while a raster build runs (default 1024)
-//   DDB_WARP_MEMORY_MB  GDALWarp working memory, -wm (default 512)
-//   DDB_BUILD_THREADS   threads one build wants: GDAL's for a raster build, bm3d's for a
+//   DDB_COG_CACHE_MB    with DDB_WARP_MEMORY_MB, the memory of a raster (COG) build: the COG
+//                       builder of ddb-tilers is given their sum (default 1024)
+//   DDB_WARP_MEMORY_MB  the rest of that memory (default 512)
+//   DDB_BUILD_THREADS   threads one build wants: the COG builder's for a raster build, bm3d's for a
 //                       model build, the COPC builder's for a point cloud build; 0 = all cores
 //                       (default min(8, cores)).
 //                       The CPU token pool (parallel.h) decides how many run.

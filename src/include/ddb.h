@@ -846,17 +846,18 @@ extern "C"
      *                         yet), when the build starts;
      *                      2. for a raster (COG) build, "warping" (the raster is reprojected to the tile
      *                         grid), "overviews" (the pyramid), "compressing" (the tiles are encoded and
-     *                         written) and "statistics" (the exact statistics of every band are computed
-     *                         from the COG), in that order: the first three with the fractions of the work
-     *                         of GDAL's COG driver scaled to 0 to 0.5, the statistics from 0.5 with the
-     *                         fraction of the raster read; a raster that is on the tile grid already has no
-     *                         warp and never reports "warping" (its phases are "overviews", "compressing"
-     *                         and "statistics"); for a point cloud (COPC) build, "planning" (the inputs
-     *                         are opened and the octree is planned) from 0, "reading" (the points are read
-     *                         and sorted) from 0.05, "building" (the nodes are thinned, encoded and
-     *                         written) from 0.4, rising as the parts of the cloud are done, and "writing"
-     *                         (the end of the file) when the builder is done; the other kinds
-     *                         report no phase of their own and keep fraction -1 until they are done;
+     *                         written) and "statistics" (the exact statistics of every band), in that
+     *                         order. The builder does all four in one pass over the rows of the raster, so
+     *                         each phase is a span of the fraction of that pass: "warping" below 0.1875,
+     *                         "overviews" below 0.25, "compressing" below 0.5 and "statistics" from 0.5. A
+     *                         raster that is on the tile grid already has no warp and never reports
+     *                         "warping" (its "overviews" end at 0.1). For a point cloud (COPC) build,
+     *                         "planning" (the inputs are opened and the octree is planned) from 0,
+     *                         "reading" (the points are read and sorted) from 0.05, "building" (the nodes
+     *                         are thinned, encoded and written) from 0.4, rising as the parts of the cloud
+     *                         are done, and "writing" (the end of the file) when the builder is done. The
+     *                         other kinds report no phase of their own and keep fraction -1 until they are
+     *                         done;
      *                      3. "publishing" with the last fraction reported (never 1) when the output is
      *                         made and moves into place: a cancel at this report stops the build before
      *                         anything is published;
