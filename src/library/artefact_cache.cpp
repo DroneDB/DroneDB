@@ -13,6 +13,7 @@
 #include "mio.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
+#include "raster_stats.h"
 
 namespace ddb
 {
@@ -60,7 +61,7 @@ namespace ddb
             if (fs::exists(target, ec))
             {
                 // Used: not one of the copies the cleanup removes
-                fs::last_write_time(target, fs::file_time_type::clock::now(), ec);
+                markArtefactUsed(target, {statsSidecarOf(target)});
                 return target;
             }
 

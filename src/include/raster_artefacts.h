@@ -4,6 +4,7 @@
 #ifndef RASTER_ARTEFACTS_H
 #define RASTER_ARTEFACTS_H
 
+#include <initializer_list>
 #include <string>
 
 #include "fs.h"
@@ -48,6 +49,15 @@ namespace ddb
         // for the 3D builds) hold files the helper or the converters read, never ones the host
         // opens with GDAL, so they are not artefacts.
         bool isLibddbArtefact(const fs::path &path);
+
+        // Marks an artefact of a cache as used, for the cleanup that removes what was not used for
+        // days and the bound that removes the least recently used: its modification time, and that
+        // of each of `companions` that exists (its statistics sidecar), becomes now when it is more
+        // than kArtefactMarkSeconds old. Not at every use: the time is part of the version a reader
+        // keeps a file open by (ddb-tilers reads a file whose modification time changed as a new
+        // one, with none of its blocks cached), so a mark at every use would make every read of a
+        // cached artefact a first read.
+        void markArtefactUsed(const fs::path &file, std::initializer_list<fs::path> companions = {});
 
         // @throws GDALException when the file is not an artefact (the tilers and the openers
         // below read nothing else)
@@ -133,6 +143,10 @@ namespace ddb
         // requests in progress do not count. A file a reader holds open on Windows stays.
         void trimArtefacts(const fs::path &keep);
         inline constexpr time_t kArtefactInUseSeconds = 300;
+        // How old the mark of a used artefact gets before the next use renews it (markArtefactUsed):
+        // a file used in the last kArtefactInUseSeconds has a mark at most this much older, which
+        // the bound adds to the time it protects
+        inline constexpr time_t kArtefactMarkSeconds = 60;
 
     } // namespace raster
 } // namespace ddb

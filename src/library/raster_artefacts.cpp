@@ -4,6 +4,7 @@
 #include "raster_artefacts.h"
 
 #include <algorithm>
+#include <chrono>
 #include <iomanip>
 #include <optional>
 #include <sstream>
@@ -178,6 +179,19 @@ namespace ddb
             // exist holds no artefact
             const fs::path folder = fs::weakly_canonical(ProcessConfig::get().cacheDir() / "artefacts", ec);
             return !ec && isInside(resolved, folder);
+        }
+
+        void markArtefactUsed(const fs::path &file, std::initializer_list<fs::path> companions)
+        {
+            std::error_code ec;
+            const auto now = fs::file_time_type::clock::now();
+            const auto last = fs::last_write_time(file, ec);
+            if (!ec && now - last < std::chrono::seconds(kArtefactMarkSeconds))
+                return;
+            fs::last_write_time(file, now, ec);
+            for (const auto &companion : companions)
+                if (fs::exists(companion, ec))
+                    fs::last_write_time(companion, now, ec);
         }
 
         std::string artefactKey(const fs::path &source)
@@ -361,7 +375,7 @@ namespace ddb
 
             // The least recently used first
             std::sort(files.begin(), files.end(), [](const CachedFile &a, const CachedFile &b) { return a.used < b.used; });
-            const time_t inUse = currentUnixTimestamp() - kArtefactInUseSeconds;
+            const time_t inUse = currentUnixTimestamp() - kArtefactInUseSeconds - kArtefactMarkSeconds;
             uint64_t removed = 0;
             for (const auto &f : files)
             {

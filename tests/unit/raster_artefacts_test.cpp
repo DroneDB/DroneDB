@@ -716,6 +716,41 @@ namespace
         EXPECT_TRUE(fs::exists(request)) << "a request in progress is not the cache's";
     }
 
+    // A file used now and then keeps its modification time between marks, so a reader keeps the
+    // version of it it has open (ddb-tilers opens a file whose time changed as a new one, with no
+    // block cached); a mark older than the interval is renewed, with the companions that exist
+    TEST_F(RasterArtefacts, aUsedArtefactIsMarkedOnceAnIntervalWithItsCompanions)
+    {
+        using namespace std::chrono_literals;
+        const fs::path dir = raster::artefactsDir();
+        const fs::path recent = cachedFile(dir, "recent.tif", 1, 10s);
+        const auto recentTime = fs::last_write_time(recent);
+        raster::markArtefactUsed(recent);
+        EXPECT_EQ(fs::last_write_time(recent), recentTime) << "marked a moment ago: left as it is";
+
+        const auto stale = std::chrono::seconds(raster::kArtefactMarkSeconds) + 30s;
+        const fs::path old = cachedFile(dir, "old.tif", 1, stale);
+        const fs::path oldStats = cachedFile(dir, "old.tif.stats.json", 1, stale);
+        const fs::path missing = dir / "old.tif.missing";
+        const auto before = fs::file_time_type::clock::now() - 1s;
+        raster::markArtefactUsed(old, {oldStats, missing});
+        EXPECT_GE(fs::last_write_time(old), before);
+        EXPECT_GE(fs::last_write_time(oldStats), before);
+        EXPECT_FALSE(fs::exists(missing)) << "a companion that is not there is not made";
+    }
+
+    // A file used in the last kArtefactInUseSeconds may carry a mark up to kArtefactMarkSeconds
+    // older (it is renewed only after that): the bound leaves it
+    TEST_F(RasterArtefacts, theBoundLeavesAFileWhoseMarkIsOlderThanItsLastUse)
+    {
+        const ScopedProcessConfig bound(json{{"artefactCacheMb", 1}}.dump());
+        const fs::path dir = raster::artefactsDir();
+        const fs::path used = cachedFile(
+            dir, "used.tif", 2048, std::chrono::seconds(raster::kArtefactInUseSeconds + raster::kArtefactMarkSeconds / 2));
+        raster::trimArtefacts(fs::path());
+        EXPECT_TRUE(fs::exists(used));
+    }
+
     TEST_F(RasterArtefacts, aCacheWithoutABoundKeepsEverything)
     {
         using namespace std::chrono_literals;

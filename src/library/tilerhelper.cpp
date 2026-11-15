@@ -262,9 +262,7 @@ namespace ddb
                 // A file in use stays: the cleanup removes what was not touched for days. A
                 // statistics sidecar next to it is touched with it, since it counts only while it
                 // is not older than the raster (raster_stats.h)
-                const auto now = fs::file_time_type::clock::now();
-                fs::last_write_time(target, now, ec);
-                fs::last_write_time(statsSidecarOf(target), now, ec);
+                raster::markArtefactUsed(target, {statsSidecarOf(target)});
                 return target;
             }
 
