@@ -114,6 +114,11 @@ namespace ddb
             // caller reads with readCloudSample: one process, which writes progress as it goes
             virtual void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
                                      const ProgressCallback &progress) = 0;
+            // An operation on a user's raster that writes `out` (isHelperOperation(op): a mask...):
+            // one process, which runs runHelperOperation. Returns the result of the operation. A full
+            // device is an FSException (no space), as the operation reported it in the host.
+            virtual json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                                 const ProgressCallback &progress) = 0;
         };
 
         // What a GdalUtilHelper can be told. The defaults are what the process uses; the tests
@@ -190,6 +195,8 @@ namespace ddb
                            const ProgressCallback &progress) override;
             void buildVector(const fs::path &path, const fs::path &out, const json &params,
                              const ProgressCallback &progress) override;
+            json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                         const ProgressCallback &progress) override;
             void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
                              const ProgressCallback &progress) override;
 
@@ -214,13 +221,33 @@ namespace ddb
             // for the caller to raise.
             Response serve(const char *op, const fs::path &path, const fs::path &out, json params,
                            std::chrono::milliseconds timeout, const ResponseCheck &accept);
-            // One `gdal-util --request` process
-            void runOneShot(const char *op, const fs::path &path, const fs::path &out, json params,
-                            const ProgressCallback &progress);
+            // What a one-shot process is to its caller: a build (a full device or an idle process is a
+            // RetryableBuildException, retried as every build is) or an operation of a call
+            enum class OneShot
+            {
+                Build,
+                Operation
+            };
+            // One `gdal-util --request` process; returns the result of its response
+            json runOneShot(const char *op, const fs::path &path, const fs::path &out, json params,
+                            const ProgressCallback &progress, OneShot kind = OneShot::Build);
 
             const Options options_;
             helper::Pool pool_;
             std::atomic<int64_t> nextId_{1};
+        };
+
+        // Logs the progress of a long operation of the helper, every 5 percent: "<what> progress: N%".
+        // Called from the thread that waits for the helper.
+        class ProgressLog
+        {
+          public:
+            explicit ProgressLog(std::string what) : what_(std::move(what)) {}
+            void operator()(double fraction);
+
+          private:
+            std::string what_;
+            std::atomic<int> last_{-1};
         };
 
         // The raster helper of the process: the one a ScopedRasterHelper installed, else the

@@ -22,6 +22,7 @@
 
 #include "ddb.h"
 #include "gdal_inc.h"
+#include "raster_artefacts.h"
 #include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "gtest/gtest.h"
@@ -624,6 +625,35 @@ namespace
 
         ASSERT_DDB_OK(DDBMaskBorders(input.c_str(), output.c_str(), 15, false));
         EXPECT_TRUE(fs::exists(output));
+    }
+
+    // The raster helper masks the user's raster itself: the host makes no normalized copy of it, and
+    // a raster masking does not cover is invalid arguments, as when the host masked it
+    TEST_F(CAbi, MaskBordersReadsTheUsersRasterInTheHelper)
+    {
+        TestArea ta(TEST_NAME, true);
+        GeoRasterSpec spec;
+        spec.width = spec.height = 64;
+        spec.value = [](int, int x, int y) { return x >= 8 && x < 56 && y >= 8 && y < 56 ? 128.0 : 0.0; };
+        const auto input = testutils::createGeoRaster(ta.getPath("ortho.tif"), spec).string();
+        spec.bands = 2;
+        const auto twoBands = testutils::createGeoRaster(ta.getPath("two.tif"), spec).string();
+
+        const auto normalizedCopies = [] {
+            std::error_code ec;
+            const fs::path folder = raster::normalizedDir();
+            return fs::exists(folder, ec) ? std::distance(fs::directory_iterator(folder, ec), fs::directory_iterator()) : 0;
+        };
+        const auto before = normalizedCopies();
+        ASSERT_DDB_OK(DDBMaskBorders(input.c_str(), ta.getPath("masked.tif").string().c_str(), 15, false));
+        EXPECT_EQ(normalizedCopies(), before) << "the host made a copy of the input";
+
+        DDBMaskBordersOptions options{};
+        options.structSize = sizeof(options);
+        EXPECT_EQ(DDBMaskBordersEx(twoBands.c_str(), ta.getPath("two-masked.tif").string().c_str(), 15, false, &options),
+                  DDBERR_INVALIDARGS);
+        EXPECT_NE(std::string(DDBGetLastError()).find("1-band"), std::string::npos) << DDBGetLastError();
+        EXPECT_FALSE(fs::exists(ta.getPath("two-masked.tif")));
     }
 
     // Calls `write(input, output)` with every form of an output path that names the input (the

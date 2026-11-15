@@ -4,6 +4,7 @@
 #include "raster_protocol.h"
 
 #include <cmath>
+#include <limits>
 #include <utility>
 
 #include "../../vendor/base64/base64.h"
@@ -273,6 +274,8 @@ namespace ddb
                 return "timeout";
             case ErrorCode::NoSpace:
                 return "nospace";
+            case ErrorCode::Invalid:
+                return "invalid";
             case ErrorCode::Internal:
                 return "internal";
             }
@@ -282,12 +285,18 @@ namespace ddb
         std::optional<ErrorCode> parseErrorCode(std::string_view name)
         {
             for (const ErrorCode code : {ErrorCode::Unreadable, ErrorCode::Policy, ErrorCode::Limit, ErrorCode::Crashed,
-                                         ErrorCode::Timeout, ErrorCode::NoSpace, ErrorCode::Internal})
+                                         ErrorCode::Timeout, ErrorCode::NoSpace, ErrorCode::Invalid,
+                                         ErrorCode::Internal})
             {
                 if (name == toString(code))
                     return code;
             }
             return std::nullopt;
+        }
+
+        bool isHelperOperation(std::string_view name)
+        {
+            return name == op::kMask;
         }
 
         const char *toString(ProbeKind kind)
@@ -872,6 +881,38 @@ namespace ddb
                     throw ProtocolError("'outsize' is not a string");
                 result.outsize = outsize->get<std::string>();
             }
+            return result;
+        }
+
+        json toJson(const MaskParams &params)
+        {
+            json result = {{"nearDist", params.nearDist}, {"white", params.white}};
+            if (!params.color.empty())
+                result["color"] = params.color;
+            setBuildThreads(result, params.threads);
+            return result;
+        }
+
+        MaskParams maskParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the mask params are not an object");
+            MaskParams result;
+            if (const json *near = member(params, "nearDist"))
+            {
+                if (!near->is_number_integer() || near->get<int64_t>() < std::numeric_limits<int>::min() ||
+                    near->get<int64_t>() > std::numeric_limits<int>::max())
+                    throw ProtocolError("'nearDist' is not an integer");
+                result.nearDist = near->get<int>();
+            }
+            result.white = optionalBool(params, "white", false);
+            if (const json *color = member(params, "color"))
+            {
+                if (!color->is_string())
+                    throw ProtocolError("'color' is not a string");
+                result.color = color->get<std::string>();
+            }
+            result.threads = buildThreadsFromJson(params);
             return result;
         }
 

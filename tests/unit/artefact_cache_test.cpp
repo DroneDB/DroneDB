@@ -91,6 +91,11 @@ namespace
         {
             real_.sampleCloud(path, out, params, progress);
         }
+        json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                     const raster::ProgressCallback &progress) override
+        {
+            return real_.operate(op, path, out, params, progress);
+        }
 
         std::atomic<int> requests{0};
 

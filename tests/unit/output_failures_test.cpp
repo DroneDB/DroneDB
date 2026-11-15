@@ -19,6 +19,7 @@
 #include "artefact_cache.h"
 #include "exceptions.h"
 #include "file_size_limit.h"
+#include "in_process_raster_helper.h"
 #include "gtest/gtest.h"
 #include "mask.h"
 #include "mio.h"
@@ -26,6 +27,7 @@
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
+#include "user_open_child.h"
 
 namespace
 {
@@ -99,11 +101,15 @@ namespace
         EXPECT_TRUE(fs::exists(ta.getPath("out.tif")));
     }
 
-    TEST(OutputFailures, MaskedBordersThatCannotBeWrittenAreAnError)
+    // The raster helper writes the mask, and resets the limit of the file size it inherits: the
+    // operation runs here, in a child that plays the helper, where the limit holds
+    USER_OPEN_TEST(OutputFailures, MaskedBordersThatCannotBeWrittenAreAnError)
     {
         SKIP_WITHOUT_FILE_SIZE_LIMIT();
         TestArea ta(TEST_NAME, true);
-        const auto input = copiedBeforeTheLimit(texturedRaster(ta.getPath("in.tif"), 3));
+        testutils::InProcessRasterHelper helper;
+        const raster::ScopedRasterHelper installed(helper);
+        const auto input = io::toUtf8(texturedRaster(ta.getPath("in.tif"), 3));
         const auto output = io::toUtf8(ta.getPath("out.tif"));
 
         {

@@ -33,7 +33,7 @@ namespace ddb
         // The version this side implements. A helper is accepted when its major version is the
         // same and its minor version is not lower.
         constexpr int kMajorVersion = 1;
-        constexpr int kMinorVersion = 2;
+        constexpr int kMinorVersion = 3;
 
         // The longest line of either side
         constexpr size_t kMaxLineBytes = 16 * 1024 * 1024;
@@ -69,6 +69,7 @@ namespace ddb
             Crashed,    // the worker ended without an answer
             Timeout,    // the host's deadline passed
             NoSpace,    // no space left on the device the output goes to
+            Invalid,    // the operation refuses its arguments for this file (new in 1.3)
             Internal    // anything else: a bad request, an operation that does not exist, a defect
         };
 
@@ -90,7 +91,14 @@ namespace ddb
             // The sample of a point cloud (new in 1.2), one-shot with progress: params of
             // cloudSampleParamsFromJson, the sample written to `out` (writeCloudSample)
             constexpr const char *kSampleCloud = "sampleCloud";
+            // The borders of a raster masked (new in 1.3), one-shot: params of maskParamsFromJson,
+            // the masked raster written to `out` (runHelperOperation)
+            constexpr const char *kMask = "mask";
         } // namespace op
+
+        // An operation on a user's raster for a call of the host (not a build, not a read): one
+        // process with the limits of a build, run by runHelperOperation (helper_operations.h)
+        bool isHelperOperation(std::string_view op);
 
         // A request. `path` is the file to read, `out` the file to write (operations that
         // write). `params` is an object whose members the operation defines.
@@ -323,6 +331,21 @@ namespace ddb
         json toJson(const GeoprojectParams &params);
         // @throws ProtocolError
         GeoprojectParams geoprojectParamsFromJson(const json &params);
+
+        // The params of a `mask` (gdal_nearblack -setmask -alg floodfill): how far from black (or
+        // white, or `color`) a border pixel may be (`nearDist`, -near), white borders (`white`),
+        // or borders of a colour (`color`: "c1,c2,c3...", -color), and the threads of the build
+        struct MaskParams
+        {
+            int nearDist = 15;
+            bool white = false;
+            std::string color;
+            std::optional<int> threads;
+        };
+
+        json toJson(const MaskParams &params);
+        // @throws ProtocolError
+        MaskParams maskParamsFromJson(const json &params);
 
     } // namespace raster
 } // namespace ddb

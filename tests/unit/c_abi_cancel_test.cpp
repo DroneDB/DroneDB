@@ -885,12 +885,12 @@ TEST_F(CancelToken, aMaskCanceledInTheMiddleKeepsTheOutputItWouldReplace) {
     options.structSize = sizeof(options);
     options.overwrite = true;
     {
-        CancelDuring during("Mask source:");
+        CancelDuring during("Mask borders progress:");
         during.arm();
         EXPECT_EQ(DDBMaskBordersEx(in.raster.string().c_str(), output.string().c_str(), 15, false, &options),
                   DDBERR_CANCELED)
             << DDBGetLastError();
-        EXPECT_TRUE(during.fired()) << "the mask never logged its source: the test checks nothing";
+        EXPECT_TRUE(during.fired()) << "the mask never logged its progress: the test checks nothing";
     }
     EXPECT_EQ(fileBytes(output), "an output that exists");
     for (const auto& entry : fs::directory_iterator(in.area.getFolder()))

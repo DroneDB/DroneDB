@@ -13,7 +13,11 @@
 #include "mio.h"
 #include "parallel.h"
 #include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "raster_ops.h"
+#include "raster_protocol.h"
 #include <cstdint>
+#include <functional>
 
 namespace ddb
 {
@@ -162,6 +166,83 @@ namespace ddb
 
     } // namespace
 
+    namespace raster
+    {
+        void maskRasterFile(const fs::path &input, const fs::path &out, const MaskParams &params,
+                            const ProgressCallback &progress)
+        {
+            const std::string inputText = io::toUtf8(input);
+            const auto srcDataset = openInputRaster(inputText);
+            if (!srcDataset)
+                throw GDALException("Cannot open " + inputText + " for reading");
+            GDALDatasetH hSrcDataset = datasetHandle(srcDataset);
+
+            const MaskSource src = checkMaskable(hSrcDataset, inputText);
+            logMaskSource(src);
+
+            CPLStringList targs;
+
+            // IMPORTANT: use mask, not alpha.
+            // Alpha would create an extra Byte band and break JPEG/YCBCR layout.
+            targs.AddString("-setmask");
+
+            targs.AddString("-alg");
+            targs.AddString("floodfill");
+            // Faster alternative but doesn't handle concave collars
+            // targs.AddString("twopasses");
+
+            targs.AddString("-near");
+            targs.AddString(std::to_string(params.nearDist).c_str());
+
+            if (!params.color.empty()) {
+                targs.AddString("-color");
+                targs.AddString(params.color.c_str());
+            } else if (params.white) {
+                targs.AddString("-white");
+            }
+
+            targs.AddString("-of");
+            targs.AddString("GTiff");
+
+            GtiffOptions creation = maskCreationOptions(src);
+
+            // Compression threads: those the host holds CPU tokens for
+            const BuildThreads threads(params.threads);
+            creation.add("NUM_THREADS=" + std::to_string(threads.threads()));
+            creation.appendTo(targs);
+
+            int bUsageError = FALSE;
+
+            cancel::GdalProgress gdalProgress([&progress](double fraction) {
+                if (progress)
+                    progress(fraction);
+            });
+            GDALDatasetUniquePtr outDataset;
+            const std::string outText = io::toUtf8(out);
+            {
+                // Force internal GeoTIFF mask instead of .msk sidecar, especially for GDAL < 3.9.
+                const ScopedThreadConfigOption internalMask("GDAL_TIFF_INTERNAL_MASK", "YES");
+
+                const GdalOptionsPtr<GDALNearblackOptions> psOptions(
+                    GDALNearblackOptionsNew(targs.List(), nullptr));
+                if (!psOptions)
+                    throw GDALException("Failed to create nearblack options");
+                gdalProgress.attach(psOptions.get());
+
+                outDataset = adoptDataset(
+                    GDALNearblack(outText.c_str(), nullptr, hSrcDataset, psOptions.get(), &bUsageError));
+            }
+
+            if (bUsageError)
+                throw GDALException("GDALNearblack usage error");
+            // The output is named by its file: its folder is the private one of the request
+            if (!outDataset)
+                throw GDALException("GDALNearblack failed to create output: " + io::toUtf8(out.filename()));
+
+            closeOutputOrThrow(std::move(outDataset), io::toUtf8(out.filename()));
+        }
+    } // namespace raster
+
     void maskBorders(const std::string &input,
                  const std::string &output,
                  int nearDist,
@@ -174,81 +255,29 @@ namespace ddb
             throw InvalidArgsException("Not the path of a file for a masked raster: " + output);
         io::assureReplaceable(io::fromUtf8(output), overwrite, {io::fromUtf8(input)});
 
-        const auto srcDataset = raster::openInputRaster(input);
-        if (!srcDataset)
-            throw GDALException("Cannot open " + input + " for reading");
-        GDALDatasetH hSrcDataset = datasetHandle(srcDataset);
-
-        const MaskSource src = checkMaskable(hSrcDataset, input);
-        logMaskSource(src);
-
-        CPLStringList targs;
-
-        // IMPORTANT: use mask, not alpha.
-        // Alpha would create an extra Byte band and break JPEG/YCBCR layout.
-        targs.AddString("-setmask");
-
-        targs.AddString("-alg");
-        targs.AddString("floodfill");
-        // Faster alternative but doesn't handle concave collars
-        // targs.AddString("twopasses");
-
-        targs.AddString("-near");
-        targs.AddString(std::to_string(nearDist).c_str());
-
-        if (!color.empty()) {
-            targs.AddString("-color");
-            targs.AddString(color.c_str());
-        } else if (white) {
-            targs.AddString("-white");
-        }
-
-        targs.AddString("-of");
-        targs.AddString("GTiff");
-
-        GtiffOptions creation = maskCreationOptions(src);
-
-        // Compression threads: this one and those the CPU pool allows, held until
-        // the output is closed
+        // The CPU tokens of the compression threads, held until the output is written
         const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
-        creation.add(parallel::gdalNumThreads(cpu));
-        creation.appendTo(targs);
+        raster::MaskParams params;
+        params.nearDist = nearDist;
+        params.white = white;
+        params.color = color;
+        params.threads = static_cast<int>(cpu.threads());
 
-        // The mask goes to a file of a private folder beside the output, which is removed with
-        // whatever is left in it: an existing output is replaced only by a complete mask
-        const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), MaskStagingPrefix,
-                                                                    raster::PrivateFolderWriter::Host);
+        // The raster helper reads the input (a file of a user) and writes the mask to a file of a
+        // private folder beside the output, which is removed with whatever is left in it: an
+        // existing output is replaced only by a complete mask
+        const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), MaskStagingPrefix);
         const fs::path produced = staging.path() / target.filename();
+        raster::ProgressLog log("Mask borders");
+        raster::rasterHelper().operate(raster::op::kMask, io::fromUtf8(input), produced, raster::toJson(params),
+                                       std::ref(log));
+        // A call canceled while the helper finished is canceled: the output stays as it was
+        cancel::throwIfCanceled();
 
-        int bUsageError = FALSE;
-
-        cancel::GdalProgress progress;
-        GDALDatasetUniquePtr outDataset;
-        {
-            // Force internal GeoTIFF mask instead of .msk sidecar, especially for GDAL < 3.9.
-            const ScopedThreadConfigOption internalMask("GDAL_TIFF_INTERNAL_MASK", "YES");
-
-            const GdalOptionsPtr<GDALNearblackOptions> psOptions(
-                GDALNearblackOptionsNew(targs.List(), nullptr));
-            if (!psOptions)
-                throw GDALException("Failed to create nearblack options");
-            // The pass over the raster stops when the call is canceled
-            progress.attach(psOptions.get());
-
-            outDataset = adoptDataset(
-                GDALNearblack(io::toUtf8(produced).c_str(), nullptr, hSrcDataset, psOptions.get(), &bUsageError));
-        }
-
-        if (bUsageError)
-            throw GDALException("GDALNearblack usage error");
-
-        if (!outDataset) {
-            // A canceled pass leaves no output: what it wrote goes with the private folder
-            cancel::throwIfCanceled();
-            throw GDALException("GDALNearblack failed to create output: " + output);
-        }
-
-        closeOutputOrThrow(std::move(outDataset), output);
+        // What the helper wrote is published as the user's raster: it has to read as one first
+        if (!raster::writtenRasterOpens(produced))
+            throw GDALException(std::string(raster::kGdalUtilName) + " wrote a mask of " + input +
+                                " that cannot be read");
 
         // The output may have appeared while the borders were masked: it is replaced only when
         // asked. The raster first, then its external mask (or none).

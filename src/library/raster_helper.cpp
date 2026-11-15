@@ -161,6 +161,8 @@ namespace ddb
                     throw RasterNotReadException(code, message);
                 case ErrorCode::NoSpace:
                     throw FSException(message, std::make_error_code(std::errc::no_space_on_device));
+                case ErrorCode::Invalid:
+                    throw InvalidArgsException(message);
                 case ErrorCode::Unreadable:
                 case ErrorCode::Policy:
                 case ErrorCode::Internal:
@@ -398,8 +400,16 @@ namespace ddb
             };
         } // namespace
 
-        void GdalUtilHelper::runOneShot(const char *op, const fs::path &path, const fs::path &out, json params,
-                                        const ProgressCallback &progress)
+        json GdalUtilHelper::operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                                     const ProgressCallback &progress)
+        {
+            if (!isHelperOperation(op))
+                throw std::logic_error(std::string("not an operation of the helper: ") + op);
+            return runOneShot(op, path, out, params, progress, OneShot::Operation);
+        }
+
+        json GdalUtilHelper::runOneShot(const char *op, const fs::path &path, const fs::path &out, json params,
+                                        const ProgressCallback &progress, OneShot kind)
         {
             const process::IProcessRunner &runner =
                 options_.runner != nullptr ? *options_.runner : process::systemProcessRunner();
@@ -445,14 +455,14 @@ namespace ddb
                 {
                     // A build that runs out of space is retried when there is some again, as
                     // every build reports it
-                    if (output.response()->error == ErrorCode::NoSpace)
+                    if (kind == OneShot::Build && output.response()->error == ErrorCode::NoSpace)
                     {
                         logFailure(op, path, ErrorCode::NoSpace, output.response()->message);
                         throw RetryableBuildException(output.response()->message, RetryableBuildReason::NoSpaceOnDevice);
                     }
                     raiseFailure(op, path, *output.response());
                 }
-                return;
+                return output.response()->result;
             }
 
             // No response: the process did not run, was killed, or ended on its own
@@ -467,11 +477,21 @@ namespace ddb
                 // A process that printed nothing for the idle time hung; one that ran for its whole
                 // maximum is a build that did not finish
                 logFailure(op, path, ErrorCode::Timeout, text);
-                if (run.maxRuntime.count() > 0 && result.duration >= run.maxRuntime)
+                if (kind == OneShot::Operation || (run.maxRuntime.count() > 0 && result.duration >= run.maxRuntime))
                     throw RasterNotReadException(ErrorCode::Timeout, text);
                 throw RetryableBuildException(text, RetryableBuildReason::IdleTimeout);
             }
             raiseFailure(op, path, limitSignal(result.termSignal) ? ErrorCode::Limit : ErrorCode::Crashed, text);
+        }
+
+        void ProgressLog::operator()(double fraction)
+        {
+            const int pct = static_cast<int>(fraction * 100.0);
+            int previous = last_.load();
+            if ((previous < 0 || pct / 5 != previous / 5) && last_.compare_exchange_strong(previous, pct))
+            {
+                LOGD << what_ << " progress: " << pct << "%";
+            }
         }
 
         // ---- the helper of the process

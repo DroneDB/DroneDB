@@ -151,14 +151,10 @@ namespace ddb
         if (hasWarp)
             options.reportProgress(0.0, cogPhaseOfFraction(0.0, true));
 
-        std::atomic<int> lastPct{0};
-        const raster::ProgressCallback logProgress = [&lastPct, &options, hasWarp](double fraction) {
+        raster::ProgressLog log("COG build");
+        const raster::ProgressCallback logProgress = [&log, &options, hasWarp](double fraction) {
             options.reportProgress(fraction, cogPhaseOfFraction(fraction, hasWarp));
-            const int pct = static_cast<int>(fraction * 100.0);
-            int prev = lastPct.load();
-            if (pct / 5 != prev / 5 && lastPct.compare_exchange_strong(prev, pct)) {
-                LOGD << "COG build progress: " << pct << "%";
-            }
+            log(fraction);
         };
         raster::rasterHelper().buildCog(io::fromUtf8(input), produced, raster::toJson(params),
                                         logProgress);

@@ -1,9 +1,9 @@
 {
  "dem32": {
-  "error": "GDALNearblack failed to create output: <dir>/dem32_masked.tif"
+  "error": "GDALNearblack failed to create output: dem32_masked.tif"
  },
  "dem64": {
-  "error": "GDALNearblack failed to create output: <dir>/dem64_masked.tif"
+  "error": "GDALNearblack failed to create output: dem64_masked.tif"
  },
  "gray8": {
   "bands": [

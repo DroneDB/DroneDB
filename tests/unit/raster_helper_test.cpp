@@ -981,7 +981,8 @@ namespace
         mutable std::mutex mutex_;
         mutable std::vector<fs::path> programs;
         mutable std::vector<std::vector<std::string>> calls;
-        std::string versionText = "gdal-util test protocol 1.2";
+        std::string versionText =
+            "gdal-util test protocol " + std::to_string(kMajorVersion) + "." + std::to_string(kMinorVersion);
         Handler handler;
     };
 
@@ -1156,6 +1157,64 @@ namespace
         }
     }
 
+    // An operation for a call is not a build: a full device is no space (not a build to retry), and the
+    // arguments the operation refuses for the file are invalid arguments, as when the call ran it itself
+    TEST(RasterOneShot, aFailureOfAnOperationIsWhatTheCallReported)
+    {
+        const std::vector<std::pair<std::string, std::string>> cases = {{"limit", "notread"},
+                                                                        {"unreadable", "op"},
+                                                                        {"internal", "op"},
+                                                                        {"nospace", "nospace"},
+                                                                        {"invalid", "invalid"}};
+        for (const auto &[code, expected] : cases)
+        {
+            SCOPED_TRACE(code);
+            FakeRunner runner;
+            runner.handler = [code = code](const std::vector<std::string> &args, const process::Options &options) {
+                options.onOutputLine(R"({"id":)" + std::to_string(idOfRequest(args)) + R"(,"ok":false,"error":")" + code +
+                                     R"(","message":"it failed"})");
+                return exitedWith(1);
+            };
+            GdalUtilHelper helper = oneShotHelper(runner);
+            const auto mask = [&] {
+                helper.operate(op::kMask, fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback());
+            };
+            if (expected == "notread")
+                EXPECT_THROW(mask(), RasterNotReadException);
+            else if (expected == "invalid")
+            {
+                try
+                {
+                    mask();
+                    FAIL() << "no exception";
+                }
+                catch (const InvalidArgsException &e)
+                {
+                    EXPECT_STREQ(e.what(), "it failed");
+                }
+            }
+            else if (expected == "nospace")
+            {
+                try
+                {
+                    mask();
+                    FAIL() << "no exception";
+                }
+                catch (const FSException &e)
+                {
+                    EXPECT_EQ(e.code(), std::errc::no_space_on_device);
+                }
+            }
+            else
+                EXPECT_THROW(mask(), RasterOpException);
+        }
+        FakeRunner runner;
+        GdalUtilHelper helper = oneShotHelper(runner);
+        EXPECT_THROW(helper.operate(op::kCog, fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback()),
+                     std::logic_error)
+            << "a build is no operation";
+    }
+
     TEST(RasterOneShot, aProcessThatEndsWithoutAResponseCrashed)
     {
         FakeRunner runner;
@@ -1259,12 +1318,13 @@ namespace
         }
     }
 
-    // The point cloud info came with protocol 1.2: a program of an earlier minor may not know an
-    // operation this client sends, and is not run
+    // A program of an earlier minor may not know an operation this client sends (the mask came
+    // with 1.3), and is not run
     TEST(RasterOneShot, aProgramOfAnEarlierProtocolMinorIsNotRun)
     {
         FakeRunner runner;
-        runner.versionText = "gdal-util test protocol 1.1";
+        runner.versionText =
+            "gdal-util test protocol " + std::to_string(kMajorVersion) + "." + std::to_string(kMinorVersion - 1);
         runner.handler = [](const std::vector<std::string> &, const process::Options &) {
             ADD_FAILURE() << "the request must not be sent";
             return exitedWith(0);
@@ -1337,6 +1397,24 @@ namespace
         EXPECT_EQ(back.height, 3000);
         EXPECT_EQ(back.footprint, photo.footprint);
         EXPECT_EQ(back.outsize, "25%");
+
+        MaskParams mask;
+        mask.nearDist = 7;
+        mask.white = true;
+        mask.color = "255,0,255";
+        mask.threads = 4;
+        const json maskSent = toJson(mask);
+        EXPECT_EQ(maskSent, json::parse(R"({"nearDist":7,"white":true,"color":"255,0,255","threads":4})"));
+        const MaskParams maskBack = maskParamsFromJson(maskSent);
+        EXPECT_EQ(maskBack.nearDist, 7);
+        EXPECT_TRUE(maskBack.white);
+        EXPECT_EQ(maskBack.color, "255,0,255");
+        EXPECT_EQ(maskBack.threads, std::optional<int>(4));
+        const MaskParams defaults = maskParamsFromJson(json::object());
+        EXPECT_EQ(defaults.nearDist, 15);
+        EXPECT_FALSE(defaults.white);
+        EXPECT_TRUE(defaults.color.empty());
+        EXPECT_FALSE(defaults.threads);
     }
 
     // The clouds merged with the path of a COPC build travel in their order, each as a path of its own
@@ -1374,6 +1452,12 @@ namespace
         EXPECT_THROW(cogParamsFromJson(json{{"threads", 5000}}), ProtocolError);
         EXPECT_THROW(cogParamsFromJson(json{{"threads", "4"}}), ProtocolError);
         EXPECT_THROW(vectorParamsFromJson(json{{"source", 3}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json::array()), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"nearDist", "15"}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"nearDist", int64_t{1} << 40}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"white", 1}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"color", 3}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"threads", 0}}), ProtocolError);
 
         const json valid = toJson([] {
             GeoprojectParams photo;
@@ -1468,6 +1552,11 @@ namespace
         void sampleCloud(const fs::path &, const fs::path &, const json &, const ProgressCallback &) override
         {
             ADD_FAILURE() << "no cloud is sampled";
+        }
+        json operate(const char *op, const fs::path &, const fs::path &, const json &, const ProgressCallback &) override
+        {
+            ADD_FAILURE() << "no operation: " << op;
+            return json::object();
         }
     };
 

@@ -522,6 +522,12 @@ namespace
         {
             ADD_FAILURE() << "no cloud is sampled";
         }
+        json operate(const char *op, const fs::path &, const fs::path &, const json &,
+                     const raster::ProgressCallback &) override
+        {
+            ADD_FAILURE() << "no operation: " << op;
+            return json::object();
+        }
 
         size_t count(const std::string &op) const
         {
