@@ -44,6 +44,8 @@ namespace
         bool alpha = false;  // the last band is alpha
         bool overviews = false;
         int epsg = 3857;     // 0: not georeferenced
+        int nbits = 0;       // NBITS (0: the type's)
+        bool minIsWhite = false;
     };
 
     double sampleOf(const Case &c, int band, int x, int y)
@@ -55,11 +57,18 @@ namespace
             return c.type == GDT_UInt16 ? uint16Alpha[(x / 7 + y / 5) % 5] : (x / 7 + y / 5) % 3 == 0 ? 0 : 255;
         }
         const double v = (x * 37 + y * 101 + band * 13) % 251;
+        if (c.nbits == 1)
+            return static_cast<double>((x / 3 + y / 2 + band) % 2);
         switch (c.type)
         {
         case GDT_Int16:
         case GDT_Int32:
             return v - 120;
+        case GDT_Int64:
+            return v - 120 - 1099511627776.0;  // beyond 32 bits
+        case GDT_UInt64:
+            return v + 2199023255552.0;
+        case GDT_Float16:
         case GDT_Float32:
         case GDT_Float64:
             return v / 7.0 - 11.25;
@@ -81,6 +90,10 @@ namespace
         else
             options.SetNameValue("BLOCKYSIZE", "7");
         options.SetNameValue("INTERLEAVE", c.bandInterleaved ? "BAND" : "PIXEL");
+        if (c.nbits != 0)
+            options.SetNameValue("NBITS", std::to_string(c.nbits).c_str());
+        if (c.minIsWhite)
+            options.SetNameValue("PHOTOMETRIC", "MINISWHITE");
         if (c.alpha)
             options.SetNameValue("ALPHA", "YES");
         auto ds = adoptDataset(GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(path).c_str(), width, height,
@@ -165,6 +178,14 @@ namespace
             {"float64-mask-overviews", GDT_Float64, 3, true, false, false, false, true, false, true},
             {"byte-not-georeferenced", GDT_Byte, 3, false, false, false, false, false, false, false, 0},
             {"float32-ms-6", GDT_Float32, 6, true, true, true, false, false, false, true, 4326},
+            // The types GDAL reads that a normalized copy keeps: 1-bit (a Byte band of 0 and 1, a black and white
+            // palette, inverted for MINISWHITE), Float16, and 64-bit integers with a NoData value beyond 32 bits
+            {"bit1-strips", GDT_Byte, 1, false, false, false, false, false, false, false, 3857, 1, false},
+            {"bit1-miniswhite-overviews", GDT_Byte, 1, true, false, false, false, false, false, true, 3857, 1, true},
+            {"float16-nodata-overviews", GDT_Float16, 1, true, false, true, false, false, false, true, 3857, 0, false},
+            {"float16-mask", GDT_Float16, 2, true, false, false, false, true, false, false, 3857, 0, false},
+            {"int64-nodata", GDT_Int64, 2, true, true, true, false, false, false, false, 3857, 0, false},
+            {"uint64-overviews", GDT_UInt64, 1, false, false, false, false, false, false, true, 3857, 0, false},
         };
         const int width = 333, height = 257;
         const std::vector<Window> windows = {
@@ -241,6 +262,20 @@ namespace
                 const json &meta = info.at("bands")[b - 1];
                 EXPECT_EQ(meta.at("colorInterp").get<std::string>(),
                           GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(band)));
+                if (GDALColorTableH table = GDALGetRasterColorTable(band); table != nullptr && b == 1)
+                {
+                    ASSERT_TRUE(meta.contains("colorTable"));
+                    ASSERT_EQ(static_cast<int>(meta.at("colorTable").size()), GDALGetColorEntryCount(table));
+                    for (int i = 0; i < GDALGetColorEntryCount(table); i++)
+                    {
+                        const GDALColorEntry *e = GDALGetColorEntry(table, i);
+                        EXPECT_EQ(meta.at("colorTable")[i], json::array({e->c1, e->c2, e->c3, e->c4})) << i;
+                    }
+                }
+                else
+                {
+                    EXPECT_FALSE(meta.contains("colorTable"));
+                }
                 int has = 0;
                 const double nodata = GDALGetRasterNoDataValue(band, &has);
                 EXPECT_EQ(meta.contains("nodata"), has != 0);
@@ -371,6 +406,10 @@ namespace
             {"float32-dem", GDT_Float32, 1, true, false, true, true, false, false, true, 32633},
             {"float64-mask-overviews", GDT_Float64, 3, true, false, false, false, true, false, true},
             {"float32-ms-6", GDT_Float32, 6, true, true, true, false, false, false, true, 4326},
+            {"bit1-strips", GDT_Byte, 1, false, false, false, false, false, false, false, 3857, 1, false},
+            {"float16-nodata-overviews", GDT_Float16, 1, true, false, true, false, false, false, true, 3857, 0, false},
+            {"int64-nodata", GDT_Int64, 2, true, true, true, false, false, false, false, 3857, 0, false},
+            {"uint64-overviews", GDT_UInt64, 1, false, false, false, false, false, false, true, 3857, 0, false},
         };
         const int width = 333, height = 257;
         for (const Case &c : cases)
@@ -432,6 +471,8 @@ namespace
             {{"uint16-mask", GDT_UInt16, 3, true, false, true, false, true}, "RGB", "VARI"},
             {{"float32-ms-5", GDT_Float32, 5, true, true, true, true, false, false, true, 4326}, "RGBReN", "NDVI"},
             {{"float64-mask-ms", GDT_Float64, 5, true, false, false, false, true, false, true}, "RGBReN", "NDRE"},
+            {{"float16-ms-5", GDT_Float16, 5, true, true, true, false, false, false, true, 4326, 0, false}, "RGBReN", "NDVI"},
+            {{"int64-ms-5", GDT_Int64, 5, true, false, true, false, false, false, false, 3857, 0, false}, "RGBReN", "NDRE"},
         };
         const int width = 333, height = 257;
         const std::vector<Window> windows = {
