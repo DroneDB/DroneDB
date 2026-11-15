@@ -725,3 +725,6 @@ Registry has to adopt first.
   The "rgba" pixels of a render are unchanged, but for a raster with a colour table: its render shows the colours
   of its classes in every format, resampled with the nearest pixel (2.6 showed the indices as grey in PNG and JPEG, and
   blended neighbouring classes with a bilinear warp).
+  Whether a raster is already an optimized COG (EPSG:3857, square tiles of 256 or 512 pixels, overviews), which
+  names the phases a COG build reports, is the rule of ddb-tilers' builder (`ddbtIsOptimizedCog`) instead of a
+  second GDAL check of the same rule, so the phases follow what the build does.

@@ -6,16 +6,13 @@
 
 #include <string>
 
-#include <gdal.h>
-
 namespace ddb {
 
-// Check if a GeoTIFF file is already an optimized Cloud Optimized GeoTIFF: Web Mercator, square
-// tiles of 256 or 512 pixels, overviews, read by the GTiff or COG driver
+// Whether a raster is already an optimized COG, which a COG build encodes again at its own grid
+// without a warp: in Web Mercator, tiled in square blocks of 256 or 512 pixels, with overviews (the
+// rule of ddb-tilers' builder, ddbtIsOptimizedCog). False for a file that cannot be read. A file of a
+// user: only in the raster helper (std::logic_error elsewhere, see gdal_open_policy.h).
 bool isOptimizedCog(const std::string& inputPath);
-
-// The same check on a dataset that is open already
-bool isOptimizedCogDataset(GDALDatasetH hDataset);
 
 // The fraction of a COG build from which its phase is "statistics", up to 1. ddb-tilers computes the
 // exact statistics of the bands in the same pass that warps, reduces and encodes the raster, so the
