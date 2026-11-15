@@ -3,14 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstring>
 #include <fstream>
-#include <iomanip>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -20,20 +17,17 @@
 #include "gdal_raii.h"
 #include "raster_utils.h"
 #include "gdal_priv.h"
-#include "gdal_utils.h"
 #include "cpl_conv.h"
 #include "cpl_vsi.h"
 #include "ogr_spatialref.h"
 
 #include "raster_region.h"
-#include "raster_cache.h"
 #include "vegetation.h"
 #include "vis_render.h"
 #include "tile_encoder.h"
 #include "tilers_raster.h"
 #include "exceptions.h"
 #include "logger.h"
-#include "parallel.h"
 #include "json.h"
 #include "mio.h"
 #include "raster_source.h"
@@ -82,30 +76,6 @@ namespace ddb
                 throw InvalidArgsException("Unsupported format: " + m);
             }
             return {FormatInfo::Kind::Image, format, format != ImageFormat::Jpeg, format == ImageFormat::Jpeg};
-        }
-
-        // Renders running in this process
-        std::atomic<int> rendersInFlight{0};
-
-        struct RenderInFlight
-        {
-            const int count;
-            RenderInFlight() : count(++rendersInFlight) {}
-            ~RenderInFlight() { --rendersInFlight; }
-        };
-
-        // Warper threads of a render (DDB_RENDER_THREADS, default 4; 0 = every core).
-        // gdalwarp's -multi only overlaps reading with warping: the bilinear warp of a
-        // 1024x768 map takes 150 ms on one thread and 60 ms on four. Only a render that
-        // runs alone gets them: under load every render already has a core, and more
-        // threads only contend (8 at once: 31 renders/s on one thread each, 22/s on four).
-        // The threads beyond the calling one take CPU tokens into `tokens`: keep it until
-        // the warp ends.
-        std::vector<std::string> warpThreadArgs(const RenderInFlight &render, parallel::CpuTokens &tokens)
-        {
-            static const int configured = parallel::threadsOption("DDB_RENDER_THREADS", 4);
-            tokens = parallel::tryAcquireThreads(render.count > 1 ? 1 : static_cast<size_t>(configured));
-            return {"-wo", parallel::gdalNumThreads(tokens)};
         }
 
         // The format of a request, with its background: a GeoTIFF is data and has none
@@ -315,12 +285,6 @@ namespace ddb
             writeRgba(std::move(rgba), width, height, background, fi, outBytes, outSize);
         }
 
-        std::string fmtDouble(double v) {
-            std::ostringstream os;
-            os << std::setprecision(17) << v;
-            return os.str();
-        }
-
         // Fails unless every requested band exists in the source (none requested: all do)
         void requireBandsInRange(const tilers::Raster &raster, const std::vector<int> &bands)
         {
@@ -382,10 +346,10 @@ namespace ddb
             image.geoTransform = warped.geoTransform;
             image.pixels.resize(pixels * static_cast<size_t>(colorBands + (white ? 0 : 1)));
             std::vector<float> alpha, values;
-            warped.readFloat(colorBands + 1, alpha);
+            warped.readBand(colorBands + 1, alpha);
             for (int b = 1; b <= colorBands; b++)
             {
-                warped.readFloat(b, values);
+                warped.readBand(b, values);
                 uint8_t *bytes = image.pixels.data() + static_cast<size_t>(b - 1) * pixels;
                 const auto &range = ranges[std::min(ranges.size() - 1, static_cast<size_t>(b - 1))];
                 for (size_t i = 0; i < pixels; i++)
@@ -667,8 +631,8 @@ namespace ddb
             RasterDataKind data_;
 
         public:
-            IndexLayerPlanner(const std::string &rasterPath, GDALDatasetH ds)
-                : detected_(VegetationEngine::instance().autoDetectFilter(rasterPath)), data_(rasterDataKind(ds)) {}
+            IndexLayerPlanner(const std::string &rasterPath, const RasterSource &source)
+                : detected_(VegetationEngine::instance().autoDetectFilter(rasterPath)), data_(rasterDataKind(source)) {}
 
             IndexChoice choose(const char *formulaId) const
             {
@@ -706,29 +670,18 @@ namespace ddb
         // the pixels that are opaque, which SAVI and EVI (they add constants) need and the ratio
         // indices do not. A band that declares a nodata value is left alone: the warper left its
         // nodata pixels out of the blend, so it is not diluted.
-        void restoreDilutedBands(GDALDatasetH warped, const std::vector<int> &bands, const RasterBandNodata &sourceNodata,
-                                 const std::vector<float> &coverage, int width, int height)
+        void restoreDilutedBands(tilers::WarpedImage &warped, const std::vector<int> &bands,
+                                 const RasterBandNodata &sourceNodata, const std::vector<float> &coverage)
         {
-            std::vector<float> plane(coverage.size());
             for (const int band : bands)
             {
                 if (sourceNodata.bands[band].has)
                     continue;
-                GDALRasterBandH hBand = GDALGetRasterBand(warped, band + 1);
-                if (GDALRasterIO(hBand, GF_Read, 0, 0, width, height, plane.data(), width, height, GDT_Float32, 0, 0) != CE_None)
-                    throw GDALException("Cannot read band " + std::to_string(band + 1) + " of the index render");
-                bool changed = false;
-                for (size_t i = 0; i < plane.size(); ++i)
-                {
+                // The warp is Float32: its samples in place
+                float *plane = reinterpret_cast<float *>(const_cast<uint8_t *>(warped.band(band + 1)));
+                for (size_t i = 0; i < coverage.size(); ++i)
                     if (coverage[i] > 0.0f && coverage[i] < 1.0f && std::isfinite(plane[i]))
-                    {
                         plane[i] /= coverage[i];
-                        changed = true;
-                    }
-                }
-                if (changed &&
-                    GDALRasterIO(hBand, GF_Write, 0, 0, width, height, plane.data(), width, height, GDT_Float32, 0, 0) != CE_None)
-                    throw GDALException("Cannot write band " + std::to_string(band + 1) + " of the index render");
             }
         }
 
@@ -743,10 +696,10 @@ namespace ddb
             bool warperAlpha = false;
         };
 
-        SourceTransparency sourceTransparency(GDALDatasetH hSrc)
+        SourceTransparency sourceTransparency(const RasterSource &source)
         {
             SourceTransparency transparency;
-            transparency.nodata = detectBandNodata(hSrc, GDALGetRasterCount(hSrc));
+            transparency.nodata = detectBandNodata(source, source.bandCount());
             transparency.hasAlpha = transparency.nodata.alphaBandIdx >= 0;
             const bool hasNodata = std::any_of(transparency.nodata.bands.begin(), transparency.nodata.bands.end(),
                                                [](const BandNodata &nodata) { return nodata.has; });
@@ -798,44 +751,32 @@ namespace ddb
             }
         };
 
-        // The gdalwarp arguments of the window of the index layer (the bands of `bands` as Float32, into
-        // memory), without the warper's threads
-        std::vector<std::string> indexWarpArgs(const RegionRequest &request, const std::string &srs,
-                                               const IndexWarpBands &bands, bool warperAlpha)
+        // The warp of the window of the index layer: the bands of `bands` as Float32, into memory, as gdalwarp
+        // -ot Float32 -nosrcalpha -setci makes it. The alpha band, if there is one, is warped like the others, so
+        // the engine reads the source's own 0 (no data) and not what the warper makes of it: with a source alpha
+        // the warper rescales it by the maximum of the band's type (65535 for UInt16, where ODM writes 255), which
+        // turned a fully opaque raster into alpha 0, and it turns the pixels that are nodata in a band into 0
+        // instead of leaving them nodata. (And it takes the alpha for a validity of 0 or 1: the edge of the alpha
+        // would not be anti-aliased.) The warped alpha is then the coverage of the pixel, which is what the output
+        // alpha is made from below. The bands keep their names (-setci), so the warp keeps naming its alpha band;
+        // the warper's own alpha (-dstalpha, DST_ALPHA_MAX 255: the default of a Float32 output) when the raster
+        // says nothing of where it has no pixels.
+        tilers::WarpRequest indexWarp(const RegionRequest &request, const std::string &srs, const IndexWarpBands &bands,
+                                      bool warperAlpha)
         {
-            const auto &bbox = request.bbox;
-            std::vector<std::string> args = {
-                "-of", "MEM",
-                "-t_srs", srs,
-                "-te", fmtDouble(bbox[0]), fmtDouble(bbox[1]),
-                       fmtDouble(bbox[2]), fmtDouble(bbox[3]),
-                "-te_srs", srs,
-                "-ts", std::to_string(request.width), std::to_string(request.height),
-                "-r", "bilinear", "-multi",
-                "-ot", "Float32",
-                // The alpha band, if there is one, is warped like the others, so the engine reads the
-                // source's own 0 (no data) and not what the warper makes of it: with a source alpha the
-                // warper rescales it by the maximum of the band's type (65535 for UInt16, where ODM writes
-                // 255), which turned a fully opaque raster into alpha 0, and it turns the pixels that are
-                // nodata in a band into 0 instead of leaving them nodata. (And it takes the alpha for a
-                // validity of 0 or 1: the edge of the alpha would not be anti-aliased.) The warped alpha
-                // is then the coverage of the pixel, which is what the output alpha is made from below.
-                "-nosrcalpha",
-                // The colour interpretation of the bands, so the warp keeps naming its alpha band
-                "-setci"
-            };
+            tilers::WarpRequest warp;
+            warp.targetCrs = srs;
+            warp.extent = request.bbox;
+            warp.extentCrs = srs;
+            warp.width = request.width;
+            warp.height = request.height;
+            warp.outputType = "Float32";
+            warp.noSrcAlpha = true;
+            warp.setColorInterp = true;
             for (const int band : bands.source())
-            {
-                args.emplace_back("-b");
-                args.emplace_back(std::to_string(band + 1));
-            }
-            if (warperAlpha)
-            {
-                args.emplace_back("-dstalpha");
-                args.emplace_back("-wo");
-                args.emplace_back("DST_ALPHA_MAX=" + std::to_string(static_cast<int>(kWarperAlphaMax)));
-            }
-            return args;
+                warp.bands.push_back(band + 1);
+            warp.dstAlpha = warperAlpha;
+            return warp;
         }
 
         // The coverage of every pixel of the warped window, from its alpha band: 1 inside the
@@ -844,20 +785,17 @@ namespace ddb
         // the value that is opaque is derived from the band's data (kept with the dataset). Empty
         // when the raster says nothing of where it has no pixels (a nodata value alone leaves them
         // out of the formula).
-        std::vector<float> warpedCoverage(GDALDatasetH hWarp, const OpenedDataset &source,
-                                          const SourceTransparency &transparency, const RasterBandNodata &warpedNodata,
-                                          const RegionRequest &request)
+        std::vector<float> warpedCoverage(const tilers::WarpedImage &warped, const RasterSource &source,
+                                          const SourceTransparency &transparency, const RasterBandNodata &warpedNodata)
         {
             std::vector<float> coverage;
             if (!transparency.hasAlpha && !transparency.warperAlpha)
                 return coverage;
-            const int alphaBand = transparency.hasAlpha ? warpedNodata.alphaBandIdx + 1 : GDALGetRasterCount(hWarp);
-            const double opaque =
-                transparency.hasAlpha ? source.alphaOpaque(transparency.nodata.alphaBandIdx + 1) : kWarperAlphaMax;
-            coverage.resize(static_cast<size_t>(request.width) * request.height);
-            if (GDALRasterIO(GDALGetRasterBand(hWarp, alphaBand), GF_Read, 0, 0, request.width, request.height,
-                             coverage.data(), request.width, request.height, GDT_Float32, 0, 0) != CE_None)
-                throw GDALException("Cannot read the alpha band of the index render of " + request.inputPath);
+            const int alphaBand = transparency.hasAlpha ? warpedNodata.alphaBandIdx + 1 : warped.bandCount();
+            const double opaque = transparency.hasAlpha
+                                      ? alphaOpaqueValue(source, transparency.nodata.alphaBandIdx + 1)
+                                      : kWarperAlphaMax;
+            warped.readBand(alphaBand, coverage);
             for (float &c : coverage)
                 c = std::isfinite(c) ? static_cast<float>(std::clamp(c / opaque, 0.0, 1.0)) : 0.0f;
             return coverage;
@@ -866,8 +804,10 @@ namespace ddb
 
     std::vector<std::string> rasterIndexLayerIndices(const std::string &rasterPath)
     {
-        const auto source = RasterCache::instance().acquireDataset(rasterPath);
-        const IndexLayerPlanner planner(rasterPath, source->handle());
+        const auto raster = tilers::Raster::openInput(rasterPath);
+        if (!raster)
+            throw GDALException("Cannot open raster: " + rasterPath);
+        const IndexLayerPlanner planner(rasterPath, *rasterSourceOf(*raster));
         std::vector<std::string> indices;
         for (const char *formula : kIndexFormulas)
             if (planner.choose(formula).refusal.empty())
@@ -894,54 +834,43 @@ namespace ddb
         // Step 1: which bands the index reads, over the source (the warp makes every band Float32,
         // so the type of the data is the source's), then warp them and the alpha band into memory at
         // the target window and resolution.
-        const auto source = RasterCache::instance().acquireDataset(inputPath);
-        GDALDatasetH hSrc = source->handle();
+        const auto raster = tilers::Raster::openInput(inputPath);
+        if (!raster)
+            throw GDALException("Cannot open raster: " + inputPath);
+        const auto source = rasterSourceOf(*raster);
 
-        const IndexChoice choice = IndexLayerPlanner(inputPath, hSrc).choose(formulaId);
+        const IndexChoice choice = IndexLayerPlanner(inputPath, *source).choose(formulaId);
         if (!choice.refusal.empty())
             throw InvalidArgsException(choice.refusal);
 
-        const SourceTransparency transparency = sourceTransparency(hSrc);
+        const SourceTransparency transparency = sourceTransparency(*source);
         const IndexWarpBands warpBands(choice, transparency);
 
-        std::vector<std::string> argStore = indexWarpArgs(request, srs, warpBands, transparency.warperAlpha);
-        const RenderInFlight inFlight;
-        parallel::CpuTokens warpTokens;
-        for (const auto &arg : warpThreadArgs(inFlight, warpTokens))
-            argStore.push_back(arg);
-        CPLStringList argv = cslFromStrings(argStore);
-        const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.List(), nullptr));
-        if (!opts) throw GDALException("Cannot build warp options");
-        cancel::GdalProgress progress; // the warp stops when the call is canceled
-        progress.attach(opts.get());
-        int usageErr = 0;
-        auto warp = adoptDataset(GDALWarp("", nullptr, 1, &hSrc, opts.get(), &usageErr));
-        if (!warp || usageErr) {
-            cancel::throwIfCanceled();
-            throw GDALException("Warp failed for index render: " + inputPath);
-        }
-        GDALDatasetH hWarp = datasetHandle(warp);
+        cancel::throwIfCanceled();
+        tilers::WarpedImage warped =
+            tilers::warp(raster->file(), indexWarp(request, srs, warpBands, transparency.warperAlpha));
         const size_t npx = static_cast<size_t>(width) * height;
 
         // Step 2: the coverage of every pixel, from the alpha band of the warp
         const RasterBandNodata warpedNodata = warpBands.nodata(transparency.nodata);
         const BandFilter filter = warpBands.filter(choice.filter);
-        const std::vector<float> coverage = warpedCoverage(hWarp, *source, transparency, warpedNodata, request);
+        const std::vector<float> coverage = warpedCoverage(warped, *source, transparency, warpedNodata);
         if (transparency.hasAlpha)
-            restoreDilutedBands(hWarp, VegetationEngine::bandsRead(*choice.formula, filter), warpedNodata, coverage, width, height);
+            restoreDilutedBands(warped, VegetationEngine::bandsRead(*choice.formula, filter), warpedNodata, coverage);
 
         // Step 3: the shared engine reads the bands of the warped window as Float32, leaves the
         // nodata and transparent pixels out of the formula (they are rendered with alpha = 0
         // instead of being colorized as if they were valid samples) and colorizes the values
         // over the range of the formula; the alpha of the output is then the coverage.
-        FormulaPlan plan = planFormula(hWarp, formulaId, filter, "", false);
+        const auto warpedSource = rasterSourceOf(warped);
+        FormulaPlan plan = planFormula(*warpedSource, formulaId, filter, "", false);
         plan.colormap = VegetationEngine::instance().getColormap(kIndexColormap, true);
         const RasterWindow window{0, 0, width, height, width, height};
-        std::vector<uint8_t> rgba = renderPlannedFormulaRgba(hWarp, plan, window, "", NodataMask::BandsRead);
+        std::vector<uint8_t> rgba = renderPlannedFormulaRgba(*warpedSource, plan, window, "", NodataMask::BandsRead);
         if (!coverage.empty())
             for (size_t i = 0; i < npx; ++i)
                 rgba[i * 4 + 3] = static_cast<uint8_t>(std::lround(rgba[i * 4 + 3] * coverage[i]));
-        warp.reset();
+        warped = {};
 
         // Step 4: the image in the requested format
         VsiFreePtr<GByte> pixels(static_cast<GByte *>(VSIMalloc(rgba.size())));

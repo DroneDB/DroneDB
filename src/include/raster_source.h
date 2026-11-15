@@ -19,6 +19,7 @@ namespace ddb
     namespace tilers
     {
         class Raster;
+        struct WarpedImage;
     }
 
     /// The bands of a raster that libddb reads its values from (statistics, formulas, band values): a dataset GDAL
@@ -88,6 +89,17 @@ namespace ddb
     std::unique_ptr<RasterSource> rasterSourceOf(GDALDatasetH ds);
     /// The source of a raster ddb-tilers reads, which must outlive it
     std::unique_ptr<RasterSource> rasterSourceOf(const tilers::Raster &raster);
+    /// The source of a warp in memory (tilers::WarpedImage), as GDAL reads gdalwarp's MEM dataset: the nodata
+    /// value of every band but the alpha band, the colour interpretations, an alpha band that masks the other
+    /// bands of 2 or 4 when they have no nodata value (read as Byte), read pixel for pixel. The image must outlive
+    /// it.
+    std::unique_ptr<RasterSource> rasterSourceOf(const tilers::WarpedImage &image);
+
+    /// The value of the alpha band `band` of the source that is opaque (alphaOpaqueValue of a GDAL band): the
+    /// maximum of its full-resolution pixels (a sample of 4 x 4 windows, then of 16 x 16 when it has no value above
+    /// 0, then every pixel) rounded up to the all-ones value that holds it; without a value above 0, the maximum of
+    /// its type (1 for floating-point types).
+    double alphaOpaqueValue(const RasterSource &source, int band);
 
 }
 

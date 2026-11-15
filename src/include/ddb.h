@@ -189,9 +189,9 @@ extern "C"
      *                    (created when first needed). The registry credentials of the ddb command
      *                    line stay in the profile folder.
      *
-     * The per-section thread counts DDB_INDEX_THREADS, DDB_BUILD_THREADS, DDB_RENDER_THREADS and
-     * DDB_OBJ2TILES_MAX_CORES (environment or GDAL config options) stay what a section asks for;
-     * the CPU pool decides how many of them run. */
+     * The per-section thread counts DDB_INDEX_THREADS, DDB_BUILD_THREADS and DDB_OBJ2TILES_MAX_CORES
+     * (environment or GDAL config options) stay what a section asks for; the CPU pool decides how many
+     * of them run. The renders of a region run on the pool of ddb-tilers, before its bulk work. */
 
     /** Changes settings of the process configuration (see above). Callable at any time, from any
      * thread, before DDBRegisterProcess too and concurrently with any other call (until

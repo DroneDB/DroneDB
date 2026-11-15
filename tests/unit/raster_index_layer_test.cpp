@@ -297,11 +297,13 @@ namespace
     // The layer warps into memory the bands its index reads and the alpha band, not every band of the raster
     // into a GeoTIFF it reads back: NDVI of a raster of R, G, B, RedEdge, NIR and alpha warps R, NIR and
     // alpha, NDRE RedEdge, NIR and alpha, EVI R, B, NIR and alpha, and the image is the same
-    TEST_F(RasterIndexLayer, theWarpHoldsTheBandsTheIndexReadsInMemory)
+    // The warp of the layer is ddb-tilers' (the bands the index reads, Float32, in memory): GDAL creates no
+    // dataset for it, neither in memory nor a GeoTIFF
+    TEST_F(RasterIndexLayer, theWarpCreatesNoGdalDataset)
     {
         TestArea ta(TEST_NAME, true);
         const fs::path raster = makeMultispectralWithAlpha(ta.getPath("alpha.tif"), GDT_Float32, true);
-        for (const auto &[index, bands] : std::vector<std::pair<std::string, int>>{{"NDVI", 3}, {"NDRE", 3}, {"EVI", 4}})
+        for (const char *index : {"NDVI", "NDRE", "EVI"})
         {
             SCOPED_TRACE(index);
             testutils::DecodedImage img;
@@ -311,11 +313,8 @@ namespace
                 img = renderLayer(raster, index);
                 created = log.containing("GDALDriver::Create(");
             }
-            ASSERT_FALSE(created.empty());
-            const std::string size = std::to_string(golden::kSize);
-            EXPECT_NE(created.front().find("Create(MEM,," + size + "," + size + "," + std::to_string(bands) + ",Float32"),
-                      std::string::npos)
-                << created.front();
+            for (const auto &message : created)
+                EXPECT_EQ(message.find("Create(MEM"), std::string::npos) << message;
             for (const auto &message : created)
                 EXPECT_EQ(message.find("GTiff"), std::string::npos) << message;
             EXPECT_EQ(img.width, golden::kSize);

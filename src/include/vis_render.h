@@ -205,9 +205,15 @@ namespace ddb
     /// outPixels() * 4 bytes, nodata transparent. The display range is the explicit "min,max"
     /// rescale, else the range of the formula, else the p2-p98 of the computed values. `mask` is
     /// the nodata rule of computeFormulaValues.
-    std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+    std::vector<uint8_t> renderPlannedFormulaRgba(const RasterSource &source, const FormulaPlan &plan,
                                                   const RasterWindow &window, const std::string &rescale,
                                                   NodataMask mask = NodataMask::AnyBand);
+    inline std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+                                                         const RasterWindow &window, const std::string &rescale,
+                                                         NodataMask mask = NodataMask::AnyBand)
+    {
+        return renderPlannedFormulaRgba(*rasterSourceOf(ds), plan, window, rescale, mask);
+    }
 
     /// Renders visParams.formula (a vegetation index) over window of ds with its
     /// colormap: RGBA interleaved, outPixels() * 4 bytes, nodata transparent. thermalTags as

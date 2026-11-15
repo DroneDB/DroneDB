@@ -136,6 +136,9 @@ namespace ddb::tilers
         std::vector<int> bands;           // -b (1-based; none: every band but a last alpha band)
         bool dstAlpha = false;            // -dstalpha
         std::optional<double> dstNodata;  // -dstnodata
+        std::string outputType;           // -ot (GDAL's name; "": the source's type)
+        bool noSrcAlpha = false;          // -nosrcalpha: a last alpha band is warped as data
+        bool setColorInterp = false;      // -setci: the bands named as their source bands
     };
 
     // The output of a warp: what GDAL reports of gdalwarp's MEM dataset, and its samples
@@ -154,8 +157,8 @@ namespace ddb::tilers
         size_t sampleSize() const;
         // The samples of band `band1`
         const uint8_t *band(int band1) const;
-        // The samples of band `band1` as floats (GDALCopyWords to Float32)
-        void readFloat(int band1, std::vector<float> &out) const;
+        // The samples of band `band1` as T: float or double (GDALCopyWords to Float32 or Float64)
+        template <typename T> void readBand(int band1, std::vector<T> &out) const;
     };
 
     // Warps `file` (a file of libddb: Raster::file()). @throws InvalidArgsException, GDALException

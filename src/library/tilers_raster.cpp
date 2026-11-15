@@ -57,13 +57,13 @@ namespace ddb::tilers
             throw GDALException("Unsupported data type: " + type);
         }
 
-        template <typename T> void toFloat(const uint8_t *in, size_t count, float *out)
+        template <typename From, typename To> void convertSamples(const uint8_t *in, size_t count, To *out)
         {
             for (size_t i = 0; i < count; i++)
             {
-                T v;
-                std::memcpy(&v, in + i * sizeof(T), sizeof(T));
-                out[i] = static_cast<float>(v);
+                From v;
+                std::memcpy(&v, in + i * sizeof(From), sizeof(From));
+                out[i] = static_cast<To>(v);
             }
         }
     }
@@ -274,23 +274,25 @@ namespace ddb::tilers
         return pixels.data() + static_cast<size_t>(band1 - 1) * static_cast<size_t>(width) * height * sampleSize();
     }
 
-    void WarpedImage::readFloat(int band1, std::vector<float> &out) const
+    template <typename T> void WarpedImage::readBand(int band1, std::vector<T> &out) const
     {
         const size_t count = static_cast<size_t>(width) * height;
         out.resize(count);
         const uint8_t *in = band(band1);
-        if (dataType == "Byte") toFloat<uint8_t>(in, count, out.data());
-        else if (dataType == "Int8") toFloat<int8_t>(in, count, out.data());
-        else if (dataType == "UInt16") toFloat<uint16_t>(in, count, out.data());
-        else if (dataType == "Int16") toFloat<int16_t>(in, count, out.data());
-        else if (dataType == "UInt32") toFloat<uint32_t>(in, count, out.data());
-        else if (dataType == "Int32") toFloat<int32_t>(in, count, out.data());
-        else if (dataType == "UInt64") toFloat<uint64_t>(in, count, out.data());
-        else if (dataType == "Int64") toFloat<int64_t>(in, count, out.data());
-        else if (dataType == "Float32") toFloat<float>(in, count, out.data());
-        else if (dataType == "Float64") toFloat<double>(in, count, out.data());
+        if (dataType == "Byte") convertSamples<uint8_t>(in, count, out.data());
+        else if (dataType == "Int8") convertSamples<int8_t>(in, count, out.data());
+        else if (dataType == "UInt16") convertSamples<uint16_t>(in, count, out.data());
+        else if (dataType == "Int16") convertSamples<int16_t>(in, count, out.data());
+        else if (dataType == "UInt32") convertSamples<uint32_t>(in, count, out.data());
+        else if (dataType == "Int32") convertSamples<int32_t>(in, count, out.data());
+        else if (dataType == "UInt64") convertSamples<uint64_t>(in, count, out.data());
+        else if (dataType == "Int64") convertSamples<int64_t>(in, count, out.data());
+        else if (dataType == "Float32") convertSamples<float>(in, count, out.data());
+        else if (dataType == "Float64") convertSamples<double>(in, count, out.data());
         else throw GDALException("Unsupported data type: " + dataType);
     }
+    template void WarpedImage::readBand<float>(int, std::vector<float> &) const;
+    template void WarpedImage::readBand<double>(int, std::vector<double> &) const;
 
     WarpedImage warp(const fs::path &file, const WarpRequest &request)
     {
@@ -305,6 +307,12 @@ namespace ddb::tilers
             options["dstAlpha"] = true;
         if (request.dstNodata)
             options["dstNodata"] = *request.dstNodata;
+        if (!request.outputType.empty())
+            options["outputType"] = request.outputType;
+        if (request.noSrcAlpha)
+            options["noSrcAlpha"] = true;
+        if (request.setColorInterp)
+            options["setColorInterp"] = true;
         char *infoText = nullptr;
         uint8_t *samples = nullptr;
         size_t size = 0;

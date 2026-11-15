@@ -376,14 +376,14 @@ namespace ddb
                 values[std::min(values.size() - 1, static_cast<size_t>(values.size() * 0.98))]};
     }
 
-    std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+    std::vector<uint8_t> renderPlannedFormulaRgba(const RasterSource &source, const FormulaPlan &plan,
                                                   const RasterWindow &window, const std::string &rescale,
                                                   NodataMask mask)
     {
         if (plan.colormap == nullptr)
             throw InvalidArgsException("renderPlannedFormulaRgba: the plan has no colormap");
         FormulaBuffers buffers;
-        computeFormulaValues(ds, plan, window, buffers, mask);
+        computeFormulaValues(source, plan, window, buffers, mask);
 
         // Display range: explicit, the formula's own, or p2-p98 of the rendered values
         std::pair<float, float> range;

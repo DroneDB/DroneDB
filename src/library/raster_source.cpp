@@ -4,9 +4,14 @@
 #include "raster_source.h"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
+#include <mutex>
+#include <unordered_map>
 
 #include "cancellation.h"
 #include "exceptions.h"
+#include "fileversion.h"
 #include "mio.h"
 #include "tilers_raster.h"
 
@@ -341,6 +346,245 @@ namespace ddb
             const RasterSource &source_;
             double nodata_;
         };
+    }
+
+    namespace
+    {
+        // gdalwarp's MEM dataset of a warp
+        class WarpedImageSource final : public RasterSource
+        {
+        public:
+            explicit WarpedImageSource(const tilers::WarpedImage &image) : image_(image) {}
+
+            std::string file() const override { return std::string(); }
+            int width() const override { return image_.width; }
+            int height() const override { return image_.height; }
+            int bandCount() const override { return image_.bandCount(); }
+            BandNodata nodata(int band) const override
+            {
+                if (band == image_.alphaBand || !image_.nodata)
+                    return {};
+                return {true, *image_.nodata};
+            }
+            GDALDataType dataType(int /*band*/) const override { return GDALGetDataTypeByName(image_.dataType.c_str()); }
+            std::string colorInterp(int band) const override { return image_.colorInterp.at(static_cast<size_t>(band - 1)); }
+            std::optional<double> scale(int) const override { return std::nullopt; }
+            std::optional<double> offset(int) const override { return std::nullopt; }
+            std::string unit(int) const override { return std::string(); }
+            std::string description(int) const override { return std::string(); }
+            std::optional<std::string> metadataItem(int, const std::string &) const override { return std::nullopt; }
+            bool hasMask(int band) const override { return maskBand(band) > 0; }
+            void blockSize(int &w, int &h) const override
+            {
+                w = image_.width;
+                h = image_.height;
+            }
+            int overviewCount() const override { return 0; }
+            std::optional<std::pair<int, int>> overviewSize(const std::vector<int> &, int) const override
+            {
+                return std::nullopt;
+            }
+            void read(int level, const RasterWindow &window, const std::vector<int> &bands, double *samples,
+                      uint8_t *mask) const override
+            {
+                if (level != 0)
+                    throw InvalidArgsException("A warped image has no overviews");
+                readInto(window, bands, samples, mask);
+            }
+            void read(const RasterWindow &window, const std::vector<int> &bands, float *samples,
+                      uint8_t *mask) const override
+            {
+                readInto(window, bands, samples, mask);
+            }
+
+        private:
+            // GDALRasterBand's default mask: a band without nodata of 2 or 4 bands whose last one is alpha is
+            // masked by it (GMF_ALPHA | GMF_PER_DATASET); 0 when it has none
+            int maskBand(int band) const
+            {
+                const int n = image_.bandCount();
+                if (nodata(band).has || band == n || (n != 2 && n != 4))
+                    return 0;
+                return image_.colorInterp.back() == "Alpha" ? n : 0;
+            }
+
+            template <typename T>
+            void readInto(const RasterWindow &window, const std::vector<int> &bands, T *samples, uint8_t *mask) const
+            {
+                if (window.outWidth != window.xsize || window.outHeight != window.ysize)
+                    throw InvalidArgsException("A warped image is read pixel for pixel");
+                std::vector<T> plane;
+                const size_t count = static_cast<size_t>(window.xsize) * window.ysize;
+                const auto copy = [&](int band, const auto &put) {
+                    image_.readBand(band, plane);
+                    for (int y = 0; y < window.ysize; y++)
+                        for (int x = 0; x < window.xsize; x++)
+                            put(static_cast<size_t>(y) * window.xsize + x,
+                                plane[static_cast<size_t>(window.y + y) * image_.width + (window.x + x)]);
+                };
+                for (size_t i = 0; i < bands.size(); i++)
+                    copy(bands[i], [&](size_t at, T v) { samples[i * count + at] = v; });
+                const int masked = bands.empty() ? 0 : maskBand(bands.front());
+                if (mask != nullptr && masked > 0)
+                    // The alpha band read as Byte (GDALCopyWords: clamped, rounded)
+                    copy(masked, [&](size_t at, T v) {
+                        mask[at] = !(v > 0) ? 0 : v >= 255 ? 255 : static_cast<uint8_t>(v + T(0.5));
+                    });
+            }
+
+            const tilers::WarpedImage &image_;
+        };
+    }
+
+    std::unique_ptr<RasterSource> rasterSourceOf(const tilers::WarpedImage &image)
+    {
+        return std::make_unique<WarpedImageSource>(image);
+    }
+
+    namespace
+    {
+        // The largest finite value of band `band` in a grid of `grid` x `grid` windows, one in the block under
+        // each grid point (at most kAlphaSampleWindow pixels a side, centred on the point and kept in that block,
+        // so a window decodes one block: one row of a strip-organised raster), read at full resolution. 0 when
+        // none of them holds a value above 0
+        constexpr int kAlphaSampleWindow = 256;
+
+        double sampledFullResolutionMaximum(const RasterSource &source, int band, int grid)
+        {
+            const int w = source.width(), h = source.height();
+            int bw = 0, bh = 0;
+            source.blockSize(bw, bh);
+            if (bw <= 0 || bh <= 0)
+                bw = bh = kAlphaSampleWindow;
+            std::vector<double> buffer;
+            double maximum = 0.0;
+            for (int gy = 0; gy < grid; gy++)
+                for (int gx = 0; gx < grid; gx++)
+                {
+                    const int cx = static_cast<int>((gx + 0.5) * w / grid);
+                    const int cy = static_cast<int>((gy + 0.5) * h / grid);
+                    // The block under the grid point, cut at the raster's edge
+                    const int bx0 = cx / bw * bw, by0 = cy / bh * bh;
+                    const int bx1 = std::min(bx0 + bw, w), by1 = std::min(by0 + bh, h);
+                    const int ww = std::min(bx1 - bx0, kAlphaSampleWindow), wh = std::min(by1 - by0, kAlphaSampleWindow);
+                    const int x0 = std::clamp(cx - ww / 2, bx0, bx1 - ww), y0 = std::clamp(cy - wh / 2, by0, by1 - wh);
+                    buffer.resize(static_cast<size_t>(ww) * wh);
+                    source.read(0, RasterWindow{x0, y0, ww, wh, ww, wh}, {band}, buffer.data(), nullptr);
+                    for (const double v : buffer)
+                        if (std::isfinite(v) && v > maximum)
+                            maximum = v;
+                }
+            return maximum;
+        }
+
+        // The maximum of every pixel of the band but its nodata value (GDALComputeRasterMinMax, exact), by rows
+        double exactMaximum(const RasterSource &source, int band)
+        {
+            const BandNodata nodata = source.nodata(band);
+            const int w = source.width(), h = source.height();
+            constexpr int kRows = 256;
+            std::vector<double> buffer;
+            double maximum = -std::numeric_limits<double>::infinity();
+            for (int y = 0; y < h; y += kRows)
+            {
+                const int rows = std::min(kRows, h - y);
+                buffer.resize(static_cast<size_t>(w) * rows);
+                source.read(0, RasterWindow{0, y, w, rows, w, rows}, {band}, buffer.data(), nullptr);
+                for (const double v : buffer)
+                    if (std::isfinite(v) && !isNodata(v, nodata) && v > maximum)
+                        maximum = v;
+            }
+            return maximum;
+        }
+    }
+
+    namespace
+    {
+        // The opaque values derived for the alpha bands of files, by version of the file: the index renders of a
+        // map ask for the one of their raster on every tile (a sample of 16 windows)
+        class AlphaOpaqueValues
+        {
+        public:
+            std::optional<double> find(const std::string &key)
+            {
+                std::lock_guard lock(mutex_);
+                const auto it = values_.find(key);
+                return it == values_.end() ? std::nullopt : std::optional<double>(it->second);
+            }
+            void put(const std::string &key, double value)
+            {
+                std::lock_guard lock(mutex_);
+                if (values_.size() >= kMax)
+                    values_.clear();
+                values_[key] = value;
+            }
+
+        private:
+            static constexpr size_t kMax = 1024;
+            std::mutex mutex_;
+            std::unordered_map<std::string, double> values_;
+        };
+
+        AlphaOpaqueValues &opaqueValues()
+        {
+            static AlphaOpaqueValues values;
+            return values;
+        }
+
+        double deriveAlphaOpaqueValue(const RasterSource &source, int band);
+    }
+
+    double alphaOpaqueValue(const RasterSource &source, int band)
+    {
+        const std::string file = source.file();
+        if (file.empty())
+            return deriveAlphaOpaqueValue(source, band);
+        const std::string key = file + "|" + fileVersion(io::fromUtf8(file)) + "|" + std::to_string(band);
+        if (const auto known = opaqueValues().find(key))
+            return *known;
+        const double value = deriveAlphaOpaqueValue(source, band);
+        opaqueValues().put(key, value);
+        return value;
+    }
+
+    namespace
+    {
+        double deriveAlphaOpaqueValue(const RasterSource &source, int band)
+        {
+            // Not GDAL's approximate maximum: it reads the overviews, and the cubic overviews of a COG ring above the
+            // opaque value at the edge of the data (266 for 255, which made 511 opaque)
+            double maximum = 0.0;
+            bool sampled = false;
+            try
+            {
+                for (const int grid : {4, 16})
+                {
+                    maximum = sampledFullResolutionMaximum(source, band, grid);
+                    sampled = true;
+                    if (maximum > 0.0)
+                        break;
+                }
+                if (!(maximum > 0.0))
+                    maximum = exactMaximum(source, band);
+            }
+            catch (const AppException &)
+            {
+                // A band with nothing to read is not an error here
+                sampled = false;
+            }
+            if (sampled && maximum > 0.0)
+            {
+                // The all-ones value that holds the maximum: 2^bits - 1
+                const double bits = std::ceil(std::log2(std::ceil(maximum) + 1.0));
+                return std::ldexp(1.0, static_cast<int>(bits)) - 1.0;
+            }
+            const GDALDataType type = source.dataType(band);
+            if (GDALDataTypeIsFloating(type))
+                return 1.0;
+            const int bits = GDALGetDataTypeSizeBits(type) - (GDALDataTypeIsSigned(type) ? 1 : 0);
+            return std::ldexp(1.0, bits) - 1.0;
+        }
+
     }
 
     std::unique_ptr<RasterSource> withNodataOverride(const RasterSource &source, double nodata)

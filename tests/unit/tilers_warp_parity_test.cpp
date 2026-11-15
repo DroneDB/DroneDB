@@ -137,8 +137,20 @@ namespace
         bool dstAlpha = false;
         std::optional<double> dstNodata;
         std::string extentCrs;            // -te_srs when it is not crs
+        std::string outputType;           // -ot
+        bool noSrcAlpha = false;          // -nosrcalpha
+        bool setci = false;               // -setci
 
         Render withNearest() const { Render r = *this; r.nearest = true; return r; }
+        // The warp of the index layer: Float32, the alpha band as data, the bands named
+        Render asIndexWarp() const
+        {
+            Render r = *this;
+            r.outputType = "Float32";
+            r.noSrcAlpha = true;
+            r.setci = true;
+            return r;
+        }
         Render withBands(std::vector<int> b) const { Render r = *this; r.bands = std::move(b); return r; }
         Render withDstAlpha() const { Render r = *this; r.dstAlpha = true; return r; }
         Render withDstNodata(double v) const { Render r = *this; r.dstNodata = v; return r; }
@@ -210,6 +222,20 @@ namespace
             args.push_back("-dstnodata");
             args.push_back(number(*r.dstNodata));
         }
+        if (!r.outputType.empty())
+        {
+            args.push_back("-ot");
+            args.push_back(r.outputType);
+        }
+        if (r.noSrcAlpha)
+            args.push_back("-nosrcalpha");
+        if (r.setci)
+            args.push_back("-setci");
+        if (r.dstAlpha && !r.outputType.empty())
+        {
+            args.push_back("-wo");
+            args.push_back("DST_ALPHA_MAX=255");
+        }
         CPLStringList argv;
         for (const auto &a : args)
             argv.AddString(a.c_str());
@@ -233,6 +259,12 @@ namespace
             options["dstAlpha"] = true;
         if (r.dstNodata)
             options["dstNodata"] = *r.dstNodata;
+        if (!r.outputType.empty())
+            options["outputType"] = r.outputType;
+        if (r.noSrcAlpha)
+            options["noSrcAlpha"] = true;
+        if (r.setci)
+            options["setColorInterp"] = true;
         char *infoText = nullptr;
         uint8_t *pixels = nullptr;
         size_t size = 0;
@@ -352,6 +384,12 @@ namespace
                                   .withExtentCrs("EPSG:3857"));
             renders.push_back(render("te_srs utm", "EPSG:4326", extentOf(file, "EPSG:32633", 1.3), 300, 300)
                                   .withExtentCrs("EPSG:32633"));
+            // The warps of the index layer: -ot Float32 -nosrcalpha -setci, the bands of a formula and the
+            // alpha band, -dstalpha when the raster says nothing of where it has no pixels
+            renders.push_back(render("index", "EPSG:3857", extentOf(file, "EPSG:3857", 1.1), 256, 256).asIndexWarp());
+            renders.push_back(
+                render("index dstalpha", "EPSG:3857", extentOf(file, "EPSG:3857", 1.1), 256, 256).asIndexWarp().withDstAlpha());
+            renders.push_back(render("index small", "EPSG:4326", extentOf(file, "EPSG:4326", 1.0), 60, 45).asIndexWarp());
             for (const Render &r : renders)
                 expectWarpedAsGdalWarp(file, r);
         }

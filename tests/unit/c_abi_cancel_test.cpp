@@ -589,6 +589,28 @@ TEST_F(CancelToken, canceledExportsLogNoErrors) {
         ASSERT_DDB_OK(DDBSetThreadCancelToken(token.get()));
         EXPECT_EQ(call(), DDBERR_CANCELED);
     }
+    // A GDAL operation its progress callback stops (cancel::GdalProgress, which the vector builds, the volumes,
+    // the contours and the thumbnails attach): the calls above stop before they reach GDAL, this one in it
+    {
+        HostToken token;
+        ASSERT_DDB_OK(DDBCancel(token.get()));
+        ASSERT_DDB_OK(DDBSetThreadCancelToken(token.get()));
+        cancel::GdalProgress progress;
+        CPLStringList argv;
+        argv.AddString("-of");
+        argv.AddString("GTiff");
+        GDALTranslateOptions* options = GDALTranslateOptionsNew(argv.List(), nullptr);
+        progress.attach(options);
+        GDALDatasetH source = GDALOpen(raster::artefactFor(in.dem).string().c_str(), GA_ReadOnly);
+        ASSERT_NE(source, nullptr);
+        GDALDatasetH copy =
+            GDALTranslate(in.area.getPath("canceled.tif").string().c_str(), source, options, nullptr);
+        EXPECT_EQ(copy, nullptr);
+        if (copy != nullptr) GDALClose(copy);
+        GDALClose(source);
+        GDALTranslateOptionsFree(options);
+        ASSERT_DDB_OK(DDBSetThreadCancelToken(nullptr));
+    }
 
     const std::lock_guard lock(logged.mutex);
     bool gdalReportedTheCancellation = false;
@@ -600,7 +622,7 @@ TEST_F(CancelToken, canceledExportsLogNoErrors) {
         }
     }
     EXPECT_TRUE(gdalReportedTheCancellation)
-        << "no GDAL error was raised by the canceled calls: the test checks nothing";
+        << "no GDAL error was raised by the canceled operations: the test checks nothing";
 }
 
 // Free after Cancel while a parallel section works for the token: the workers keep their own
