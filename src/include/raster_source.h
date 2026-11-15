@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "gdal_inc.h"
+#include "gdal_metadata.h"
 #include "raster_utils.h"
 
 namespace ddb
@@ -54,6 +55,10 @@ namespace ddb
         virtual std::string description(int band) const = 0;
         /// An item of the default metadata domain of a band (GDALGetMetadataItem: the name in any case)
         virtual std::optional<std::string> metadataItem(int band, const std::string &name) const = 0;
+        /// The metadata of the raster as GDAL lists it: the domains of the dataset, the default domain of each band
+        virtual gdalmeta::RasterMetadata metadata() const = 0;
+        /// The CRS of the raster as GDALGetProjectionRef gives it (WKT1 GDAL), "" without one
+        virtual std::string wkt() const = 0;
         /// Whether a band has an alpha band or a mask of the dataset (not a NoData mask): the bands that have one
         /// share it (GMF_PER_DATASET)
         virtual bool hasMask(int band) const = 0;
@@ -94,6 +99,12 @@ namespace ddb
     /// bands of 2 or 4 when they have no nodata value (read as Byte), read pixel for pixel. The image must outlive
     /// it.
     std::unique_ptr<RasterSource> rasterSourceOf(const tilers::WarpedImage &image);
+
+    /// The raster libddb reads for `path` (UTF-8), as raster::openInputRaster opens it, in a source that owns it: in
+    /// the raster helper the file of the user, which GDAL reads; in the host the file ddb-tilers reads
+    /// (tilers::Raster::openInput: the COG of a build, the normalized copy of any other raster). None when there is
+    /// no raster to read. @throws what openInputRaster and tilers::Raster::openInput throw
+    std::unique_ptr<RasterSource> openInputSource(const std::string &path);
 
     /// The value of the alpha band `band` of the source that is opaque (alphaOpaqueValue of a GDAL band): the
     /// maximum of its full-resolution pixels (a sample of 4 x 4 windows, then of 16 x 16 when it has no value above

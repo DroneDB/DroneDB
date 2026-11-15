@@ -7,6 +7,7 @@
 
 #include "gdal_metadata.h"
 #include "gdal_raii.h"
+#include "raster_source.h"
 #include "sensorprofile.h"
 #include "test.h"
 #include "testarea.h"
@@ -34,7 +35,7 @@ namespace
         GDALSetMetadataItem(ds.get(), "SENSOR", "tirs", nullptr);
         GDALSetMetadataItem(ds.get(), "ABOUT", "other", "IMAGE_STRUCTURE");
 
-        const auto entries = collectMetadata(ds.get(), {});
+        const auto entries = collectMetadata(*rasterSourceOf(GDALDataset::ToHandle(ds.get())), {});
 
         EXPECT_TRUE(has(entries, "SENSOR=tirs"));
         EXPECT_TRUE(has(entries, "ABOUT=other"));
@@ -57,7 +58,7 @@ namespace
 
         CollectOptions options;
         options.bandCount = 2;
-        const auto entries = collectMetadata(ds.get(), options);
+        const auto entries = collectMetadata(*rasterSourceOf(GDALDataset::ToHandle(ds.get())), options);
 
         EXPECT_TRUE(has(entries, "KEPT=LST day"));
         EXPECT_TRUE(has(entries, "BANDKEPT=kelvin"));
@@ -105,7 +106,7 @@ namespace
         CollectOptions firstOnly;
         firstOnly.bandCount = 1;
         firstOnly.bandDescriptions = true;
-        const auto first = collectMetadata(ds.get(), firstOnly);
+        const auto first = collectMetadata(*rasterSourceOf(GDALDataset::ToHandle(ds.get())), firstOnly);
         EXPECT_TRUE(has(first, "LST"));
         EXPECT_TRUE(has(first, "A=one"));
         EXPECT_FALSE(has(first, "second"));
@@ -113,12 +114,12 @@ namespace
 
         CollectOptions allBands;
         allBands.bandCount = 3;
-        const auto all = collectMetadata(ds.get(), allBands);
+        const auto all = collectMetadata(*rasterSourceOf(GDALDataset::ToHandle(ds.get())), allBands);
         EXPECT_TRUE(has(all, "A=one"));
         EXPECT_TRUE(has(all, "B=two"));
         EXPECT_FALSE(has(all, "LST"));
 
-        const auto none = collectMetadata(ds.get(), {});
+        const auto none = collectMetadata(*rasterSourceOf(GDALDataset::ToHandle(ds.get())), {});
         EXPECT_FALSE(has(none, "A=one"));
         EXPECT_FALSE(has(none, "LST"));
     }
@@ -130,7 +131,7 @@ namespace
 
         CollectOptions options;
         options.datasetItems = {"TIFFTAG_IMAGEDESCRIPTION", "TIFFTAG_SOFTWARE"};
-        const auto entries = collectMetadata(ds.get(), options);
+        const auto entries = collectMetadata(*rasterSourceOf(GDALDataset::ToHandle(ds.get())), options);
 
         ASSERT_FALSE(entries.empty());
         EXPECT_EQ(entries[0], "Pix4D");

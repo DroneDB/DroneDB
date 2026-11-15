@@ -9,9 +9,11 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "artefact_cache.h"
 #include "cancellation.h"
 #include "exceptions.h"
 #include "fileversion.h"
+#include "gdal_open_policy.h"
 #include "mio.h"
 #include "tilers_raster.h"
 
@@ -20,7 +22,7 @@ namespace ddb
     namespace
     {
         // A dataset GDAL opened
-        class GdalRasterSource final : public RasterSource
+        class GdalRasterSource : public RasterSource
         {
         public:
             explicit GdalRasterSource(GDALDatasetH ds) : ds_(ds) {}
@@ -61,6 +63,12 @@ namespace ddb
             {
                 const char *v = GDALGetMetadataItem(bandOf(band), name.c_str(), nullptr);
                 return v != nullptr ? std::optional<std::string>(v) : std::nullopt;
+            }
+            gdalmeta::RasterMetadata metadata() const override { return gdalmeta::metadataOf(ds_); }
+            std::string wkt() const override
+            {
+                const char *wkt = GDALGetProjectionRef(ds_);
+                return wkt != nullptr ? wkt : "";
             }
             bool hasMask(int band) const override { return maskBandOf(bandOf(band)) != nullptr; }
             void blockSize(int &width, int &height) const override { GDALGetBlockSize(bandOf(1), &width, &height); }
@@ -183,7 +191,7 @@ namespace ddb
         };
 
         // A raster ddb-tilers reads
-        class TilersRasterSource final : public RasterSource
+        class TilersRasterSource : public RasterSource
         {
         public:
             explicit TilersRasterSource(const tilers::Raster &raster) : raster_(raster) {}
@@ -214,6 +222,13 @@ namespace ddb
                         return value;
                 return std::nullopt;
             }
+            gdalmeta::RasterMetadata metadata() const override
+            {
+                gdalmeta::RasterMetadata metadata;
+                guarded([&] { metadata = raster_.metadata(); });
+                return metadata;
+            }
+            std::string wkt() const override { return raster_.wkt(); }
             bool hasMask(int band) const override
             {
                 bandOf(band);
@@ -292,6 +307,44 @@ namespace ddb
         return std::make_unique<TilersRasterSource>(raster);
     }
 
+    namespace
+    {
+        // A source that owns what it reads (held before the source is made, released after it)
+        template <typename Owned> struct Holder
+        {
+            Owned owned;
+        };
+
+        class OwnedGdalSource final : private Holder<GDALDatasetUniquePtr>, public GdalRasterSource
+        {
+        public:
+            explicit OwnedGdalSource(GDALDatasetUniquePtr ds)
+                : Holder<GDALDatasetUniquePtr>{std::move(ds)}, GdalRasterSource(GDALDataset::ToHandle(owned.get()))
+            {
+            }
+        };
+
+        class OwnedTilersSource final : private Holder<std::unique_ptr<tilers::Raster>>, public TilersRasterSource
+        {
+        public:
+            explicit OwnedTilersSource(std::unique_ptr<tilers::Raster> raster)
+                : Holder<std::unique_ptr<tilers::Raster>>{std::move(raster)}, TilersRasterSource(*owned)
+            {
+            }
+        };
+    }
+
+    std::unique_ptr<RasterSource> openInputSource(const std::string &path)
+    {
+        if (gdalopen::userFileOpensEnabled())
+        {
+            auto dataset = raster::openInputRaster(path);
+            return dataset ? std::make_unique<OwnedGdalSource>(std::move(dataset)) : nullptr;
+        }
+        auto raster = tilers::Raster::openInput(path);
+        return raster ? std::make_unique<OwnedTilersSource>(std::move(raster)) : nullptr;
+    }
+
 
     namespace
     {
@@ -319,6 +372,8 @@ namespace ddb
             {
                 return source_.metadataItem(band, name);
             }
+            gdalmeta::RasterMetadata metadata() const override { return source_.metadata(); }
+            std::string wkt() const override { return source_.wkt(); }
             bool hasMask(int band) const override
             {
                 source_.dataType(band);
@@ -373,6 +428,13 @@ namespace ddb
             std::string unit(int) const override { return std::string(); }
             std::string description(int) const override { return std::string(); }
             std::optional<std::string> metadataItem(int, const std::string &) const override { return std::nullopt; }
+            // What GDAL's MEM driver lists for the dataset gdalwarp makes (but its derived datasets)
+            gdalmeta::RasterMetadata metadata() const override
+            {
+                return gdalmeta::RasterMetadata{{gdalmeta::Domain{"IMAGE_STRUCTURE", {"INTERLEAVE=BAND"}}},
+                                                std::vector<std::vector<std::string>>(static_cast<size_t>(bandCount()))};
+            }
+            std::string wkt() const override { return image_.wkt; }
             bool hasMask(int band) const override { return maskBand(band) > 0; }
             void blockSize(int &w, int &h) const override
             {

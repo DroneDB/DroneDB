@@ -119,6 +119,32 @@ namespace ddb::tilers
 
     Raster::~Raster() { ddbtRasterClose(handle_); }
 
+    gdalmeta::RasterMetadata Raster::metadata() const
+    {
+        char *text = nullptr;
+        check(ddbtRasterMetadata(handle_, &text));
+        const tilers::String owned(text);
+        const json report = json::parse(text);
+        const auto domainsOf = [](const json &domains) {
+            std::vector<gdalmeta::Domain> out;
+            for (const auto &d : domains)
+                out.push_back(gdalmeta::Domain{d.at("name").get<std::string>(),
+                                               d.at("items").get<std::vector<std::string>>()});
+            return out;
+        };
+        gdalmeta::RasterMetadata metadata;
+        metadata.domains = domainsOf(report.at("domains"));
+        for (const auto &band : report.at("bands"))
+        {
+            std::vector<std::string> items;
+            for (const auto &d : domainsOf(band.at("domains")))
+                if (d.name.empty())
+                    items = d.items;
+            metadata.bandItems.push_back(std::move(items));
+        }
+        return metadata;
+    }
+
     std::unique_ptr<Raster> Raster::open(const fs::path &file)
     {
         ddbtRaster *handle = nullptr;
@@ -325,6 +351,7 @@ namespace ddb::tilers
         image.height = info.at("height").get<int>();
         image.dataType = info.at("type").get<std::string>();
         image.geoTransform = info.at("geoTransform").get<std::array<double, 6>>();
+        image.wkt = info.value("wkt", std::string());
         image.colorInterp = info.at("colorInterp").get<std::vector<std::string>>();
         image.nodata = optionalNodata(info);
         image.alphaBand = info.value("alphaBand", 0);

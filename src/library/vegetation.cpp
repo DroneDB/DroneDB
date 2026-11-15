@@ -7,11 +7,9 @@
 #include "sensorprofile.h"
 #include "thermal.h"
 #include "exceptions.h"
-#include "artefact_cache.h"
-#include "gdal_raii.h"
 #include "logger.h"
+#include "raster_source.h"
 
-#include <gdal_priv.h>
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -239,11 +237,11 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath, std
 
     // The data bands of the raster (the alpha band is not one) and whether it is a single-band thermal raster
     int dataBands = 0;
-    if (auto dataset = raster::openInputRaster(rasterPath)) {
-        const int nBands = dataset->GetRasterCount();
+    if (auto source = openInputSource(rasterPath)) {
+        const int nBands = source->bandCount();
         for (int b = 1; b <= nBands; b++)
-            if (dataset->GetRasterBand(b)->GetColorInterpretation() != GCI_AlphaBand) dataBands++;
-        dataset.reset();
+            if (!source->isAlpha(b)) dataBands++;
+        source.reset();
         if (nBands == 1 && isThermalImage(rasterPath, thermalTags)) {
             bf.id = "T";
             bf.T = 0;

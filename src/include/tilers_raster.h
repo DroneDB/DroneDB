@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "fs.h"
+#include "gdal_metadata.h"
 
 struct ddbtRaster;
 
@@ -64,6 +65,9 @@ namespace ddb::tilers
         const std::optional<std::array<double, 6>> &geoTransform() const { return geoTransform_; }
         // The CRS as WKT1 GDAL; empty without one
         const std::string &wkt() const { return wkt_; }
+        // The metadata of the raster as GDAL lists it (ddbtRasterMetadata), read on the first call for the file
+        // @throws GDALException
+        gdalmeta::RasterMetadata metadata() const;
 
         // Reads the window (x, y, width, height) of `bands` (1-based) into bufWidth x bufHeight samples
         // per band, band after band, as GDAL's RasterIO reads it into Float32 or Float64; `mask`, when
@@ -147,6 +151,7 @@ namespace ddb::tilers
         int width = 0, height = 0;
         std::string dataType;                            // GDAL's name ("Byte", "Float32"...)
         std::array<double, 6> geoTransform{};
+        std::string wkt;                                 // the CRS (WKT1 GDAL)
         std::vector<std::string> colorInterp;            // one per band
         std::optional<double> nodata;                    // of every band but the alpha band
         int alphaBand = 0;                               // 1-based, 0 when there is none
