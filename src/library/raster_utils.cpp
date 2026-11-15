@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_utils.h"
+#include "raster_source.h"
 
 #include <cmath>
 #include <cstdio>
@@ -154,25 +155,7 @@ double alphaOpaqueValue(GDALRasterBandH alphaBand) {
 }
 
 RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount) {
-    RasterBandNodata info;
-    info.alphaBandIdx = -1;
-    info.bands.resize(bandCount);
-
-    for (int b = 0; b < bandCount; b++) {
-        GDALRasterBandH hBand = GDALGetRasterBand(hDataset, b + 1);
-        if (GDALGetRasterColorInterpretation(hBand) == GCI_AlphaBand) {
-            info.alphaBandIdx = b;
-        }
-        info.bands[b] = readBandNodata(hBand);
-    }
-
-    // A mask kept for the whole dataset; a nodata mask is the nodata compare already
-    if (info.alphaBandIdx < 0 && bandCount > 0) {
-        const int flags = GDALGetMaskFlags(GDALGetRasterBand(hDataset, 1));
-        info.datasetMask = (flags & GMF_PER_DATASET) != 0 && (flags & GMF_NODATA) == 0;
-    }
-
-    return info;
+    return detectBandNodata(*rasterSourceOf(hDataset), bandCount);
 }
 
 void premaskNodata(const std::vector<float*>& bandPtrs,

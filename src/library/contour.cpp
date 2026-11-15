@@ -422,7 +422,7 @@ std::string generateContoursJson(const std::string &rasterPath,
 
     // Band statistics drive interval-from-count and JSON metadata: the exact statistics of the pixels that
     // have a value, in physical values (RasterStatsProvider, FR-RAS-07; a pass that stops when the call is canceled)
-    const BandStatistics stats = RasterStatsProvider::instance().get(rasterPath, *statsSourceOf(*dem.raster),
+    const BandStatistics stats = RasterStatsProvider::instance().get(rasterPath, *rasterSourceOf(*dem.raster),
                                                                      options.bandIndex, options.nodata);
     double bMin = dem.toPhysical(stats.min);
     double bMax = dem.toPhysical(stats.max);

@@ -19,6 +19,8 @@
 #include "json.h"
 #include "mio.h"
 #include "raster_stats.h"
+#include "vegetation.h"
+#include "vis_render.h"
 #include "test.h"
 #include "testarea.h"
 #include "tilers_raster.h"
@@ -376,8 +378,8 @@ namespace
             const auto ds = adoptDataset(GDALOpen(io::toUtf8(file).c_str(), GA_ReadOnly));
             ASSERT_TRUE(ds);
             const auto raster = tilers::Raster::open(file);
-            const auto gdal = statsSourceOf(datasetHandle(ds));
-            const auto tilers = statsSourceOf(*raster);
+            const auto gdal = rasterSourceOf(datasetHandle(ds));
+            const auto tilers = rasterSourceOf(*raster);
             std::vector<int> bands;
             for (int b = 1; b <= c.bands; b++)
                 bands.push_back(b);
@@ -405,6 +407,90 @@ namespace
                     expectSameStatistics(
                         statisticsOf([&] { return sampleBandStatistics(*tilers, bands, nodata, budget); }, bands.size()),
                         statisticsOf([&] { return sampleBandStatistics(*gdal, bands, nodata, budget); }, bands.size()));
+                }
+            }
+        }
+    }
+
+    // The values of a formula and of a band read through ddb-tilers (the host) are those read through GDAL (the
+    // raster helper, the renders): the NoData of every band, the alpha band or the dataset mask, the data kind,
+    // and the values of every window, at full resolution and reduced, under both NoData rules
+    TEST(TilersRasterParity, theFormulaAndBandValuesAreWhatGdalReads)
+    {
+        TestArea ta(TEST_NAME, true);
+        struct FormulaCase
+        {
+            Case raster;
+            std::string filter;
+            std::string formula;
+        };
+        const std::vector<FormulaCase> cases = {
+            {{"byte-rgba-alpha", GDT_Byte, 4, true, false, false, false, false, true, true}, "RGB", "VARI"},
+            {{"uint16-rgba-alpha-overviews", GDT_UInt16, 4, true, false, false, false, false, true, true}, "RGB", "VARI"},
+            {{"uint16-mask", GDT_UInt16, 3, true, false, true, false, true}, "RGB", "VARI"},
+            {{"float32-ms-5", GDT_Float32, 5, true, true, true, true, false, false, true, 4326}, "RGBReN", "NDVI"},
+            {{"float64-mask-ms", GDT_Float64, 5, true, false, false, false, true, false, true}, "RGBReN", "NDRE"},
+        };
+        const int width = 333, height = 257;
+        const std::vector<Window> windows = {
+            {0, 0, width, height, width, height},
+            {17, 29, 120, 90, 120, 90},
+            {0, 0, width, height, 81, 67},
+            {200, 100, 40, 30, 60, 45},
+        };
+        for (const FormulaCase &fc : cases)
+        {
+            SCOPED_TRACE(fc.raster.name);
+            const fs::path file = writeRaster(ta.getPath(fc.raster.name + ".tif"), fc.raster, width, height);
+            const auto ds = adoptDataset(GDALOpen(io::toUtf8(file).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(ds);
+            const auto raster = tilers::Raster::open(file);
+            const auto gdal = rasterSourceOf(datasetHandle(ds));
+            const auto tilers = rasterSourceOf(*raster);
+
+            const RasterBandNodata want = detectBandNodata(*gdal, fc.raster.bands);
+            const RasterBandNodata got = detectBandNodata(*tilers, fc.raster.bands);
+            EXPECT_EQ(got.alphaBandIdx, want.alphaBandIdx);
+            EXPECT_EQ(got.datasetMask, want.datasetMask);
+            ASSERT_EQ(got.bands.size(), want.bands.size());
+            for (size_t b = 0; b < got.bands.size(); b++)
+            {
+                EXPECT_EQ(got.bands[b].has, want.bands[b].has) << "band " << b + 1;
+                EXPECT_EQ(got.bands[b].value, want.bands[b].value) << "band " << b + 1;
+            }
+            const RasterDataKind kindGot = rasterDataKind(*tilers), kindWant = rasterDataKind(*gdal);
+            EXPECT_EQ(kindGot.bandCount, kindWant.bandCount);
+            EXPECT_EQ(kindGot.floatingPoint, kindWant.floatingPoint);
+            EXPECT_EQ(kindGot.typeName, kindWant.typeName);
+
+            const BandFilter filter = VegetationEngine::parseFilter(fc.filter, fc.raster.bands);
+            const FormulaPlan planGot = planFormula(*tilers, fc.formula, filter, "", false);
+            const FormulaPlan planWant = planFormula(*gdal, fc.formula, filter, "", false);
+            EXPECT_EQ(static_cast<int>(planGot.bandUnit), static_cast<int>(planWant.bandUnit));
+            for (const Window &w : windows)
+            {
+                SCOPED_TRACE(std::to_string(w.x) + "," + std::to_string(w.y) + " " + std::to_string(w.w) + "x" +
+                             std::to_string(w.h) + " -> " + std::to_string(w.bufW) + "x" + std::to_string(w.bufH));
+                const RasterWindow window{w.x, w.y, w.w, w.h, w.bufW, w.bufH};
+                for (const NodataMask mask : {NodataMask::AnyBand, NodataMask::BandsRead})
+                {
+                    FormulaBuffers bufGot, bufWant;
+                    computeFormulaValues(*tilers, planGot, window, bufGot, mask);
+                    computeFormulaValues(*gdal, planWant, window, bufWant, mask);
+                    ASSERT_EQ(bufGot.result.size(), bufWant.result.size());
+                    EXPECT_EQ(0, std::memcmp(bufGot.result.data(), bufWant.result.data(),
+                                             bufGot.result.size() * sizeof(float)))
+                        << "the values of " << fc.formula;
+                }
+                for (int b = 1; b <= fc.raster.bands; b++)
+                {
+                    FormulaBuffers bufGot, bufWant;
+                    computeBandValues(*tilers, got, b, window, bufGot);
+                    computeBandValues(*gdal, want, b, window, bufWant);
+                    ASSERT_EQ(bufGot.result.size(), bufWant.result.size());
+                    EXPECT_EQ(0, std::memcmp(bufGot.result.data(), bufWant.result.data(),
+                                             bufGot.result.size() * sizeof(float)))
+                        << "the values of band " << b;
                 }
             }
         }
