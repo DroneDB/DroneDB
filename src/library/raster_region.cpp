@@ -29,6 +29,7 @@
 #include "vegetation.h"
 #include "vis_render.h"
 #include "tile_encoder.h"
+#include "tilers_raster.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "parallel.h"
@@ -446,30 +447,33 @@ namespace ddb
 
         // The value of the pixel in every band, with the band's nodata value when it has one: null
         // for a pixel outside the raster, one that cannot be read and one that is nodata
-        json pixelBandValues(GDALDatasetH hDS, int px, int py)
+        // The value of every band at a pixel: null outside the raster, for NoData and for a read
+        // that fails
+        json pixelBandValues(const tilers::Raster &raster, int px, int py)
         {
-            const bool inBounds = (px >= 0 && py >= 0 && px < GDALGetRasterXSize(hDS) && py < GDALGetRasterYSize(hDS));
-            const int bandCount = GDALGetRasterCount(hDS);
+            const bool inBounds = (px >= 0 && py >= 0 && px < raster.width() && py < raster.height());
 
             json bands = json::array();
-            for (int b = 1; b <= bandCount; b++) {
-                GDALRasterBandH hBand = GDALGetRasterBand(hDS, b);
+            for (int b = 1; b <= raster.bandCount(); b++) {
                 json bj;
-                const BandNodata nodata = readBandNodata(hBand);
+                BandNodata nodata;
+                if (const auto value = raster.band(b).nodata)
+                    nodata = {true, *value};
                 if (nodata.has) bj["nodata"] = nodata.value;
 
                 if (!inBounds) {
                     bj["value"] = nullptr;
                 } else {
                     double val = 0.0;
-                    CPLErr err = GDALRasterIO(hBand, GF_Read, px, py, 1, 1,
-                                              &val, 1, 1, GDT_Float64, 0, 0);
-                    if (err != CE_None) {
+                    try {
+                        raster.read(px, py, 1, 1, 1, 1, std::span<const int>(&b, 1), &val);
+                        if (isNodata(val, nodata))
+                            bj["value"] = nullptr;
+                        else
+                            bj["value"] = val;
+                    } catch (const AppException &e) {
+                        LOGD << "Cannot read band " << b << " at " << px << "," << py << ": " << e.what();
                         bj["value"] = nullptr;
-                    } else if (isNodata(val, nodata)) {
-                        bj["value"] = nullptr;
-                    } else {
-                        bj["value"] = val;
                     }
                 }
                 bands.push_back(bj);
@@ -592,21 +596,21 @@ namespace ddb
 
         const std::string requestedSrs = srs.empty() ? std::string("EPSG:4326") : srs;
 
-        const auto source = RasterCache::instance().acquireDataset(inputPath);
-        GDALDatasetH hDS = source->handle();
+        const auto raster = tilers::Raster::openInput(inputPath);
+        if (!raster)
+            throw GDALException("Cannot open raster: " + inputPath);
 
-        double gt[6];
-        if (GDALGetGeoTransform(hDS, gt) != CE_None) {
+        if (!raster->geoTransform()) {
             throw GDALException("Raster has no geotransform: " + inputPath);
         }
+        const std::array<double, 6> gt = *raster->geoTransform();
 
         // Source SRS
-        const char *wkt = GDALGetProjectionRef(hDS);
-        if (!wkt || strlen(wkt) == 0) {
+        if (raster->wkt().empty()) {
             throw GDALException("Raster has no projection: " + inputPath);
         }
 
-        const SrsPtr hDsSrs = srsFromWkt(wkt);
+        const SrsPtr hDsSrs = srsFromWkt(raster->wkt().c_str());
         if (!hDsSrs) {
             throw GDALException("Cannot create coord transformation");
         }
@@ -643,13 +647,13 @@ namespace ddb
         // the raster on the negative side map to negative pixel coordinates and get reported as
         // out-of-bounds, rather than being silently clamped to the edge pixel.
         int px = 0, py = 0;
-        GeoPixelMap(gt).toPixelIndex(dsX, dsY, px, py);
+        GeoPixelMap(gt.data()).toPixelIndex(dsX, dsY, px, py);
 
         json out;
         out["lon"] = lon;
         out["lat"] = lat;
         out["pixel"] = {px, py};
-        out["bands"] = pixelBandValues(hDS, px, py);
+        out["bands"] = pixelBandValues(*raster, px, py);
         return out.dump();
     }
 
