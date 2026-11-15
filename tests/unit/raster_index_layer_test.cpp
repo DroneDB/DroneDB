@@ -430,7 +430,7 @@ namespace
     std::array<int, 4> pixelOf(const testutils::DecodedImage &img, int x, int y)
     {
         const size_t p = static_cast<size_t>(y) * img.width + x;
-        return {img.bands[0][p], img.bands[1][p], img.bands[2][p], img.bands[3][p]};
+        return {img.bands[0][p], img.bands[1][p], img.bands[2][p], img.alpha()[p]};
     }
 
     // The colour of a pixel is that of `value` in the ramp. A value on the border of two of the 256

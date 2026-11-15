@@ -714,3 +714,14 @@ Registry has to adopt first.
   build: "planning" from 0, "reading" from 0.05, "building" from 0.4 and "writing" when the file is done (2.5:
   fraction -1 until it was done). `DDB_UNTWINE_PATH`, `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose
   between Untwine and PDAL's writers.copc in 2.5, are no longer read, and the packages have no Untwine.
+
+* 2026-11-15: next release (no export, schema or fixture change).
+  The images that libddb renders itself, the region and index renders (`DDBRenderRasterRegionEx*`,
+  `DDBRenderRasterIndex*`) and the thumbnails, are encoded by ddb-tilers with the encoders and rules of the tiles
+  instead of GDAL's PNG, JPEG and WEBP drivers. A PNG decodes to the pixels of 2.6 and JPEG is the same bytes; an
+  alpha that is 255 everywhere is no longer written (an opaque render is an RGB or grey PNG instead of RGBA or
+  grey + alpha, often half the size); WebP is encoded as the WebP tiles are (libwebp method 1 instead of 2: the
+  pixels differ by a few levels at the same quality, PSNR within 0.3 dB, and the files are up to 20 % larger).
+  The "rgba" pixels of a render are unchanged, but for a raster with a colour table: its render shows the colours
+  of its classes in every format, resampled with the nearest pixel (2.6 showed the indices as grey in PNG and JPEG, and
+  blended neighbouring classes with a bilinear warp).

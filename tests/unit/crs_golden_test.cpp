@@ -89,19 +89,25 @@ namespace
         return testutils::createGeoRaster(path, spec);
     }
 
-    std::string hashOf(const testutils::DecodedImage &img)
+    std::string hashOf(const std::vector<std::vector<uint8_t>> &planes)
     {
         std::string all;
-        for (const auto &plane : img.bands)
+        for (const auto &plane : planes)
             all += golden::fnv1a(plane.data(), plane.size());
         return golden::fnv1a(all.data(), all.size());
     }
 
-    json imageSummary(const std::vector<uint8_t> &bytes)
+    // The size, planes and transparent pixels of an encoded image: its bands as they are encoded, or
+    // with `withAlpha` its colour bands and an alpha band, 255 everywhere when it has none (an encoder
+    // leaves out an alpha that is 255 everywhere: the pixels a viewer shows are the same)
+    json imageSummary(const std::vector<uint8_t> &bytes, bool withAlpha = false)
     {
         const testutils::DecodedImage img = testutils::decodeImage(bytes);
-        json out = {{"width", img.width}, {"height", img.height}, {"bands", img.bands.size()}, {"pixels", hashOf(img)}};
-        if (img.hasAlpha())
+        std::vector<std::vector<uint8_t>> planes = img.bands;
+        if (withAlpha && !img.hasAlpha())
+            planes.push_back(img.alpha());
+        json out = {{"width", img.width}, {"height", img.height}, {"bands", planes.size()}, {"pixels", hashOf(planes)}};
+        if (withAlpha || img.hasAlpha())
         {
             size_t transparent = 0;
             for (const uint8_t a : img.alpha())
@@ -180,7 +186,7 @@ namespace
                 try
                 {
                     renderRasterRegion(testutils::regionRequest(ortho.string(), bbox, requested, 48, 48, "image/png"), {}, &buffer, &size);
-                    region[requested] = imageSummary(testutils::takeBuffer(buffer, size));
+                    region[requested] = imageSummary(testutils::takeBuffer(buffer, size), true);
                 }
                 catch (const std::exception &e)
                 {

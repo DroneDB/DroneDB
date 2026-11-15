@@ -63,7 +63,18 @@ namespace testutils
         std::vector<GDALColorInterp> colorInterp;
 
         bool hasAlpha() const { return !colorInterp.empty() && colorInterp.back() == GCI_AlphaBand; }
-        const std::vector<uint8_t> &alpha() const { return bands.back(); }
+        /// The alpha of every pixel: the alpha band, or 255 for an image without one (an encoder
+        /// leaves out an alpha that is 255 everywhere)
+        const std::vector<uint8_t> &alpha() const
+        {
+            if (hasAlpha())
+                return bands.back();
+            opaque_.assign(static_cast<size_t>(width) * height, 255);
+            return opaque_;
+        }
+
+    private:
+        mutable std::vector<uint8_t> opaque_;
     };
 
     DecodedImage decodeImage(const uint8_t *data, size_t size);

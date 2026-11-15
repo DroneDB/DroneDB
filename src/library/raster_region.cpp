@@ -40,47 +40,44 @@ namespace ddb
     namespace
     {
 
-        // Map MIME type to GDAL driver name + sensible defaults.
+        // What a request asks for: a GeoTIFF (written by gdalwarp), the RGBA pixels themselves
+        // (kRgbaPixelsFormat) or an image encoded as the tiles are
         struct FormatInfo
         {
-            const char *driver;    // null for the pixels themselves (kRgbaPixelsFormat)
-            const char *vsiExt;
+            enum class Kind
+            {
+                GeoTiff,
+                Pixels,
+                Image
+            };
+            Kind kind;
+            ImageFormat image;     // the format of Kind::Image
             bool wantsAlpha;       // append -dstalpha
             bool jpegCompositing;  // if true, composite on white before write
-            std::vector<std::string> creationOptions;
 
-            bool pixels() const { return driver == nullptr; }
-            bool is(const char *name) const { return driver != nullptr && std::strcmp(driver, name) == 0; }
+            bool pixels() const { return kind == Kind::Pixels; }
+            bool geoTiff() const { return kind == Kind::GeoTiff; }
         };
 
         FormatInfo resolveFormat(const std::string &mime)
         {
             const std::string m = mime.empty() ? "image/png" : mime;
             if (m == "image/tiff" || m == "image/geotiff" || m == "tiff" || m == "tif")
-                return {"GTiff", "tif", true, false, {}};
+                return {FormatInfo::Kind::GeoTiff, ImageFormat::Png, true, false};
             if (m == kRgbaPixelsFormat)
-                return {nullptr, "", true, false, {}};
+                return {FormatInfo::Kind::Pixels, ImageFormat::Png, true, false};
 
             // Renders are map previews (WMS GetMap): the same encoding as tiles
-            EncodeOptions options;
+            ImageFormat format;
             try
             {
-                options.format = parseImageFormat(m);
+                format = parseImageFormat(m);
             }
             catch (const InvalidArgsException &)
             {
                 throw InvalidArgsException("Unsupported format: " + m);
             }
-            const auto opts = imageCreationOptions(options);
-            switch (options.format)
-            {
-            case ImageFormat::Jpeg:
-                return {"JPEG", "jpg", false, true, opts};
-            case ImageFormat::Webp:
-                return {"WEBP", "webp", true, false, opts};
-            default:
-                return {"PNG", "png", true, false, opts};
-            }
+            return {FormatInfo::Kind::Image, format, format != ImageFormat::Jpeg, format == ImageFormat::Jpeg};
         }
 
         // Renders running in this process
@@ -111,7 +108,7 @@ namespace ddb
         FormatInfo requestFormat(const RegionRequest &request)
         {
             FormatInfo fi = resolveFormat(request.format);
-            if (request.background && fi.is("GTiff"))
+            if (request.background && fi.geoTiff())
                 throw InvalidArgsException("A background is for an image (PNG, JPEG, WebP or rgba), not for a GeoTIFF");
             return fi;
         }
@@ -126,32 +123,6 @@ namespace ddb
                 throw GDALException("Empty render output for " + label);
             *outBytes = reinterpret_cast<uint8_t *>(buf.release());
             *outSize = size;
-        }
-
-        // Encodes ds in the output format into a buffer allocated by GDAL (VSIFree)
-        void encodeDataset(GDALDatasetH ds, const FormatInfo &fi, uint8_t **outBytes, int *outSize,
-                           const std::string &label)
-        {
-            GDALDriverH driver = GDALGetDriverByName(fi.driver);
-            if (!driver)
-                throw GDALException(std::string("Driver not available: ") + fi.driver);
-
-            const VsiMemFile out = VsiMemFile::unique("ddb-render-", std::string(".") + fi.vsiExt);
-            CPLStringList createOpts;
-            for (const auto &co : fi.creationOptions)
-                createOpts.AddString(co.c_str());
-            // Closed before its bytes are taken: closing writes them
-            cancel::GdalProgress progress;
-            auto encoded = adoptDataset(GDALCreateCopy(driver, out.c_str(), ds, FALSE, createOpts.List(),
-                                                       progress.function(), progress.data()));
-            if (!encoded)
-            {
-                cancel::throwIfCanceled();
-                throw GDALException("Cannot encode the render of " + label);
-            }
-            closeOutputOrThrow(std::move(encoded), "the render of " + label);
-
-            takeRenderBytes(out, outBytes, outSize, label);
         }
 
         // The colour bands (1: grey, 3: RGB) and the alpha band (the last one; 0 when there is none) of the
@@ -172,10 +143,8 @@ namespace ddb
             return bands;
         }
 
-        // The pixels of the 8-bit image of a render as kRgbaPixelsFormat, in a buffer of GDAL (VSIFree):
-        // what a PNG of the image decodes to (the grey in red, green and blue, alpha 255 without an alpha
-        // band, the colours of a single band with a colour table)
-        VsiFreePtr<GByte> readRgba(GDALDatasetH image, const ImageBands &bands, const std::string &label)
+        // Fails unless the image of a render can be encoded: 8-bit, 1 (grey) or 3 (RGB) colour bands
+        void requireImage(GDALDatasetH image, const ImageBands &bands, const std::string &label)
         {
             if (bands.color != 1 && bands.color != 3)
                 throw InvalidArgsException("The render of " + label + " has " + std::to_string(bands.color) +
@@ -183,35 +152,67 @@ namespace ddb
             for (int b = 1; b <= GDALGetRasterCount(image); b++)
                 if (GDALGetRasterDataType(GDALGetRasterBand(image, b)) != GDT_Byte)
                     throw InvalidArgsException("The render of " + label + " is not 8-bit: an image holds bytes");
+        }
 
+        // The colours of the colour table of a single colour band (RGBA, at most 256), empty when the
+        // image has none
+        std::vector<std::array<uint8_t, 4>> colorTable(GDALDatasetH image, const ImageBands &bands)
+        {
+            std::vector<std::array<uint8_t, 4>> colors;
+            const GDALColorTableH table =
+                bands.color == 1 ? GDALGetRasterColorTable(GDALGetRasterBand(image, 1)) : nullptr;
+            if (table == nullptr)
+                return colors;
+            for (int i = 0; i < std::min(256, GDALGetColorEntryCount(table)); i++)
+            {
+                const GDALColorEntry *e = GDALGetColorEntry(table, i);
+                colors.push_back({static_cast<uint8_t>(e->c1), static_cast<uint8_t>(e->c2),
+                                  static_cast<uint8_t>(e->c3), static_cast<uint8_t>(e->c4)});
+            }
+            return colors;
+        }
+
+        // Reads the bands `map` of the image interleaved into a new buffer of GDAL (VSIFree)
+        VsiFreePtr<GByte> readInterleaved(GDALDatasetH image, std::vector<int> map, const std::string &label)
+        {
             const int width = GDALGetRasterXSize(image), height = GDALGetRasterYSize(image);
-            const size_t pixels = static_cast<size_t>(width) * height;
-            VsiFreePtr<GByte> rgba(static_cast<GByte *>(VSIMalloc2(pixels, 4)));
-            if (!rgba)
+            const int channels = static_cast<int>(map.size());
+            VsiFreePtr<GByte> pixels(static_cast<GByte *>(
+                VSIMalloc2(static_cast<size_t>(width) * height, static_cast<size_t>(channels))));
+            if (!pixels)
                 throw std::bad_alloc();
-            std::vector<int> map = bands.color == 3 ? std::vector<int>{1, 2, 3} : std::vector<int>{1, 1, 1};
-            if (bands.alpha > 0)
-                map.push_back(bands.alpha);
-            if (GDALDatasetRasterIO(image, GF_Read, 0, 0, width, height, rgba.get(), width, height, GDT_Byte,
-                                    static_cast<int>(map.size()), map.data(), 4, 4 * static_cast<GSpacing>(width),
+            if (GDALDatasetRasterIO(image, GF_Read, 0, 0, width, height, pixels.get(), width, height, GDT_Byte,
+                                    channels, map.data(), channels, static_cast<GSpacing>(channels) * width,
                                     1) != CE_None)
                 throw GDALException("Cannot read the render of " + label);
+            return pixels;
+        }
 
+        // The pixels of the 8-bit image of a render as kRgbaPixelsFormat, in a buffer of GDAL (VSIFree):
+        // what a PNG of the image decodes to (the grey in red, green and blue, alpha 255 without an alpha
+        // band, the colours of a single band with a colour table, their alpha times that of the alpha
+        // band when there is one; an index past the table is transparent black)
+        VsiFreePtr<GByte> readRgba(GDALDatasetH image, const ImageBands &bands, const std::string &label)
+        {
+            requireImage(image, bands, label);
+            std::vector<int> map = bands.color == 3 ? std::vector<int>{1, 2, 3} : std::vector<int>{1, 1, 1};
+            map.push_back(bands.alpha > 0 ? bands.alpha : 1);
+            VsiFreePtr<GByte> rgba = readInterleaved(image, map, label);
+
+            const size_t pixels = static_cast<size_t>(GDALGetRasterXSize(image)) * GDALGetRasterYSize(image);
             GByte *p = rgba.get();
-            const GDALColorTableH table = bands.color == 1 && bands.alpha == 0
-                                              ? GDALGetRasterColorTable(GDALGetRasterBand(image, 1))
-                                              : nullptr;
-            if (table != nullptr)
+            const auto colors = colorTable(image, bands);
+            if (!colors.empty())
             {
-                std::array<std::array<GByte, 4>, 256> colors{};
-                for (int i = 0; i < std::min(256, GDALGetColorEntryCount(table)); i++)
-                {
-                    const GDALColorEntry *e = GDALGetColorEntry(table, i);
-                    colors[i] = {static_cast<GByte>(e->c1), static_cast<GByte>(e->c2), static_cast<GByte>(e->c3),
-                                 static_cast<GByte>(e->c4)};
-                }
+                std::array<std::array<GByte, 4>, 256> lookup{};
+                std::copy(colors.begin(), colors.end(), lookup.begin());
                 for (size_t i = 0; i < pixels; i++, p += 4)
-                    std::memcpy(p, colors[p[0]].data(), 4);
+                {
+                    const unsigned alpha = p[3];
+                    std::memcpy(p, lookup[p[0]].data(), 4);
+                    if (bands.alpha > 0)
+                        p[3] = static_cast<GByte>((p[3] * alpha + 127) / 255);
+                }
             }
             else if (bands.alpha == 0)
                 for (size_t i = 0; i < pixels; i++)
@@ -236,55 +237,24 @@ namespace ddb
             }
         }
 
-        // A MEM dataset over interleaved RGBA pixels, without a copy: their first `bands` channels (3: RGB,
-        // 4: RGBA). The pixels outlive it.
-        GDALDatasetUniquePtr rgbaView(GByte *rgba, int width, int height, int bands)
+        // The colour a render with transparency is composited over: the background of the request, else
+        // white for a format without alpha (JPEG), else none
+        std::optional<RgbColor> imageBackground(const FormatInfo &fi, const RegionRequest &request, bool hasAlpha)
         {
-            GDALDriverH mem = GDALGetDriverByName("MEM");
-            if (!mem)
-                throw GDALException("Driver not available: MEM");
-            auto view = adoptDataset(GDALCreate(mem, "", width, height, 0, GDT_Byte, nullptr));
-            if (!view)
-                throw GDALException("Cannot create the image of a render");
-            for (int b = 0; b < bands; b++)
-            {
-                CPLStringList options;
-                options.SetNameValue("DATAPOINTER", std::to_string(reinterpret_cast<std::uintptr_t>(rgba + b)).c_str());
-                options.SetNameValue("PIXELOFFSET", "4");
-                options.SetNameValue("LINEOFFSET", std::to_string(4 * static_cast<long long>(width)).c_str());
-                if (GDALAddBand(datasetHandle(view), GDT_Byte, options.List()) != CE_None)
-                    throw GDALException("Cannot create the image of a render");
-            }
-            if (bands == 4)
-                setBandColors(datasetHandle(view), {GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand});
-            else
-                setBandColors(datasetHandle(view), {GCI_RedBand, GCI_GreenBand, GCI_BlueBand});
-            return view;
+            if (request.background)
+                return request.background;
+            if (!fi.wantsAlpha && hasAlpha)
+                return RgbColor{255, 255, 255};
+            return std::nullopt;
         }
 
-        // Writes the image of a render (8-bit: grey or RGB, then its alpha band if it has one) in the
-        // format of the request: composited over the background of the request, given as its pixels for
-        // kRgbaPixelsFormat, else encoded as it is. JPEG has no alpha (an image with alpha is composited
-        // over white when the request has no background) and the WebP encoder takes RGB (a grey image is
-        // made RGB). The image is released before the encode.
-        void writeImage(GDALDatasetUniquePtr image, const FormatInfo &fi, const RegionRequest &request,
-                        uint8_t **outBytes, int *outSize)
+        // Writes the RGBA pixels of a render in the format of the request: composited over `background`
+        // when it is set, then given as they are for kRgbaPixelsFormat, else encoded (an alpha that is
+        // 255 everywhere is not written)
+        void writeRgba(VsiFreePtr<GByte> rgba, int width, int height, const std::optional<RgbColor> &background,
+                       const FormatInfo &fi, uint8_t **outBytes, int *outSize)
         {
-            GDALDatasetH hImage = datasetHandle(image);
-            const ImageBands bands = imageBands(hImage);
-            std::optional<RgbColor> background = request.background;
-            if (!background && !fi.wantsAlpha && bands.alpha > 0)
-                background = RgbColor{255, 255, 255};
-            if (!background && !fi.pixels() && !(fi.is("WEBP") && bands.color == 1))
-            {
-                encodeDataset(hImage, fi, outBytes, outSize, request.inputPath);
-                return;
-            }
-
-            const int width = GDALGetRasterXSize(hImage), height = GDALGetRasterYSize(hImage);
             const size_t pixels = static_cast<size_t>(width) * height;
-            VsiFreePtr<GByte> rgba = readRgba(hImage, bands, request.inputPath);
-            image.reset();
             if (background)
                 compositeOver(rgba.get(), pixels, *background);
             if (fi.pixels())
@@ -293,8 +263,53 @@ namespace ddb
                 *outSize = static_cast<int>(pixels * 4);
                 return;
             }
-            const auto view = rgbaView(rgba.get(), width, height, background || bands.alpha == 0 ? 3 : 4);
-            encodeDataset(datasetHandle(view), fi, outBytes, outSize, request.inputPath);
+            TileEncoder::encode(InterleavedImage{rgba.get(), width, height, 4}, {fi.image}, outBytes, outSize);
+        }
+
+        // Writes the image of a render (8-bit: grey or RGB, then its alpha band if it has one) in the
+        // format of the request: encoded as it is (grey stays grey, a colour table is the palette of a
+        // PNG), or as its RGBA pixels when the request wants them, a background is composited under it
+        // or a colour table cannot be a palette (JPEG, WebP, an alpha band). JPEG has no alpha: an image with alpha is
+        // composited over white when the request has no background. The image is released before the
+        // encode.
+        void writeImage(GDALDatasetUniquePtr image, const FormatInfo &fi, const RegionRequest &request,
+                        uint8_t **outBytes, int *outSize)
+        {
+            GDALDatasetH hImage = datasetHandle(image);
+            const ImageBands bands = imageBands(hImage);
+            requireImage(hImage, bands, request.inputPath);
+            const std::optional<RgbColor> background = imageBackground(fi, request, bands.alpha > 0);
+            const int width = GDALGetRasterXSize(hImage), height = GDALGetRasterYSize(hImage);
+            auto palette = colorTable(hImage, bands);
+
+            // A colour table is kept as the palette of a PNG without an alpha band; elsewhere its colours
+            // are written (JPEG and WebP have no palette, and a palette has no alpha band beside it)
+            if (!background && !fi.pixels() && (palette.empty() || (fi.image == ImageFormat::Png && bands.alpha == 0)))
+            {
+                std::vector<int> map;
+                for (int b = 1; b <= bands.color; b++)
+                    map.push_back(b);
+                if (bands.alpha > 0)
+                    map.push_back(bands.alpha);
+                const VsiFreePtr<GByte> pixels = readInterleaved(hImage, map, request.inputPath);
+                image.reset();
+                // An index past the table is transparent black, as in the RGBA pixels (readRgba)
+                if (!palette.empty())
+                {
+                    const size_t count = static_cast<size_t>(width) * height;
+                    const GByte top = *std::max_element(pixels.get(), pixels.get() + count);
+                    if (top >= palette.size())
+                        palette.resize(static_cast<size_t>(top) + 1, {0, 0, 0, 0});
+                }
+                TileEncoder::encode(InterleavedImage{pixels.get(), width, height, static_cast<int>(map.size()),
+                                                     palette.empty() ? nullptr : &palette},
+                                    {fi.image}, outBytes, outSize);
+                return;
+            }
+
+            VsiFreePtr<GByte> rgba = readRgba(hImage, bands, request.inputPath);
+            image.reset();
+            writeRgba(std::move(rgba), width, height, background, fi, outBytes, outSize);
         }
 
         std::string fmtDouble(double v) {
@@ -329,17 +344,17 @@ namespace ddb
         };
 
         // The gdalwarp arguments of a region render, without the warper's threads: the window
-        // (bbox in srs, size in pixels) in the CRS tSrs, with the format's creation options when
-        // gdalwarp writes the file itself, the bands (none: all of them) and the background
+        // (bbox in srs, size in pixels) in the CRS tSrs, into a GeoTIFF when the request asks for one
+        // (else into memory), the bands (none: all of them) and the background
         std::vector<std::string> regionWarpArgs(const RegionRequest &request, const FormatInfo &fi, GDALDatasetH hSrc,
                                                 const std::vector<int> &bands, WarpBackground background,
                                                 const std::string &srs, const std::string &tSrs)
         {
             const auto &bbox = request.bbox;
-            const bool directOutput = fi.is("GTiff");
+            const bool directOutput = fi.geoTiff();
 
             std::vector<std::string> argStore;
-            argStore.emplace_back("-of");       argStore.emplace_back(directOutput ? fi.driver : "MEM");
+            argStore.emplace_back("-of");       argStore.emplace_back(directOutput ? "GTiff" : "MEM");
             argStore.emplace_back("-t_srs");    argStore.emplace_back(tSrs);
             argStore.emplace_back("-te");
             argStore.emplace_back(fmtDouble(bbox[0]));
@@ -350,14 +365,11 @@ namespace ddb
             argStore.emplace_back("-ts");
             argStore.emplace_back(std::to_string(request.width));
             argStore.emplace_back(std::to_string(request.height));
-            argStore.emplace_back("-r");        argStore.emplace_back("bilinear");
+            // The indices of a colour table are classes, not values: they are not interpolated
+            const int firstBand = bands.empty() ? 1 : bands.front();
+            const bool palette = GDALGetRasterColorTable(GDALGetRasterBand(hSrc, firstBand)) != nullptr;
+            argStore.emplace_back("-r");        argStore.emplace_back(palette ? "near" : "bilinear");
             argStore.emplace_back("-multi");
-            if (directOutput) {
-                for (const auto &co : fi.creationOptions) {
-                    argStore.emplace_back("-co");
-                    argStore.emplace_back(co);
-                }
-            }
             // gdalwarp still reads the alpha band of the raster to know where it has no data
             for (int b : bands) {
                 argStore.emplace_back("-b");
@@ -512,8 +524,8 @@ namespace ddb
         // PNG, JPEG and WebP can only be written by CreateCopy: gdalwarp would then pull
         // the warp block by block on one thread. Warp into memory with the warper's
         // threads and encode the result instead.
-        const bool directOutput = fi.is("GTiff");
-        const VsiMemFile out = VsiMemFile::unique("ddb-render-", std::string(".") + fi.vsiExt);
+        const bool directOutput = fi.geoTiff();
+        const VsiMemFile out = VsiMemFile::unique("ddb-render-", ".tif");
 
         // An image (PNG, JPEG, WebP) holds 8-bit grey or RGB: unless the caller pinned the bands
         // (WCS RangeSubset semantics: exactly those, with no alpha), it shows the raster as the
@@ -983,7 +995,11 @@ namespace ddb
         warp.reset();
 
         // Step 4: the image in the requested format
-        writeImage(rgbaView(rgba.data(), width, height, 4), fi, request, outBytes, outSize);
+        VsiFreePtr<GByte> pixels(static_cast<GByte *>(VSIMalloc(rgba.size())));
+        if (!pixels)
+            throw std::bad_alloc();
+        std::memcpy(pixels.get(), rgba.data(), rgba.size());
+        writeRgba(std::move(pixels), width, height, imageBackground(fi, request, true), fi, outBytes, outSize);
     }
 
 } // namespace ddb
