@@ -359,6 +359,9 @@ namespace
             // A palette band: its colour table goes to the first band of the output, the entry of the
             // nodata value transparent
             {"palette", GDT_Byte, {GCI_PaletteIndex}, 32633, 400, 300, 0.5, 250.0, false, false, true},
+            // Types a normalized copy keeps: Float16, 64-bit integers
+            {"half", GDT_Float16, {GCI_GrayIndex}, 32633, 400, 300, 0.5, -9999.0, false, true, false},
+            {"int64", GDT_Int64, {GCI_GrayIndex, GCI_GrayIndex}, 32633, 400, 300, 0.5, -5.0, false, false, false},
         };
         for (const Source &s : sources)
         {

@@ -731,6 +731,10 @@ namespace
         {
         case GDT_Byte:
             return std::floor(v);
+        case GDT_Float16:
+            // Halves, which every conversion of GDAL keeps as they are (its bulk conversion of doubles goes
+            // through float, a single one rounds directly)
+            return std::floor(v * 8) / 8 - 20.0;
         case GDT_Float32:
         case GDT_Float64:
             return v * 3.25 - 40.0 + std::sin(x * 0.37 + y * 0.11) * 0.0137;
@@ -772,6 +776,10 @@ namespace
             // A palette band, alone and with an alpha band (a palette raster rendered with -dstalpha)
             {"palette", GDT_Byte, {"Palette"}, 250.0, "EPSG:32633", "none", 1, true},
             {"palette-alpha", GDT_Byte, {"Palette", "Alpha"}, std::nullopt, "EPSG:32633", "deflate", 2, true},
+            // The types a warp of a normalized copy keeps: Float16 and 64-bit integers
+            {"float16-deflate-fp", GDT_Float16, {"Gray"}, -9999.0, "EPSG:32633", "deflate", 3, false},
+            {"int64-deflate", GDT_Int64, {"Gray", "Undefined"}, -5.0, "EPSG:32633", "deflate", 2, false},
+            {"uint64", GDT_UInt64, {"Gray"}, std::nullopt, "EPSG:3857", "none", 1, false},
         };
         for (const TypedCase &c : cases)
         {

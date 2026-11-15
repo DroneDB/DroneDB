@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -140,6 +141,53 @@ namespace
         EXPECT_NEAR(at(png, 0, centreX(2), centreY(2)), 170, 1);
         EXPECT_EQ(at(png, 0, centreX(3), centreY(3)), 255);
         EXPECT_EQ(png.alpha()[static_cast<size_t>(centreY(0)) * png.width + centreX(0)], 255);
+    }
+
+    // The types the normalized copy of a raster keeps that GDAL rendered and ddb-tilers reads too (Float16, Int64): a
+    // DEM of them is grey stretched over its range, and its GeoTIFF keeps its type and values
+    TEST_F(RasterRegionRender, aFloat16OrInt64DemRendersAsAnyDem)
+    {
+        TestArea ta(TEST_NAME, true);
+        for (const GDALDataType type : {GDT_Float16, GDT_Int64})
+        {
+            SCOPED_TRACE(GDALGetDataTypeName(type));
+            testutils::GeoRasterSpec spec;
+            spec.width = spec.height = kSize;
+            spec.bands = 1;
+            spec.type = type;
+            spec.originX = kOriginX;
+            spec.originY = kOriginY;
+            spec.pixelSize = kPixel;
+            spec.value = [](int, int x, int y) { return 300.0 + 20.0 * quadrant(x, y); };
+            const fs::path dem =
+                testutils::createGeoRaster(ta.getPath(std::string(GDALGetDataTypeName(type)) + ".tif"), spec);
+
+            const auto png = render(dem, "image/png");
+            ASSERT_EQ(png.bands.size(), 1u);
+            EXPECT_EQ(at(png, 0, centreX(0), centreY(0)), 0);
+            EXPECT_NEAR(at(png, 0, centreX(1), centreY(1)), 85, 1);
+            EXPECT_NEAR(at(png, 0, centreX(2), centreY(2)), 170, 1);
+            EXPECT_EQ(at(png, 0, centreX(3), centreY(3)), 255);
+
+            uint8_t *buffer = nullptr;
+            int size = 0;
+            renderRasterRegion(testutils::regionRequest(dem.string(), kBbox, "EPSG:3857", kSize, kSize, "image/tiff"), {},
+                               &buffer, &size);
+            const auto bytes = testutils::takeBuffer(buffer, size);
+            const fs::path tif = ta.getPath(std::string(GDALGetDataTypeName(type)) + "-render.tif");
+            std::ofstream(tif, std::ios::binary).write(reinterpret_cast<const char *>(bytes.data()),
+                                                       static_cast<std::streamsize>(bytes.size()));
+            const auto ds = adoptDataset(GDALOpen(tif.string().c_str(), GA_ReadOnly));
+            ASSERT_TRUE(ds);
+            GDALRasterBandH band = GDALGetRasterBand(datasetHandle(ds), 1);
+            EXPECT_EQ(GDALGetRasterDataType(band), type);
+            for (int q = 0; q < 4; q++)
+            {
+                double v = 0;
+                ASSERT_EQ(GDALRasterIO(band, GF_Read, centreX(q), centreY(q), 1, 1, &v, 1, 1, GDT_Float64, 0, 0), CE_None);
+                EXPECT_EQ(v, 300.0 + 20.0 * q) << "quadrant " << q;
+            }
+        }
     }
 
     // A raster of classes with a colour table (a land cover, a classified orthophoto): every format shows

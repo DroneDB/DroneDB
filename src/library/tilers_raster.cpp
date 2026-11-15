@@ -43,28 +43,13 @@ namespace ddb::tilers
             return it->is_null() ? std::numeric_limits<double>::quiet_NaN() : it->get<double>();
         }
 
-        // The size of a sample of a GDAL data type
-        size_t sampleSizeOf(const std::string &type)
+        // A GDAL data type by its name ("Byte", "Float16"...)
+        GDALDataType dataTypeOf(const std::string &type)
         {
-            if (type == "Byte" || type == "Int8")
-                return 1;
-            if (type == "UInt16" || type == "Int16")
-                return 2;
-            if (type == "UInt32" || type == "Int32" || type == "Float32")
-                return 4;
-            if (type == "UInt64" || type == "Int64" || type == "Float64")
-                return 8;
-            throw GDALException("Unsupported data type: " + type);
-        }
-
-        template <typename From, typename To> void convertSamples(const uint8_t *in, size_t count, To *out)
-        {
-            for (size_t i = 0; i < count; i++)
-            {
-                From v;
-                std::memcpy(&v, in + i * sizeof(From), sizeof(From));
-                out[i] = static_cast<To>(v);
-            }
+            const GDALDataType t = GDALGetDataTypeByName(type.c_str());
+            if (t == GDT_Unknown)
+                throw GDALException("Unsupported data type: " + type);
+            return t;
         }
     }
 
@@ -293,7 +278,10 @@ namespace ddb::tilers
                              static_cast<int>(bands.size()), DDBT_SAMPLE_FLOAT64, out, mask));
     }
 
-    size_t WarpedImage::sampleSize() const { return sampleSizeOf(dataType); }
+    size_t WarpedImage::sampleSize() const
+    {
+        return static_cast<size_t>(GDALGetDataTypeSizeBytes(dataTypeOf(dataType)));
+    }
 
     const uint8_t *WarpedImage::band(int band1) const
     {
@@ -305,17 +293,11 @@ namespace ddb::tilers
         const size_t count = static_cast<size_t>(width) * height;
         out.resize(count);
         const uint8_t *in = band(band1);
-        if (dataType == "Byte") convertSamples<uint8_t>(in, count, out.data());
-        else if (dataType == "Int8") convertSamples<int8_t>(in, count, out.data());
-        else if (dataType == "UInt16") convertSamples<uint16_t>(in, count, out.data());
-        else if (dataType == "Int16") convertSamples<int16_t>(in, count, out.data());
-        else if (dataType == "UInt32") convertSamples<uint32_t>(in, count, out.data());
-        else if (dataType == "Int32") convertSamples<int32_t>(in, count, out.data());
-        else if (dataType == "UInt64") convertSamples<uint64_t>(in, count, out.data());
-        else if (dataType == "Int64") convertSamples<int64_t>(in, count, out.data());
-        else if (dataType == "Float32") convertSamples<float>(in, count, out.data());
-        else if (dataType == "Float64") convertSamples<double>(in, count, out.data());
-        else throw GDALException("Unsupported data type: " + dataType);
+        // As GDAL reads gdalwarp's MEM dataset: GDALCopyWords from the type of the warp
+        const GDALDataType from = dataTypeOf(dataType);
+        const GDALDataType to = std::is_same_v<T, float> ? GDT_Float32 : GDT_Float64;
+        GDALCopyWords64(in, from, GDALGetDataTypeSizeBytes(from), out.data(), to, static_cast<int>(sizeof(T)),
+                        static_cast<GPtrDiff_t>(count));
     }
     template void WarpedImage::readBand<float>(int, std::vector<float> &) const;
     template void WarpedImage::readBand<double>(int, std::vector<double> &) const;
@@ -363,7 +345,8 @@ namespace ddb::tilers
 
     void writeGeoTiff(const WarpedImage &image, const std::string &crs, const fs::path &output)
     {
-        const bool floating = image.dataType == "Float32" || image.dataType == "Float64";
+        // Floating-point samples (Float16 among them) with the floating-point predictor
+        const bool floating = GDALDataTypeIsFloating(dataTypeOf(image.dataType)) != 0;
         json options = {{"width", image.width},
                         {"height", image.height},
                         {"type", image.dataType},
