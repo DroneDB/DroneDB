@@ -174,6 +174,15 @@ namespace ddb
         Counters counters_;
     };
 
+    /// The range GDALComputeRasterMinMax(band, bApproxOK TRUE) gives (what gdal_translate -scale stretches a band
+    /// over): the band's STATISTICS_MINIMUM and STATISTICS_MAXIMUM metadata when it has both; else the minimum and
+    /// maximum of the overview with the fewest pixels above 2500 (GetRasterSampleOverview), every pixel of it;
+    /// else those of every n-th block of the band, n the square root of its blocks (one more when that is the
+    /// blocks of a row). The pixels at the NoData value, NaN, and masked (the alpha band or the dataset mask, when
+    /// the band has no NoData value and is not alpha) are left out. No pixel left: 0, 0 (+inf, -inf for an
+    /// overview of 32 or 64-bit samples without a mask, as GDAL's).
+    std::pair<double, double> approximateMinMax(const RasterSource &source, int band);
+
     /// The statistics sidecar of a raster: "<raster>.stats.json", next to it
     fs::path statsSidecarOf(const fs::path &raster);
 

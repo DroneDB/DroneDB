@@ -67,6 +67,13 @@ namespace ddb::tilers
             band.offset = optionalNumber(b, "offset");
             band.unit = b.value("unit", std::string());
             band.description = b.value("description", std::string());
+            for (const auto &item : b.value("metadata", json::array()))
+            {
+                const std::string entry = item.get<std::string>();
+                const size_t eq = entry.find('=');
+                if (eq != std::string::npos)
+                    band.metadata.emplace_back(entry.substr(0, eq), entry.substr(eq + 1));
+            }
             bands_.push_back(std::move(band));
         }
     }

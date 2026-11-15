@@ -784,6 +784,107 @@ namespace ddb
         entries_.clear();
     }
 
+    std::pair<double, double> approximateMinMax(const RasterSource &source, int band)
+    {
+        const auto statsMin = source.metadataItem(band, "STATISTICS_MINIMUM");
+        const auto statsMax = source.metadataItem(band, "STATISTICS_MAXIMUM");
+        if (statsMin && statsMax)
+            return {CPLAtofM(statsMin->c_str()), CPLAtofM(statsMax->c_str())};
+
+        const GDALDataType type = source.dataType(band);
+        const BandNodata nodata = source.nodata(band);
+        const bool masked = !nodata.has && source.hasMask(band) && !source.isAlpha(band);
+        // GDALNoDataValues: a Float32 band compares its samples with the NoData value as floats
+        const bool floatNodata = type == GDT_Float32 && nodata.has && !std::isnan(nodata.value) &&
+                                 std::fabs(nodata.value) <= std::numeric_limits<float>::max();
+        const auto isValue = [&](double v) {
+            if (std::isnan(v))
+                return false;
+            if (!nodata.has)
+                return true;
+            if (floatNodata)
+                return static_cast<float>(v) != static_cast<float>(nodata.value);
+            return v != nodata.value;
+        };
+        double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+        std::vector<double> samples;
+        std::vector<uint8_t> mask;
+        const auto accumulate = [&](int level, const RasterWindow &w) {
+            cancel::throwIfCanceled();
+            const size_t count = w.outPixels();
+            samples.resize(count);
+            if (masked)
+                mask.resize(count);
+            source.read(level, w, {band}, samples.data(), masked ? mask.data() : nullptr);
+            for (size_t i = 0; i < count; i++)
+            {
+                if (masked && mask[i] == 0)
+                    continue;
+                if (!isValue(samples[i]))
+                    continue;
+                lo = std::min(lo, samples[i]);
+                hi = std::max(hi, samples[i]);
+            }
+        };
+
+        // GetRasterSampleOverview(GDALSTAT_APPROX_NUMSAMPLES)
+        constexpr double kApproxSamples = 2500;
+        int level = 0;
+        double best = static_cast<double>(source.width()) * source.height();
+        for (int i = 0; i < source.overviewCount(); i++)
+        {
+            const auto size = source.overviewSize({band}, i);
+            if (!size)
+                continue;
+            const double pixels = static_cast<double>(size->first) * size->second;
+            if (pixels < best && pixels > kApproxSamples)
+            {
+                best = pixels;
+                level = i + 1;
+            }
+        }
+        if (level > 0)
+        {
+            // Every pixel of the overview, rows at a time
+            const auto [ow, oh] = *source.overviewSize({band}, level - 1);
+            const int rows = std::max(1, static_cast<int>((size_t{1} << 22) / static_cast<size_t>(std::max(1, ow))));
+            for (int y = 0; y < oh; y += rows)
+            {
+                const int n = std::min(rows, oh - y);
+                accumulate(level, RasterWindow{0, y, ow, n, ow, n});
+            }
+            if (lo > hi)
+            {
+                // ComputeRasterMinMaxLocation (32 and 64-bit samples without a mask) leaves its initial range
+                const bool location = !masked && type != GDT_Byte && type != GDT_UInt16 && type != GDT_Int16;
+                return location ? std::pair<double, double>{std::numeric_limits<double>::infinity(),
+                                                            -std::numeric_limits<double>::infinity()}
+                                : std::pair<double, double>{0.0, 0.0};
+            }
+            return {lo, hi};
+        }
+
+        // Every n-th block of the full resolution
+        int bw = 0, bh = 0;
+        source.blockSize(bw, bh);
+        bw = std::max(1, bw);
+        bh = std::max(1, bh);
+        const int64_t across = (source.width() + bw - 1) / bw, down = (source.height() + bh - 1) / bh;
+        int64_t rate = std::max<int64_t>(1, static_cast<int64_t>(std::sqrt(static_cast<double>(across) * static_cast<double>(down))));
+        if (rate == across && across > 1)
+            rate++;
+        for (int64_t block = 0; block < across * down; block += rate)
+        {
+            const int bx = static_cast<int>(block % across), by = static_cast<int>(block / across);
+            const int x = bx * bw, y = by * bh;
+            const int w = std::min(bw, source.width() - x), h = std::min(bh, source.height() - y);
+            accumulate(0, RasterWindow{x, y, w, h, w, h});
+        }
+        if (lo > hi)
+            return {0.0, 0.0};
+        return {lo, hi};
+    }
+
     fs::path statsSidecarOf(const fs::path &raster)
     {
         return io::concat(raster, ".stats.json");

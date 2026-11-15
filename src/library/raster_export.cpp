@@ -16,13 +16,9 @@
 #include "cancellation.h"
 #include "dem.h"
 #include "exceptions.h"
-#include "artefact_cache.h"
-#include "gdal_raii.h"
-#include "gtiff_options.h"
 #include "json.h"
 #include "logger.h"
 #include "mio.h"
-#include "raster_artefacts.h"
 #include "raster_source.h"
 #include "raster_stats.h"
 #include "parallel.h"
@@ -52,23 +48,6 @@ std::vector<int> overviewFactorsOf(int width, int height)
         factor *= 2;
     }
     return levels;
-}
-
-// Builds the internal overviews of a freshly written GeoTIFF (overviewFactorsOf), DEFLATE + PREDICTOR as the
-// full resolution, so the output supports efficient zoomed/partial reads. Best-effort: a failure to build
-// overviews is non-fatal (the full-resolution data is intact).
-void buildInternalOverviews(GDALDatasetH hDs, int width, int height)
-{
-    std::vector<int> levels = overviewFactorsOf(width, height);
-    if (levels.empty()) return;
-    // Thread-local config so concurrent exports do not clobber global GDAL state.
-    const ScopedThreadConfigOption compress("COMPRESS_OVERVIEW", "DEFLATE");
-    const ScopedThreadConfigOption predictor("PREDICTOR_OVERVIEW", "2");
-    if (GDALBuildOverviews(hDs, "AVERAGE", static_cast<int>(levels.size()),
-                           levels.data(), 0, nullptr, nullptr, nullptr) != CE_None)
-    {
-        LOGD << "Cannot build the internal overviews of the export (the full-resolution data is intact)";
-    }
 }
 
 // Auto-compute a windowed tile size for the formula export branch.
@@ -109,26 +88,6 @@ int computeExportTileSize(const RasterSource &source, int bandCount, int tileSiz
     result = ((result + 15) / 16) * 16;
     return std::clamp(result, 64, 8192);
 }
-
-// The output file of an export, deleted unless the export completed (commit): a failed or
-// canceled export leaves no partial file
-class PartialOutput
-{
-public:
-    explicit PartialOutput(const char *path) : path_(path) {}
-    ~PartialOutput()
-    {
-        if (!committed_)
-            VSIUnlink(path_);
-    }
-    PartialOutput(const PartialOutput &) = delete;
-    PartialOutput &operator=(const PartialOutput &) = delete;
-    void commit() noexcept { committed_ = true; }
-
-private:
-    const char *path_;
-    bool committed_ = false;
-};
 
 // One cancellation for the whole call: the token of this call is canceled by the
 // caller's token, by the shutdown, and by the progress callback when it asks to stop,
@@ -278,42 +237,32 @@ std::pair<float, float> displayRange(const RasterSource &source, const FormulaPl
 // The values of a window of the source: NODATA_SENTINEL where a pixel has none, valid until the next call
 using WindowValues = std::function<const std::vector<float> &(const RasterWindow &)>;
 
-// What the windows of an RGBA export are filled with: the values of the window coloured by the colormap
-struct RgbaFill
+// Fills a tile of an export: its window (x, y, width, height) in the output, its samples written to `out`, rows
+// `stride` bytes apart
+using TileFiller = std::function<void(int x, int y, int width, int height, uint8_t *out, size_t stride)>;
+
+// The tiles of an export as ddbtWriteRaster asks for them: the filler, with the progress and the cancellation of
+// the export; an exception of the filler stops the write and is thrown again after it
+struct TileFill
 {
-    RgbaFill(const WindowValues &windowValues, const Colormap &windowColormap, const std::pair<float, float> &valueRange,
-             const SourceWindow &exported, ExportSession &exportSession, size_t tiles)
-        : values(windowValues), colormap(windowColormap), range(valueRange), part(exported), session(exportSession),
-          total(tiles)
+    const TileFiller &filler;
+    ExportSession &session;
+    size_t total;
+    size_t done = 0;
+    std::exception_ptr error;
+
+    TileFill(const TileFiller &tileFiller, ExportSession &exportSession, size_t tiles)
+        : filler(tileFiller), session(exportSession), total(tiles)
     {
     }
 
-    const WindowValues &values;
-    const Colormap &colormap;
-    std::pair<float, float> range;
-    SourceWindow part;
-    ExportSession &session;
-    size_t total = 0;
-    size_t done = 0;
-    std::vector<uint8_t> rgba;
-    std::exception_ptr error;
-
     static int fill(void *userData, int x, int y, int width, int height, uint8_t *out, size_t stride)
     {
-        auto &f = *static_cast<RgbaFill *>(userData);
+        auto &f = *static_cast<TileFill *>(userData);
         try
         {
             f.session.checkpoint(static_cast<double>(f.done) / static_cast<double>(f.total), "rendering");
-            const RasterWindow window{f.part.x + x, f.part.y + y, width, height, width, height};
-            const std::vector<float> &values = f.values(window);
-            const size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
-            f.rgba.resize(pixels * 4);
-            VegetationEngine::instance().applyColormap(values.data(), f.rgba.data(), pixels, f.colormap,
-                                                       {f.range.first, f.range.second, NODATA_SENTINEL});
-            const size_t rowBytes = static_cast<size_t>(width) * 4;
-            for (int row = 0; row < height; row++)
-                std::memcpy(out + static_cast<size_t>(row) * stride, f.rgba.data() + static_cast<size_t>(row) * rowBytes,
-                            rowBytes);
+            f.filler(x, y, width, height, out, stride);
             f.done++;
             return 0;
         }
@@ -325,20 +274,35 @@ struct RgbaFill
     }
 };
 
-// Writes the RGBA export of the part of the source: the values of each tile coloured by the colormap over the
-// range, a tiled DEFLATE GeoTIFF with the georeferencing of the source (the corner of the part) and its average
-// overviews (ddb-tilers: ddbtWriteRaster). The output appears whole or not at all.
-void writeRgba(const RasterExport &request, const ExportSource &src, const SourceWindow &part, int tileSize,
-               const WindowValues &values, const Colormap &colormap, const std::pair<float, float> &range,
-               ExportSession &session)
+// What an export writes besides its pixels
+struct ExportLayout
+{
+    std::vector<std::string> colorInterp;  // one per band
+    std::vector<std::string> descriptions; // one per band ("" for none), or none
+    std::optional<double> nodata;
+    bool mask = false;                     // an internal mask, filled after the bands of each pixel
+    int predictor = 2;                     // the horizontal differencing of DEFLATE (1: none)
+};
+
+// Writes the export of the part of the source: the tiles the filler computes, a tiled DEFLATE GeoTIFF with the
+// georeferencing of the source (the corner of the part) and its average overviews (ddb-tilers: ddbtWriteRaster).
+// The output appears whole or not at all.
+void writeExport(const RasterExport &request, const ExportSource &src, const SourceWindow &part, int tileSize,
+                 const ExportLayout &layout, const TileFiller &filler, ExportSession &session)
 {
     json options = {{"width", part.width},
                     {"height", part.height},
-                    {"colorInterp", {"Red", "Green", "Blue", "Alpha"}},
+                    {"colorInterp", layout.colorInterp},
                     {"blockSize", tileSize},
                     {"codec", "deflate"},
-                    {"predictor", 2},
+                    {"predictor", layout.predictor},
                     {"overviewFactors", overviewFactorsOf(part.width, part.height)}};
+    if (layout.nodata)
+        options["nodata"] = std::isnan(*layout.nodata) ? json("nan") : json(*layout.nodata);
+    if (!layout.descriptions.empty())
+        options["descriptions"] = layout.descriptions;
+    if (layout.mask)
+        options["mask"] = true;
     const tilers::Raster &raster = src.raster();
     if (const auto &gt = raster.geoTransform())
     {
@@ -351,16 +315,38 @@ void writeRgba(const RasterExport &request, const ExportSource &src, const Sourc
             options["geoKeysFrom"] = io::toUtf8(raster.file());
     }
 
-    RgbaFill fill(values, colormap, range, part, session,
+    TileFill fill(filler, session,
                   static_cast<size_t>((part.width + tileSize - 1) / tileSize) *
                       static_cast<size_t>((part.height + tileSize - 1) / tileSize));
     session.checkpoint(0.0, "rendering");
-    const ddbtErr rc = ddbtWriteRaster(request.output.c_str(), options.dump().c_str(), &RgbaFill::fill, &fill,
+    const ddbtErr rc = ddbtWriteRaster(request.output.c_str(), options.dump().c_str(), &TileFill::fill, &fill,
                                        nullptr, nullptr);
     if (fill.error)
         std::rethrow_exception(fill.error);
     tilers::check(rc);
     session.report(1.0, "rendering");
+}
+
+// Writes the RGBA export of the part of the source: the values of each tile coloured by the colormap over the range
+void writeRgba(const RasterExport &request, const ExportSource &src, const SourceWindow &part, int tileSize,
+               const WindowValues &values, const Colormap &colormap, const std::pair<float, float> &range,
+               ExportSession &session)
+{
+    std::vector<uint8_t> rgba;
+    const TileFiller filler = [&](int x, int y, int width, int height, uint8_t *out, size_t stride) {
+        const RasterWindow window{part.x + x, part.y + y, width, height, width, height};
+        const std::vector<float> &windowValues = values(window);
+        const size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+        rgba.resize(pixels * 4);
+        VegetationEngine::instance().applyColormap(windowValues.data(), rgba.data(), pixels, colormap,
+                                                   {range.first, range.second, NODATA_SENTINEL});
+        const size_t rowBytes = static_cast<size_t>(width) * 4;
+        for (int row = 0; row < height; row++)
+            std::memcpy(out + static_cast<size_t>(row) * stride, rgba.data() + static_cast<size_t>(row) * rowBytes,
+                        rowBytes);
+    };
+    writeExport(request, src, part, tileSize, ExportLayout{{"Red", "Green", "Blue", "Alpha"}, {}, std::nullopt, false, 2},
+                filler, session);
 }
 
 // The bands to export: the explicit list, the preset of the sensor, or the first three
@@ -456,89 +442,149 @@ void exportStyledBand(const RasterExport &request, int band, ExportSession &sess
         *style.colormap, style.range, session);
 }
 
-// Bands mode (no formula, and not one band with a colormap): band selection + rescale, export as GeoTIFF
-void exportBands(const RasterExport &request, ExportSession &session, GDALDatasetUniquePtr &srcGuard)
+// How one band of a bands export becomes 8-bit, as gdal_translate -ot Byte -scale makes it (a VRTComplexSource with
+// linear scaling and the NoData value of the band): its range (the rescale, else approximateMinMax), the working type
+// of its samples (double for 32 and 64-bit integers, else float), and the value of the pixels it leaves out
+struct ByteBand
 {
-    GDALDatasetH hSrcDs = datasetHandle(srcGuard);
-    const char *outputPath = request.output.c_str();
-    const std::string &rescaleStr = request.rescale;
-    const SourceWindow part = sourceWindowOf(request, GDALGetRasterXSize(hSrcDs), GDALGetRasterYSize(hSrcDs));
+    int band = 0;
+    bool scaled = false;  // a source that is not Byte; a Byte one is copied as it is
+    bool linear = false;  // the scaling changes the samples
+    double ratio = 1.0, offset = 0.0;
+    bool doubleWork = false;
+    bool nodataNan = false, nodataValue = false;
+    double nodata = 0;
+    uint8_t fill = 0;     // the pixels left out: the NoData value of the output as Byte (GDALCopyWords)
 
-    const std::vector<int> selectedBands = selectBands(request, GDALGetRasterCount(hSrcDs));
-
-    // Use GDALTranslate for band selection + rescale. Its progress goes to the
-    // callback, and it stops when the export is canceled.
-    session.checkpoint(0.0, "converting");
-    CPLStringList targs;
-    targs.AddString("-ot");
-    targs.AddString("Byte");
-
-    if (request.bbox)
+    // ARE_REAL_EQUAL of GDAL, in the working type
+    template <typename W> static bool equal(W a, W b)
     {
-        targs.AddString("-srcwin");
-        for (const int v : {part.x, part.y, part.width, part.height})
-            targs.AddString(std::to_string(v).c_str());
+        return a == b || std::abs(a - b) < static_cast<W>(std::numeric_limits<float>::epsilon()) * std::abs(a + b) * 2;
     }
 
-    for (int b : selectedBands)
+    template <typename W> uint8_t toByte(W v) const
     {
-        targs.AddString("-b");
-        targs.AddString(std::to_string(b).c_str());
+        if (nodataNan && std::isnan(v))
+            return fill;
+        if (nodataValue && equal(v, static_cast<W>(nodata)))
+            return fill;
+        if (linear)
+            v = static_cast<W>(v * ratio + offset);
+        return static_cast<uint8_t>(std::min(255.0f, std::max(0.0f, static_cast<float>(v) + 0.5f)));
     }
+};
 
-    GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrcDs, 1));
-    if (srcType != GDT_Byte)
+// The range of a "min,max" rescale (gdal_translate -scale min max 0 255)
+std::pair<double, double> rescaleRangeOf(const std::string &rescale)
+{
+    const size_t comma = rescale.find(',');
+    if (comma == std::string::npos)
+        return {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()};
+    return {CPLAtof(rescale.substr(0, comma).c_str()), CPLAtof(rescale.substr(comma + 1).c_str())};
+}
+
+// Bands mode (no formula, and not one band with a colormap): the selected bands as 8-bit, as gdal_translate -ot Byte
+// [-srcwin] -b ... [-scale] writes them: a Byte source copied; any other scaled from its range (the rescale, else the
+// approximate minimum and maximum of each band over the whole raster) to 0..255, its NoData pixels left at the NoData
+// value of the source as Byte (which the output keeps, even one Byte cannot hold); the internal mask of the source kept
+void exportBands(const RasterExport &request, ExportSession &session, const ExportSource &src)
+{
+    const RasterSource &source = src.source();
+    const SourceWindow part = sourceWindowOf(request, source.width(), source.height());
+    const std::vector<int> selected = selectBands(request, source.bandCount());
+    const bool scale = source.dataType(1) != GDT_Byte;
+    const std::pair<double, double> rescale = rescaleRangeOf(request.rescale);
+
+    ExportLayout layout;
+    layout.predictor = 1;  // gdal_translate's GTiff options: DEFLATE without a predictor
+    std::vector<ByteBand> plans;
+    for (const int b : selected)
     {
-        if (!rescaleStr.empty())
+        ByteBand plan;
+        plan.band = b;
+        plan.scaled = scale;
+        const GDALDataType type = source.dataType(b);
+        plan.doubleWork = type == GDT_Int32 || type == GDT_UInt32 || type == GDT_Int64 || type == GDT_UInt64;
+        // The NoData value of the source is the output's (GTiff keeps one Byte cannot hold); the pixels
+        // left out take it as Byte (GDALCopyWords: rounded, clamped, NaN 0)
+        const BandNodata nd = source.nodata(b);
+        if (nd.has && !std::isnan(nd.value))
+            plan.fill = static_cast<uint8_t>(std::clamp(std::floor(nd.value + 0.5), 0.0, 255.0));
+        if (b == selected.front() && nd.has)
+            layout.nodata = nd.value;
+        if (scale)
         {
-            auto commaPos = rescaleStr.find(',');
-            if (commaPos != std::string::npos)
+            plan.nodataNan = nd.has && std::isnan(nd.value);
+            plan.nodataValue = nd.has && !std::isnan(nd.value) &&
+                               (plan.doubleWork || std::fabs(nd.value) <= std::numeric_limits<float>::max());
+            plan.nodata = nd.value;
+            auto [lo, hi] = std::isnan(rescale.first) ? approximateMinMax(source, b) : rescale;
+            // To avoid a divide by zero
+            if (hi == lo)
+                hi += 0.1;
+            if (hi == lo)
+                throw GDALException("-scale cannot be applied due to source minimum and maximum being equal");
+            plan.ratio = 255.0 / (hi - lo);
+            plan.offset = -1 * lo * plan.ratio + 0.0;
+            plan.linear = plan.offset != 0.0 || plan.ratio != 1.0;
+        }
+        // gdal_translate copies the colour interpretation and the description of each band
+        layout.colorInterp.push_back(source.colorInterp(b));
+        layout.descriptions.push_back(source.description(b));
+        plans.push_back(plan);
+    }
+    // gdal_translate's MASK_AUTO: a source whose first band has a dataset mask (not alpha, not NoData) keeps it
+    layout.mask = detectBandNodata(source, source.bandCount()).datasetMask;
+
+    const int bandCount = static_cast<int>(plans.size());
+    const int samples = bandCount + (layout.mask ? 1 : 0);
+    std::vector<float> floats;
+    std::vector<double> doubles;
+    std::vector<uint8_t> mask;
+    const TileFiller filler = [&](int x, int y, int width, int height, uint8_t *out, size_t stride) {
+        const RasterWindow window{part.x + x, part.y + y, width, height, width, height};
+        const size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+        for (int i = 0; i < bandCount; i++)
+        {
+            const ByteBand &plan = plans[static_cast<size_t>(i)];
+            const bool withMask = layout.mask && i == 0;
+            if (withMask)
+                mask.resize(pixels);
+            if (plan.doubleWork)
             {
-                targs.AddString("-scale");
-                targs.AddString(rescaleStr.substr(0, commaPos).c_str());
-                targs.AddString(rescaleStr.substr(commaPos + 1).c_str());
-                targs.AddString("0");
-                targs.AddString("255");
+                doubles.resize(pixels);
+                source.read(0, window, {plan.band}, doubles.data(), withMask ? mask.data() : nullptr);
+            }
+            else
+            {
+                floats.resize(pixels);
+                source.read(window, {plan.band}, floats.data(), withMask ? mask.data() : nullptr);
+            }
+            for (int row = 0; row < height; row++)
+            {
+                uint8_t *line = out + static_cast<size_t>(row) * stride;
+                for (int col = 0; col < width; col++)
+                {
+                    const size_t k = static_cast<size_t>(row) * static_cast<size_t>(width) + static_cast<size_t>(col);
+                    uint8_t v;
+                    if (!plan.scaled)
+                        v = static_cast<uint8_t>(floats[k]);  // a Byte sample
+                    else if (plan.doubleWork)
+                        v = plan.toByte(doubles[k]);
+                    else
+                        v = plan.toByte(floats[k]);
+                    line[static_cast<size_t>(col) * samples + i] = v;
+                }
             }
         }
-        else
-        {
-            targs.AddString("-scale");
-        }
-    }
-
-    targs.AddString("-of");
-    targs.AddString("GTiff");
-    GtiffOptions().tiled().compress(GtiffOptions::Codec::Deflate).appendTo(targs);
-
-    const GdalOptionsPtr<GDALTranslateOptions> psOptions(
-        GDALTranslateOptionsNew(targs.List(), nullptr));
-    if (!psOptions)
-        throw GDALException("Cannot create GDALTranslate options");
-    cancel::GdalProgress translateProgress([&](double fraction) { session.report(fraction, "converting"); });
-    translateProgress.attach(psOptions.get());
-
-    PartialOutput partialOutput(outputPath);
-    int bUsageError = FALSE;
-    auto out = adoptDataset(GDALTranslate(outputPath, hSrcDs, psOptions.get(), &bUsageError));
-    srcGuard.reset();  // closes hSrcDs
-
-    if (!out || bUsageError)
-    {
-        out.reset();
-        cancel::throwIfCanceled();
-        throw GDALException("Cannot create output GeoTIFF");
-    }
-
-    closeOutputOrThrow(std::move(out), outputPath);
-    // Reopen in update mode to add internal overviews (efficient zoomed
-    // reads). Best-effort: a failure here is non-fatal.
-    if (const auto ovr = raster::reopenWrittenRaster(io::fromUtf8(outputPath), raster::ArtefactAccess::Update))
-    {
-        buildInternalOverviews(datasetHandle(ovr), part.width, part.height);
-    }
-    partialOutput.commit();
-    session.report(1.0, "converting");
+        if (layout.mask)
+            for (int row = 0; row < height; row++)
+                for (int col = 0; col < width; col++)
+                    out[static_cast<size_t>(row) * stride + static_cast<size_t>(col) * samples + bandCount] =
+                        mask[static_cast<size_t>(row) * static_cast<size_t>(width) + static_cast<size_t>(col)];
+    };
+    // gdal_translate's GTiff tiles: 256, whatever tile the request asks for
+    writeExport(request, src, part, 256, layout, filler, session);
 }
 
 } // namespace
@@ -549,30 +595,13 @@ void exportRaster(const RasterExport &request)
     io::assureDistinctOutput(io::fromUtf8(request.input), io::fromUtf8(request.output));
 
     ExportSession session(request.progress);
-
     const ExportSource src(request);
     if (!request.formula.empty())
-    {
         exportFormula(request, session, src);
-        return;
-    }
-    if (const int band = styledBandOf(request, src.source()); band > 0)
-    {
+    else if (const int band = styledBandOf(request, src.source()); band > 0)
         exportStyledBand(request, band, session, src);
-        return;
-    }
-
-    // Closed on any return or throw
-    auto source = raster::openInputRaster(request.input);
-    if (!source)
-        throw GDALException("Cannot open " + request.input);
-
-    // With a NoData override the export reads a view of the raster that has it (it is closed before the
-    // raster, which it reads)
-    GDALDatasetUniquePtr view;
-    if (request.nodata)
-        view = withNodataOverride(datasetHandle(source), *request.nodata);
-    exportBands(request, session, view ? view : source);
+    else
+        exportBands(request, session, src);
 }
 
 } // namespace ddb

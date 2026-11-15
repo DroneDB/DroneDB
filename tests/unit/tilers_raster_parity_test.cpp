@@ -503,16 +503,20 @@ namespace
     {
         std::string name;
         std::vector<std::string> interps;
-        std::optional<uint8_t> nodata;
+        std::optional<double> nodata;
+        bool mask = false;  // an internal (per-dataset) mask
+        int width = 1003, height = 771;
     };
+
+    uint8_t exportMask(int x, int y) { return (x / 4 + y / 6) % 5 == 0 ? 0 : 255; }
 
     uint8_t exportSample(const WriteCase &c, int band, int x, int y)
     {
         const bool alpha = c.interps[static_cast<size_t>(band)] == "Alpha";
         if (alpha)
             return (x / 3 + y / 5) % 4 == 0 ? 0 : ((x + y) % 9 == 0 ? 128 : 255);
-        if (c.nodata && (x * 7 + y * 3) % 11 == 0)
-            return *c.nodata;
+        if (c.nodata && *c.nodata >= 0 && *c.nodata <= 255 && (x * 7 + y * 3) % 11 == 0)
+            return static_cast<uint8_t>(*c.nodata);
         return static_cast<uint8_t>((x * 13 + y * 29 + band * 71) % 256);
     }
 
@@ -520,29 +524,40 @@ namespace
     {
         const auto &c = *static_cast<const WriteCase *>(userData);
         const int bands = static_cast<int>(c.interps.size());
+        const int samples = bands + (c.mask ? 1 : 0);
         for (int r = 0; r < h; r++)
             for (int col = 0; col < w; col++)
+            {
+                uint8_t *px = out + static_cast<size_t>(r) * stride + static_cast<size_t>(col) * samples;
                 for (int b = 0; b < bands; b++)
-                    out[static_cast<size_t>(r) * stride + static_cast<size_t>(col) * bands + b] =
-                        exportSample(c, b, x + col, y + r);
+                    px[b] = exportSample(c, b, x + col, y + r);
+                if (c.mask)
+                    px[bands] = exportMask(x + col, y + r);
+            }
         return 0;
     }
 
     TEST(TilersRasterParity, anExportIsWrittenAsGdalWritesIt)
     {
         TestArea ta(TEST_NAME, true);
-        const int width = 1003, height = 771;
         std::vector<int> factors = {2, 4, 8};
         const std::vector<WriteCase> cases = {
             {"rgba", {"Red", "Green", "Blue", "Alpha"}, std::nullopt},
             {"grey-alpha", {"Gray", "Alpha"}, std::nullopt},
             {"rgb", {"Red", "Green", "Blue"}, std::nullopt},
-            {"nodata", {"Gray"}, uint8_t{7}},
+            {"nodata", {"Gray"}, 7.0},
+            {"mask", {"Red", "Green", "Blue"}, std::nullopt, true},
+            // An even width and an odd height: GDAL's fast path on the rows over 2 source rows
+            {"even-odd", {"Red", "Green", "Blue"}, std::nullopt, false, 1004, 771},
+            // A nodata value Byte cannot hold (a scaled DEM), and bands the photometric does not name
+            {"nodata-9999", {"Undefined", "Undefined", "Gray"}, -9999.0, false, 1004, 771},
+            {"nodata-mask", {"Gray", "Undefined"}, 0.0, true},
         };
         for (const WriteCase &c : cases)
         {
             SCOPED_TRACE(c.name);
             const int bands = static_cast<int>(c.interps.size());
+            const int width = c.width, height = c.height;
             // GDAL: created band by band, then its overviews
             const fs::path gdalFile = ta.getPath(c.name + "-gdal.tif");
             {
@@ -567,6 +582,16 @@ namespace
                     ASSERT_EQ(GDALRasterIO(band, GF_Write, 0, 0, width, height, plane.data(), width, height, GDT_Byte, 0, 0),
                               CE_None);
                 }
+                if (c.mask)
+                {
+                    ASSERT_EQ(GDALCreateDatasetMaskBand(h, GMF_PER_DATASET), CE_None);
+                    for (int y = 0; y < height; y++)
+                        for (int x = 0; x < width; x++)
+                            plane[static_cast<size_t>(y) * width + x] = exportMask(x, y);
+                    ASSERT_EQ(GDALRasterIO(GDALGetMaskBand(GDALGetRasterBand(h, 1)), GF_Write, 0, 0, width, height,
+                                           plane.data(), width, height, GDT_Byte, 0, 0),
+                              CE_None);
+                }
                 ASSERT_EQ(GDALBuildOverviews(h, "AVERAGE", static_cast<int>(factors.size()), factors.data(), 0, nullptr,
                                              nullptr, nullptr),
                           CE_None);
@@ -577,6 +602,10 @@ namespace
                             {"overviewFactors", factors}};
             if (c.nodata)
                 options["nodata"] = *c.nodata;
+            options["width"] = width;
+            options["height"] = height;
+            if (c.mask)
+                options["mask"] = true;
             ASSERT_EQ(ddbtWriteRaster(io::toUtf8(tilersFile).c_str(), options.dump().c_str(), fillExport,
                                       const_cast<WriteCase *>(&c), nullptr, nullptr),
                       DDBT_ERR_NONE)
@@ -590,7 +619,10 @@ namespace
                 SCOPED_TRACE("band " + std::to_string(b));
                 GDALRasterBandH wb = GDALGetRasterBand(datasetHandle(want), b);
                 GDALRasterBandH gb = GDALGetRasterBand(datasetHandle(got), b);
-                EXPECT_EQ(GDALGetRasterColorInterpretation(gb), GDALGetRasterColorInterpretation(wb));
+                // Every band as it was named, as gdal_translate's CreateCopy writes them (GDALCreate and
+                // SetColorInterpretation, the reference here, drop the names the photometric gives)
+                EXPECT_EQ(std::string(GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(gb))),
+                          c.interps[static_cast<size_t>(b - 1)]);
                 EXPECT_EQ(GDALGetMaskFlags(gb), GDALGetMaskFlags(wb));
                 int hasWant = 0, hasGot = 0;
                 EXPECT_EQ(GDALGetRasterNoDataValue(gb, &hasGot), GDALGetRasterNoDataValue(wb, &hasWant));
@@ -610,8 +642,70 @@ namespace
                     for (size_t i = 0; i < a.size(); i++)
                         differ += a[i] != z[i];
                     EXPECT_EQ(differ, 0u) << "level " << level + 1 << " (" << lw << " x " << lh << ")";
+                    // The mask of the level
+                    ASSERT_EQ(GDALRasterIO(GDALGetMaskBand(w), GF_Read, 0, 0, lw, lh, a.data(), lw, lh, GDT_Byte, 0, 0),
+                              CE_None);
+                    ASSERT_EQ(GDALRasterIO(GDALGetMaskBand(g), GF_Read, 0, 0, lw, lh, z.data(), lw, lh, GDT_Byte, 0, 0),
+                              CE_None);
+                    differ = 0;
+                    for (size_t i = 0; i < a.size(); i++)
+                        differ += a[i] != z[i];
+                    EXPECT_EQ(differ, 0u) << "the mask of level " << level + 1;
                 }
             }
         }
+    }
+
+    // The range gdal_translate -scale stretches a band over (GDALComputeRasterMinMax with bApproxOK) is the one
+    // approximateMinMax reads through ddb-tilers: from the STATISTICS_* metadata, an overview, or a sample of the
+    // blocks, with the NoData value and the masks
+    TEST(TilersRasterParity, theApproximateRangeOfABandIsGdals)
+    {
+        TestArea ta(TEST_NAME, true);
+        const std::vector<Case> cases = {
+            {"byte-rgba-alpha", GDT_Byte, 4, true, false, false, false, false, true, true},
+            {"uint16-strips-band", GDT_UInt16, 2, false, true, true},
+            {"int16-scaled", GDT_Int16, 1, true, false, true, true},
+            {"uint32-mask", GDT_UInt32, 1, true, false, false, false, true},
+            {"int32-overviews", GDT_Int32, 2, true, true, false, false, false, false, true},
+            {"float32-dem", GDT_Float32, 1, true, false, true, true, false, false, true, 32633},
+            {"float64-mask-overviews", GDT_Float64, 3, true, false, false, false, true, false, true},
+            {"float32-ms-6", GDT_Float32, 6, true, true, true, false, false, false, true, 4326},
+        };
+        // Large enough for overviews of more than 2500 pixels, and for a sample of the blocks without them
+        const int width = 333, height = 257;
+        for (const Case &c : cases)
+        {
+            SCOPED_TRACE(c.name);
+            const fs::path file = writeRaster(ta.getPath(c.name + ".tif"), c, width, height);
+            const auto ds = adoptDataset(GDALOpen(io::toUtf8(file).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(ds);
+            const auto raster = tilers::Raster::open(file);
+            const auto source = rasterSourceOf(*raster);
+            for (int b = 1; b <= c.bands; b++)
+            {
+                SCOPED_TRACE("band " + std::to_string(b));
+                double want[2] = {0, 0};
+                CPLPushErrorHandler(CPLQuietErrorHandler);
+                GDALComputeRasterMinMax(GDALGetRasterBand(datasetHandle(ds), b), TRUE, want);
+                CPLPopErrorHandler();
+                const auto [lo, hi] = approximateMinMax(*source, b);
+                EXPECT_EQ(lo, want[0]);
+                EXPECT_EQ(hi, want[1]);
+            }
+        }
+
+        // A band that states its statistics: they are the range
+        Case stated{"stated", GDT_Float32, 1};
+        const fs::path file = writeRaster(ta.getPath("stated.tif"), stated, width, height);
+        {
+            const auto ds = adoptDataset(GDALOpen(io::toUtf8(file).c_str(), GA_Update));
+            ASSERT_TRUE(ds);
+            ASSERT_EQ(GDALSetRasterStatistics(GDALGetRasterBand(datasetHandle(ds), 1), -3.5, 1234.25, 5, 2), CE_None);
+        }
+        const auto raster = tilers::Raster::open(file);
+        const auto [lo, hi] = approximateMinMax(*rasterSourceOf(*raster), 1);
+        EXPECT_EQ(lo, -3.5);
+        EXPECT_EQ(hi, 1234.25);
     }
 }

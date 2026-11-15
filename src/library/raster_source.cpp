@@ -30,9 +30,9 @@ namespace ddb
             int bandCount() const override { return GDALGetRasterCount(ds_); }
             BandNodata nodata(int band) const override { return readBandNodata(bandOf(band)); }
             GDALDataType dataType(int band) const override { return GDALGetRasterDataType(bandOf(band)); }
-            bool isAlpha(int band) const override
+            std::string colorInterp(int band) const override
             {
-                return GDALGetRasterColorInterpretation(bandOf(band)) == GCI_AlphaBand;
+                return GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(bandOf(band)));
             }
             std::optional<double> scale(int band) const override
             {
@@ -50,6 +50,12 @@ namespace ddb
             {
                 const char *u = GDALGetRasterUnitType(bandOf(band));
                 return u != nullptr ? u : "";
+            }
+            std::string description(int band) const override { return GDALGetDescription(bandOf(band)); }
+            std::optional<std::string> metadataItem(int band, const std::string &name) const override
+            {
+                const char *v = GDALGetMetadataItem(bandOf(band), name.c_str(), nullptr);
+                return v != nullptr ? std::optional<std::string>(v) : std::nullopt;
             }
             bool hasMask(int band) const override { return maskBandOf(bandOf(band)) != nullptr; }
             void blockSize(int &width, int &height) const override { GDALGetBlockSize(bandOf(1), &width, &height); }
@@ -191,10 +197,18 @@ namespace ddb
                 bandOf(band);
                 return GDALGetDataTypeByName(raster_.dataType().c_str());
             }
-            bool isAlpha(int band) const override { return bandOf(band).colorInterp == "Alpha"; }
+            std::string colorInterp(int band) const override { return bandOf(band).colorInterp; }
             std::optional<double> scale(int band) const override { return bandOf(band).scale; }
             std::optional<double> offset(int band) const override { return bandOf(band).offset; }
             std::string unit(int band) const override { return bandOf(band).unit; }
+            std::string description(int band) const override { return bandOf(band).description; }
+            std::optional<std::string> metadataItem(int band, const std::string &name) const override
+            {
+                for (const auto &[key, value] : bandOf(band).metadata)
+                    if (EQUAL(key.c_str(), name.c_str()))
+                        return value;
+                return std::nullopt;
+            }
             bool hasMask(int band) const override
             {
                 bandOf(band);
@@ -291,10 +305,15 @@ namespace ddb
                 return BandNodata{true, nodata_};
             }
             GDALDataType dataType(int band) const override { return source_.dataType(band); }
-            bool isAlpha(int band) const override { return source_.isAlpha(band); }
+            std::string colorInterp(int band) const override { return source_.colorInterp(band); }
             std::optional<double> scale(int band) const override { return source_.scale(band); }
             std::optional<double> offset(int band) const override { return source_.offset(band); }
             std::string unit(int band) const override { return source_.unit(band); }
+            std::string description(int band) const override { return source_.description(band); }
+            std::optional<std::string> metadataItem(int band, const std::string &name) const override
+            {
+                return source_.metadataItem(band, name);
+            }
             bool hasMask(int band) const override
             {
                 source_.dataType(band);

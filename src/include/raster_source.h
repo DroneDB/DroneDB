@@ -40,13 +40,19 @@ namespace ddb
         virtual GDALDataType dataType(int band) const = 0;
         /// Whether a band holds Float32 samples (its NoData value is compared rounded to float)
         bool isFloat32(int band) const { return dataType(band) == GDT_Float32; }
+        /// GDAL's name of the colour interpretation of a band ("Red", "Gray", "Alpha", "Undefined"...)
+        virtual std::string colorInterp(int band) const = 0;
         /// Whether a band is an alpha band (its colour interpretation)
-        virtual bool isAlpha(int band) const = 0;
+        bool isAlpha(int band) const { return colorInterp(band) == "Alpha"; }
         /// The scale and offset of a band, each when it has one
         virtual std::optional<double> scale(int band) const = 0;
         virtual std::optional<double> offset(int band) const = 0;
         /// The unit type of a band, "" without one
         virtual std::string unit(int band) const = 0;
+        /// The description of a band, "" without one
+        virtual std::string description(int band) const = 0;
+        /// An item of the default metadata domain of a band (GDALGetMetadataItem: the name in any case)
+        virtual std::optional<std::string> metadataItem(int band, const std::string &name) const = 0;
         /// Whether a band has an alpha band or a mask of the dataset (not a NoData mask): the bands that have one
         /// share it (GMF_PER_DATASET)
         virtual bool hasMask(int band) const = 0;

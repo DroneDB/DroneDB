@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "fs.h"
@@ -32,6 +33,7 @@ namespace ddb::tilers
             std::optional<double> nodata;
             std::optional<double> scale, offset;
             std::string unit, description;
+            std::vector<std::pair<std::string, std::string>> metadata;  // the items of its default domain
         };
 
         // The raster libddb reads for `path` (UTF-8), as raster::openInputRaster opens it: none for a
