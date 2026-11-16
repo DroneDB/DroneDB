@@ -315,10 +315,22 @@ namespace
                 GDALCopyWords(data + first * ss, type, 0, &v, GDT_Float64, 0, 1);
                 return v;
             };
+            // How this build of GDAL makes a half of a double, which depends on the compiler (_Float16 rounds,
+            // its absence truncates): what a difference of halves comes from
+            const auto gdalHalfOf = [](double v) {
+                uint16_t h = 0;
+                GDALCopyWords(&v, GDT_Float64, 0, &h, GDT_Float16, 0, 1);
+                double back = 0;
+                GDALCopyWords(&h, GDT_Float16, 0, &back, GDT_Float64, 0, 1);
+                return back;
+            };
             EXPECT_EQ(differ, 0u) << "samples that differ from GDALWarp's (level " << info.at("sourceLevel").get<int>()
                                   << "), the first at (" << first % static_cast<size_t>(r.width) << ", "
                                   << first / static_cast<size_t>(r.width) << "): " << valueAt(got) << " for "
-                                  << valueAt(expected.data());
+                                  << valueAt(expected.data())
+                                  << (type == GDT_Float16 ? " (GDAL makes " + std::to_string(gdalHalfOf(-9999.0)) +
+                                                                " of -9999 in this build)"
+                                                          : std::string());
         }
         ddbtFree(pixels);
         // The colour table gdalwarp copies from the first band of the source
