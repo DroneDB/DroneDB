@@ -14,6 +14,8 @@
 
 #include <chrono>
 #include <fstream>
+#include <future>
+#include <mutex>
 #include <thread>
 #include <atomic>
 
@@ -152,77 +154,48 @@ TEST_F(IsBuildActiveTest, SimpleLockTest) {
 }
 
 TEST_F(IsBuildActiveTest, RealBuildInThread) {
-    // Test with a real build running in a separate thread
+    // A real build in another thread is seen while it runs: the build reports its progress while it holds
+    // its lock, and its first report waits until the test has looked, so the test looks at a running build
+    // however fast the build is (no timing)
     Entry orthoEntry;
     fs::path relativePath = fs::relative(orthoPath, dbPath);
     EXPECT_TRUE(loadEntry(db.get(), relativePath.string(), orthoEntry));
-
-    // Initially no build should be active
     EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
 
-    // Create output directory for the build - use the database build directory
     fs::path buildOutputPath = db->buildDirectory();
     fs::create_directories(buildOutputPath);
 
-    // Flag to control and monitor the build thread
-    std::atomic<bool> buildStarted{false};
-    std::atomic<bool> buildCompleted{false};
-    std::exception_ptr buildException = nullptr;
-
-    // Start build in a separate thread
+    std::promise<void> running, looked;
+    std::shared_future<void> lookedDone = looked.get_future().share();
+    std::once_flag first;
+    BuildOptions options;
+    options.progress = [&](double, std::string_view) {
+        std::call_once(first, [&] {
+            running.set_value();
+            lookedDone.wait();
+        });
+    };
+    std::exception_ptr buildException;
     std::thread buildThread([&]() {
         try {
-            buildStarted = true;
-
-            // Add a small delay to ensure the build is detected
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-            // Run the actual build - this will create the build lock internally
-            ddb::build(db.get(), relativePath.string(), buildOutputPath.string());
-
-            buildCompleted = true;
+            ddb::build(db.get(), relativePath.string(), buildOutputPath.string(), false, options);
         } catch (...) {
             buildException = std::current_exception();
-            buildCompleted = true;
         }
+        // A build that reported nothing must not leave the test waiting
+        std::call_once(first, [&] { running.set_value(); });
     });
 
-    // Wait for build to start
-    while (!buildStarted) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    // Give the build some time to acquire the lock and start processing
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-
-    // Now isBuildActive should return true (build is running)
-    bool isActive = ddb::isBuildActive(db.get(), relativePath.string());
-
-    EXPECT_TRUE(isActive || buildCompleted) << "Build should be active or already completed";
-
-    // Wait for build to complete
+    running.get_future().wait();
+    const bool isActive = ddb::isBuildActive(db.get(), relativePath.string());
+    looked.set_value();
     buildThread.join();
 
-    // Check if there was an exception in the build thread
-    if (buildException) {
-        try {
-            std::rethrow_exception(buildException);
-        } catch (const std::exception& e) {
-            // Build might fail for various reasons (missing dependencies, etc.)
-            // but we can still test if isBuildActive detected it correctly
-            GTEST_LOG_(INFO) << "Build failed with: " << e.what();
-        }
-    }
-
-    // Wait a bit more to ensure lock is released
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-    // After build completes, isBuildActive should return false
-    EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
-
-    // The key test is that we detected the build while it was running
-    // Even if the build failed, we should have detected it was active
+    if (buildException)
+        std::rethrow_exception(buildException);
     EXPECT_TRUE(isActive) << "isBuildActive should have detected the running build";
+    // The build released its lock when it returned
+    EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
 }
 
 TEST_F(IsBuildActiveTest, StaleLockFileIsCleanedUp) {

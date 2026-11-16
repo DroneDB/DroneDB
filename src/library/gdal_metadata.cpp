@@ -101,6 +101,15 @@ std::optional<std::string> itemOf(const RasterMetadata &metadata, std::string_vi
     return std::nullopt;
 }
 
+std::optional<std::pair<std::string, std::string>> parseNameValue(std::string_view item) {
+    const size_t separator = item.find_first_of("=:");
+    if (separator == std::string_view::npos) return std::nullopt;
+    std::string_view name = item.substr(0, separator), value = item.substr(separator + 1);
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.remove_prefix(1);
+    while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.remove_suffix(1);
+    return std::make_pair(std::string(name), std::string(value));
+}
+
 std::vector<std::string> collectMetadata(const RasterSource &raster, const CollectOptions &options) {
     std::vector<std::string> out;
     const RasterMetadata metadata = raster.metadata();

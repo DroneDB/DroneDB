@@ -4,6 +4,7 @@
 #ifndef POINTCLOUD_H
 #define POINTCLOUD_H
 
+#include <functional>
 #include <string>
 #include <vector>
 #include "build_budget.h"
@@ -25,6 +26,11 @@ namespace ddb
     // that is not a point cloud of those formats.
     // @throws the exceptions of IRasterHelper (a GDALException for a file that cannot be read)
     bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info);
+
+    // Runs `read`, a read of a user's point cloud in the raster helper. A cloud the helper cannot read
+    // is a PDALException (the add error code "PDAL"), as PDAL's readers reported it when libddb read
+    // the clouds itself; `context` comes before the reason.
+    void readPointCloud(const std::string &context, const std::function<void()> &read);
 
     // The info of a built COPC (.copc.laz), read by ddb-tilers in this process (the file is the
     // output of a build), with its footprint in EPSG:footprintSrs. False when it cannot be read.

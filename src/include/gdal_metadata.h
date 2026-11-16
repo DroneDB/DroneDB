@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gdal.h>
@@ -44,6 +45,10 @@ RasterMetadata metadataOf(GDALDatasetH dataset);
 // The value of item `name` of `domain` as GDALGetMetadataItem finds it (the name in any case, then
 // '=' or ':'), or none
 std::optional<std::string> itemOf(const RasterMetadata &metadata, std::string_view domain, std::string_view name);
+
+// An item "NAME=VALUE" split as GDAL's writers split it (CPLParseNameValue: at the first '=' or ':', the
+// spaces and tabs before the separator and after it left out), none without a separator
+std::optional<std::pair<std::string, std::string>> parseNameValue(std::string_view item);
 
 struct CollectOptions {
     // Metadata of bands 1..bandCount

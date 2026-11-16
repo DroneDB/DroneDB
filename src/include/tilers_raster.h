@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "copied_metadata.h"
 #include "fs.h"
 #include "gdal_metadata.h"
 
@@ -174,10 +175,18 @@ namespace ddb::tilers
     // Warps `file` (a file of libddb: Raster::file()). @throws InvalidArgsException, GDALException
     WarpedImage warp(const fs::path &file, const WarpRequest &request);
 
-    // Writes `image` to `output`, a tiled DEFLATE GeoTIFF in `crs` (a CRS with an EPSG code) that GDAL
-    // reads as it reads gdalwarp's GeoTIFF of the same warp: the samples, the colour interpretations,
-    // the nodata value and the colour table of band 1. @throws InvalidArgsException, GDALException
-    void writeGeoTiff(const WarpedImage &image, const std::string &crs, const fs::path &output);
+    // How writeGeoTiff writes an image
+    struct GeoTiffOptions
+    {
+        std::string crs;          // a CRS with an EPSG code; empty: the image is not georeferenced
+        bool compress = true;     // DEFLATE (with the predictor of its type), else none
+        CopiedMetadata metadata;  // what it takes from the raster it was made from
+    };
+
+    // Writes `image` to `output`, a tiled GeoTIFF that GDAL reads as it reads gdalwarp's GeoTIFF of the
+    // same warp: the samples, the colour interpretations, the nodata value, the colour table of band 1
+    // and the metadata of the options. @throws InvalidArgsException, GDALException
+    void writeGeoTiff(const WarpedImage &image, const fs::path &output, const GeoTiffOptions &options);
 }
 
 #endif // TILERS_RASTER_H

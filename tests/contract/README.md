@@ -766,3 +766,21 @@ Registry has to adopt first.
   output instead of the cache. The process of libddb opens no raster with GDAL.
   The 3D Tiles of models are built by Obj2Tiles v1.10.1, whose KTX2 encoder (libktx 5.0.0-rc2) no longer hangs at
   the end of a multi-threaded encode.
+* 2026-11-16: 2.7.1 (ABI 2.7, a patch: no export is added or removed, `capabilities` is unchanged and no schema or
+  fixture changes).
+  The GeoTIFFs libddb writes with ddb-tilers again have what GDAL's tools copied from the raster in 2.6.0, which
+  2.7.0 lost (the pixels were the same). The export of bands (`DDBExportRaster3` without a formula) has what
+  gdal_translate copies: the metadata items of the raster (but `TIFFTAG_MINSAMPLEVALUE` and
+  `TIFFTAG_MAXSAMPLEVALUE`, `CACHE_PATH`, `NITF_BLOCKA_*` of a window and `NODATA_VALUES` unless every band is
+  exported in its order) and its XMP; for each band its items (but its statistics when the values are scaled or a
+  window is exported), its scale and offset, its unit (only when its statistics are kept) and its description; and
+  the colour table of a palette band, with overviews averaged in the colours of the table as GDAL averages a
+  palette band (a palette raster with an internal mask is exported without its table). The GeoTIFF of a region
+  render (`DDBRenderRasterRegionEx*`, WCS) has what gdalwarp copies: the metadata items of the raster (but
+  `CACHE_PATH`, and `NODATA_VALUES` beside an alpha band), the scale and offset of each band, and when the render has
+  as many bands as the raster the items, description and unit of each band. A raster whose pixels are points
+  (`AREA_OR_POINT=Point`) is exported where it is (2.7.0 wrote every export of it half a pixel away) and its region
+  GeoTIFF says so. `DDBRenderRasterIndex*` with "image/tiff" or "image/geotiff" gives an uncompressed TIFF of the RGBA
+  pixels without georeferencing again (2.7.0 gave a PNG). A point cloud the raster helper cannot read is again a
+  `PDALException`, the add error code "PDAL", for its info and the sample of the splat training export (2.7.0 gave
+  "GDAL"), as for its COPC build.

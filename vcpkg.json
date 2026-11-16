@@ -1,6 +1,6 @@
 {
   "name": "ddb",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "dependencies": [
     "boolinq",
     "cctz",

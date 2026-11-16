@@ -170,8 +170,16 @@ bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info) {
         LOGD << "Not a point cloud ddb-tilers reads: " << filename;
         return false;
     }
-    info = raster::rasterHelper().pointCloudInfo(io::fromUtf8(filename));
+    readPointCloud("", [&] { info = raster::rasterHelper().pointCloudInfo(io::fromUtf8(filename)); });
     return true;
+}
+
+void readPointCloud(const std::string& context, const std::function<void()>& read) {
+    try {
+        read();
+    } catch (const raster::RasterOpException& e) {
+        throw PDALException(context + e.what());
+    }
 }
 
 bool getCopcInfo(const std::string& copcPath, PointCloudInfo& info, int footprintSrs) {
@@ -293,12 +301,9 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     const raster::ProgressCallback report = [&options](double fraction) {
         options.reportProgress(fraction, copcPhaseOfFraction(fraction));
     };
-    try {
+    readPointCloud("COPC build failed: ", [&] {
         raster::rasterHelper().buildCopc(io::fromUtf8(filenames.front()), produced, raster::toJson(params), report);
-    } catch (const raster::RasterOpException& e) {
-        // A point cloud the helper cannot read, as PDAL's build reported it
-        throw PDALException(std::string("COPC build failed: ") + e.what());
-    }
+    });
     checkBuiltCopc(produced);
 
     // The output may have appeared while the COPC was built: replaced only when asked
