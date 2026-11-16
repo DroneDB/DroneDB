@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "raster_test_utils.h"
 #include "gtest/gtest.h"
 #include "ddbt/ddbt.h"
 #include "gdal_inc.h"
@@ -881,7 +882,7 @@ namespace
                 std::vector<uint8_t> a(static_cast<size_t>(width) * height * size), z(a.size());
                 ASSERT_EQ(GDALRasterIO(wb, GF_Read, 0, 0, width, height, a.data(), width, height, c.type, 0, 0), CE_None);
                 ASSERT_EQ(GDALRasterIO(gb, GF_Read, 0, 0, width, height, z.data(), width, height, c.type, 0, 0), CE_None);
-                EXPECT_EQ(std::memcmp(a.data(), z.data(), a.size()), 0);
+                EXPECT_EQ(testutils::samplesThatDiffer(c.type, a.data(), z.data(), a.size()), 0u);
             }
             // The colour table GDAL reads back (the alpha of the nodata entry as GDAL gives it)
             const GDALColorTableH wt = GDALGetRasterColorTable(GDALGetRasterBand(datasetHandle(want), 1));

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <vector>
@@ -18,6 +19,44 @@
 
 namespace testutils
 {
+    /// Whether this build of GDAL makes the nearest half of a double. It does with the compiler's _Float16
+    /// (GCC, Clang); built without it (MSVC) it rounds only the halves GDALCopyWords converts eight at a
+    /// time and truncates the others, so a sample of a Float16 raster depends on where it falls in a buffer
+    inline bool gdalRoundsHalves()
+    {
+        double v = -9999.0;
+        uint16_t h = 0;
+        GDALCopyWords(&v, GDT_Float64, 0, &h, GDT_Float16, 0, 1);
+        return h == 0xF0E2;  // -10000, the nearest half; -9992 is the truncated one
+    }
+
+    /// The samples of `type` that differ between `a` and `b` (`bytes` long each); `first` gets the index of the
+    /// first. ddb-tilers makes the nearest half of every sample: against a GDAL that does not
+    /// (gdalRoundsHalves), two halves one step apart are the same sample
+    inline size_t samplesThatDiffer(GDALDataType type, const uint8_t *a, const uint8_t *b, size_t bytes,
+                                    size_t *first = nullptr)
+    {
+        const size_t size = static_cast<size_t>(GDALGetDataTypeSizeBytes(type));
+        const bool halfStep = type == GDT_Float16 && !gdalRoundsHalves();
+        size_t differ = 0;
+        for (size_t i = 0; i + size <= bytes; i += size)
+        {
+            if (std::memcmp(a + i, b + i, size) == 0)
+                continue;
+            if (halfStep)
+            {
+                uint16_t ha = 0, hb = 0;
+                std::memcpy(&ha, a + i, 2);
+                std::memcpy(&hb, b + i, 2);
+                if (((ha ^ hb) & 0x8000u) == 0 && (ha > hb ? ha - hb : hb - ha) == 1)
+                    continue;
+            }
+            if (differ++ == 0 && first != nullptr)
+                *first = i / size;
+        }
+        return differ;
+    }
+
     /// Opens a raster with GDAL to look at what a test wrote or what libddb wrote (any driver, read-only):
     /// the tests look at files, libddb's host reads its rasters with ddb-tilers
     inline GDALDatasetUniquePtr openRaster(const fs::path &path)

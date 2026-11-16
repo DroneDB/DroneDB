@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "raster_test_utils.h"
 #include "gtest/gtest.h"
 #include "ddbt/ddbt.h"
 #include "gdal_inc.h"
@@ -299,38 +300,20 @@ namespace
             ASSERT_EQ(GDALRasterIO(band, GF_Read, 0, 0, r.width, r.height, expected.data(), r.width, r.height,
                                    type, 0, 0),
                       CE_None);
-            size_t differ = 0, first = 0;
+            size_t first = 0;
             const size_t ss = static_cast<size_t>(GDALGetDataTypeSizeBytes(type));
             const uint8_t *got = pixels + static_cast<size_t>(b - 1) * plane;
-            for (size_t i = 0; i < plane; i += ss)
-            {
-                if (std::memcmp(expected.data() + i, got + i, ss) == 0)
-                    continue;
-                if (differ++ == 0)
-                    first = i / ss;
-            }
+            const size_t differ = testutils::samplesThatDiffer(type, expected.data(), got, plane, &first);
             // The first sample that differs, as doubles
             const auto valueAt = [&](const uint8_t *data) {
                 double v = 0;
                 GDALCopyWords(data + first * ss, type, 0, &v, GDT_Float64, 0, 1);
                 return v;
             };
-            // How this build of GDAL makes a half of a double, which depends on the compiler (_Float16 rounds,
-            // its absence truncates): what a difference of halves comes from
-            const auto gdalHalfOf = [](double v) {
-                uint16_t h = 0;
-                GDALCopyWords(&v, GDT_Float64, 0, &h, GDT_Float16, 0, 1);
-                double back = 0;
-                GDALCopyWords(&h, GDT_Float16, 0, &back, GDT_Float64, 0, 1);
-                return back;
-            };
             EXPECT_EQ(differ, 0u) << "samples that differ from GDALWarp's (level " << info.at("sourceLevel").get<int>()
                                   << "), the first at (" << first % static_cast<size_t>(r.width) << ", "
                                   << first / static_cast<size_t>(r.width) << "): " << valueAt(got) << " for "
-                                  << valueAt(expected.data())
-                                  << (type == GDT_Float16 ? " (GDAL makes " + std::to_string(gdalHalfOf(-9999.0)) +
-                                                                " of -9999 in this build)"
-                                                          : std::string());
+                                  << valueAt(expected.data());
         }
         ddbtFree(pixels);
         // The colour table gdalwarp copies from the first band of the source
