@@ -31,7 +31,7 @@ param(
             if (Test-Path $versionFile) {
                 (Get-Content $versionFile -ErrorAction SilentlyContinue).Trim()
             } else {
-                "v1.10.1"
+                "v1.10.2"
             }
         }
     )
@@ -114,7 +114,8 @@ try {
     }
 
     # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary, with the
-    # notices of the libraries the binary bundles (THIRD_PARTY_NOTICES.md, since v1.8.1: LibTiff.Net, BSD).
+    # notices of the libraries the binary bundles (THIRD_PARTY_NOTICES.md: LibTiff.Net since v1.8.1; libktx and the
+    # code it is built from since v1.10.2).
     foreach ($doc in @("LICENSE", "THIRD_PARTY_NOTICES")) {
         $docDest = Join-Path $TargetDir "Obj2Tiles.$doc.md"
         $docUrl = "https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/$Version/$doc.md"
