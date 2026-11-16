@@ -764,5 +764,5 @@ Registry has to adopt first.
   and failed on Float32 and Float64); its border colour is one number. The message of a mask GDAL cannot write
   names the output by its file. The scratch rasters of an alignment are written in a private folder beside its
   output instead of the cache. The process of libddb opens no raster with GDAL.
-  The 3D Tiles of models are built by Obj2Tiles v1.10.0, whose KTX2 encoder (libktx 5.0.0-rc2) no longer hangs at
+  The 3D Tiles of models are built by Obj2Tiles v1.10.1, whose KTX2 encoder (libktx 5.0.0-rc2) no longer hangs at
   the end of a multi-threaded encode.
