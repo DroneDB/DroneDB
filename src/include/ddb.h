@@ -1800,7 +1800,13 @@ extern "C"
      * transparent; DDBERR_INVALIDARGS for a colormap that does not exist. Without a formula and without a colormap,
      * or with a colormap and several bands, 8-bit GeoTIFF of the bands (the first three, or those chosen) scaled to
      * the rescale, else to their minimum and maximum, and the colormap is ignored. A library older than 2.4 ignores
-     * the colormap of a band without a formula and writes the 8-bit grey band. */
+     * the colormap of a band without a formula and writes the 8-bit grey band.
+     * Changed in 2.7.1: the GeoTIFF of the bands has what gdal_translate copies from the raster, which 2.7.0 lost:
+     * the metadata items and the XMP of the raster, the items, scale, offset and unit of each band (its statistics
+     * and unit only when the values and the extent are those of the raster) and the colour table of a palette band
+     * (its overviews averaged in the colours of the table, as GDAL does; a palette raster with a mask is written
+     * without its table). Every export of a raster whose pixels are points (AREA_OR_POINT=Point) is again where the
+     * raster is: 2.7.0 wrote it half a pixel away. */
     DDB_DLL DDBErr DDBExportRaster3(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,
@@ -2030,7 +2036,10 @@ extern "C"
      *                  NULL or empty = use @p bboxSrs (legacy behaviour).
      * @param bands     Optional pointer to @p bandCount 1-based band indices.
      *                  NULL or @p bandCount = 0 means "all bands".
-     * @param bandCount Number of entries in @p bands. */
+     * @param bandCount Number of entries in @p bands.
+     * Changed in 2.7.1: the GeoTIFF has what gdalwarp copies from the raster, which 2.7.0 lost: its metadata items,
+     * the scale and offset of each band, and when the render has as many bands as the raster the items,
+     * description and unit of each band; AREA_OR_POINT=Point for a raster whose pixels are points. */
     DDB_DLL DDBErr DDBRenderRasterRegionEx(const char *inputPath,
                                            const double *bbox,
                                            const char *bboxSrs,
@@ -2061,6 +2070,8 @@ extern "C"
      * @param format MIME: "image/png" | "image/jpeg" | "image/webp" | "image/tiff" | "image/geotiff", or
      *               "rgba" (new in 2.5, see DDBRenderRasterRegionEx2). Changed in 2.5: a JPEG composites the
      *               partial alpha of an edge over white with the rounding of DDBRenderOptions::background.
+     *               "image/tiff" and "image/geotiff" are an uncompressed TIFF of the RGBA pixels, without
+     *               georeferencing, as before 2.7.0 (2.7.0 gave a PNG).
      * @param outBuffer Allocated buffer (free with DDBVSIFree).
      * @param outBufferSize Buffer size in bytes.
      * @return DDBERR_NONE on success, an error otherwise. */
