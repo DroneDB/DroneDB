@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "real_raster_helper.h"
 #include "exceptions.h"
 #include "gtest/gtest.h"
 #include "json.h"
@@ -80,46 +81,17 @@ namespace
     }
 
     // The real program, counting the COG conversions
-    class CountingCogHelper : public raster::IRasterHelper
+    class CountingCogHelper : public testutils::RealRasterHelper
     {
       public:
-        raster::ProbeResult probe(const fs::path &path, const raster::ProbeParams &params) override
-        {
-            return real_.probe(path, params);
-        }
-        void thumbnail(const fs::path &path, const fs::path &out, const raster::ThumbnailParams &params) override
-        {
-            real_.thumbnail(path, out, params);
-        }
-        void normalize(const fs::path &path, const fs::path &out, const json &params) override
-        {
-            real_.normalize(path, out, params);
-        }
-        void geoproject(const fs::path &path, const fs::path &out, const json &params) override
-        {
-            real_.geoproject(path, out, params);
-        }
         void buildCog(const fs::path &path, const fs::path &out, const json &params,
                       const raster::ProgressCallback &progress) override
         {
             cogRequests++;
-            real_.buildCog(path, out, params, progress);
-        }
-        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
-                       const raster::ProgressCallback &progress) override
-        {
-            real_.buildCopc(path, out, params, progress);
-        }
-        void buildVector(const fs::path &path, const fs::path &out, const json &params,
-                         const raster::ProgressCallback &progress) override
-        {
-            real_.buildVector(path, out, params, progress);
+            RealRasterHelper::buildCog(path, out, params, progress);
         }
 
         std::atomic<int> cogRequests{0};
-
-      private:
-        raster::GdalUtilHelper real_;
     };
 
     std::vector<fs::path> filesIn(const fs::path &folder)

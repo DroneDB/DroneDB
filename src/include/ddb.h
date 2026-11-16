@@ -127,7 +127,9 @@ extern "C"
      * is missing from a 2.0 library, so a host checks DDBGetAbiVersion() for 2.4 (0x00020004) before it calls
      * them or sets them, and the DDBGetCapabilities() "symbols" tell which exports the library has. ABI 2.5
      * (libddb 2.5.0) adds DDBMemoryTileEx3, DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (0x00020005).
-     * ABI 2.6 (libddb 2.6.0, 0x00020006) adds no export: the DDBConfigure setting "artefactCacheMb". */
+     * ABI 2.6 (libddb 2.6.0, 0x00020006) adds no export: the DDBConfigure setting "artefactCacheMb".
+     * ABI 2.7 (libddb 2.7.0, 0x00020007) adds no export: the renders, reads and operations of rasters through
+     * ddb-tilers and the raster helper (protocol 1.3). */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -155,7 +157,7 @@ extern "C"
      *   "cpuPoolSize"    integer 0..4096, env DDB_CPU_POOL_SIZE, default cores - 1.
      *                    The process-wide CPU token pool: the worker threads libddb may run at
      *                    once beside the calling threads, across every call (parallel indexing,
-     *                    GDAL NUM_THREADS, PDAL readers, the threads of a COPC build, the cores
+     *                    GDAL NUM_THREADS, the threads of ddb-tilers, of a COPC build, the cores
      *                    given to Obj2Tiles). A calling thread always works and never needs a
      *                    token; a section gets the tokens that are free and never waits for one,
      *                    so 0 runs every call on its calling thread only. The calls a host runs
@@ -189,9 +191,9 @@ extern "C"
      *                    (created when first needed). The registry credentials of the ddb command
      *                    line stay in the profile folder.
      *
-     * The per-section thread counts DDB_INDEX_THREADS, DDB_BUILD_THREADS, DDB_RENDER_THREADS and
-     * DDB_OBJ2TILES_MAX_CORES (environment or GDAL config options) stay what a section asks for;
-     * the CPU pool decides how many of them run. */
+     * The per-section thread counts DDB_INDEX_THREADS, DDB_BUILD_THREADS and DDB_OBJ2TILES_MAX_CORES
+     * (environment or GDAL config options) stay what a section asks for; the CPU pool decides how many
+     * of them run. The renders of a region run on the pool of ddb-tilers, before its bulk work. */
 
     /** Changes settings of the process configuration (see above). Callable at any time, from any
      * thread, before DDBRegisterProcess too and concurrently with any other call (until

@@ -416,6 +416,80 @@ namespace
                              {"polygonGeom", {{"type", "Polygon"}, {"coordinates", json::array()}}}}));
     }
 
+    TEST(RasterProtocol, thePointCloudInfoSurvivesEncodingAndDecoding)
+    {
+        PointCloudInfo info;
+        info.pointCount = 903713;
+        info.wktProjection = "PROJCS[\"WGS 84 / UTM zone 15N\"]";
+        info.dimensions = {"X", "Y", "Z", "Intensity", "Pulse width"};
+        info.bounds = {576662.6, 5188115.1, 156.0, 576767.5, 5188210.8, 169.4};
+        info.polyBounds = footprint();
+        info.centroid.addPoint(9.15, 45.25, 156.0);
+
+        const PointCloudInfo back = raster::pointCloudInfoFromJson(json::parse(raster::pointCloudInfoJson(info).dump()));
+        EXPECT_EQ(back.pointCount, info.pointCount);
+        EXPECT_EQ(back.wktProjection, info.wktProjection);
+        EXPECT_EQ(back.dimensions, info.dimensions);
+        EXPECT_EQ(back.bounds, info.bounds);
+        ASSERT_EQ(back.polyBounds.points.size(), 5u);
+        EXPECT_DOUBLE_EQ(back.polyBounds.points[2].y, 45.3);
+        ASSERT_EQ(back.centroid.points.size(), 1u);
+        EXPECT_DOUBLE_EQ(back.centroid.points[0].z, 156.0);
+        EXPECT_TRUE(back.footprintWarning.empty());
+
+        // A cloud without a CRS or bounds: none of their members, and the warning of one without
+        // a footprint
+        PointCloudInfo bare;
+        bare.pointCount = 4;
+        bare.dimensions = {"X", "Y", "Z"};
+        bare.footprintWarning = "No coordinate transformation from Site to EPSG:4326";
+        const json encoded = raster::pointCloudInfoJson(bare);
+        for (const char *member : {"wkt", "bounds", "pointGeom", "polygonGeom"})
+            EXPECT_FALSE(encoded.contains(member)) << member;
+        const PointCloudInfo bareBack = raster::pointCloudInfoFromJson(encoded);
+        EXPECT_TRUE(bareBack.bounds.empty());
+        EXPECT_TRUE(bareBack.polyBounds.empty());
+        EXPECT_EQ(bareBack.footprintWarning, bare.footprintWarning);
+    }
+
+    TEST(RasterProtocol, aPointCloudInfoThatIsNotOneIsRefused)
+    {
+        const auto refused = [](const json &result) {
+            try
+            {
+                raster::pointCloudInfoFromJson(result);
+                return false;
+            }
+            catch (const ProtocolError &)
+            {
+                return true;
+            }
+        };
+        const json ok = {{"pointCount", 3}, {"dimensions", {"X", "Y", "Z"}}};
+        EXPECT_FALSE(refused(ok));
+        EXPECT_TRUE(refused(json::array()));
+        EXPECT_TRUE(refused({{"dimensions", {"X"}}}));                       // no count
+        EXPECT_TRUE(refused({{"pointCount", -1}, {"dimensions", {"X"}}}));   // not a count
+        EXPECT_TRUE(refused({{"pointCount", 1.5}, {"dimensions", {"X"}}}));
+        EXPECT_TRUE(refused({{"pointCount", 3}}));                           // no dimensions
+        EXPECT_TRUE(refused({{"pointCount", 3}, {"dimensions", "X"}}));
+        EXPECT_TRUE(refused({{"pointCount", 3}, {"dimensions", {1}}}));
+        json bad = ok;
+        bad["wkt"] = 4;
+        EXPECT_TRUE(refused(bad));
+        bad = ok;
+        bad["bounds"] = {1, 2, 3};
+        EXPECT_TRUE(refused(bad));
+        bad["bounds"] = {1, 2, 3, 4, 5, "6"};
+        EXPECT_TRUE(refused(bad));
+        bad = ok;
+        bad["polygonGeom"] = {{"type", "Point"}};
+        EXPECT_TRUE(refused(bad));
+        bad = ok;
+        bad["warning"] = json::object();
+        EXPECT_TRUE(refused(bad));
+    }
+
     TEST(RasterProtocol, theParamsOfAProbeSurviveEncodingAndDecoding)
     {
         raster::ProbeParams params;

@@ -4,6 +4,7 @@
 #ifndef RASTER_ARTEFACTS_H
 #define RASTER_ARTEFACTS_H
 
+#include <initializer_list>
 #include <string>
 
 #include "fs.h"
@@ -49,6 +50,15 @@ namespace ddb
         // opens with GDAL, so they are not artefacts.
         bool isLibddbArtefact(const fs::path &path);
 
+        // Marks an artefact of a cache as used, for the cleanup that removes what was not used for
+        // days and the bound that removes the least recently used: its modification time, and that
+        // of each of `companions` that exists (its statistics sidecar), becomes now when it is more
+        // than kArtefactMarkSeconds old. Not at every use: the time is part of the version a reader
+        // keeps a file open by (ddb-tilers reads a file whose modification time changed as a new
+        // one, with none of its blocks cached), so a mark at every use would make every read of a
+        // cached artefact a first read.
+        void markArtefactUsed(const fs::path &file, std::initializer_list<fs::path> companions = {});
+
         // @throws GDALException when the file is not an artefact (the tilers and the openers
         // below read nothing else)
         void requireArtefact(const fs::path &path);
@@ -59,33 +69,23 @@ namespace ddb
         // @throws FSException when the file cannot be read
         std::string artefactKey(const fs::path &source);
 
-        // How an artefact or a file libddb wrote is opened
-        enum class ArtefactAccess
-        {
-            ReadOnly,
-            Update
-        };
-
-        // Opens an artefact raster with the drivers libddb writes it with (GTiff, COG) and no
-        // others: a VRT, whatever its name, is not opened (a memory dataset is not opened by a
-        // path either: no caller has one). While it opens GDAL makes no HTTP request and opens
-        // no other file through its network file systems (gdalopen::NoNetworkWhileOpening). Null
-        // (as GDALOpen returns it) when GDAL cannot open the file or its metadata names another
-        // dataset (gdalopen::validateMetadataFiles).
+        // Opens a vector artefact, read-only, with the driver libddb writes it with: GeoPackage (the one a
+        // build writes, or that libddb wrote in memory). No MVT driver: the tiles of a build are served as
+        // files and no libddb code reads them with GDAL. While it opens GDAL makes no HTTP request and
+        // opens no other file through its network file systems (gdalopen::NoNetworkWhileOpening). Null (as
+        // GDALOpen returns it) when GDAL cannot open the file or its metadata names another dataset
+        // (gdalopen::validateMetadataFiles). The host reads no raster with GDAL: its rasters are read with
+        // ddb-tilers (tilers::Raster), and the raster helper reads the files of users.
         // @throws GDALException when the file is not an artefact
-        GDALDatasetUniquePtr openArtefactRaster(const fs::path &path, ArtefactAccess access = ArtefactAccess::ReadOnly);
-
-        // The same for a vector artefact, read-only: GeoPackage (the one a build writes, or
-        // that libddb wrote in memory). No MVT driver: the tiles of a build are served as files
-        // and no libddb code reads them with GDAL.
         GDALDatasetUniquePtr openArtefactVector(const fs::path &path);
 
-        // Opens again the raster that this call has just written (the export of a raster, the COG
-        // of a build in the helper), where it was told to write it: that is a file of the user's
-        // choosing, so it is no artefact by place. Only a regular file, with the drivers of the
-        // artefacts and the same guards on the open. Null (as GDALOpen returns it) when the path is
-        // not a regular file or GDAL cannot open it.
-        GDALDatasetUniquePtr reopenWrittenRaster(const fs::path &path, ArtefactAccess access = ArtefactAccess::ReadOnly);
+        // Whether the raster the helper has just written for this call (the COG of a build, a
+        // normalized copy, a geoprojected photo) is a regular file that libddb reads: a TIFF that
+        // ddb-tilers opens and describes. The helper read a file of a user, and what it wrote is
+        // then published and trusted by its place. The file is opened for the check alone and
+        // closed before it returns: the caller renames it next, which Windows refuses while a
+        // process holds it open.
+        bool writtenRasterOpens(const fs::path &path);
 
         // Who writes in a private folder (makePrivateFolder)
         enum class PrivateFolderWriter
@@ -108,7 +108,7 @@ namespace ddb
                                             PrivateFolderWriter writer = PrivateFolderWriter::Helper);
 
         // A private folder in artefactsDir(): what the helper writes there is an artefact, and
-        // the host checks it with openArtefactRaster before it moves it to its name
+        // the host checks it with writtenRasterOpens before it moves it to its name
         io::ScopedTempDir makeArtefactRequestFolder(const std::string &prefix);
 
         // Moves a file the helper wrote (in a folder made by makePrivateFolder) to `target`, replacing
@@ -133,6 +133,10 @@ namespace ddb
         // requests in progress do not count. A file a reader holds open on Windows stays.
         void trimArtefacts(const fs::path &keep);
         inline constexpr time_t kArtefactInUseSeconds = 300;
+        // How old the mark of a used artefact gets before the next use renews it (markArtefactUsed):
+        // a file used in the last kArtefactInUseSeconds has a mark at most this much older, which
+        // the bound adds to the time it protects
+        inline constexpr time_t kArtefactMarkSeconds = 60;
 
     } // namespace raster
 } // namespace ddb

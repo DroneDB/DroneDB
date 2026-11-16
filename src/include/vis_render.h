@@ -37,14 +37,16 @@ namespace ddb
     /// Display range of a band: mean ± 2.33 σ (≈ p2-p98) clipped to [min, max]
     std::pair<double, double> stretchRange(const BandStatistics &s);
 
-    /// The bands of ds that hold data: all but a last band that is alpha (by its color
-    /// interpretation or the mask of the raster, or the 2nd of 2 and the 4th of 4 bands)
-    int dataBandCount(GDALDatasetH ds);
+    /// The bands of the raster that hold data: all but a last band that is alpha (by its colour interpretation,
+    /// or the 2nd of 2 and the 4th of 4 bands, the only ones whose mask GDAL takes for alpha)
+    int dataBandCount(const RasterSource &source);
+    inline int dataBandCount(GDALDatasetH ds) { return dataBandCount(*rasterSourceOf(ds)); }
 
     /// How a raster shows without visualisation parameters: the map tiles and the WMS map draw
     /// its first three data bands as RGB (its first band as grey when it has fewer), and when they
     /// are not 8-bit, stretch them together over the range of their statistics (displayRange)
-    std::vector<int> defaultDisplayBands(GDALDatasetH ds);
+    std::vector<int> defaultDisplayBands(const RasterSource &source);
+    inline std::vector<int> defaultDisplayBands(GDALDatasetH ds) { return defaultDisplayBands(*rasterSourceOf(ds)); }
 
     /// The range that bands of the raster at path (ds, open) are stretched over to show them: the
     /// lowest minimum to the highest maximum of their statistics, one range for all so their
@@ -67,10 +69,17 @@ namespace ddb
     /// (stretchRange), so a 16-bit multispectral ortho is readable. `nodata` is the override of the
     /// NoData value (FR-RAS-31); `source` says which statistics it reads. Throws GDALException when a band
     /// has no pixel with a value.
-    std::vector<std::pair<double, double>> defaultStretch(const std::string &path, GDALDatasetH ds,
+    std::vector<std::pair<double, double>> defaultStretch(const std::string &path, const RasterSource &source,
                                                           const std::vector<int> &bands,
                                                           const std::optional<double> &nodata = std::nullopt,
-                                                          StretchSource source = StretchSource::Exact);
+                                                          StretchSource from = StretchSource::Exact);
+    inline std::vector<std::pair<double, double>> defaultStretch(const std::string &path, GDALDatasetH ds,
+                                                                 const std::vector<int> &bands,
+                                                                 const std::optional<double> &nodata = std::nullopt,
+                                                                 StretchSource from = StretchSource::Exact)
+    {
+        return defaultStretch(path, *rasterSourceOf(ds), bands, nodata, from);
+    }
 
     /// v stretched from [lo, hi] to 0-255, clipped
     inline uint8_t stretchToByte(double v, double lo, double hi)
@@ -82,7 +91,8 @@ namespace ddb
     /// The type of the data bands of ds (the alpha band does not count): floating point when every
     /// one is Float32 or Float64. What decides whether a formula that needs reflectance can be
     /// computed (VegetationEngine::dataRefusal).
-    RasterDataKind rasterDataKind(GDALDatasetH ds);
+    RasterDataKind rasterDataKind(const RasterSource &source);
+    inline RasterDataKind rasterDataKind(GDALDatasetH ds) { return rasterDataKind(*rasterSourceOf(ds)); }
 
     /// What the render of a formula over one raster decides once: the formula, the band filter
     /// that maps R, G, B, N, Re and T to bands, the colormap and the nodata of every band. The
@@ -108,13 +118,25 @@ namespace ddb
     /// needs reflectance over a raster whose data is not floating point (SAVI, OSAVI, EVI over
     /// UInt16): the rule of VegetationEngine::renderRefusal. Every render of a formula plans it
     /// here, so none can skip the rule.
-    FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
+    FormulaPlan planFormula(const RasterSource &source, const std::string &rasterPath, const std::string &formulaId,
                             const std::string &bandFilter, const std::string &colormapId, bool withColormap,
                             std::optional<bool> thermalTags = std::nullopt);
+    inline FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
+                                   const std::string &bandFilter, const std::string &colormapId, bool withColormap,
+                                   std::optional<bool> thermalTags = std::nullopt)
+    {
+        return planFormula(*rasterSourceOf(ds), rasterPath, formulaId, bandFilter, colormapId, withColormap,
+                           thermalTags);
+    }
 
     /// The same with the band filter already resolved
-    FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
+    FormulaPlan planFormula(const RasterSource &source, const std::string &formulaId, const BandFilter &filter,
                             const std::string &colormapId, bool withColormap);
+    inline FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
+                                   const std::string &colormapId, bool withColormap)
+    {
+        return planFormula(*rasterSourceOf(ds), formulaId, filter, colormapId, withColormap);
+    }
 
     /// Which bands decide that a pixel has no value, when a formula is computed
     enum class NodataMask
@@ -147,15 +169,25 @@ namespace ddb
     /// and applies the formula: buffers.result holds window.outPixels() values, NODATA_SENTINEL where
     /// a pixel has none, the pixels that mask being those of `mask`. The bands that are not read have
     /// a null entry in buffers.ptrs. The read stops with the call that is canceled.
-    void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
+    void computeFormulaValues(const RasterSource &source, const FormulaPlan &plan, const RasterWindow &window,
                               FormulaBuffers &buffers, NodataMask mask = NodataMask::AnyBand);
+    inline void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
+                                     FormulaBuffers &buffers, NodataMask mask = NodataMask::AnyBand)
+    {
+        computeFormulaValues(*rasterSourceOf(ds), plan, window, buffers, mask);
+    }
 
     /// Reads window of band `band` (1-based) of ds as float, the physical values (raw * scale + offset) in
     /// buffers.result, NODATA_SENTINEL where a pixel has none: the pixels that are nodata in the band or
     /// transparent in the alpha band or the dataset mask (`nodata` is detectBandNodata of ds). The values that a
     /// band shows with a colormap and no formula. The read stops with the call that is canceled.
-    void computeBandValues(GDALDatasetH ds, const RasterBandNodata &nodata, int band, const RasterWindow &window,
-                           FormulaBuffers &buffers);
+    void computeBandValues(const RasterSource &source, const RasterBandNodata &nodata, int band,
+                           const RasterWindow &window, FormulaBuffers &buffers);
+    inline void computeBandValues(GDALDatasetH ds, const RasterBandNodata &nodata, int band, const RasterWindow &window,
+                                  FormulaBuffers &buffers)
+    {
+        computeBandValues(*rasterSourceOf(ds), nodata, band, window, buffers);
+    }
 
     /// A computed value that is a number to render: neither the nodata sentinel nor NaN
     inline bool isFormulaValue(float v) { return v != NODATA_SENTINEL && !std::isnan(v); }
@@ -173,9 +205,15 @@ namespace ddb
     /// outPixels() * 4 bytes, nodata transparent. The display range is the explicit "min,max"
     /// rescale, else the range of the formula, else the p2-p98 of the computed values. `mask` is
     /// the nodata rule of computeFormulaValues.
-    std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+    std::vector<uint8_t> renderPlannedFormulaRgba(const RasterSource &source, const FormulaPlan &plan,
                                                   const RasterWindow &window, const std::string &rescale,
                                                   NodataMask mask = NodataMask::AnyBand);
+    inline std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+                                                         const RasterWindow &window, const std::string &rescale,
+                                                         NodataMask mask = NodataMask::AnyBand)
+    {
+        return renderPlannedFormulaRgba(*rasterSourceOf(ds), plan, window, rescale, mask);
+    }
 
     /// Renders visParams.formula (a vegetation index) over window of ds with its
     /// colormap: RGBA interleaved, outPixels() * 4 bytes, nodata transparent. thermalTags as
@@ -198,7 +236,11 @@ namespace ddb
     /// names it (the same band three times is one), or the first band of a raster of one data band when nothing
     /// is chosen (the alpha band is not a data band: dataBandCount). A raster of several data bands with no
     /// choice, or a choice of several bands, is not one band: it keeps its bands and the colormap is ignored.
-    int styledBand(GDALDatasetH ds, const std::string &colormap, const std::vector<int> &chosen);
+    int styledBand(const RasterSource &source, const std::string &colormap, const std::vector<int> &chosen);
+    inline int styledBand(GDALDatasetH ds, const std::string &colormap, const std::vector<int> &chosen)
+    {
+        return styledBand(*rasterSourceOf(ds), colormap, chosen);
+    }
 
     /// The plan of band `band` of the raster at path (ds, open) painted with colormapId (InvalidArgsException
     /// when it does not exist), over the "min,max" rescale, else over the default stretch of the band
@@ -210,9 +252,15 @@ namespace ddb
     /// (sampled()) is thrown, not the nominal range. A Byte band is stretched as any other (over its exact minimum to
     /// maximum, which a plain Byte tile does not read). `source` says which statistics the default stretch reads: the
     /// exact ones for a tile and an export, the bounded ones of D-041 for a thumbnail.
-    BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,
-                                const std::string &rescale, const std::optional<double> &nodata,
-                                StretchSource source = StretchSource::Exact);
+    BandStylePlan planBandStyle(const std::string &path, const RasterSource &source, int band,
+                                const std::string &colormapId, const std::string &rescale,
+                                const std::optional<double> &nodata, StretchSource from = StretchSource::Exact);
+    inline BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,
+                                       const std::string &rescale, const std::optional<double> &nodata,
+                                       StretchSource from = StretchSource::Exact)
+    {
+        return planBandStyle(path, *rasterSourceOf(ds), band, colormapId, rescale, nodata, from);
+    }
 
     /// The plan of visParams for the raster at path (ds, open, whose statistics and scale the stretch reads)
     /// when they paint one band with a colormap and no formula (styledBand, with the bands or the preset

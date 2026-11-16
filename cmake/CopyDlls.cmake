@@ -26,11 +26,10 @@ foreach(DLL_PATH ${SOURCE_DLLS})
     set(DEST_PATH "${DEST_DIR}/${DLL_NAME}")
 
     # Always propagate DLLs from the active config's SOURCE_DIR, overwriting
-    # stale copies from a previous build of a different config. This is
-    # critical for PDAL plugin DLLs (e.g. libpdal_plugin_reader_e57.dll) which
-    # share the same filename between release and debug vcpkg directories and
-    # would otherwise be left with a CRT-mismatched binary, causing crashes
-    # or plugin registration failures at runtime.
+    # stale copies from a previous build of a different config. A DLL that has
+    # the same filename in the release and debug vcpkg directories would
+    # otherwise be left with a CRT-mismatched binary, causing crashes at
+    # runtime.
     file(COPY_FILE "${DLL_PATH}" "${DEST_PATH}" ONLY_IF_DIFFERENT)
 endforeach()
 

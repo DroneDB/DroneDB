@@ -71,6 +71,11 @@ namespace ddb
         // coordinate system cannot be read
         ProbeResult probe(const fs::path &path, const ProbeParams &params);
 
+        // What GDAL reports of the shape of each of the user's rasters (size, bands, type, geotransform,
+        // CRS, and its xml:XMP when `xmp`), or why it cannot be read: what the raster helper runs for a
+        // `rasterShapes` request
+        std::vector<RasterShape> readRasterShapes(const std::vector<fs::path> &rasters, bool xmp);
+
         // Adds what a probe found to the entry: its properties, the projection, the geometries
         // and its warning
         void applyProbe(const ProbeResult &result, Entry &entry);

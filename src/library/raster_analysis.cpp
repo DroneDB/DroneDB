@@ -11,16 +11,13 @@
 #include "area_statistics_internal.h"
 #include "sensorprofile.h"
 #include "exceptions.h"
-#include "artefact_cache.h"
-#include "gdal_raii.h"
 #include "dem.h"
+#include "tilers_raster.h"
 #include "raster_stats.h"
 #include "logger.h"
 #include "vegetation.h"
 #include "vis_render.h"
 
-#include <gdal_priv.h>
-#include <cpl_conv.h>
 
 #include <algorithm>
 #include <cctype>
@@ -154,7 +151,7 @@ void requirePixelInRaster(int x, int y, int w, int h) {
 // the band-value model (scale and offset) gives. A band with a scale or an offset (the Landsat encoding of its
 // temperatures) holds physical values, not raw counts: it takes no calibration
 std::optional<ThermalCalibration> rawCalibrationOf(const DemContext &dem, bool isThermal, const std::string &filePath) {
-    if (!isThermal || GDALGetRasterDataType(dem.band) != GDT_UInt16 || dem.hasScale) return std::nullopt;
+    if (!isThermal || dem.dataType != GDT_UInt16 || dem.hasScale) return std::nullopt;
     const ThermalCalibration cal = extractThermalCalibration(filePath);
     if (!cal.valid) return std::nullopt;
     return cal;
@@ -190,7 +187,7 @@ ValueFormula valueFormulaOf(const std::string &bandUnit, const std::string &form
 // (raw * scale + offset, the Landsat encoding), not raw counts: it keeps the unit of a thermal raster
 std::string bandUnitOf(const DemContext &dem, bool isThermal, bool calibrated) {
     if (!dem.unit.empty() || !isThermal) return dem.unit;
-    const GDALDataType type = GDALGetRasterDataType(dem.band);
+    const GDALDataType type = dem.dataType;
     if (type == GDT_Byte || (type == GDT_UInt16 && !calibrated && !dem.hasScale)) return "";
     return "\xC2\xB0\x43";
 }
@@ -204,7 +201,7 @@ enum class UncalibratedValues {
 
 // The values of a thermal band without a unit (bandUnitOf): the colour preview of a picture, else raw counts
 UncalibratedValues uncalibratedValuesOf(const DemContext &dem) {
-    return GDALGetRasterDataType(dem.band) == GDT_Byte ? UncalibratedValues::ColourPreview
+    return dem.dataType == GDT_Byte ? UncalibratedValues::ColourPreview
                                                        : UncalibratedValues::RawCounts;
 }
 
@@ -459,15 +456,13 @@ void forEachAreaWindow(const AreaBounds &b, int blockHeight, Read &&read) {
 // formula. No value is a NoRasterDataException
 AreaStatistics bandAreaStatistics(const DemContext &dem, const std::optional<ThermalCalibration> &cal,
                                   const AreaBounds &b, const ValueFormula &vf) {
-    int blockWidth = 0, blockHeight = 0;
-    GDALGetBlockSize(dem.band, &blockWidth, &blockHeight);
     return areaStatistics(areaPixels(b), [&](auto &&add) {
-        forEachAreaWindow(b, blockHeight, [&](int x, int y, int w, int h) {
+        forEachAreaWindow(b, dem.blockHeight, [&](int x, int y, int w, int h) {
             const uint64_t pixels = static_cast<uint64_t>(w) * static_cast<uint64_t>(h);
             countAreaWindow(pixels);
             // What readRaw holds: the samples, and the mask of the band beside them
             AreaBufferBytes bytes;
-            bytes.set(pixels * (sizeof(float) + (dem.maskBand != nullptr ? sizeof(uint8_t) : 0)));
+            bytes.set(pixels * (sizeof(float) + (dem.masked ? sizeof(uint8_t) : 0)));
             const std::vector<float> samples = dem.readRaw(x, y, w, h, w, h);
             bytes.set(samples.capacity() * sizeof(float));
             for (const float raw : samples) {
@@ -518,7 +513,7 @@ json pointResult(const DemContext &dem, const std::optional<ThermalCalibration> 
         throw NoRasterDataException("No valid data at the point: the pixel (" + std::to_string(x) + ", " +
                                     std::to_string(y) + ") has no value");
     json result;
-    const GDALDataType type = GDALGetRasterDataType(dem.band);
+    const GDALDataType type = dem.dataType;
     const double value = valueOfRaw(dem, cal, raw);
     if (std::isnan(value))
         throw NoRasterDataException("No valid data at the point: the raw count of the pixel (" + std::to_string(x) +
@@ -582,7 +577,7 @@ private:
     const RawThermalData &raw_;
 };
 
-// The first band of a thermal raster GDAL reads, kAreaWindowPixels at a time (area_statistics_internal.h)
+// The first band of a thermal raster, kAreaWindowPixels at a time (area_statistics_internal.h)
 class BandThermalGrid {
 public:
     explicit BandThermalGrid(const ThermalBandReader &band) : band_(band) {}
@@ -648,7 +643,7 @@ std::string thermalAreaStatsJson(const Grid &grid, int x0, int y0, int x1, int y
     return areaStatsJson(stats, bounds, vf.unit, true);
 }
 
-// The point of a thermal raster GDAL reads, when the band model cannot read it: its first band (ThermalBandReader)
+// The point of a thermal raster, when the band model cannot read it: its first band (ThermalBandReader)
 std::string thermalImagePointJson(const std::string &filePath, int x, int y, const RasterValueOptions &options) {
     // A bad formula is refused before the image is read
     valueFormulaOf("\xC2\xB0\x43", options.formula);
@@ -811,7 +806,7 @@ std::string rawGridAreaStatsJson(const RJpegThermal &rjpeg, int x0, int y0, int 
 
 namespace {
 
-json formulaRasterStatistics(GDALDatasetH hDs, const std::string &formula, const BandFilter &filter);
+json formulaRasterStatistics(const RasterSource &source, const std::string &formula, const BandFilter &filter);
 
 // The default stretch of a band, as the info reports it: {"min", "max"} in the values of the band
 json stretchEntry(double lo, double hi) {
@@ -824,7 +819,8 @@ struct PhysicalStats {
     double min = 0, max = 0, mean = 0, stdDev = 0;
 };
 
-PhysicalStats physicalStats(const BandStatistics &s, GDALRasterBandH band, const std::optional<ThermalCalibration> &cal) {
+PhysicalStats physicalStats(const BandStatistics &s, const tilers::Raster::Band &band,
+                            const std::optional<ThermalCalibration> &cal) {
     PhysicalStats p;
     if (cal) {
         p.min = rawToTemperature(static_cast<uint16_t>(s.min), *cal);
@@ -834,11 +830,8 @@ PhysicalStats physicalStats(const BandStatistics &s, GDALRasterBandH band, const
         p.stdDev = s.stdDev;
         return p;
     }
-    int hasScale = FALSE, hasOffset = FALSE;
-    const double scale = GDALGetRasterScale(band, &hasScale);
-    const double offset = GDALGetRasterOffset(band, &hasOffset);
-    const double m = hasScale ? scale : 1.0;
-    const double c = hasOffset ? offset : 0.0;
+    const double m = band.scale.value_or(1.0);
+    const double c = band.offset.value_or(0.0);
     p.min = s.min * m + c;
     p.max = s.max * m + c;
     if (p.min > p.max) std::swap(p.min, p.max);
@@ -852,7 +845,7 @@ PhysicalStats physicalStats(const BandStatistics &s, GDALRasterBandH band, const
 // of several bands (an RGB image has no stretch). A single band (a DEM, a thermal raster) is stretched from
 // its minimum to its maximum; the bands of a raster that is not Byte each over the mean +- 2.33 standard
 // deviations, clamped to the minimum and the maximum (stretchRange).
-json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const DemContext &dem,
+json defaultStretchJson(const std::string &filePath, const RasterSource &source, const DemContext &dem,
                         const std::optional<ThermalCalibration> &cal, const RasterValueOptions &options,
                         const ValueFormula &unit) {
     auto &ve = VegetationEngine::instance();
@@ -860,8 +853,8 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
     if (isThermalFormulaId(options.formula)) {
         const std::optional<double> nodataOverride =
             dem.nodataOverridden ? std::optional<double>(dem.nodata.value) : std::nullopt;
-        const PhysicalStats p = physicalStats(RasterStatsProvider::instance().get(filePath, hDs, 1, nodataOverride),
-                                              dem.band, cal);
+        const PhysicalStats p = physicalStats(RasterStatsProvider::instance().get(filePath, source, 1, nodataOverride),
+                                              dem.raster->band(1), cal);
         const double lo = unit.apply(p.min);
         double hi = unit.apply(p.max);
         if (!(hi > lo)) hi = lo + 1.0;
@@ -872,7 +865,7 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
         // A thermal formula keeps the stretch of the band; an index has its own
         if (formula != nullptr && formula->requiredBands != "T") {
             const BandFilter filter = ve.autoDetectFilter(filePath);
-            const json stats = formulaRasterStatistics(hDs, options.formula, filter);
+            const json stats = formulaRasterStatistics(source, options.formula, filter);
             if (stats.is_null() || !stats.contains("1"))
                 return json::array();
             const json &s = stats["1"];
@@ -887,21 +880,20 @@ json defaultStretchJson(const std::string &filePath, GDALDatasetH hDs, const Dem
         }
     }
 
-    const int dataBands = dataBandCount(hDs);
-    const bool isByte = GDALGetRasterDataType(dem.band) == GDT_Byte;
+    const int dataBands = dataBandCount(source);
+    const bool isByte = dem.dataType == GDT_Byte;
     auto &provider = RasterStatsProvider::instance();
     const std::optional<double> nodata = dem.nodataOverridden ? std::optional<double>(dem.nodata.value) : std::nullopt;
     json stretch = json::array();
     if (dataBands <= 1) {
-        const PhysicalStats p = physicalStats(provider.get(filePath, hDs, 1, nodata), dem.band, cal);
+        const PhysicalStats p = physicalStats(provider.get(filePath, source, 1, nodata), dem.raster->band(1), cal);
         double hi = p.max;
         if (!(hi > p.min)) hi = p.min + 1.0;
         stretch.push_back(stretchEntry(p.min, hi));
     } else if (!isByte) {
         for (int b = 1; b <= dataBands; b++) {
-            const GDALRasterBandH band = GDALGetRasterBand(hDs, b);
-            const BandStatistics raw = provider.get(filePath, hDs, b, nodata);
-            const PhysicalStats p = physicalStats(raw, band, b == 1 ? cal : std::nullopt);
+            const BandStatistics raw = provider.get(filePath, source, b, nodata);
+            const PhysicalStats p = physicalStats(raw, dem.raster->band(b), b == 1 ? cal : std::nullopt);
             BandStatistics physical;
             physical.min = p.min;
             physical.max = p.max;
@@ -988,8 +980,8 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
         // The values of the raster come from this file (the source file the Registry names), as the band
         // model reads them: the NoData value of the caller, the scale and the offset (FR-XC-24)
         const DemContext dem = openDem(filePath, 1, BandValueOptions{options.nodata}, false);
-        const GDALDatasetH hDs = dem.handle();
-        const GDALDataType dt = GDALGetRasterDataType(dem.band);
+        const auto source = rasterSourceOf(*dem.raster);
+        const GDALDataType dt = dem.dataType;
         // A UInt16 band with a scale or an offset holds physical values, not raw counts (rawCalibrationOf)
         const std::optional<ThermalCalibration> rawCal = (isThermal && dt == GDT_UInt16 && !dem.hasScale && cal.valid)
                                                              ? std::optional<ThermalCalibration>(cal)
@@ -997,8 +989,8 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
 
         // The exact statistics of the pixels that have a value: the range of the whole raster
         // (FR-RAS-07), through the provider
-        const BandStatistics raw = RasterStatsProvider::instance().get(filePath, hDs, 1, options.nodata);
-        const PhysicalStats p = physicalStats(raw, dem.band, rawCal);
+        const BandStatistics raw = RasterStatsProvider::instance().get(filePath, *source, 1, options.nodata);
+        const PhysicalStats p = physicalStats(raw, dem.raster->band(1), rawCal);
 
         // The unit of the values: the band's, else degrees Celsius for a thermal raster that has none; a thermal
         // formula gives the range in its own unit (D-022). Values that are no temperatures (raw counts without a
@@ -1010,7 +1002,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
 
         result["width"] = dem.width;
         result["height"] = dem.height;
-        result["bandCount"] = GDALGetRasterCount(hDs);
+        result["bandCount"] = dem.raster->bandCount();
         result["dataType"] = dataTypeName(dt);
         result["valueMin"] = tidyValue(unit.apply(p.min), dt);
         result["valueMax"] = tidyValue(unit.apply(p.max), dt);
@@ -1047,16 +1039,16 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
             result["windowPixelCount"] = static_cast<uint64_t>(cols * rows);
         }
 
-        result["stretch"] = defaultStretchJson(filePath, hDs, dem, rawCal, options, unit);
+        result["stretch"] = defaultStretchJson(filePath, *source, dem, rawCal, options, unit);
         hasStats = true;
     } catch (const GDALException &e) {
-        // A file GDAL cannot read, or no pixel with a value: the R-JPEG fallback below, else the failure
+        // A file that cannot be read, or no pixel with a value: the R-JPEG fallback below, else the failure
         LOGD << "getRasterValueInfoJson: " << e.what();
         if (!isThermal) throw;
         result = json::object();
     }
 
-    // Fallback for a thermal raster whose statistics GDAL cannot give (no pixel with a value by the band model): the
+    // Fallback for a thermal raster whose statistics cannot be given (no pixel with a value by the band model): the
     // temperatures of its first band, read a window at a time (a raw sample equal to the NoData value of the options has
     // no value, FR-RAS-31)
     if (!hasStats && isThermal) {
@@ -1072,7 +1064,7 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
 
 namespace {
 
-// The point at pixel (x, y) of a raster GDAL reads; throws GDALException when GDAL cannot open it
+// The point at pixel (x, y) of a raster; throws GDALException when it cannot be opened
 std::string pointAtPixel(const std::string &filePath, int x, int y, bool isThermal, const RasterValueOptions &options) {
     // A raster without a geotransform has its pixels and no map: the pixel coordinates still work
     const DemContext dem = openDem(filePath, 1, BandValueOptions{options.nodata}, false);
@@ -1080,10 +1072,7 @@ std::string pointAtPixel(const std::string &filePath, int x, int y, bool isTherm
     const ValueFormula vf = bandValueFormula(dem, isThermal, cal.has_value(), options.formula);
     requirePixelInRaster(x, y, dem.width, dem.height);
     json result = pointResult(dem, cal, x, y, isThermal, vf);
-    double geoTransform[6];
-    const char *proj = GDALGetProjectionRef(dem.handle());
-    setGeoPosition(result, GDALGetGeoTransform(dem.handle(), geoTransform) == CE_None, geoTransform,
-                   proj != nullptr ? proj : "", x, y);
+    setGeoPosition(result, dem.hasGeoTransform, dem.gt, dem.projection, x, y);
     return result.dump();
 }
 
@@ -1133,10 +1122,7 @@ std::string getRasterPointAtJson(const std::string &filePath, double lon, double
     requirePixelInRaster(x, y, dem.width, dem.height);
 
     json result = pointResult(dem, cal, x, y, isThermal, vf);
-    double geoTransform[6];
-    const char *proj = GDALGetProjectionRef(dem.handle());
-    setGeoPosition(result, GDALGetGeoTransform(dem.handle(), geoTransform) == CE_None, geoTransform,
-                   proj != nullptr ? proj : "", x, y);
+    setGeoPosition(result, dem.hasGeoTransform, dem.gt, dem.projection, x, y);
     // The point that was asked for
     result["lon"] = lon;
     result["lat"] = lat;
@@ -1149,7 +1135,7 @@ namespace {
 std::string areaOfBounds(const DemContext &dem, const std::optional<ThermalCalibration> &cal, bool isThermal,
                          const AreaBounds &bounds, const ValueFormula &vf) {
     return areaStatsJson(bandAreaStatistics(dem, cal, bounds, vf), bounds, vf.unit, isThermal,
-                         GDALGetRasterDataType(dem.band));
+                         dem.dataType);
 }
 
 } // anonymous namespace
@@ -1261,29 +1247,29 @@ json formulaStatistics(const std::vector<float> &formulaResult, const Vegetation
 }
 
 // The statistics of a formula over the raster sampled at 512 x 512 at most
-json formulaRasterStatistics(GDALDatasetH hDs, const std::string &formula, const BandFilter &filter) {
-    const int width = GDALGetRasterXSize(hDs);
-    const int height = GDALGetRasterYSize(hDs);
+json formulaRasterStatistics(const RasterSource &source, const std::string &formula, const BandFilter &filter) {
+    const int width = source.width();
+    const int height = source.height();
 
     // Sample at reduced resolution for performance
     const int sampleW = std::min(width, 512);
     const int sampleH = std::min(height, 512);
 
-    const FormulaPlan plan = planFormula(hDs, formula, filter, "", false);
+    const FormulaPlan plan = planFormula(source, formula, filter, "", false);
     FormulaBuffers buffers;
-    computeFormulaValues(hDs, plan, RasterWindow{0, 0, width, height, sampleW, sampleH}, buffers);
+    computeFormulaValues(source, plan, RasterWindow{0, 0, width, height, sampleW, sampleH}, buffers);
     return formulaStatistics(buffers.result, plan.formula);
 }
 
 // The statistics of every band the provider can compute them for (exact: FR-RAS-07), by band number; null
 // when none
-json bandStatistics(const std::string &path, GDALDatasetH hDs) {
+json bandStatistics(const std::string &path, const RasterSource &source) {
     json stats;
-    const int nBands = GDALGetRasterCount(hDs);
+    const int nBands = source.bandCount();
     for (int i = 1; i <= nBands; i++) {
         BandStatistics s;
         try {
-            s = RasterStatsProvider::instance().get(path, hDs, i);
+            s = RasterStatsProvider::instance().get(path, source, i);
         } catch (const GDALException &) {
             // A band with no pixel that has a value has no statistics
             cancel::throwIfCanceled();
@@ -1299,8 +1285,8 @@ json bandStatistics(const std::string &path, GDALDatasetH hDs) {
 
 // Every formula of the engine, those the raster cannot compute (with this band filter and this
 // data) marked disabled with their reason
-json algorithmList(const VegetationEngine &ve, GDALDatasetH hDs, const BandFilter &filter) {
-    const RasterDataKind dataKind = rasterDataKind(hDs);
+json algorithmList(const VegetationEngine &ve, const RasterSource &source, const BandFilter &filter) {
+    const RasterDataKind dataKind = rasterDataKind(source);
     json algorithms = json::array();
     for (const auto &f : ve.getAllFormulas()) {
         json fj = {
@@ -1372,30 +1358,29 @@ ValueHistogram binValues(const std::vector<double> &values, double lo, double hi
 std::string getRasterMetadataJson(const std::string &path, const std::string &formula, const std::string &bandFilter) {
     cancel::throwIfCanceled();
     // Owned: the formula, statistics and sensor steps below can throw while it is open
-    auto dataset = raster::openInputRaster(path);
-    if (!dataset)
+    auto raster = tilers::Raster::openInput(path);
+    if (!raster)
         throw GDALException("Cannot open " + path);
-    GDALDatasetH hDs = datasetHandle(dataset);
+    const auto source = rasterSourceOf(*raster);
 
     auto &ve = VegetationEngine::instance();
 
     // Determine effective band filter
     const BandFilter effectiveFilter = !bandFilter.empty()
-                                           ? VegetationEngine::parseFilter(bandFilter, GDALGetRasterCount(hDs))
+                                           ? VegetationEngine::parseFilter(bandFilter, source->bandCount())
                                            : ve.autoDetectFilter(path);
 
     json result;
-    result["statistics"] = !formula.empty() ? formulaRasterStatistics(hDs, formula, effectiveFilter)
-                                            : bandStatistics(path, hDs);
+    result["statistics"] = !formula.empty() ? formulaRasterStatistics(*source, formula, effectiveFilter)
+                                            : bandStatistics(path, *source);
 
     // Available algorithms for this band filter and this data
     // Include all formulas, mark the ones the raster cannot compute as disabled
-    result["algorithms"] = algorithmList(ve, hDs, effectiveFilter);
+    result["algorithms"] = algorithmList(ve, *source, effectiveFilter);
     result["colormaps"] = ve.getColormapsJson();
     result["autoBands"] = {{"filter", effectiveFilter.id}, {"match", !effectiveFilter.id.empty()}};
     result["detectedSensor"] = SensorProfileManager::instance().detectSensor(path).sensorId;
 
-    dataset.reset();
     return result.dump();
 }
 

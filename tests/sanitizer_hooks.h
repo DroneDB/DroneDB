@@ -9,7 +9,7 @@
 //
 // Only for a fork()ed child that must leave through std::exit() because the test needs the
 // atexit handlers to run. The child has a copy of the parent's heap but only the forking
-// thread: objects the parent's other threads (GDAL/PDAL worker pools, thread-locals) still
+// thread: objects the parent's other threads (GDAL and ddb-tilers worker pools, thread-locals) still
 // reference look unreachable in the child, so the check would report the parent's live
 // objects as leaks and replace the child's exit code. Children that leave with _exit() never
 // run the check. The parent process keeps its own leak check.

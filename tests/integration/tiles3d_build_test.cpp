@@ -13,11 +13,13 @@
 
 #include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -769,8 +771,25 @@ TEST(tiles3dBuild, cleanupNeverStripsTilesFromConcurrentModelBuild) {
     auto cleanupDb = ddb::open(ds.root.string(), true);
     std::atomic<bool> stop{false};
     std::atomic<int> cleanups{0};
+    // The cleaner can hold the primary lock at every attempt of the builds (one CPU, or a loaded machine):
+    // after kMaxRefused refusals in a row the main thread pauses it, builds once it is idle, then resumes
+    // it, so builds happen whatever the scheduling and every other attempt still runs against it
+    constexpr int kMaxRefused = 3;
+    std::mutex gate;
+    std::condition_variable changed;
+    bool pauseWanted = false, cleanerIdle = false;
     std::thread cleaner([&]() {
         while (!stop.load()) {
+            {
+                std::unique_lock<std::mutex> lock(gate);
+                if (pauseWanted) {
+                    cleanerIdle = true;
+                    changed.notify_all();
+                    changed.wait(lock, [&] { return !pauseWanted || stop.load(); });
+                    cleanerIdle = false;
+                    continue;
+                }
+            }
             std::error_code ec;
             fs::create_directories(base / "3dtiles-temp-0123456789abcdef", ec);
             std::ofstream((base / "3dtiles-temp-0123456789abcdef" / "x.b3dm").string()) << "x";
@@ -782,31 +801,57 @@ TEST(tiles3dBuild, cleanupNeverStripsTilesFromConcurrentModelBuild) {
             ++cleanups;
         }
     });
+    const auto pauseCleaner = [&]() {
+        std::unique_lock<std::mutex> lock(gate);
+        pauseWanted = true;
+        changed.wait(lock, [&] { return cleanerIdle; });
+    };
+    const auto resumeCleaner = [&]() {
+        {
+            std::lock_guard<std::mutex> lock(gate);
+            pauseWanted = false;
+        }
+        changed.notify_all();
+    };
 
-    int refused = 0, built = 0;
+    int refused = 0, built = 0, refusedInARow = 0, builtPaused = 0;
     for (int i = 0; i < 20; ++i) {
         writeFile(tiles / "stale.marker", "iteration " + std::to_string(i));
+        const bool paused = refusedInARow >= kMaxRefused;
+        if (paused) pauseCleaner();
         try {
             ddb::build(ds.db.get(), "model.obj", "", true);
         } catch (const BuildInProgressException&) {
+            if (paused) resumeCleaner();
             // Cleanup held the primary lock: benign, the previous tiles stay intact.
+            // (an ASSERT would leave the cleaner running when the test ends)
+            EXPECT_FALSE(paused) << "iteration " << i << ": refused with the cleaner idle";
             ++refused;
+            ++refusedInARow;
             EXPECT_TRUE(fs::exists(tiles / "stale.marker"));
             EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
             continue;
         }
+        if (paused) resumeCleaner();
+        refusedInARow = 0;
         ++built;
+        builtPaused += paused ? 1 : 0;
         EXPECT_TRUE(fs::exists(base / "bm3d" / "model.bm3d")) << "iteration " << i;
         EXPECT_TRUE(fs::exists(tiles / "tileset.json")) << "iteration " << i;
         EXPECT_FALSE(fs::exists(tiles / "stale.marker"))
             << "iteration " << i << ": build returned normally without replacing the tiles";
     }
-    stop.store(true);
+    {
+        std::lock_guard<std::mutex> lock(gate);
+        stop.store(true);
+    }
+    changed.notify_all();
     cleaner.join();
 
     EXPECT_GT(built, 0);
     EXPECT_GT(cleanups.load(), 0);
-    LOGD << "cleanupNeverStripsTilesFromConcurrentModelBuild: " << built << " built, " << refused
+    LOGD << "cleanupNeverStripsTilesFromConcurrentModelBuild: " << built << " built (" << builtPaused
+         << " with the cleaner paused), " << refused
          << " refused on the primary lock, " << cleanups.load() << " cleanups";
 
     // Nothing is held after the run and the leftovers of the last cleanup pass

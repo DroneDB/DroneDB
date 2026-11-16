@@ -6,7 +6,7 @@
 // objects (they use C++ code libddb does not export), so this is the one test that runs the
 // shared library itself, through ddb.h only, as Registry does over P/Invoke: it registers the
 // process, indexes a small dataset (SQLite, SpatiaLite, the metadata helper, GDAL, PROJ), reads it back,
-// generates a thumbnail, builds every entry (GDAL, PDAL, the vector driver) and shuts down.
+// generates a thumbnail, builds every entry (GDAL, ddb-tilers, the vector driver) and shuts down.
 // Runs as its own process because DDBRegisterProcess initializes once per process.
 //
 // DDB_PROBE_INPUT_DIR: the files to index (tests/contract/inputs); DDB_PROBE_WORK_DIR: where

@@ -214,7 +214,8 @@ namespace
         EXPECT_EQ(dem.height, 8);
         EXPECT_EQ(dem.gt[0], 500000.0);
         EXPECT_EQ(dem.gt[5], -2.0);
-        EXPECT_EQ(dem.band, GDALGetRasterBand(dem.handle(), 2));
+        EXPECT_EQ(dem.bandIndex, 2);
+        EXPECT_EQ(dem.dataType, GDT_Float32);
         EXPECT_TRUE(dem.nodata.has);
         EXPECT_EQ(dem.nodata.value, -9999.0);
         EXPECT_FALSE(dem.projection.empty());
@@ -239,7 +240,7 @@ namespace
         const DemContext geographic = openDem(makeDemFile(ta.getPath("etrs89.tif"), 1, 4258, std::nullopt).string());
         EXPECT_TRUE(geographic.isGeographic);
         EXPECT_FALSE(geographic.nodata.has);
-        EXPECT_EQ(geographic.band, GDALGetRasterBand(geographic.handle(), 1));
+        EXPECT_EQ(geographic.bandIndex, 1);
 
         // No CRS: no transformers, map coordinates are WGS84
         const DemContext bare = openDem(makeDemFile(ta.getPath("bare.tif"), 1, 0, std::nullopt).string());

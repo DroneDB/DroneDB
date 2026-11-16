@@ -5,7 +5,6 @@ if(BUILD_TESTING)
     find_package(GTest CONFIG REQUIRED)
     find_package(cpr CONFIG REQUIRED)
     find_package(GDAL CONFIG REQUIRED)
-    find_package(PDAL CONFIG REQUIRED)
     find_package(tinyobjloader CONFIG REQUIRED)
     find_package(OpenSSL REQUIRED)
     find_package(Threads REQUIRED)
@@ -233,8 +232,7 @@ if(BUILD_TESTING)
     # on the ddb target
     ddb_stage_runtime_files(ddb_unit_tests)
 
-    # The same library objects and dependencies as the unit tests (COMMON_LIBS links pdalcpp
-    # before the static GDAL archive: one GDAL instance in the process), plus the data files:
+    # The same library objects and dependencies as the unit tests, plus the data files:
     # the integration binary does not depend on the ddb target either
     ddb_add_test_binary(ddbtest
         LABEL integration

@@ -43,6 +43,7 @@
 #include "raster_helper.h"
 #include "raster_ops.h"
 #include "raster_test_utils.h"
+#include "tilers_raster.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
@@ -693,7 +694,7 @@ namespace
         const fs::path copy = artefactFor(input);
 
         EXPECT_EQ(copy, normalizedDir() / (artefactKey(input) + ".tif"));
-        ASSERT_TRUE(openArtefactRaster(copy));
+        ASSERT_TRUE(tilers::Raster::open(copy));
         EXPECT_EQ(copiesInCache(), std::vector<fs::path>{copy});
         EXPECT_TRUE(requestFolders().empty());
         EXPECT_EQ(requestsFor(log_, "normalize", "ok.jpg").size(), 1u);
@@ -733,14 +734,14 @@ namespace
     TEST_F(RasterNormalizeTest, theFailuresOfTheHelperOpenAsAMissingRasterOrAreThrown)
     {
         // A raster GDAL cannot open or the policy refuses: as for any file GDAL does not read
-        EXPECT_FALSE(openInputRaster(io::toUtf8(touch("unreadable.jpg"))));
-        EXPECT_FALSE(openInputRaster(io::toUtf8(touch("policy.jpg"))));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(touch("unreadable.jpg"))));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(touch("policy.jpg"))));
         EXPECT_THROW(artefactFor(touch("unreadable2.jpg")), RasterOpException);
         // A raster the helper could not read within its limits, a full device and a broken helper are not
-        EXPECT_THROW(openInputRaster(io::toUtf8(touch("limit.jpg"))), RasterNotReadException);
-        EXPECT_THROW(openInputRaster(io::toUtf8(touch("crashed.jpg"))), RasterNotReadException);
-        EXPECT_THROW(openInputRaster(io::toUtf8(touch("garbage.jpg"))), RasterNotReadException);
-        EXPECT_THROW(openInputRaster(io::toUtf8(touch("internal.jpg"))), RasterOpException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("limit.jpg"))), RasterNotReadException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("crashed.jpg"))), RasterNotReadException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("garbage.jpg"))), RasterNotReadException);
+        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("internal.jpg"))), RasterOpException);
         try
         {
             artefactFor(touch("nospace.jpg"));
@@ -797,7 +798,7 @@ namespace
         testutils::createGeoRaster(cog, spec);
 
         EXPECT_EQ(artefactFor(cog), cog);
-        EXPECT_TRUE(openInputRaster(io::toUtf8(cog)));
+        EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(cog)));
         EXPECT_EQ(helper_->requestsSent(), 0u);
         EXPECT_EQ(helper_->startedHelpers(), 0u);
     }
@@ -981,7 +982,8 @@ namespace
         mutable std::mutex mutex_;
         mutable std::vector<fs::path> programs;
         mutable std::vector<std::vector<std::string>> calls;
-        std::string versionText = "gdal-util test protocol 1.1";
+        std::string versionText =
+            "gdal-util test protocol " + std::to_string(kMajorVersion) + "." + std::to_string(kMinorVersion);
         Handler handler;
     };
 
@@ -1156,6 +1158,64 @@ namespace
         }
     }
 
+    // An operation for a call is not a build: a full device is no space (not a build to retry), and the
+    // arguments the operation refuses for the file are invalid arguments, as when the call ran it itself
+    TEST(RasterOneShot, aFailureOfAnOperationIsWhatTheCallReported)
+    {
+        const std::vector<std::pair<std::string, std::string>> cases = {{"limit", "notread"},
+                                                                        {"unreadable", "op"},
+                                                                        {"internal", "op"},
+                                                                        {"nospace", "nospace"},
+                                                                        {"invalid", "invalid"}};
+        for (const auto &[code, expected] : cases)
+        {
+            SCOPED_TRACE(code);
+            FakeRunner runner;
+            runner.handler = [code = code](const std::vector<std::string> &args, const process::Options &options) {
+                options.onOutputLine(R"({"id":)" + std::to_string(idOfRequest(args)) + R"(,"ok":false,"error":")" + code +
+                                     R"(","message":"it failed"})");
+                return exitedWith(1);
+            };
+            GdalUtilHelper helper = oneShotHelper(runner);
+            const auto mask = [&] {
+                helper.operate(op::kMask, fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback());
+            };
+            if (expected == "notread")
+                EXPECT_THROW(mask(), RasterNotReadException);
+            else if (expected == "invalid")
+            {
+                try
+                {
+                    mask();
+                    FAIL() << "no exception";
+                }
+                catch (const InvalidArgsException &e)
+                {
+                    EXPECT_STREQ(e.what(), "it failed");
+                }
+            }
+            else if (expected == "nospace")
+            {
+                try
+                {
+                    mask();
+                    FAIL() << "no exception";
+                }
+                catch (const FSException &e)
+                {
+                    EXPECT_EQ(e.code(), std::errc::no_space_on_device);
+                }
+            }
+            else
+                EXPECT_THROW(mask(), RasterOpException);
+        }
+        FakeRunner runner;
+        GdalUtilHelper helper = oneShotHelper(runner);
+        EXPECT_THROW(helper.operate(op::kCog, fs::absolute("a.tif"), fs::absolute("o.tif"), json::object(), ProgressCallback()),
+                     std::logic_error)
+            << "a build is no operation";
+    }
+
     TEST(RasterOneShot, aProcessThatEndsWithoutAResponseCrashed)
     {
         FakeRunner runner;
@@ -1259,11 +1319,13 @@ namespace
         }
     }
 
-    // The COPC build came with protocol 1.1: a program of 1.0 does not know the operation
+    // A program of an earlier minor may not know an operation this client sends (the mask came
+    // with 1.3), and is not run
     TEST(RasterOneShot, aProgramOfAnEarlierProtocolMinorIsNotRun)
     {
         FakeRunner runner;
-        runner.versionText = "gdal-util test protocol 1.0";
+        runner.versionText =
+            "gdal-util test protocol " + std::to_string(kMajorVersion) + "." + std::to_string(kMinorVersion - 1);
         runner.handler = [](const std::vector<std::string> &, const process::Options &) {
             ADD_FAILURE() << "the request must not be sent";
             return exitedWith(0);
@@ -1336,6 +1398,24 @@ namespace
         EXPECT_EQ(back.height, 3000);
         EXPECT_EQ(back.footprint, photo.footprint);
         EXPECT_EQ(back.outsize, "25%");
+
+        MaskParams mask;
+        mask.nearDist = 7;
+        mask.white = true;
+        mask.color = "255,0,255";
+        mask.threads = 4;
+        const json maskSent = toJson(mask);
+        EXPECT_EQ(maskSent, json::parse(R"({"nearDist":7,"white":true,"color":"255,0,255","threads":4})"));
+        const MaskParams maskBack = maskParamsFromJson(maskSent);
+        EXPECT_EQ(maskBack.nearDist, 7);
+        EXPECT_TRUE(maskBack.white);
+        EXPECT_EQ(maskBack.color, "255,0,255");
+        EXPECT_EQ(maskBack.threads, std::optional<int>(4));
+        const MaskParams defaults = maskParamsFromJson(json::object());
+        EXPECT_EQ(defaults.nearDist, 15);
+        EXPECT_FALSE(defaults.white);
+        EXPECT_TRUE(defaults.color.empty());
+        EXPECT_FALSE(defaults.threads);
     }
 
     // The clouds merged with the path of a COPC build travel in their order, each as a path of its own
@@ -1360,6 +1440,170 @@ namespace
 #endif
     }
 
+    // The photos of a splat export travel in their order, each with its own path; the results come
+    // back one per photo
+    TEST(RasterBuildParams, thePhotosOfAnExportAreTheOnesTheHostSent)
+    {
+        RasterShapesParams sizes;
+        sizes.inputs = {"/data/odm/images/a.JPG", "/data/odm/images/b.JPG"};
+        EXPECT_EQ(rasterShapesParamsFromJson(toJson(sizes)).inputs, sizes.inputs);
+        RasterShape photo;
+        photo.width = 4000;
+        photo.height = 3000;
+        photo.bands = 3;
+        photo.type = "Byte";
+        photo.descriptions = {"", "", ""};
+        RasterShape band = photo;
+        band.bands = 1;
+        band.descriptions = {"NIR"};
+        band.xmp = "<x:xmpmeta><Camera:BandName>NIR</Camera:BandName></x:xmpmeta>";
+        band.type = "UInt16";
+        band.geoTransform = std::array<double, 6>{500000.0, 0.05, 0.0, 5000000.0, 0.0, -0.05};
+        band.wkt = "PROJCS[\"WGS 84 / UTM zone 32N\"]";
+        RasterShape unreadable;
+        unreadable.error = "Cannot open b.JPG";
+        const std::vector<RasterShape> read = {photo, band, unreadable};
+        const auto back = rasterShapesFromJson(toJson(read), 3);
+        ASSERT_EQ(back.size(), 3u);
+        EXPECT_EQ(back[0].width, 4000);
+        EXPECT_EQ(back[0].height, 3000);
+        EXPECT_EQ(back[0].bands, 3);
+        EXPECT_EQ(back[0].type, "Byte");
+        EXPECT_FALSE(back[0].geoTransform);
+        EXPECT_TRUE(back[0].wkt.empty());
+        EXPECT_TRUE(back[0].error.empty());
+        EXPECT_EQ(back[1].type, "UInt16");
+        EXPECT_EQ(back[1].geoTransform, band.geoTransform);
+        EXPECT_EQ(back[1].wkt, band.wkt);
+        EXPECT_EQ(back[1].descriptions, (std::vector<std::string>{"NIR"}));
+        EXPECT_EQ(back[0].descriptions.size(), 3u);
+        EXPECT_EQ(back[1].xmp, band.xmp);
+        EXPECT_TRUE(back[0].xmp.empty());
+        EXPECT_FALSE(rasterShapesParamsFromJson(toJson(sizes)).xmp) << "the XMP only when asked for";
+        sizes.xmp = true;
+        EXPECT_TRUE(rasterShapesParamsFromJson(toJson(sizes)).xmp);
+        EXPECT_EQ(back[2].error, "Cannot open b.JPG");
+        EXPECT_THROW(rasterShapesFromJson(toJson(read), 2), ProtocolError) << "a shape per raster";
+        EXPECT_THROW(rasterShapesFromJson(json{{"shapes", json::array({json{{"width", 0}, {"height", 3}}})}}, 1), ProtocolError);
+
+        ResizeImagesParams resize;
+        resize.images = {{"/data/odm/images/a.JPG", "a.JPG", 64, 48}, {"/data/odm/images/c.tif", "c.tif.jpg", 48, 64}};
+        resize.quality = 90;
+        resize.threads = 4;
+        const auto resizeBack = resizeImagesParamsFromJson(toJson(resize));
+        ASSERT_EQ(resizeBack.images.size(), 2u);
+        EXPECT_EQ(resizeBack.images[1].source, fs::path("/data/odm/images/c.tif"));
+        EXPECT_EQ(resizeBack.images[1].name, "c.tif.jpg");
+        EXPECT_EQ(resizeBack.images[1].width, 48);
+        EXPECT_EQ(resizeBack.images[1].height, 64);
+        EXPECT_EQ(resizeBack.quality, 90);
+        EXPECT_EQ(resizeBack.threads, std::optional<int>(4));
+        EXPECT_EQ(resizeResultsFromJson(resizeResultsToJson({"", "it failed"}), 2), (std::vector<std::string>{"", "it failed"}));
+        EXPECT_THROW(resizeResultsFromJson(resizeResultsToJson({""}), 2), ProtocolError);
+
+        // The helper writes a JPEG into the folder of the request, nowhere else
+        for (const char *name : {"../a.jpg", "sub/a.jpg", "", ".", ".."})
+        {
+            SCOPED_TRACE(name);
+            json bad = toJson(resize);
+            bad["images"][0]["name"] = name;
+            EXPECT_THROW(resizeImagesParamsFromJson(bad), ProtocolError);
+        }
+        json badQuality = toJson(resize);
+        badQuality["quality"] = 101;
+        EXPECT_THROW(resizeImagesParamsFromJson(badQuality), ProtocolError);
+
+        // The confinement of the helper lets it read the photos
+        Request request;
+        request.op = op::kResizeImages;
+        request.params = toJson(resize);
+        EXPECT_EQ(helperOperationInputs(request),
+                  (std::vector<fs::path>{"/data/odm/images/a.JPG", "/data/odm/images/c.tif"}));
+        request.op = op::kRasterShapes;
+        request.params = toJson(sizes);
+        EXPECT_EQ(helperOperationInputs(request), sizes.inputs);
+        EXPECT_TRUE(outIsFolder(op::kResizeImages));
+        EXPECT_FALSE(outIsFolder(op::kMask));
+    }
+
+    // The bands of a merge travel in their order, with the crop that shifts them into place, the names
+    // of the merged bands and its XMP
+    TEST(RasterBuildParams, theBandsOfAMergeAreTheOnesTheHostSent)
+    {
+        MergeBandsParams merge;
+        merge.inputs = {"/data/ms/IMG_0001_1.tif", "/data/ms/IMG_0001_2.tif"};
+        AlignmentCrop crop;
+        crop.dx = {0, -3};
+        crop.dy = {0, 2};
+        crop.padLeft = 3;
+        crop.padTop = 2;
+        crop.outW = 1277;
+        crop.outH = 958;
+        merge.crop = crop;
+        merge.names = {"Blue", "Green"};
+        merge.xmp = "<x:xmpmeta/>";
+        merge.threads = 6;
+        const auto back = mergeBandsParamsFromJson(toJson(merge));
+        EXPECT_EQ(back.inputs, merge.inputs);
+        ASSERT_TRUE(back.crop);
+        EXPECT_EQ(back.crop->dx, crop.dx);
+        EXPECT_EQ(back.crop->dy, crop.dy);
+        EXPECT_EQ(back.crop->padLeft, 3);
+        EXPECT_EQ(back.crop->padTop, 2);
+        EXPECT_EQ(back.crop->outW, 1277);
+        EXPECT_EQ(back.crop->outH, 958);
+        EXPECT_EQ(back.names, merge.names);
+        EXPECT_EQ(back.xmp, merge.xmp);
+        EXPECT_EQ(back.threads, std::optional<int>(6));
+        merge.crop.reset();
+        EXPECT_FALSE(mergeBandsParamsFromJson(toJson(merge)).crop);
+
+        json oneInput = toJson(merge);
+        oneInput["inputs"].erase(1);
+        EXPECT_THROW(mergeBandsParamsFromJson(oneInput), ProtocolError);
+        merge.crop = crop;
+        json shortCrop = toJson(merge);
+        shortCrop["crop"]["dx"].erase(1);
+        EXPECT_THROW(mergeBandsParamsFromJson(shortCrop), ProtocolError) << "a shift per input";
+
+        MergePreviewParams preview;
+        preview.inputs = merge.inputs;
+        preview.bands = {3, 2, 1};
+        preview.size = 512;
+        const auto previewBack = mergePreviewParamsFromJson(toJson(preview));
+        EXPECT_EQ(previewBack.inputs, preview.inputs);
+        EXPECT_EQ(previewBack.bands, preview.bands);
+        EXPECT_EQ(previewBack.size, 512);
+        preview.bands = {1, 2};
+        EXPECT_THROW(mergePreviewParamsFromJson(toJson(preview)), ProtocolError);
+        preview.bands = {0, 1, 2};
+        EXPECT_THROW(mergePreviewParamsFromJson(toJson(preview)), ProtocolError);
+
+        Request request;
+        request.op = op::kMergeBands;
+        request.params = toJson(merge);
+        EXPECT_EQ(helperOperationInputs(request), merge.inputs);
+    }
+
+    // An alignment names its reference, which the confinement lets the helper read, and carries its options
+    TEST(RasterBuildParams, theReferenceOfAnAlignmentIsTheOneTheHostSent)
+    {
+        AlignParams align;
+        align.reference = "/data/ds/reference.tif";
+        align.options = {{"mode", "translation"}, {"minOverlap", 0.5}};
+        const auto back = alignParamsFromJson(toJson(align));
+        EXPECT_EQ(back.reference, align.reference);
+        EXPECT_EQ(back.options, align.options);
+        EXPECT_THROW(alignParamsFromJson(json{{"options", json::object()}}), ProtocolError) << "no reference";
+        EXPECT_THROW(alignParamsFromJson(json{{"reference", "/a.tif"}, {"options", 3}}), ProtocolError);
+        Request request;
+        request.op = op::kAlign;
+        request.params = toJson(align);
+        EXPECT_EQ(helperOperationInputs(request), (std::vector<fs::path>{"/data/ds/reference.tif"}));
+        request.op = op::kAlignValidation;
+        EXPECT_EQ(helperOperationInputs(request), (std::vector<fs::path>{"/data/ds/reference.tif"}));
+    }
+
     TEST(RasterBuildParams, paramsThatAreNotWhatTheOperationTakesAreRefused)
     {
         EXPECT_THROW(copcParamsFromJson(json::array()), ProtocolError);
@@ -1373,6 +1617,12 @@ namespace
         EXPECT_THROW(cogParamsFromJson(json{{"threads", 5000}}), ProtocolError);
         EXPECT_THROW(cogParamsFromJson(json{{"threads", "4"}}), ProtocolError);
         EXPECT_THROW(vectorParamsFromJson(json{{"source", 3}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json::array()), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"nearDist", "15"}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"nearDist", int64_t{1} << 40}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"white", 1}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"color", 3}}), ProtocolError);
+        EXPECT_THROW(maskParamsFromJson(json{{"threads", 0}}), ProtocolError);
 
         const json valid = toJson([] {
             GeoprojectParams photo;
@@ -1430,6 +1680,11 @@ namespace
             ADD_FAILURE() << "no probe is asked for";
             return ProbeResult();
         }
+        PointCloudInfo pointCloudInfo(const fs::path &) override
+        {
+            ADD_FAILURE() << "no point cloud info is asked for";
+            return PointCloudInfo();
+        }
         void thumbnail(const fs::path &, const fs::path &, const ThumbnailParams &) override
         {
             ADD_FAILURE() << "no thumbnail is asked for";
@@ -1458,6 +1713,15 @@ namespace
         {
             ASSERT_TRUE(onVector) << "no vector is built";
             onVector(path, out, params);
+        }
+        void sampleCloud(const fs::path &, const fs::path &, const json &, const ProgressCallback &) override
+        {
+            ADD_FAILURE() << "no cloud is sampled";
+        }
+        json operate(const char *op, const fs::path &, const fs::path &, const json &, const ProgressCallback &) override
+        {
+            ADD_FAILURE() << "no operation: " << op;
+            return json::object();
         }
     };
 

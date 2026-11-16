@@ -43,8 +43,8 @@ set(DDB_HELPER_TOOLS "${DDB_HELPER_TOOLS}" PARENT_SCOPE)
 # Built here as a static library under DroneDB's control instead of using SPZ's own
 # CMakeLists (which would fetch its own zlib/zstd and build optional CLI tools and
 # Python bindings). This keeps the integration point in one place and links the
-# exact zlib/zstd targets vcpkg already provides (zlib direct, zstd via the manifest
-# and pdal[zstd]). SPZ only needs zlib + zstd, so no new third-party dependency.
+# exact zlib/zstd targets vcpkg already provides (both in the manifest). SPZ only
+# needs zlib + zstd, so no new third-party dependency.
 find_package(ZLIB REQUIRED)
 find_package(zstd CONFIG REQUIRED)
 

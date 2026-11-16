@@ -4,6 +4,7 @@
 #ifndef MERGE_MULTISPECTRAL_H
 #define MERGE_MULTISPECTRAL_H
 
+#include "raster_protocol.h"
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -54,6 +55,9 @@ struct MergeValidationResult {
 std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string> &inputPaths);
 
 MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths);
+/// The same from the shapes of the files, which the raster helper read (raster::rasterShapesOf), one per file
+MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths,
+                                                 const std::vector<raster::RasterShape> &shapes);
 
 /// The validation as JSON (DDBValidateMergeMultispectral): ok, errors, warnings, summary
 /// {totalBands, dataType, width, height, crs, pixelSizeX, pixelSizeY, estimatedSize} and
@@ -80,6 +84,17 @@ void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
 void mergeMultispectral(const std::vector<std::string> &inputPaths,
                                  const std::string &outputPath,
                                  bool overwrite = false);
+
+namespace raster {
+/// Writes `out`, the bands of `params` merged (MergeBandsParams): what the raster helper runs for a
+/// `mergeBands` request. Returns {"cropped": whether the bands were shifted into place}. Only where users'
+/// files are opened (the helper). @throws GDALException
+json mergeBandsFile(const MergeBandsParams &params, const fs::path &out);
+/// Writes `out`, the WebP preview of the merge of `params` (MergePreviewParams): what the raster helper
+/// runs for a `mergePreview` request. Only where users' files are opened. @throws GDALException
+void mergePreviewFile(const MergePreviewParams &params, const fs::path &out);
+}  // namespace raster
+
 
 } // namespace ddb
 

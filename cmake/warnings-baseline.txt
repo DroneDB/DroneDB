@@ -50,7 +50,6 @@ tests/integration/latent_bugs_test.cpp -Wunused-result 3
 tests/integration/multispectral_test.cpp -Wunused-result 8
 tests/integration/plyconv_test.cpp -Wdangling-else 1
 tests/integration/plyconv_test.cpp -Wrange-loop-construct 1
-tests/integration/pointcloud_render_test.cpp -Wconversion 3
 tests/integration/rescan_test.cpp -Wunused-function 1
 tests/integration/rescan_test.cpp -Wunused-parameter 11
 tests/integration/thumbs_test.cpp -Wsign-compare 1

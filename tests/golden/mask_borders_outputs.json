@@ -1,9 +1,52 @@
 {
  "dem32": {
-  "error": "GDALNearblack failed to create output: <dir>/dem32_masked.tif"
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Gray",
+    "maskFlags": 2,
+    "nodata": -9999.0,
+    "overviews": 0,
+    "type": "Float32"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 96,
+  "pixelsFile": "mask_dem32",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "BAND",
+   "LAYOUT": "COG",
+   "PREDICTOR": "3"
+  },
+  "width": 96
  },
  "dem64": {
-  "error": "GDALNearblack failed to create output: <dir>/dem64_masked.tif"
+  "bands": [
+   {
+    "blockX": 512,
+    "blockY": 512,
+    "colorInterp": "Gray",
+    "maskFlags": 2,
+    "overviews": 0,
+    "type": "Float64"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 96,
+  "pixelsFile": "mask_dem64",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "DEFLATE",
+   "INTERLEAVE": "BAND",
+   "LAYOUT": "COG",
+   "PREDICTOR": "3"
+  },
+  "width": 96
  },
  "gray8": {
   "bands": [
@@ -167,13 +210,13 @@
     "colorInterp": "Gray",
     "maskFlags": 2,
     "overviews": 0,
-    "type": "Byte"
+    "type": "UInt16"
    }
   ],
   "bigTiff": false,
   "driver": "GTiff",
   "height": 96,
-  "pixels": "3e156a6ce58cad58",
+  "pixels": "6516a2602103f6db",
   "srs": "WGS 84 / UTM zone 32N",
   "structure": {
    "COMPRESSION": "DEFLATE",

@@ -14,10 +14,13 @@
 #include <string_view>
 #include <vector>
 
+#include "alignment_crop.h"
 #include "basicgeometry.h"
 #include "exif_protocol.h"
 #include "fs.h"
 #include "json.h"
+#include "cloud_sample.h"
+#include "pointcloud_info.h"
 #include "thumbs.h"
 
 namespace ddb
@@ -31,7 +34,7 @@ namespace ddb
         // The version this side implements. A helper is accepted when its major version is the
         // same and its minor version is not lower.
         constexpr int kMajorVersion = 1;
-        constexpr int kMinorVersion = 1;
+        constexpr int kMinorVersion = 3;
 
         // The longest line of either side
         constexpr size_t kMaxLineBytes = 16 * 1024 * 1024;
@@ -67,6 +70,7 @@ namespace ddb
             Crashed,    // the worker ended without an answer
             Timeout,    // the host's deadline passed
             NoSpace,    // no space left on the device the output goes to
+            Invalid,    // the operation refuses its arguments for this file (new in 1.3)
             Internal    // anything else: a bad request, an operation that does not exist, a defect
         };
 
@@ -83,7 +87,39 @@ namespace ddb
             constexpr const char *kCog = "cog";
             constexpr const char *kCopc = "copc";
             constexpr const char *kVector = "vector";
+            // The info of a point cloud (new in 1.2): no params, the result of pointCloudInfoJson
+            constexpr const char *kPointCloudInfo = "pointCloudInfo";
+            // The sample of a point cloud (new in 1.2), one-shot with progress: params of
+            // cloudSampleParamsFromJson, the sample written to `out` (writeCloudSample)
+            constexpr const char *kSampleCloud = "sampleCloud";
+            // The borders of a raster masked (new in 1.3), one-shot: params of maskParamsFromJson,
+            // the masked raster written to `out` (runHelperOperation)
+            constexpr const char *kMask = "mask";
+            // What GDAL reports of the shape of rasters (new in 1.3), one-shot: params of
+            // rasterShapesParamsFromJson, the result of toJson(std::vector<RasterShape>)
+            constexpr const char *kRasterShapes = "rasterShapes";
+            // Photos resized to JPEGs (new in 1.3), one-shot: params of resizeImagesParamsFromJson,
+            // `out` the folder the JPEGs are written in, the result of resizeResultsToJson
+            constexpr const char *kResizeImages = "resizeImages";
+            // The bands of a multispectral capture merged into one raster (new in 1.3), one-shot:
+            // params of mergeBandsParamsFromJson, the raster written to `out`
+            constexpr const char *kMergeBands = "mergeBands";
+            // The preview of such a merge, a WebP (new in 1.3), one-shot: params of
+            // mergePreviewParamsFromJson, the WebP written to `out`
+            constexpr const char *kMergePreview = "mergePreview";
+            // A raster aligned to a reference (new in 1.3), one-shot: params of alignParamsFromJson,
+            // the aligned raster written to `out`, the result of alignResultToJson
+            constexpr const char *kAlign = "align";
+            // The check of an alignment (new in 1.3), one-shot: params of alignParamsFromJson, no
+            // `out`, the result of alignValidationToJson
+            constexpr const char *kAlignValidation = "alignValidation";
         } // namespace op
+
+        // An operation on a user's raster for a call of the host (not a build, not a read): one
+        // process with the limits of a build, run by runHelperOperation (helper_operations.h)
+        bool isHelperOperation(std::string_view op);
+        // Whether `out` of the operation is the folder it writes in (vector, resizeImages), not a file
+        bool outIsFolder(std::string_view op);
 
         // A request. `path` is the file to read, `out` the file to write (operations that
         // write). `params` is an object whose members the operation defines.
@@ -95,6 +131,11 @@ namespace ddb
             fs::path out;
             json params = json::object();
         };
+
+        // The files an operation for a call reads besides `path` (the rasters of rasterShapes, the
+        // photos of resizeImages), which its confinement allows
+        // @throws ProtocolError for params that are not the operation's
+        std::vector<fs::path> helperOperationInputs(const Request &request);
 
         // The request line (without the line feed), in ASCII: any other character of a text is a
         // \u escape of JSON, so the line passes unchanged through a command line in any code page.
@@ -191,6 +232,20 @@ namespace ddb
         json toJson(const ProbeResult &result);
         // @throws ProtocolError
         ProbeResult probeResultFromJson(const json &result);
+
+        // ---- point cloud info
+
+        // The result of kPointCloudInfo: {"pointCount", "wkt" (when the cloud has a CRS), "dimensions",
+        // "bounds" (6 numbers, when known), "pointGeom" and "polygonGeom" (its footprint in EPSG:4326),
+        // "warning" (why it has no footprint)}
+        json pointCloudInfoJson(const PointCloudInfo &info);
+        // @throws ProtocolError
+        PointCloudInfo pointCloudInfoFromJson(const json &result);
+
+        // The params of kSampleCloud: {"shift": [x, y, z], "limit": n}
+        json toJson(const CloudSampleParams &params);
+        // @throws ProtocolError
+        CloudSampleParams cloudSampleParamsFromJson(const json &params);
 
         // ---- thumbnail
 
@@ -302,6 +357,123 @@ namespace ddb
         json toJson(const GeoprojectParams &params);
         // @throws ProtocolError
         GeoprojectParams geoprojectParamsFromJson(const json &params);
+
+        // The params of a `mask` (gdal_nearblack -setmask -alg floodfill): how far from black (or
+        // white, or `color`) a border pixel may be (`nearDist`, -near), white borders (`white`),
+        // or borders of a colour (`color`: "c1,c2,c3...", -color), and the threads of the build
+        struct MaskParams
+        {
+            int nearDist = 15;
+            bool white = false;
+            std::string color;
+            std::optional<int> threads;
+        };
+
+        json toJson(const MaskParams &params);
+        // @throws ProtocolError
+        MaskParams maskParamsFromJson(const json &params);
+
+        // The params of a `rasterShapes`: the rasters (`inputs`, a path each as the inputs of a copc),
+        // and whether their xml:XMP is asked for too (`xmp`)
+        struct RasterShapesParams
+        {
+            std::vector<fs::path> inputs;
+            bool xmp = false;
+        };
+
+        json toJson(const RasterShapesParams &params);
+        // @throws ProtocolError
+        RasterShapesParams rasterShapesParamsFromJson(const json &params);
+
+        // What GDAL reports of the shape of a raster, or why it cannot be read
+        struct RasterShape
+        {
+            int width = 0;
+            int height = 0;
+            int bands = 0;
+            std::string type;                                  // GDAL's name of the type of band 1
+            std::optional<std::array<double, 6>> geoTransform; // none without one
+            std::string wkt;                                   // GDALGetProjectionRef ("" without a CRS)
+            std::vector<std::string> descriptions;             // GDALGetDescription of each band
+            std::string xmp;                                   // the xml:XMP of the raster, when asked for
+            std::string error;                                 // not empty: the raster cannot be read
+        };
+
+        // {"shapes": [{"width", "height", "bands", "type", "geoTransform"?, "wkt", "descriptions", "xmp"?} or {"error"},
+        // ...]}, in
+        // the order of the inputs
+        json toJson(const std::vector<RasterShape> &shapes);
+        // @throws ProtocolError for a result that is not that, or that has not `count` shapes
+        std::vector<RasterShape> rasterShapesFromJson(const json &result, size_t count);
+
+        // The params of a `resizeImages`: each photo (`source`, a path) written as a JPEG of quality
+        // `quality` and of size `width` x `height` (average resampling, the EXIF left out; 16-bit
+        // samples scaled from the range of their type) to `name`, a file name in the folder `out`
+        struct ResizeImagesParams
+        {
+            struct Image
+            {
+                fs::path source;
+                std::string name;
+                int width = 0;
+                int height = 0;
+            };
+            std::vector<Image> images;
+            int quality = 95;
+            std::optional<int> threads;
+        };
+
+        json toJson(const ResizeImagesParams &params);
+        // @throws ProtocolError (a name that is not a plain file name among them)
+        ResizeImagesParams resizeImagesParamsFromJson(const json &params);
+
+        // {"errors": ["" for a photo written, else why it was not]}, in the order of the images
+        json resizeResultsToJson(const std::vector<std::string> &errors);
+
+        // The params of a `mergeBands`: the files of the bands (`inputs`), stacked in their order
+        // (gdalbuildvrt -separate -r average) and written as a tiled GeoTIFF (gdalwarp -multi for
+        // georeferenced bands, else gdal_translate; JPEG quality 90 for 3 or 4 bands of 8 bits, else
+        // LZW with the predictor of the type), each band shifted into place first when `crop` is given;
+        // `names` the description of each band of the result, `xmp` its xml:XMP ("" for none)
+        struct MergeBandsParams
+        {
+            std::vector<fs::path> inputs;
+            std::optional<AlignmentCrop> crop;
+            std::vector<std::string> names;
+            std::string xmp;
+            std::optional<int> threads;
+        };
+
+        json toJson(const MergeBandsParams &params);
+        // @throws ProtocolError
+        MergeBandsParams mergeBandsParamsFromJson(const json &params);
+
+        // The params of a `mergePreview`: the stack of `inputs`, its `bands` (1-based, at least 3)
+        // scaled to bytes and written as a WebP of `size` x `size` pixels
+        struct MergePreviewParams
+        {
+            std::vector<fs::path> inputs;
+            std::vector<int> bands;
+            int size = 0;
+        };
+
+        // The params of an `align` and an `alignValidation`: the raster `path` is aligned to (`reference`)
+        // and the options of the alignment (align.h, as the host and the helper of one build write them)
+        struct AlignParams
+        {
+            fs::path reference;
+            json options = json::object();
+        };
+
+        json toJson(const AlignParams &params);
+        // @throws ProtocolError
+        AlignParams alignParamsFromJson(const json &params);
+
+        json toJson(const MergePreviewParams &params);
+        // @throws ProtocolError
+        MergePreviewParams mergePreviewParamsFromJson(const json &params);
+        // @throws ProtocolError for a result that is not that, or that has not `count` items
+        std::vector<std::string> resizeResultsFromJson(const json &result, size_t count);
 
     } // namespace raster
 } // namespace ddb

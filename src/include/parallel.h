@@ -23,7 +23,7 @@ namespace ddb::parallel
     //
     // One pool of ProcessConfig::cpuPoolSize() tokens (DDBConfigure "cpuPoolSize"; default
     // cores - 1) bounds the CPU threads libddb runs at once beside the calling threads: the
-    // workers of forEachIndex, GDAL's NUM_THREADS, the threads of PDAL readers and the cores of
+    // workers of forEachIndex, GDAL's NUM_THREADS, the threads of ddb-tilers and the cores of
     // the external tools. A calling thread never needs a token: it always does its own work.
     // Each thread beyond it holds one token while it runs.
     //
@@ -83,7 +83,7 @@ namespace ddb::parallel
     // lowest failed index is rethrown: the same one a serial loop would throw.
     // GDAL errors raised by fn go to libddb's handler on every thread (the host's
     // log callback, else GDAL's default handler), not to the process-wide handler
-    // (which PDAL replaces while its stages run). The workers log with the calling
+    // (which a library may replace while it runs). The workers log with the calling
     // thread's operation id (log_forwarding.h).
     // The workers work for the calling thread's cancel token (cancellation.h),
     // and every index checks it before it starts: once the token is canceled

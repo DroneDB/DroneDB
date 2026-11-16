@@ -18,13 +18,9 @@
 #include <set>
 #include <unordered_map>
 
-#include "pdal_inc.h"
-#include <pdal/Options.hpp>
-#include <pdal/Stage.hpp>
-#include <pdal/StageFactory.hpp>
 
 #include "cancellation.h"
-#include "point_batch.h"
+#include "cloud_sample.h"
 #include "exceptions.h"
 #include "artefact_cache.h"
 #include "gdal_raii.h"
@@ -32,6 +28,9 @@
 #include "local_frame_georef.h"
 #include "mio.h"
 #include "parallel.h"
+#include "raster_artefacts.h"
+#include "raster_helper.h"
+#include "raster_protocol.h"
 #include "ply.h"
 #include "stringutil.h"
 
@@ -48,13 +47,11 @@ namespace ddb
         constexpr double NadirAngleDegrees = 12.0;
         // Most of the images (more than this share) looking down is worth a warning
         constexpr double NadirShareToWarn = 0.98;
-        // The cell of the thinning grid starts at this size (meters) and grows by this factor while there
-        // are too many points: the cube root of 2, so that the points of a surface (which fall as the
-        // square of the cell) fall by about a third, not by 3/4, and the grid ends close to the limit
-        constexpr double InitialCellSize = 0.001;
-        constexpr double CellGrowth = 1.25;
+        // The private folder in the output folder where the raster helper writes the sample of the cloud
+        constexpr const char *CloudSamplePrefix = "ddb-cloud-sample-";
+        // The private folder the raster helper writes the resized images in
+        constexpr const char *ResizeStagingPrefix = "ddb-resized-images-";
         // How many images are exported between two checks of the progress
-        constexpr size_t ImageBatch = 16;
         constexpr size_t ImageThreads = 8;
         constexpr int JpegQuality = 95;
         // Files named in a warning
@@ -476,223 +473,6 @@ namespace ddb
 
         // ---- The point cloud ----
 
-        struct SampledPoint
-        {
-            double x, y, z;
-            uint16_t r, g, b;
-        };
-
-        // Thins a stream of points on a 3D grid down to at most `limit`: the first point of each
-        // cell stays, and the cell grows while there are more cells than the limit. One
-        // pass, no knowledge of the cloud (its size, its extent) and memory of the limit.
-        class GridSampler
-        {
-        public:
-            explicit GridSampler(size_t limit) : limit_(limit) { points_.reserve(std::min<size_t>(limit, 1u << 20)); }
-
-            void add(double x, double y, double z, uint16_t r, uint16_t g, uint16_t b)
-            {
-                ++seen_;
-                const auto key = keyOf(x, y, z);
-                if (!key || limit_ == 0)
-                    return;
-                if (cells_.try_emplace(*key, static_cast<uint32_t>(points_.size())).second)
-                {
-                    points_.push_back({x, y, z, r, g, b});
-                    if (points_.size() > limit_)
-                        coarsen();
-                }
-            }
-
-            size_t seen() const { return seen_; }
-            const std::vector<SampledPoint> &points() const { return points_; }
-
-        private:
-            struct Key
-            {
-                int64_t x, y, z;
-                bool operator==(const Key &o) const { return x == o.x && y == o.y && z == o.z; }
-            };
-            struct KeyHash
-            {
-                size_t operator()(const Key &k) const
-                {
-                    size_t h = std::hash<int64_t>()(k.x);
-                    h = h * 0x9E3779B97F4A7C15ull + std::hash<int64_t>()(k.y);
-                    h = h * 0x9E3779B97F4A7C15ull + std::hash<int64_t>()(k.z);
-                    return h;
-                }
-            };
-
-            // Nothing for a coordinate that is not finite or too far for the grid
-            std::optional<Key> keyOf(double x, double y, double z) const
-            {
-                const double gx = std::floor(x / cell_), gy = std::floor(y / cell_), gz = std::floor(z / cell_);
-                constexpr double Limit = 4e18;
-                if (!(std::abs(gx) < Limit) || !(std::abs(gy) < Limit) || !(std::abs(gz) < Limit))
-                    return std::nullopt;
-                return Key{static_cast<int64_t>(gx), static_cast<int64_t>(gy), static_cast<int64_t>(gz)};
-            }
-
-            // Grows the cell until the points that stay fit; the first of the points that share a
-            // cell stays
-            void coarsen()
-            {
-                while (points_.size() > limit_)
-                {
-                    cell_ *= CellGrowth;
-                    cells_.clear();
-                    std::vector<SampledPoint> kept;
-                    kept.reserve(points_.size());
-                    for (const auto &p : points_)
-                        if (cells_.try_emplace(*keyOf(p.x, p.y, p.z), static_cast<uint32_t>(kept.size())).second)
-                            kept.push_back(p);
-                    points_ = std::move(kept);
-                }
-            }
-
-            size_t limit_;
-            double cell_ = InitialCellSize;
-            size_t seen_ = 0;
-            std::unordered_map<Key, uint32_t, KeyHash> cells_;
-            std::vector<SampledPoint> points_;
-        };
-
-        // The scalar at p as a double
-        double plyScalar(const char *p, PlyScalarType type)
-        {
-            switch (type)
-            {
-            case PlyScalarType::Int8:
-                return static_cast<double>(*reinterpret_cast<const int8_t *>(p));
-            case PlyScalarType::UInt8:
-                return static_cast<double>(*reinterpret_cast<const uint8_t *>(p));
-            case PlyScalarType::Int16: {
-                int16_t v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::UInt16: {
-                uint16_t v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::Int32: {
-                int32_t v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::UInt32: {
-                uint32_t v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::Float32: {
-                float v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            case PlyScalarType::Float64: {
-                double v;
-                std::memcpy(&v, p, sizeof v);
-                return v;
-            }
-            default:
-                return 0.0;
-            }
-        }
-
-        // The points of a binary little-endian PLY (ODM's filtered cloud), already in the local
-        // frame. Colours are read by property name: the order of red, green and blue varies.
-        void forEachPlyPoint(const fs::path &file, const std::function<void(PointBatch &)> &sink)
-        {
-            const PlyHeader header = readPlyHeader(file);
-            if (header.format != PlyFormat::BinaryLittleEndian)
-                throw AppException(io::toUtf8(file) + " is not a binary little-endian PLY");
-            const int vertexIndex = header.findElement("vertex");
-            if (vertexIndex < 0)
-                throw AppException(io::toUtf8(file) + " has no vertex element");
-            const PlyElement &vertex = header.elements[vertexIndex];
-            if (vertexIndex != 0)
-                throw AppException(io::toUtf8(file) + " has an element before its vertices");
-
-            struct Column
-            {
-                size_t offset = 0;
-                PlyScalarType type = PlyScalarType::Unknown;
-                bool present = false;
-            };
-            Column x, y, z, red, green, blue;
-            size_t stride = 0;
-            for (const auto &p : vertex.properties)
-            {
-                if (p.isList || plyScalarSize(p.type) == 0)
-                    throw AppException(io::toUtf8(file) + " has a vertex property '" + p.name +
-                                               "' that is a list or of an unknown type");
-                const Column column{stride, p.type, true};
-                if (p.name == "x") x = column;
-                else if (p.name == "y") y = column;
-                else if (p.name == "z") z = column;
-                else if (p.name == "red") red = column;
-                else if (p.name == "green") green = column;
-                else if (p.name == "blue") blue = column;
-                stride += plyScalarSize(p.type);
-            }
-            if (!x.present || !y.present || !z.present || stride == 0)
-                throw AppException(io::toUtf8(file) + " has no x, y and z vertex properties");
-
-            std::ifstream in(file, std::ios::binary);
-            in.seekg(static_cast<std::streamoff>(header.headerLength));
-            constexpr size_t RowsPerBatch = 16384;
-            std::vector<char> rows(RowsPerBatch * stride);
-            PointBatch batch;
-            batch.reserve(RowsPerBatch);
-            const bool hasColor = red.present && green.present && blue.present;
-            for (uint64_t done = 0; done < vertex.count;)
-            {
-                const size_t n = static_cast<size_t>(std::min<uint64_t>(RowsPerBatch, vertex.count - done));
-                in.read(rows.data(), static_cast<std::streamsize>(n * stride));
-                if (static_cast<size_t>(in.gcount()) != n * stride)
-                    throw AppException(io::toUtf8(file) + " ends before its " + std::to_string(vertex.count) +
-                                               " vertices");
-                batch.clear();
-                for (size_t i = 0; i < n; ++i)
-                {
-                    const char *row = rows.data() + i * stride;
-                    batch.x.push_back(plyScalar(row + x.offset, x.type));
-                    batch.y.push_back(plyScalar(row + y.offset, y.type));
-                    batch.z.push_back(plyScalar(row + z.offset, z.type));
-                    batch.red.push_back(hasColor ? static_cast<uint16_t>(plyScalar(row + red.offset, red.type)) : 0);
-                    batch.green.push_back(hasColor ? static_cast<uint16_t>(plyScalar(row + green.offset, green.type)) : 0);
-                    batch.blue.push_back(hasColor ? static_cast<uint16_t>(plyScalar(row + blue.offset, blue.type)) : 0);
-                }
-                sink(batch);
-                done += n;
-            }
-        }
-
-        // The points of a LAS or LAZ file, one batch at a time
-        void forEachLasPoint(const fs::path &file, const std::function<void(PointBatch &)> &sink, uint64_t &total)
-        {
-            pdal::StageFactory factory;
-            pdal::Stage *reader = factory.createStage("readers.las");
-            if (reader == nullptr)
-                throw PDALException("Cannot create the LAS reader");
-            pdal::Options options;
-            options.add("filename", io::toUtf8(file));
-            options.add("nosrs", true);
-            reader->setOptions(options);
-            try
-            {
-                total = reader->preview().m_pointCount;
-                forEachPointBatch(*reader, sink);
-            }
-            catch (const pdal::pdal_error &e)
-            {
-                throw PDALException("Cannot read " + io::toUtf8(file) + ": " + e.what());
-            }
-        }
-
         // The cloud to take the points of and whether its coordinates are those of the CRS (a LAS
         // file) or already shifted by the offset (ODM's filtered PLY)
         struct CloudFile
@@ -725,29 +505,24 @@ namespace ddb
             bool wide = false; // colours are 16-bit
         };
 
-        // The points of the cloud thinned to at most `limit`, in the local frame
-        Cloud sampleCloud(const CloudFile &cloud, const Vec3 &offset, size_t limit, Progress &progress)
+        // The points of the cloud thinned to at most `limit`, in the local frame: the raster helper reads
+        // the cloud of the project and writes its sample in a private folder of `workFolder`, which is
+        // read here
+        Cloud sampleCloud(const CloudFile &cloud, const Vec3 &offset, size_t limit, Progress &progress,
+                          const fs::path &workFolder)
         {
-            GridSampler sampler(limit);
-            uint64_t total = 0;
-            size_t read = 0;
-            const Vec3 shift = cloud.absolute ? offset : Vec3{0, 0, 0};
-            const auto sink = [&](PointBatch &batch) {
-                for (size_t i = 0; i < batch.size(); ++i)
-                    sampler.add(batch.x[i] - shift[0], batch.y[i] - shift[1], batch.z[i] - shift[2], batch.red[i],
-                                batch.green[i], batch.blue[i]);
-                read += batch.size();
-                progress.report(within(CamerasEnd, PointsEnd, shareOf(read, total)),
-                                "points");
-            };
-
-            if (cloud.las)
-                forEachLasPoint(cloud.path, sink, total);
-            else
-                forEachPlyPoint(cloud.path, sink);
+            CloudSampleParams params;
+            if (cloud.absolute)
+                params.shift = {offset[0], offset[1], offset[2]};
+            params.limit = limit;
+            const io::ScopedTempDir folder = raster::makePrivateFolder(workFolder, CloudSamplePrefix);
+            const fs::path sample = folder.path() / "sample.bin";
+            raster::rasterHelper().sampleCloud(cloud.path, sample, raster::toJson(params), [&progress](double f) {
+                progress.report(within(CamerasEnd, PointsEnd, f), "points");
+            });
 
             Cloud result;
-            result.points = sampler.points();
+            result.points = readCloudSample(sample);
             for (const auto &p : result.points)
             {
                 result.hasColor = result.hasColor || p.r != 0 || p.g != 0 || p.b != 0;
@@ -764,14 +539,6 @@ namespace ddb
             int height = 0;
         };
 
-        ImageSize imageSizeOf(const fs::path &file)
-        {
-            const auto ds = raster::openInputRaster(io::toUtf8(file));
-            if (!ds)
-                throw GDALException("Cannot open " + io::toUtf8(file));
-            return {GDALGetRasterXSize(datasetHandle(ds)), GDALGetRasterYSize(datasetHandle(ds))};
-        }
-
         // The size of an image once its longest side is at most maxSize; 0 keeps it
         ImageSize resizedTo(const ImageSize &size, int maxSize)
         {
@@ -781,53 +548,6 @@ namespace ddb
             const double scale = static_cast<double>(maxSize) / side;
             return {std::max(1, static_cast<int>(std::lround(size.width * scale))),
                     std::max(1, static_cast<int>(std::lround(size.height * scale)))};
-        }
-
-        // Writes the image resampled to a JPEG of the given size
-        void resizeToJpeg(const fs::path &source, const fs::path &target, const ImageSize &size)
-        {
-            const auto src = raster::openInputRaster(io::toUtf8(source));
-            if (!src)
-                throw GDALException("Cannot open " + io::toUtf8(source));
-            GDALDatasetH hSrc = datasetHandle(src);
-            const int bands = GDALGetRasterCount(hSrc);
-
-            // No EXIF: the camera's metadata (its orientation among it) does not describe the resampled pixels
-            std::vector<std::string> args = {"-of", "JPEG", "-co", "QUALITY=" + std::to_string(JpegQuality),
-                                             "-co", "WRITE_EXIF_METADATA=NO",
-                                             "-outsize", std::to_string(size.width), std::to_string(size.height),
-                                             "-r", "average"};
-            // JPEG holds bytes: 16-bit pixels (the bands of a multispectral camera) are scaled from the
-            // range of their type, the same for every image, so the images keep their relative exposure
-            const GDALDataType type = GDALGetRasterDataType(GDALGetRasterBand(hSrc, 1));
-            if (type == GDT_UInt16)
-                args.insert(args.end(), {"-ot", "Byte", "-scale", "0", "65535", "0", "255"});
-            else if (type == GDT_Int16)
-                args.insert(args.end(), {"-ot", "Byte", "-scale", "0", "32767", "0", "255"});
-            else if (type != GDT_Byte)
-                throw GDALException(io::toUtf8(source) + " has " + GDALGetDataTypeName(type) +
-                                    " pixels, which cannot be written as a JPEG");
-            // JPEG holds 1 or 3 bands: grey, or the colours of an image with an alpha or more bands
-            const int keep = bands == 2 ? 1 : std::min(bands, 3);
-            if (keep != bands)
-                for (int b = 1; b <= keep; ++b)
-                    args.insert(args.end(), {"-b", std::to_string(b)});
-
-            CPLStringList argv = cslFromStrings(args);
-            const GdalOptionsPtr<GDALTranslateOptions> options(GDALTranslateOptionsNew(argv.List(), nullptr));
-            if (!options)
-                throw GDALException("Cannot resize " + io::toUtf8(source));
-            cancel::GdalProgress progress;
-            progress.attach(options.get());
-
-            auto out = adoptDataset(GDALTranslate(io::toUtf8(target).c_str(), hSrc, options.get(), nullptr));
-            if (!out)
-            {
-                cancel::throwIfCanceled();
-                throw GDALException("Cannot resize " + io::toUtf8(source) + ": " + CPLGetLastErrorMsg());
-            }
-            if (out->Close() != CE_None)
-                throw GDALException("Cannot write " + io::toUtf8(target) + ": " + CPLGetLastErrorMsg());
         }
 
         bool isJpegName(const std::string &name)
@@ -965,9 +685,15 @@ namespace ddb
                                              int maxImageSize, Skipped &skipped, std::vector<std::string> &warnings,
                                              Progress &progress)
         {
-            std::vector<PlannedImage> planned;
-            std::set<std::string> names;
-            std::set<std::string> noted;
+            // The shots whose image the checks without pixels let through: their sizes are read by the
+            // raster helper, all in one run
+            struct Candidate
+            {
+                const OdmShot *shot = nullptr;
+                PlannedImage image;
+                std::string note;
+            };
+            std::vector<Candidate> candidates;
             for (size_t i = 0; i < shots.size(); ++i)
             {
                 progress.report(within(0.0, CamerasEnd, shareOf(i, shots.size())), "cameras");
@@ -992,33 +718,49 @@ namespace ddb
                     continue;
                 }
 
-                PlannedImage image;
-                image.camera = camera;
-                image.source = project / "images" / io::fromUtf8(shot.filename);
+                Candidate candidate;
+                candidate.shot = &shot;
+                candidate.note = note;
+                candidate.image.camera = camera;
+                candidate.image.source = project / "images" / io::fromUtf8(shot.filename);
                 std::error_code ec;
-                if (!fs::is_regular_file(image.source, ec))
+                if (!fs::is_regular_file(candidate.image.source, ec))
                 {
                     skipped.add("the file is not in images/", shot.filename);
                     continue;
                 }
-                try
+                candidates.push_back(std::move(candidate));
+            }
+
+            std::vector<fs::path> sources;
+            for (const auto &c : candidates)
+                sources.push_back(c.image.source);
+            const std::vector<raster::RasterShape> sizes = raster::rasterShapesOf(sources);
+
+            std::vector<PlannedImage> planned;
+            std::set<std::string> names;
+            std::set<std::string> noted;
+            for (size_t k = 0; k < candidates.size(); ++k)
+            {
+                const OdmShot &shot = *candidates[k].shot;
+                const OdmCamera *camera = candidates[k].image.camera;
+                const std::string &note = candidates[k].note;
+                PlannedImage image = std::move(candidates[k].image);
+                const raster::RasterShape &size = sizes[k];
+                if (!size.error.empty())
                 {
-                    const ImageSize size = imageSizeOf(image.source);
-                    if (size.width != camera->width || size.height != camera->height)
-                    {
-                        skipped.add("its size is " + std::to_string(size.width) + "x" + std::to_string(size.height) +
-                                        ", not the " + std::to_string(camera->width) + "x" + std::to_string(camera->height) +
-                                        " of its camera",
-                                    shot.filename);
-                        continue;
-                    }
-                    image.size = size;
-                }
-                catch (const GDALException &e)
-                {
-                    skipped.add(std::string("it cannot be read (") + e.what() + ")", shot.filename);
+                    skipped.add(std::string("it cannot be read (") + size.error + ")", shot.filename);
                     continue;
                 }
+                if (size.width != camera->width || size.height != camera->height)
+                {
+                    skipped.add("its size is " + std::to_string(size.width) + "x" + std::to_string(size.height) +
+                                    ", not the " + std::to_string(camera->width) + "x" + std::to_string(camera->height) +
+                                    " of its camera",
+                                shot.filename);
+                    continue;
+                }
+                image.size = {size.width, size.height};
                 image.target = resizedTo(image.size, maxImageSize);
                 const bool resized = image.target.width != image.size.width || image.target.height != image.size.height;
                 image.name = resized && !isJpegName(shot.filename) ? shot.filename + ".jpg" : shot.filename;
@@ -1039,41 +781,75 @@ namespace ddb
             return planned;
         }
 
-        // Links or resizes the images into outFolder/images, a few at a time; an image that cannot
-        // be written is left out (its `exported` stays false)
+        // Links the images of their own size into imagesFolder, a few at a time, and has the raster helper
+        // resize the others, all in one run, into a private folder beside it, from which they are moved
+        // there; an image that cannot be written is left out (its `exported` stays false)
         void exportImages(std::vector<PlannedImage> &images, const fs::path &imagesFolder, Skipped &skipped,
                           Progress &progress)
         {
-            for (size_t begin = 0; begin < images.size(); begin += ImageBatch)
+            std::mutex failures;
+            const auto leaveOut = [&](PlannedImage &image, const std::string &why) {
+                std::error_code ec;
+                fs::remove(imagesFolder / io::fromUtf8(image.name), ec);
+                const std::lock_guard lock(failures);
+                skipped.add("it cannot be written (" + why + ")", image.name);
+            };
+
+            std::vector<PlannedImage *> resized;
+            std::vector<PlannedImage *> linked;
+            for (auto &image : images)
+                (image.target.width != image.size.width || image.target.height != image.size.height ? resized : linked)
+                    .push_back(&image);
+
+            progress.report(PointsEnd, "images");
+            parallel::forEachIndex(linked.size(), ImageThreads, [&](size_t k) {
+                PlannedImage &image = *linked[k];
+                try
+                {
+                    io::hardlinkSafe(image.source, imagesFolder / io::fromUtf8(image.name));
+                    image.exported = true;
+                }
+                catch (const CanceledException &)
+                {
+                    throw;
+                }
+                catch (const std::exception &e)
+                {
+                    leaveOut(image, e.what());
+                }
+            });
+            if (resized.empty())
+                return;
+
+            raster::ResizeImagesParams params;
+            params.quality = JpegQuality;
+            params.threads = static_cast<int>(ImageThreads);
+            for (const PlannedImage *image : resized)
+                params.images.push_back({image->source, image->name, image->target.width, image->target.height});
+            const io::ScopedTempDir staging = raster::makePrivateFolder(imagesFolder.parent_path(), ResizeStagingPrefix);
+            const double linkedShare = shareOf(linked.size(), images.size());
+            const json result = raster::rasterHelper().operate(
+                raster::op::kResizeImages, resized.front()->source, staging.path(), raster::toJson(params),
+                [&](double f) { progress.report(within(PointsEnd, ImagesEnd, linkedShare + (1.0 - linkedShare) * f), "images"); });
+            cancel::throwIfCanceled();
+            const std::vector<std::string> errors = raster::resizeResultsFromJson(result, resized.size());
+            for (size_t k = 0; k < resized.size(); ++k)
             {
-                progress.report(within(PointsEnd, ImagesEnd, shareOf(begin, images.size())), "images");
-                const size_t end = std::min(images.size(), begin + ImageBatch);
-                std::mutex failures;
-                parallel::forEachIndex(end - begin, ImageThreads, [&](size_t k) {
-                    PlannedImage &image = images[begin + k];
-                    const fs::path target = imagesFolder / io::fromUtf8(image.name);
-                    const bool resized =
-                        image.target.width != image.size.width || image.target.height != image.size.height;
-                    try
-                    {
-                        if (resized)
-                            resizeToJpeg(image.source, target, image.target);
-                        else
-                            io::hardlinkSafe(image.source, target);
-                        image.exported = true;
-                    }
-                    catch (const CanceledException &)
-                    {
-                        throw;
-                    }
-                    catch (const std::exception &e)
-                    {
-                        std::error_code ec;
-                        fs::remove(target, ec);
-                        const std::lock_guard lock(failures);
-                        skipped.add(std::string("it cannot be written (") + e.what() + ")", image.name);
-                    }
-                });
+                PlannedImage &image = *resized[k];
+                if (!errors[k].empty())
+                {
+                    leaveOut(image, errors[k]);
+                    continue;
+                }
+                try
+                {
+                    raster::publishArtefact(staging.path() / io::fromUtf8(image.name), imagesFolder / io::fromUtf8(image.name));
+                    image.exported = true;
+                }
+                catch (const std::exception &e)
+                {
+                    leaveOut(image, e.what());
+                }
             }
         }
 
@@ -1189,7 +965,7 @@ namespace ddb
         }
         else if (const auto file = findCloud(odmProjectFolder))
         {
-            cloud = sampleCloud(*file, georef.offset, options.maxPoints, progress);
+            cloud = sampleCloud(*file, georef.offset, options.maxPoints, progress, outFolder);
             if (cloud.points.empty())
             {
                 result.warnings.push_back("The point cloud " + io::toUtf8(file->path) +

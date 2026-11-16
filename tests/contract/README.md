@@ -714,3 +714,55 @@ Registry has to adopt first.
   build: "planning" from 0, "reading" from 0.05, "building" from 0.4 and "writing" when the file is done (2.5:
   fraction -1 until it was done). `DDB_UNTWINE_PATH`, `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose
   between Untwine and PDAL's writers.copc in 2.5, are no longer read, and the packages have no Untwine.
+
+* 2026-11-16: 2.7.0 (ABI 2.7: `capabilities` has `abi.minor` 7; no export is added or removed, no schema or
+  other fixture changes).
+  The images that libddb renders itself, the region and index renders (`DDBRenderRasterRegionEx*`,
+  `DDBRenderRasterIndex*`) and the thumbnails, are encoded by ddb-tilers with the encoders and rules of the tiles
+  instead of GDAL's PNG, JPEG and WEBP drivers. A PNG decodes to the pixels of 2.6 and JPEG is the same bytes; an
+  alpha that is 255 everywhere is no longer written (an opaque render is an RGB or grey PNG instead of RGBA or
+  grey + alpha, often half the size); WebP is encoded as the WebP tiles are (libwebp method 1 instead of 2: the
+  pixels differ by a few levels at the same quality, PSNR within 0.3 dB, and the files are up to 20 % larger).
+  The "rgba" pixels of a render are unchanged, but for a raster with a colour table: its render shows the colours
+  of its classes in every format, resampled with the nearest pixel (2.6 showed the indices as grey in PNG and JPEG, and
+  blended neighbouring classes with a bilinear warp).
+  Whether a raster is already an optimized COG (EPSG:3857, square tiles of 256 or 512 pixels, overviews), which
+  names the phases a COG build reports, is the rule of ddb-tilers' builder (`ddbtIsOptimizedCog`) instead of a
+  second GDAL check of the same rule, so the phases follow what the build does.
+  The info of a point cloud of a user (LAS, LAZ, E57, XYZ, PTS: its point count, CRS, dimensions and footprint)
+  is read by ddb-tilers in the raster helper (`gdal-util`, protocol 1.2, operation `pointCloudInfo`) instead of
+  PDAL in the process of libddb; a PLY point cloud is read from its header as before. The properties are those
+  of 2.6 (the same count, the dimensions PDAL names in its order, the CRS as the file states it), but for a CRS
+  of GeoTIFF keys without an EPSG code for the whole of it: the same CRS, its WKT without GDAL's AUTHORITY nodes,
+  and a GeographicType of 4978 read as WGS 84 (2.6: GDAL's geocentric CRS, whose footprint was at the pole).
+  A helper of protocol 1.1 is refused (HelperUnavailableException), as for every protocol change.
+  The training export of Gaussian splats (`ddb gsplat --training-data`, `DDBExportSplatTraining`) takes the sample
+  of the point cloud of the ODM project from the raster helper (operation `sampleCloud`), which reads the LAS, LAZ
+  or PLY file with ddb-tilers instead of PDAL and the export's own PLY reader in the process of libddb: the same
+  `points3D.bin` byte for byte (4 ODM projects checked), in 40 to 71 % of the time of 2.6 (the points are decoded
+  on several threads); a PLY that is not binary little-endian is now read too.
+  libddb no longer links PDAL: the info of a point cloud, the sample of the splat export and the COPC builds and
+  tiles all read clouds with ddb-tilers, and PDAL, its plugins and the vcpkg ports only it needed (libE57Format,
+  xerces-c, eigen3, h3, nanoflann, rapidxml, crcpp, json-schema-validator) leave the packages. The diagnostics
+  print the version of ddb-tilers instead of PDAL's. `PDALException` and the add error code "PDAL" stay: they
+  are what a point cloud that cannot be read throws and reports, as before.
+  The rasters libddb reads in its process (the COG of a build, the copy of a user's raster that the raster helper
+  writes) are read by ddb-tilers instead of GDAL: the values, statistics, formulas, exports, region and index
+  renders and the sensor and thermal detections are those of 2.6 (checked against GDAL bit for bit), but a few:
+  the GeoTIFF of a region render (WCS) is DEFLATE-compressed (smaller files, the same samples); a raster whose CRS
+  is a WKT that is not its authority's definition can differ by one float step in one sample per render; and
+  rasters of 1-bit, Float16 and 64-bit integer samples are read, rendered and exported where 2.6 failed on them.
+  The operations on users' rasters run in the raster helper on the file of the user, instead of GDAL in the
+  process of libddb on a normalized copy of it, which is no longer written: the mask of borders
+  (`DDBMaskBorders*`), the photos of the training export of splats, the multispectral merge, its preview and
+  validation (`DDB*MergeMultispectral*`) and the alignment and its validation (`DDBAlignRaster*`,
+  `DDBValidateAlignRaster`). Their outputs are those of 2.6 byte for byte. A raster helper of protocol 1.3 is
+  required (operations `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`,
+  `alignValidation`; error kind `invalid`, which keeps `DDBERR_INVALIDARGS` for the arguments an operation
+  refuses). The mask of a raster of one band of more than 8 bits (a DEM, a thermal raster) keeps its type and
+  every sample, with the mask nearblack computes from them and NoData masked too (2.6 cut the samples to 8 bits,
+  and failed on Float32 and Float64); its border colour is one number. The message of a mask GDAL cannot write
+  names the output by its file. The scratch rasters of an alignment are written in a private folder beside its
+  output instead of the cache. The process of libddb opens no raster with GDAL.
+  The 3D Tiles of models are built by Obj2Tiles v1.10.1, whose KTX2 encoder (libktx 5.0.0-rc2) no longer hangs at
+  the end of a multi-threaded encode.

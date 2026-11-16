@@ -60,15 +60,15 @@ int main()
     }
 
     // GDAL cannot open a file that does not exist: its error goes to the callback. Only the files
-    // libddb wrote are opened by this process (the COG of a build is one), so the file is a COG
-    // of a build that is not there.
+    // libddb wrote are opened by this process, and GDAL opens the vectors of a build (the rasters
+    // are read by ddb-tilers), so the file is the vector of a build that is not there.
     if (DDBSetThreadOperation(77) != DDBERR_NONE)
         return 1;
     char *out = nullptr;
-    if (DDBGetRasterInfo("/no/such/dataset/.ddb/build/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/cog/cog.tif",
-                         &out) == DDBERR_NONE)
+    if (DDBDescribeVector("/no/such/dataset/.ddb/build/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/vec/source.gpkg",
+                          nullptr, &out) == DDBERR_NONE)
     {
-        std::cerr << "DDBGetRasterInfo opened a missing raster" << std::endl;
+        std::cerr << "DDBDescribeVector opened a missing vector" << std::endl;
         return 1;
     }
     if (gdalWithOperation == 0)

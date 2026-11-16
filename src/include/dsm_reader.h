@@ -6,15 +6,16 @@
 #define DSM_READER_H
 
 // Reads a DSM raster (one band, georeferenced) into memory: the part of the DSM service
-// (dsmservice.h) that knows about GDAL and the layout of the pixels.
+// (dsmservice.h) that knows about the file and the layout of the pixels. The DSM is read with
+// ddb-tilers (tilers_raster.h), as GDAL reads it.
 
 #include <cstring>
 #include <vector>
 
 #include "fs.h"
-#include "gdal_inc.h"
 #include "geo.h"
 #include "raster_utils.h"
+#include "tilers_raster.h"
 
 struct DSMCacheEntry
 {
@@ -30,7 +31,8 @@ struct DSMCacheEntry
         memset(geoTransform, 0, sizeof(double) * 6);
     }
 
-    void loadData(GDALDatasetH hDataset);
+    // Reads every elevation of band 1 of `raster` as Float32
+    void loadData(const ddb::tilers::Raster &raster);
     float getElevation(double latitude, double longitude);
 };
 

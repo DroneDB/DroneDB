@@ -4,9 +4,9 @@
 
 // The integrity label of a published output (Windows). A private folder made for the confined
 // raster helper has a low integrity label, and what is made in it keeps the label when it is
-// renamed to its place, as a COG or a COPC the helper builds does. The writers that never run the
-// helper (mask, merge, bm3d) stage in a folder without it: their outputs are files that a low
-// integrity process cannot change.
+// renamed to its place: the COG and the COPC of a build, a masked raster, a merge of bands, an
+// aligned raster. The writers that never run the helper (bm3d) stage in a folder without it: their
+// outputs are files that a low integrity process cannot change.
 
 #include <fstream>
 #include <string>
@@ -59,9 +59,9 @@ namespace
         EXPECT_TRUE(lowLabelled(ta.getPath("published.txt")));
     }
 
-    // ─── The writers that do not run the helper ─────────────────────────────────
+    // ─── The outputs the helper writes ──────────────────────────────────────────
 
-    TEST(OutputLabel, aMaskHasNoLowLabel)
+    TEST(OutputLabel, aMaskKeepsTheLabelOfTheHelper)
     {
         TestArea ta(TEST_NAME, true);
         testutils::GeoRasterSpec spec;
@@ -70,10 +70,10 @@ namespace
         const fs::path output = ta.getPath("masked.tif");
         maskBorders(io::toUtf8(input), io::toUtf8(output));
         ASSERT_TRUE(fs::exists(output));
-        EXPECT_FALSE(lowLabelled(output));
+        EXPECT_TRUE(lowLabelled(output));
     }
 
-    TEST(OutputLabel, aMergeHasNoLowLabel)
+    TEST(OutputLabel, aMergeKeepsTheLabelOfTheHelper)
     {
         TestArea ta(TEST_NAME, true);
         std::vector<std::string> bands;
@@ -87,8 +87,10 @@ namespace
         const fs::path output = ta.getPath("merged.tif");
         mergeMultispectral(bands, io::toUtf8(output));
         ASSERT_TRUE(fs::exists(output));
-        EXPECT_FALSE(lowLabelled(output));
+        EXPECT_TRUE(lowLabelled(output));
     }
+
+    // ─── The writers that do not run the helper ─────────────────────────────────
 
     TEST(OutputLabel, aBm3dFileHasNoLowLabel)
     {

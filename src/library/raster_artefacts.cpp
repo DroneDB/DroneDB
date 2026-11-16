@@ -4,6 +4,7 @@
 #include "raster_artefacts.h"
 
 #include <algorithm>
+#include <chrono>
 #include <iomanip>
 #include <optional>
 #include <sstream>
@@ -20,6 +21,7 @@
 #include "logger.h"
 #include "process_config.h"
 #include "raster_stats.h"
+#include "tilers_raster.h"
 #include "randomutil.h"
 #include "timeutil.h"
 #include "userprofile.h"
@@ -38,9 +40,7 @@ namespace ddb
             // (the COG of a raster, the GeoPackage and the tiles of a vector)
             constexpr const char *kReadableRoles[] = {"raster.cog", "vector.gpkg", "vector.mvt"};
 
-            // The drivers libddb writes its artefacts with. A VRT is not among them: it lists
-            // other files to read, and an artefact is one file.
-            const std::vector<std::string> kRasterDrivers = {"GTiff", "COG"};
+            // The driver libddb writes its vector artefacts with
             const std::vector<std::string> kVectorDrivers = {"GPKG"};
 
             // A file of the memory file system of GDAL: what is in it was written by this process
@@ -104,7 +104,7 @@ namespace ddb
                 return false;
             }
 
-            // Opens `path` read-only or for update with `drivers` alone. While it opens GDAL makes
+            // Opens `path` read-only with `drivers` alone. While it opens GDAL makes
             // no HTTP request and opens no other file through its network file systems, as when
             // a file of a user opens: an artefact is a file libddb wrote, but what the helper
             // copied into it came from a file of a user. A dataset whose metadata names another
@@ -112,12 +112,12 @@ namespace ddb
             // drivers: the copy of a raster leaves none of those items, and one found here was
             // put there by something other than libddb.
             GDALDatasetUniquePtr openWithDrivers(const std::string &utf8, const std::vector<std::string> &drivers,
-                                                 unsigned int kind, bool update)
+                                                 unsigned int kind)
             {
                 const CPLStringList allowed = cslFromStrings(drivers);
                 const gdalopen::NoNetworkWhileOpening noNetwork(utf8);
                 auto dataset = adoptDataset(GDALOpenEx(
-                    utf8.c_str(), kind | (update ? GDAL_OF_UPDATE : GDAL_OF_READONLY) | GDAL_OF_VERBOSE_ERROR,
+                    utf8.c_str(), kind | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
                     allowed.List(), nullptr, nullptr));
                 if (!dataset)
                     return dataset;
@@ -130,10 +130,10 @@ namespace ddb
             }
 
             GDALDatasetUniquePtr openArtefact(const fs::path &path, const std::vector<std::string> &drivers,
-                                              unsigned int kind, bool update)
+                                              unsigned int kind)
             {
                 requireArtefact(path);
-                return openWithDrivers(io::toUtf8(path), drivers, kind, update);
+                return openWithDrivers(io::toUtf8(path), drivers, kind);
             }
         } // namespace
 
@@ -180,6 +180,19 @@ namespace ddb
             return !ec && isInside(resolved, folder);
         }
 
+        void markArtefactUsed(const fs::path &file, std::initializer_list<fs::path> companions)
+        {
+            std::error_code ec;
+            const auto now = fs::file_time_type::clock::now();
+            const auto last = fs::last_write_time(file, ec);
+            if (!ec && now - last < std::chrono::seconds(kArtefactMarkSeconds))
+                return;
+            fs::last_write_time(file, now, ec);
+            for (const auto &companion : companions)
+                if (fs::exists(companion, ec))
+                    fs::last_write_time(companion, now, ec);
+        }
+
         std::string artefactKey(const fs::path &source)
         {
             // The modification time with the fraction of the second the file system keeps: a raster
@@ -191,25 +204,28 @@ namespace ddb
             return Hash::strCRC64(key.str());
         }
 
-        GDALDatasetUniquePtr openArtefactRaster(const fs::path &path, ArtefactAccess access)
-        {
-            return openArtefact(path, kRasterDrivers, GDAL_OF_RASTER, access == ArtefactAccess::Update);
-        }
-
         GDALDatasetUniquePtr openArtefactVector(const fs::path &path)
         {
-            return openArtefact(path, kVectorDrivers, GDAL_OF_VECTOR, false);
+            return openArtefact(path, kVectorDrivers, GDAL_OF_VECTOR);
         }
 
-        GDALDatasetUniquePtr reopenWrittenRaster(const fs::path &path, ArtefactAccess access)
+        bool writtenRasterOpens(const fs::path &path)
         {
             std::error_code ec;
             if (!fs::is_regular_file(fs::symlink_status(path, ec)) || ec)
             {
-                LOGW << "Not reopening " << io::toUtf8(path) << ": it is not a regular file";
-                return nullptr;
+                LOGW << "Not reading " << io::toUtf8(path) << ": it is not a regular file";
+                return false;
             }
-            return openWithDrivers(io::toUtf8(path), kRasterDrivers, GDAL_OF_RASTER, access == ArtefactAccess::Update);
+            try
+            {
+                return tilers::Raster::openPrivate(path) != nullptr;
+            }
+            catch (const AppException &e)
+            {
+                LOGW << "Cannot read " << io::toUtf8(path) << ": " << e.what();
+                return false;
+            }
         }
 
         io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix,
@@ -361,7 +377,7 @@ namespace ddb
 
             // The least recently used first
             std::sort(files.begin(), files.end(), [](const CachedFile &a, const CachedFile &b) { return a.used < b.used; });
-            const time_t inUse = currentUnixTimestamp() - kArtefactInUseSeconds;
+            const time_t inUse = currentUnixTimestamp() - kArtefactInUseSeconds - kArtefactMarkSeconds;
             uint64_t removed = 0;
             for (const auto &f : files)
             {

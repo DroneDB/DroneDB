@@ -23,7 +23,6 @@
 #include "exceptions.h"
 #include "json.h"
 #include "pointcloud.h"
-#include "point_batch.h"
 #include "raster_cache.h"
 #include "raster_test_utils.h"
 #include "test.h"
@@ -39,21 +38,24 @@ namespace
     using namespace ddb;
     using namespace testutils;
 
-    PointBatch randomPoints(size_t n, double minX, double minY, double size, bool sixteenBit, unsigned seed)
+    // Random points, column by column
+    struct RandomPoints
+    {
+        std::vector<double> x, y, z;
+        size_t size() const { return x.size(); }
+    };
+
+    RandomPoints randomPoints(size_t n, double minX, double minY, double size, unsigned seed)
     {
         std::mt19937 rng(seed);
         std::uniform_real_distribution<double> pos(-0.05, 1.05);
         std::uniform_real_distribution<double> z(0, 100);
-        std::uniform_int_distribution<int> color(0, sixteenBit ? 65535 : 255);
-        PointBatch b;
+        RandomPoints b;
         for (size_t i = 0; i < n; i++)
         {
             b.x.push_back(minX + pos(rng) * size);
             b.y.push_back(minY + pos(rng) * size);
             b.z.push_back(z(rng));
-            b.red.push_back(color(rng));
-            b.green.push_back(color(rng));
-            b.blue.push_back(color(rng));
         }
         return b;
     }
@@ -66,7 +68,7 @@ namespace
             "PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",15],PARAMETER[\"scale_factor\",0.9996],"
             "PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1]]";
         CoordsTransformer ct(utm33, 3857);
-        auto batch = randomPoints(5000, 500000, 5000000, 2000, false, 7);
+        auto batch = randomPoints(5000, 500000, 5000000, 2000, 7);
         auto x = batch.x, y = batch.y;
         ct.transform(batch.size(), batch.x.data(), batch.y.data());
         for (size_t i = 0; i < x.size(); i++)

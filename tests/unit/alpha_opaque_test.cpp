@@ -18,9 +18,11 @@
 #include "gdal_utils.h"
 #include "gtest/gtest.h"
 #include "raster_test_utils.h"
+#include "raster_source.h"
 #include "raster_utils.h"
 #include "test.h"
 #include "testarea.h"
+#include "tilers_raster.h"
 
 namespace {
 
@@ -67,6 +69,12 @@ double opaqueOf(const fs::path& path) {
     return v;
 }
 
+// The opaque value read through ddb-tilers (the index render's source)
+double tilersOpaqueOf(const fs::path& path) {
+    const auto raster = tilers::Raster::open(path);
+    return alphaOpaqueValue(*rasterSourceOf(*raster), raster->bandCount());
+}
+
 double overviewMaximum(const fs::path& path) {
     GDALDatasetH ds = GDALOpen(path.string().c_str(), GA_ReadOnly);
     GDALRasterBandH alpha = GDALGetRasterBand(ds, GDALGetRasterCount(ds));
@@ -102,7 +110,22 @@ TEST_F(AlphaOpaque, isTheFullResolutionValueOfACogWithCubicOverviews) {
             EXPECT_GT(overviewMaximum(cog), c.opaque) << c.name << ": the overviews do not ring here";
         }
         EXPECT_EQ(opaqueOf(cog), c.expected) << c.name;
+        EXPECT_EQ(tilersOpaqueOf(cog), c.expected) << c.name << " through ddb-tilers";
     }
+}
+
+// The value is derived once per version of a file: a raster rewritten in place gets the value of its new alpha
+TEST_F(AlphaOpaque, followsTheFileWhenItIsRewritten) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path first = cogWithAlpha(ta, "first", GDT_UInt16, 255, 300);
+    const fs::path second = cogWithAlpha(ta, "second", GDT_UInt16, 65535, 300);
+    const fs::path raster = ta.getPath("raster.tif");
+    fs::copy_file(first, raster);
+    EXPECT_EQ(opaqueOf(raster), 255);
+    EXPECT_EQ(opaqueOf(raster), 255);
+    fs::copy_file(second, raster, fs::copy_options::overwrite_existing);
+    EXPECT_EQ(opaqueOf(raster), 65535);
+    EXPECT_EQ(tilersOpaqueOf(raster), 65535);
 }
 
 // Corner cases: data in a small part of the raster only (the sample may miss it: it is found

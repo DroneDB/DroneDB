@@ -8,36 +8,34 @@
 #include <vector>
 #include "build_budget.h"
 #include "build_layout.h"
+#include "fs.h"
 #include "json_fwd.h"
 #include "basicgeometry.h"
+#include "pointcloud_info.h"
 
 namespace ddb
 {
 
-    struct PointCloudInfo
-    {
-        size_t pointCount;
-        std::string wktProjection;
-        std::vector<std::string> dimensions;
-        std::vector<double> bounds;
-        BasicPointGeometry centroid;
-        BasicPolygonGeometry polyBounds;
-        /// Why polyBounds and centroid are empty although the file has a coordinate reference
-        /// system and bounds (a CRS that has no transformation to EPSG:4326, for one); "" otherwise.
-        /// The native bounds are kept: a build needs no footprint. Not part of the properties JSON.
-        std::string footprintWarning;
-
-    };
 
     /// The properties of a point cloud entry: {"pointCount", "projection", "dimensions"}
     void to_json(json &j, const PointCloudInfo &info);
 
-    bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyboundsSrs = 4326);
+    // The info of the point cloud of a user (LAS, LAZ, E57, XYZ, PTS, read by ddb-tilers in the raster
+    // helper; a PLY point cloud from its header), with its footprint in EPSG:4326. False for a file
+    // that is not a point cloud of those formats.
+    // @throws the exceptions of IRasterHelper (a GDALException for a file that cannot be read)
+    bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info);
 
-    // Reads metadata from a built COPC (.copc.laz) file. `span` returns an estimated
-    // root-node span (in points along the side of the root cube) used for tile-zoom heuristics,
-    // analogous to the EPT span field.
-    bool getCopcInfo(const std::string &copcPath, PointCloudInfo &info, int polyboundsSrs = 4326, int *span = nullptr);
+    // The info of a built COPC (.copc.laz), read by ddb-tilers in this process (the file is the
+    // output of a build), with its footprint in EPSG:footprintSrs. False when it cannot be read.
+    bool getCopcInfo(const std::string &copcPath, PointCloudInfo &info, int footprintSrs = 4326);
+
+    // The info of a point cloud as ddb-tilers reads it (ddbtPointCloudInfo), with the footprint of its
+    // bounds in EPSG:4326 when it has a CRS: what the raster helper answers for a file of a user
+    // (raster::op::kPointCloudInfo). Text files (XYZ, PTS) have no bounds, as the bounds of a text
+    // file were never kept. A file of a user: only in the raster helper (std::logic_error elsewhere).
+    // @throws GDALException for a file that cannot be read
+    PointCloudInfo readPointCloudInfo(const fs::path &path);
 
     // Builds a Cloud Optimized Point Cloud (COPC) file from one or more input point cloud files
     // (LAS, LAZ, E57, PTS, XYZ, a PLY point cloud), merged into one. Output is a single file named

@@ -132,8 +132,9 @@ jobs:
       - name: Check that the host opens no file of a user with GDAL
         # Only gdal-util parses the files of users: fails when GDALOpen*, GDALIdentifyDriver*, OGROpen*
         # or "/vsicurl" appear in src/ or apps/ outside the allow-list of scripts/check-gdal-opens.py,
-        # or when anything but the start of gdal-util calls enableUserFileOpens(). A text search, so
-        # it runs before the build; --self-test checks the check on built-in fixtures.
+        # when GDAL_OF_RASTER (a GDAL raster open) appears outside the open policy of the helper, or
+        # when anything but the start of gdal-util calls enableUserFileOpens(). A text search, so it
+        # runs before the build; --self-test checks the check on built-in fixtures.
         shell: bash
         run: |
           python3 scripts/check-gdal-opens.py --self-test
@@ -415,22 +416,6 @@ jobs:
             fi
           fi
 
-          # Verify PDAL plugin packaging. PDAL >= 19 loads plugins by
-          # unversioned soname from the loader path (the directory holding
-          # libpdalcpp); without unversioned copies in /usr/lib every E57
-          # fails with "Cannot create reader stage readers.e57". This
-          # regressed silently for months, so it fails the build outright.
-          echo "Checking PDAL plugin packaging..."
-          if ! dpkg -c build/package/ddb_*.deb | grep -E '/usr/lib/libpdal_plugin_reader_e57\.so$' >/dev/null; then
-            echo "  ✗ unversioned libpdal_plugin_reader_e57.so missing from /usr/lib - E57 indexing would be dead. Failing."
-            exit 1
-          fi
-          if ! dpkg -c build/package/ddb_*.deb | grep -E '/usr/lib/pdal/plugins/libpdal_plugin_' >/dev/null; then
-            echo "  ✗ versioned PDAL plugins missing from /usr/lib/pdal/plugins. Failing."
-            exit 1
-          fi
-          echo "  ✓ PDAL plugin layout OK (unversioned next to libpdalcpp + versioned under /usr/lib/pdal/plugins)"
-
           # Functional smoke test: install the .deb in a clean Ubuntu 24.04
           # (same base image as the dronedb/registry runtime image) and
           # really index an E57. A build-tree-side test cannot catch this
@@ -480,7 +465,7 @@ jobs:
                 echo "  ✓ packaged ddb built a DWG with the packaged dwg2dxf in a clean Ubuntu 24.04"
               fi
             ' || {
-              echo "  ✗ Package smoke test failed - the installed package cannot index E57 (PDAL plugins?) or a GPS JPEG (metadata-util?), or its helper tools do not start."
+              echo "  ✗ Package smoke test failed - the installed package cannot index E57 (gdal-util?) or a GPS JPEG (metadata-util?), or its helper tools do not start."
               exit 1
             }
       - name: Upload Distribution Files

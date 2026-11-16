@@ -110,25 +110,19 @@ namespace ddb
         return {sMin, sMax};
     }
 
-    int dataBandCount(GDALDatasetH ds)
+    int dataBandCount(const RasterSource &source)
     {
-        const GDALRasterBandH raster = GDALGetRasterBand(ds, 1);
-        const GDALRasterBandH alphaBand = GDALGetMaskBand(raster);
-        const int bandsCount = GDALGetRasterCount(ds);
-        const GDALRasterBandH lastBand = GDALGetRasterBand(ds, bandsCount);
-
-        if (GDALGetMaskFlags(alphaBand) & GMF_ALPHA || bandsCount == 4 ||
-            bandsCount == 2 || GDALGetRasterColorInterpretation(lastBand) == GCI_AlphaBand)
-        {
+        // GDAL takes the mask of the first band for an alpha band (GMF_ALPHA) only for the 2nd of 2 and the 4th of
+        // 4 bands, which the band count says: the mask needs no read
+        const int bandsCount = source.bandCount();
+        if (bandsCount == 4 || bandsCount == 2 || source.isAlpha(bandsCount))
             return bandsCount - 1;
-        }
-
         return bandsCount;
     }
 
-    std::vector<int> defaultDisplayBands(GDALDatasetH ds)
+    std::vector<int> defaultDisplayBands(const RasterSource &source)
     {
-        return dataBandCount(ds) >= 3 ? std::vector<int>{1, 2, 3} : std::vector<int>{1};
+        return dataBandCount(source) >= 3 ? std::vector<int>{1, 2, 3} : std::vector<int>{1};
     }
 
     std::pair<double, double> displayRange(const std::string &path, GDALDatasetH ds, const std::vector<int> &bands)
@@ -151,18 +145,18 @@ namespace ddb
         return {lo, hi};
     }
 
-    std::vector<std::pair<double, double>> defaultStretch(const std::string &path, GDALDatasetH ds,
+    std::vector<std::pair<double, double>> defaultStretch(const std::string &path, const RasterSource &source,
                                                           const std::vector<int> &bands,
-                                                          const std::optional<double> &nodata, StretchSource source)
+                                                          const std::optional<double> &nodata, StretchSource from)
     {
         auto &provider = RasterStatsProvider::instance();
         // The statistics of the bands: exact, or those of a thumbnail (the bands in one bounded read, D-041)
         std::vector<BandStatistics> stats;
-        if (source == StretchSource::Bounded)
-            stats = provider.getStretchStatistics(path, ds, bands, nodata);
+        if (from == StretchSource::Bounded)
+            stats = provider.getStretchStatistics(path, source, bands, nodata);
         else
             for (const int b : bands)
-                stats.push_back(provider.get(path, ds, b, nodata));
+                stats.push_back(provider.get(path, source, b, nodata));
 
         std::vector<std::pair<double, double>> ranges;
         if (bands.size() == 1)
@@ -182,18 +176,17 @@ namespace ddb
         return ranges;
     }
 
-    RasterDataKind rasterDataKind(GDALDatasetH ds)
+    RasterDataKind rasterDataKind(const RasterSource &source)
     {
         RasterDataKind kind;
         kind.floatingPoint = true;
-        const int bandCount = GDALGetRasterCount(ds);
+        const int bandCount = source.bandCount();
         for (int b = 1; b <= bandCount; b++)
         {
-            GDALRasterBandH band = GDALGetRasterBand(ds, b);
-            if (GDALGetRasterColorInterpretation(band) == GCI_AlphaBand)
+            if (source.isAlpha(b))
                 continue;
             kind.bandCount++;
-            const GDALDataType type = GDALGetRasterDataType(band);
+            const GDALDataType type = source.dataType(b);
             if (kind.floatingPoint && (kind.typeName.empty() || !GDALDataTypeIsFloating(type)))
                 kind.typeName = GDALGetDataTypeName(type);
             if (!GDALDataTypeIsFloating(type))
@@ -202,12 +195,12 @@ namespace ddb
         return kind;
     }
 
-    FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
+    FormulaPlan planFormula(const RasterSource &source, const std::string &formulaId, const BandFilter &filter,
                             const std::string &colormapId, bool withColormap)
     {
         auto &ve = VegetationEngine::instance();
         FormulaPlan plan;
-        plan.bandCount = GDALGetRasterCount(ds);
+        plan.bandCount = source.bandCount();
         plan.filter = filter;
 
         // A formula that does not exist, or that this raster cannot compute, is refused: the same
@@ -220,7 +213,7 @@ namespace ddb
         // The rule of what a raster can compute (the lists of formulas ask its base,
         // unavailableReason): a band the filter does not map ("Requires bands: RN" for NDVI over
         // an RGB raster; not for the thermal formulas, which read the first band), then the data
-        const std::string refusal = VegetationEngine::renderRefusal(*plan.formula, filter, rasterDataKind(ds));
+        const std::string refusal = VegetationEngine::renderRefusal(*plan.formula, filter, rasterDataKind(source));
         if (!refusal.empty())
             throw RefusedArgumentException(refusal);
 
@@ -232,49 +225,43 @@ namespace ddb
                 throw InvalidArgsException("Unknown colormap: " + id);
         }
 
-        plan.nodata = detectBandNodata(ds, plan.bandCount);
+        plan.nodata = detectBandNodata(source, plan.bandCount);
         if (plan.bandCount >= 1)
         {
             // The thermal formulas convert from the unit of the first band to their own (D-022)
-            const char *unitType = GDALGetRasterUnitType(GDALGetRasterBand(ds, 1));
-            plan.bandUnit = bandTemperatureUnit(unitType != nullptr ? unitType : "");
+            plan.bandUnit = bandTemperatureUnit(source.unit(1));
         }
         return plan;
     }
 
-    FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
+    FormulaPlan planFormula(const RasterSource &source, const std::string &rasterPath, const std::string &formulaId,
                             const std::string &bandFilter, const std::string &colormapId, bool withColormap,
                             std::optional<bool> thermalTags)
     {
         const BandFilter filter = !bandFilter.empty()
-                                      ? VegetationEngine::parseFilter(bandFilter, GDALGetRasterCount(ds))
+                                      ? VegetationEngine::parseFilter(bandFilter, source.bandCount())
                                       : VegetationEngine::instance().autoDetectFilter(rasterPath, thermalTags);
-        return planFormula(ds, formulaId, filter, colormapId, withColormap);
+        return planFormula(source, formulaId, filter, colormapId, withColormap);
     }
 
     namespace
     {
-        // Reads window of the bands of ds that `read` marks (the others get a null entry of buffers.ptrs) as
-        // float, masks the transparent and nodata pixels with the sentinel and gives the physical values of a
+        // Reads window of the bands of the source that `read` marks (the others get a null entry of buffers.ptrs)
+        // as float, masks the transparent and nodata pixels with the sentinel and gives the physical values of a
         // band: raw * scale + offset (FR-RAS-04). `nodata` is that of the raster (detectBandNodata)
-        void readPhysicalBands(GDALDatasetH ds, const RasterBandNodata &nodata, int bandCount,
+        void readPhysicalBands(const RasterSource &source, const RasterBandNodata &nodata, int bandCount,
                                const std::vector<bool> &read, const RasterWindow &window, FormulaBuffers &buffers)
         {
             const size_t pixels = window.outPixels();
             buffers.bands.resize(bandCount);
             buffers.ptrs.resize(bandCount);
 
-            cancel::GdalProgress progress; // the call is canceled
-            GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
-            // Reads the window of a band into out, as type
-            const auto readWindow = [&](GDALRasterBandH band, void *out, GDALDataType type, const std::string &what) {
-                if (GDALRasterIOEx(band, GF_Read, window.x, window.y, window.xsize, window.ysize, out,
-                                   window.outWidth, window.outHeight, type, 0, 0, &extra) != CE_None)
-                {
-                    cancel::throwIfCanceled();
-                    throw GDALException("Cannot read " + what);
-                }
-            };
+            // The dataset mask, when the raster keeps its transparency there instead of in an alpha band: read
+            // with the first band read
+            const uint8_t *datasetMask = nullptr;
+            bool maskRead = !nodata.datasetMask;
+            if (nodata.datasetMask)
+                buffers.mask.resize(pixels);
             for (int b = 0; b < bandCount; b++)
             {
                 if (!read[b])
@@ -282,18 +269,20 @@ namespace ddb
                     buffers.ptrs[b] = nullptr;
                     continue;
                 }
+                cancel::throwIfCanceled();
                 buffers.bands[b].resize(pixels);
                 buffers.ptrs[b] = buffers.bands[b].data();
-                readWindow(GDALGetRasterBand(ds, b + 1), buffers.ptrs[b], GDT_Float32, "band " + std::to_string(b + 1));
+                source.read(window, {b + 1}, buffers.ptrs[b], maskRead ? nullptr : buffers.mask.data());
+                maskRead = true;
             }
-
-            // The dataset mask, when the raster keeps its transparency there instead of in an alpha band
-            const uint8_t *datasetMask = nullptr;
             if (nodata.datasetMask)
             {
-                buffers.mask.resize(pixels);
-                readWindow(GDALGetMaskBand(GDALGetRasterBand(ds, 1)), buffers.mask.data(), GDT_Byte,
-                           "the dataset mask");
+                // No band was read: the mask alone, with the first band
+                if (std::none_of(read.begin(), read.end(), [](bool r) { return r; }))
+                {
+                    std::vector<float> discarded(pixels);
+                    source.read(window, {1}, discarded.data(), buffers.mask.data());
+                }
                 datasetMask = buffers.mask.data();
             }
 
@@ -306,14 +295,12 @@ namespace ddb
             {
                 if (buffers.ptrs[b] == nullptr)
                     continue;
-                const GDALRasterBandH hBand = GDALGetRasterBand(ds, b + 1);
-                int hasScale = FALSE, hasOffset = FALSE;
-                const double scale = GDALGetRasterScale(hBand, &hasScale);
-                const double offset = GDALGetRasterOffset(hBand, &hasOffset);
-                if (!((hasScale && scale != 1.0) || (hasOffset && offset != 0.0)))
+                const std::optional<double> scale = source.scale(b + 1);
+                const std::optional<double> offset = source.offset(b + 1);
+                if (!((scale && *scale != 1.0) || (offset && *offset != 0.0)))
                     continue;
-                const double m = hasScale ? scale : 1.0;
-                const double c = hasOffset ? offset : 0.0;
+                const double m = scale.value_or(1.0);
+                const double c = offset.value_or(0.0);
                 float *values = buffers.ptrs[b];
                 for (size_t i = 0; i < pixels; i++)
                     if (values[i] != NODATA_SENTINEL)
@@ -322,7 +309,7 @@ namespace ddb
         }
     }
 
-    void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
+    void computeFormulaValues(const RasterSource &source, const FormulaPlan &plan, const RasterWindow &window,
                               FormulaBuffers &buffers, NodataMask mask)
     {
         const size_t pixels = window.outPixels();
@@ -345,17 +332,17 @@ namespace ddb
                 if (plan.nodata.bands[b].has)
                     read[b] = true;
 
-        readPhysicalBands(ds, plan.nodata, plan.bandCount, read, window, buffers);
+        readPhysicalBands(source, plan.nodata, plan.bandCount, read, window, buffers);
 
         buffers.result.resize(pixels);
         VegetationEngine::instance().applyFormula(*plan.formula, plan.filter, buffers.ptrs, buffers.result.data(),
                                                   pixels, NODATA_SENTINEL, plan.bandUnit);
     }
 
-    void computeBandValues(GDALDatasetH ds, const RasterBandNodata &nodata, int band, const RasterWindow &window,
-                           FormulaBuffers &buffers)
+    void computeBandValues(const RasterSource &source, const RasterBandNodata &nodata, int band,
+                           const RasterWindow &window, FormulaBuffers &buffers)
     {
-        const int bandCount = GDALGetRasterCount(ds);
+        const int bandCount = source.bandCount();
         if (band < 1 || band > bandCount)
             throw InvalidArgsException("Band index " + std::to_string(band) + " out of range (1-" +
                                        std::to_string(bandCount) + ")");
@@ -366,7 +353,7 @@ namespace ddb
         if (nodata.alphaBandIdx >= 0)
             read[nodata.alphaBandIdx] = true;
 
-        readPhysicalBands(ds, nodata, bandCount, read, window, buffers);
+        readPhysicalBands(source, nodata, bandCount, read, window, buffers);
         buffers.result.swap(buffers.bands[band - 1]);
     }
 
@@ -389,14 +376,14 @@ namespace ddb
                 values[std::min(values.size() - 1, static_cast<size_t>(values.size() * 0.98))]};
     }
 
-    std::vector<uint8_t> renderPlannedFormulaRgba(GDALDatasetH ds, const FormulaPlan &plan,
+    std::vector<uint8_t> renderPlannedFormulaRgba(const RasterSource &source, const FormulaPlan &plan,
                                                   const RasterWindow &window, const std::string &rescale,
                                                   NodataMask mask)
     {
         if (plan.colormap == nullptr)
             throw InvalidArgsException("renderPlannedFormulaRgba: the plan has no colormap");
         FormulaBuffers buffers;
-        computeFormulaValues(ds, plan, window, buffers, mask);
+        computeFormulaValues(source, plan, window, buffers, mask);
 
         // Display range: explicit, the formula's own, or p2-p98 of the rendered values
         std::pair<float, float> range;
@@ -429,21 +416,21 @@ namespace ddb
         return renderPlannedFormulaRgba(ds, plan, window, visParams.rescale);
     }
 
-    int styledBand(GDALDatasetH ds, const std::string &colormap, const std::vector<int> &chosen)
+    int styledBand(const RasterSource &source, const std::string &colormap, const std::vector<int> &chosen)
     {
         if (colormap.empty())
             return 0;
         if (chosen.empty())
-            return dataBandCount(ds) == 1 ? 1 : 0;
+            return dataBandCount(source) == 1 ? 1 : 0;
         for (const int b : chosen)
             if (b != chosen.front())
                 return 0;
         return chosen.front();
     }
 
-    BandStylePlan planBandStyle(const std::string &path, GDALDatasetH ds, int band, const std::string &colormapId,
-                                const std::string &rescale, const std::optional<double> &nodata,
-                                StretchSource source)
+    BandStylePlan planBandStyle(const std::string &path, const RasterSource &source, int band,
+                                const std::string &colormapId, const std::string &rescale,
+                                const std::optional<double> &nodata, StretchSource from)
     {
         BandStylePlan plan;
         plan.band = band;
@@ -460,7 +447,7 @@ namespace ddb
         std::pair<double, double> stretch;
         try
         {
-            stretch = defaultStretch(path, ds, {band}, nodata, source)[0];
+            stretch = defaultStretch(path, source, {band}, nodata, from)[0];
         }
         catch (const NoValidPixelsException &e)
         {
@@ -478,11 +465,7 @@ namespace ddb
         }
         const auto [lo, hi] = stretch;
         // The stretch is in the raw values of the band
-        int hasScale = FALSE, hasOffset = FALSE;
-        const GDALRasterBandH hBand = GDALGetRasterBand(ds, band);
-        const double scale = GDALGetRasterScale(hBand, &hasScale);
-        const double offset = GDALGetRasterOffset(hBand, &hasOffset);
-        const double m = hasScale ? scale : 1.0, c = hasOffset ? offset : 0.0;
+        const double m = source.scale(band).value_or(1.0), c = source.offset(band).value_or(0.0);
         plan.range = {static_cast<float>(std::min(lo * m + c, hi * m + c)),
                       static_cast<float>(std::max(lo * m + c, hi * m + c))};
         return plan;

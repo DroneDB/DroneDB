@@ -90,6 +90,9 @@ namespace ddb
 
             // What GDAL finds in a raster or a vector file, as the entry of the file needs it
             virtual ProbeResult probe(const fs::path &path, const ProbeParams &params) = 0;
+            // What ddb-tilers finds in a point cloud (LAS, LAZ, E57, XYZ, PTS), as the entry of the
+            // file needs it (readPointCloudInfo)
+            virtual PointCloudInfo pointCloudInfo(const fs::path &path) = 0;
             // Writes the thumbnail (WebP) of a photo or a raster to `out`, in a folder only this
             // request writes to; the caller checks the file before it trusts it (renderThumbnailWebp())
             virtual void thumbnail(const fs::path &path, const fs::path &out, const ThumbnailParams &params) = 0;
@@ -107,6 +110,15 @@ namespace ddb
                                    const ProgressCallback &progress) = 0;
             virtual void buildVector(const fs::path &path, const fs::path &out, const json &params,
                                      const ProgressCallback &progress) = 0;
+            // Writes the sample of a point cloud (CloudSampleParams in `params`) to `out`, which the
+            // caller reads with readCloudSample: one process, which writes progress as it goes
+            virtual void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
+                                     const ProgressCallback &progress) = 0;
+            // An operation on a user's raster that writes `out` (isHelperOperation(op): a mask...):
+            // one process, which runs runHelperOperation. Returns the result of the operation. A full
+            // device is an FSException (no space), as the operation reported it in the host.
+            virtual json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                                 const ProgressCallback &progress) = 0;
         };
 
         // What a GdalUtilHelper can be told. The defaults are what the process uses; the tests
@@ -173,6 +185,7 @@ namespace ddb
             static size_t shutdownInstance();
 
             ProbeResult probe(const fs::path &path, const ProbeParams &params) override;
+            PointCloudInfo pointCloudInfo(const fs::path &path) override;
             void thumbnail(const fs::path &path, const fs::path &out, const ThumbnailParams &params) override;
             void normalize(const fs::path &path, const fs::path &out, const json &params) override;
             void geoproject(const fs::path &path, const fs::path &out, const json &params) override;
@@ -181,6 +194,10 @@ namespace ddb
             void buildCopc(const fs::path &path, const fs::path &out, const json &params,
                            const ProgressCallback &progress) override;
             void buildVector(const fs::path &path, const fs::path &out, const json &params,
+                             const ProgressCallback &progress) override;
+            json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                         const ProgressCallback &progress) override;
+            void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
                              const ProgressCallback &progress) override;
 
             // Closes the idle helpers (their input first, then a kill for the ones that stay); the
@@ -204,13 +221,37 @@ namespace ddb
             // for the caller to raise.
             Response serve(const char *op, const fs::path &path, const fs::path &out, json params,
                            std::chrono::milliseconds timeout, const ResponseCheck &accept);
-            // One `gdal-util --request` process
-            void runOneShot(const char *op, const fs::path &path, const fs::path &out, json params,
-                            const ProgressCallback &progress);
+            // What a one-shot process is to its caller: a build (a full device or an idle process is a
+            // RetryableBuildException, retried as every build is) or an operation of a call
+            enum class OneShot
+            {
+                Build,
+                Operation
+            };
+            // One `gdal-util --request` process; returns the result of its response
+            json runOneShot(const char *op, const fs::path &path, const fs::path &out, json params,
+                            const ProgressCallback &progress, OneShot kind = OneShot::Build);
 
             const Options options_;
             helper::Pool pool_;
             std::atomic<int64_t> nextId_{1};
+        };
+
+        // What GDAL reports of the shape of each of the user's rasters (and their xml:XMP when `xmp`), or
+        // why it cannot be read: the raster helper reads them, all in one run (none for no raster)
+        std::vector<RasterShape> rasterShapesOf(const std::vector<fs::path> &rasters, bool xmp = false);
+
+        // Logs the progress of a long operation of the helper, every 5 percent: "<what> progress: N%".
+        // Called from the thread that waits for the helper.
+        class ProgressLog
+        {
+          public:
+            explicit ProgressLog(std::string what) : what_(std::move(what)) {}
+            void operator()(double fraction);
+
+          private:
+            std::string what_;
+            std::atomic<int> last_{-1};
         };
 
         // The raster helper of the process: the one a ScopedRasterHelper installed, else the
@@ -273,6 +314,10 @@ namespace ddb
         // Whether the bytes are a WebP file (RIFF container whose size is the file's) at most
         // kMaxThumbnailBytes long
         bool looksLikeThumbnail(const std::string &bytes);
+
+        // The WebP the helper wrote to `file` (a thumbnail, a preview) of `source`, checked: a regular file
+        // of a thumbnail's size that is a WebP. @throws GDALException otherwise
+        std::string readHelperWebp(const fs::path &file, const std::string &source);
 
         // The largest remote file a tile or a thumbnail reads (it is downloaded first, into a
         // temporary folder or the tile cache): 8 GiB, beyond the largest orthophoto a dataset

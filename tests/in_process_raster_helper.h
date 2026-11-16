@@ -6,6 +6,9 @@
 
 #include "json.h"
 
+#include "cloud_sample.h"
+#include "helper_operations.h"
+#include "pointcloud.h"
 #include "raster_helper.h"
 #include "raster_ops.h"
 
@@ -26,6 +29,7 @@ namespace testutils
         {
             return ddb::raster::probe(path, params);
         }
+        ddb::PointCloudInfo pointCloudInfo(const fs::path &path) override { return ddb::readPointCloudInfo(path); }
         void thumbnail(const fs::path &path, const fs::path &out, const ddb::raster::ThumbnailParams &params) override
         {
             ddb::raster::thumbnail(path, out, params);
@@ -52,6 +56,16 @@ namespace testutils
                          const ddb::raster::ProgressCallback &) override
         {
             ddb::raster::buildVectorFiles(path, out, ddb::raster::vectorParamsFromJson(params));
+        }
+        void sampleCloud(const fs::path &path, const fs::path &out, const json &params,
+                         const ddb::raster::ProgressCallback &progress) override
+        {
+            ddb::writeCloudSample(out, ddb::sampleCloudFile(path, ddb::raster::cloudSampleParamsFromJson(params), progress));
+        }
+        json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                     const ddb::raster::ProgressCallback &progress) override
+        {
+            return ddb::raster::runHelperOperation(op, path, out, params, progress);
         }
     };
 }

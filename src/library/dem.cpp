@@ -5,7 +5,7 @@
 
 #include "cancellation.h"
 #include "exceptions.h"
-#include "artefact_cache.h"
+#include "logger.h"
 #include "mathutil.h"
 
 #include <algorithm>
@@ -25,63 +25,59 @@ namespace ddb
         // The path may be a raster a user uploaded (volume, stockpile, contour and profile
         // requests name one): it is read as an artefact, the COG of a build as it is and any
         // other raster as the normalized copy the raster helper wrote
-        dem.dataset = raster::openInputRaster(path);
-        if (!dem.dataset)
+        dem.raster = tilers::Raster::openInput(path);
+        if (!dem.raster)
             throw GDALException("Cannot open raster: " + path);
-        const GDALDatasetH hDs = dem.handle();
+        const tilers::Raster &raster = *dem.raster;
 
-        if (requireGeo)
-            requireGeoTransform(hDs, dem.gt, path);
-        else if (GDALGetGeoTransform(hDs, dem.gt) != CE_None)
-        {
+        if (const auto &gt = raster.geoTransform())
+            std::copy(gt->begin(), gt->end(), dem.gt);
+        else if (requireGeo)
+            throw GDALException("Raster has no geotransform: " + path);
+        else
             dem.hasGeoTransform = false;
-            const double identity[6] = {0, 1, 0, 0, 0, 1};
-            std::copy(identity, identity + 6, dem.gt);
-        }
 
-        dem.width = GDALGetRasterXSize(hDs);
-        dem.height = GDALGetRasterYSize(hDs);
-        const int bandCount = GDALGetRasterCount(hDs);
+        dem.width = raster.width();
+        dem.height = raster.height();
+        const int bandCount = raster.bandCount();
         if (bandCount < 1)
             throw GDALException("Raster has no bands");
         if (bandIndex < 1 || bandIndex > bandCount)
             throw InvalidArgsException("Invalid band index: " + std::to_string(bandIndex));
 
-        dem.band = GDALGetRasterBand(hDs, bandIndex);
-        if (dem.band == nullptr)
-            throw GDALException("Cannot access raster band");
-        dem.nodata = readBandNodata(dem.band);
-        dem.nodataInvalid = dem.nodata.has && nodataOutOfRange(GDALGetRasterDataType(dem.band), dem.nodata.value);
+        dem.bandIndex = bandIndex;
+        dem.dataType = GDALGetDataTypeByName(raster.dataType().c_str());
+        dem.blockWidth = raster.blockWidth();
+        dem.blockHeight = raster.blockHeight();
+        const tilers::Raster::Band &band = raster.band(bandIndex);
+        if (band.nodata)
+            dem.nodata = BandNodata{true, *band.nodata};
+        dem.nodataInvalid = dem.nodata.has && nodataOutOfRange(dem.dataType, dem.nodata.value);
         if (options.nodata)
         {
             // The override replaces the NoData value of the band, valid or not
             dem.nodata = BandNodata{true, *options.nodata};
             dem.nodataOverridden = true;
-            dem.nodataInvalid = nodataOutOfRange(GDALGetRasterDataType(dem.band), *options.nodata);
+            dem.nodataInvalid = nodataOutOfRange(dem.dataType, *options.nodata);
         }
 
         // The transparency of the band that is not its NoData value: an alpha band or a mask of the
         // dataset (the NoData value is compared here, so that the override can replace it)
-        const int maskFlags = GDALGetMaskFlags(dem.band);
-        if ((maskFlags & (GMF_ALPHA | GMF_PER_DATASET)) != 0 && (maskFlags & (GMF_NODATA | GMF_ALL_VALID)) == 0)
-            dem.maskBand = GDALGetMaskBand(dem.band);
+        dem.masked = raster.hasMask(bandIndex);
 
-        int hasScale = FALSE, hasOffset = FALSE;
-        const double scale = GDALGetRasterScale(dem.band, &hasScale);
-        const double offset = GDALGetRasterOffset(dem.band, &hasOffset);
-        if ((hasScale && scale != 1.0) || (hasOffset && offset != 0.0))
+        const double scale = band.scale.value_or(1.0);
+        const double offset = band.offset.value_or(0.0);
+        if (scale != 1.0 || offset != 0.0)
         {
             dem.hasScale = true;
-            dem.scale = hasScale ? scale : 1.0;
-            dem.offset = hasOffset ? offset : 0.0;
+            dem.scale = scale;
+            dem.offset = offset;
         }
 
-        const char *unitType = GDALGetRasterUnitType(dem.band);
-        dem.unit = unitType != nullptr ? unitType : "";
+        dem.unit = band.unit;
         dem.zToMeters = elevationUnitToMeters(dem.unit);
 
-        const char *projRef = GDALGetProjectionRef(hDs);
-        dem.projection = projRef != nullptr ? projRef : "";
+        dem.projection = raster.wkt();
         dem.srs = srsFromWkt(dem.projection.c_str());
         dem.isGeographic = dem.srs && OSRIsGeographic(dem.srs.get()) != 0;
         return dem;
@@ -201,31 +197,31 @@ namespace ddb
         bound(loY, hiY, y0, y1);
     }
 
-    std::vector<float> DemContext::readRaw(int x, int y, int w, int h, int bufferW, int bufferH) const
+    namespace
     {
-        std::vector<float> samples(static_cast<size_t>(bufferW) * bufferH);
-        // The read stops when the call is canceled
-        cancel::GdalProgress progress;
-        GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
-        if (GDALRasterIOEx(band, GF_Read, x, y, w, h, samples.data(), bufferW, bufferH, GDT_Float32, 0, 0, &extra) !=
-            CE_None)
+        // The window of the band (and its mask, when it has one and `mask` is set) as the file holds
+        // it. The read stops at the window when the call is canceled.
+        void readWindow(const DemContext &dem, int x, int y, int w, int h, int bufferW, int bufferH, float *samples,
+                        uint8_t *mask)
         {
             cancel::throwIfCanceled();
-            throw AppException("Cannot read raster data");
-        }
-
-        std::vector<uint8_t> mask;
-        if (maskBand != nullptr)
-        {
-            mask.resize(samples.size());
-            GDALRasterIOExtraArg maskExtra = progress.rasterIOExtraArg();
-            if (GDALRasterIOEx(maskBand, GF_Read, x, y, w, h, mask.data(), bufferW, bufferH, GDT_Byte, 0, 0,
-                               &maskExtra) != CE_None)
+            try
             {
-                cancel::throwIfCanceled();
+                dem.raster->readBand(dem.bandIndex, x, y, w, h, bufferW, bufferH, samples, mask);
+            }
+            catch (const std::exception &e)
+            {
+                LOGD << "Cannot read the window " << x << "," << y << " " << w << "x" << h << ": " << e.what();
                 throw AppException("Cannot read raster data");
             }
         }
+    }
+
+    std::vector<float> DemContext::readRaw(int x, int y, int w, int h, int bufferW, int bufferH) const
+    {
+        std::vector<float> samples(static_cast<size_t>(bufferW) * bufferH);
+        std::vector<uint8_t> mask(masked ? samples.size() : 0);
+        readWindow(*this, x, y, w, h, bufferW, bufferH, samples.data(), masked ? mask.data() : nullptr);
 
         // A pixel with no value reads back as NaN: the NoData value (the override, else the one of the
         // band), a pixel the mask says is transparent, a sample that is not a number
@@ -255,14 +251,7 @@ namespace ddb
         {
             // The samples as the band holds them: the callers compare them with its NoData value (isValid)
             std::vector<float> samples(static_cast<size_t>(bufferW) * bufferH);
-            cancel::GdalProgress progress;
-            GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
-            if (GDALRasterIOEx(band, GF_Read, x, y, w, h, samples.data(), bufferW, bufferH, GDT_Float32, 0, 0,
-                               &extra) != CE_None)
-            {
-                cancel::throwIfCanceled();
-                throw AppException("Cannot read raster data");
-            }
+            readWindow(*this, x, y, w, h, bufferW, bufferH, samples.data(), nullptr);
             return samples;
         }
 

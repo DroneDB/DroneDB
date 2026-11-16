@@ -15,6 +15,11 @@
 #include "fs.h"          // fs::absolute - used by applyWarp() for VRT path resolution
 #include "build_layout.h"
 #include "mio.h"
+#include "cancellation.h"
+#include "raster_helper.h"
+#include "raster_ops.h"
+#include "raster_protocol.h"
+#include <functional>
 
 #include <algorithm>
 #include <cmath>
@@ -780,10 +785,10 @@ static MatchQuality requireMatch(const RasterGrid &src, const RasterGrid &ref, c
 
 // ─── I  Geotransform composition + GDAL warp ─────────────────────────────────
 
-static void applyWarp(const std::string &sourcePath,
-                      const std::string &tmpPath,
-                      const Similarity2D &sim,
-                      const std::string &targetCrs)
+static GDALDatasetUniquePtr applyWarp(const std::string &sourcePath,
+                                      const std::string &tmpPath,
+                                      const Similarity2D &sim,
+                                      const std::string &targetCrs)
 {
     // Resolve to an absolute path so the VRT SimpleSource can find the file
     // regardless of any cwd change between the VRT creation and the warp read.
@@ -838,18 +843,16 @@ static void applyWarp(const std::string &sourcePath,
     auto out = adoptDataset(
         GDALWarp(tmpPath.c_str(), nullptr, 1, &hVrt, wOpts.get(), nullptr));
     if (!out) throw GDALException("GDALWarp failed for aligned output: " + tmpPath);
-    closeOutputOrThrow(std::move(out), tmpPath);
+    // Open: the Z offset and the compressed copy are made of it as it is
+    return out;
 }
 
 // ─── J  DEM Z offset ────────────────────────────────────────────────────────
 
-static double computeZOffset(const std::string &alignedPath,
-                             const std::string &referencePath)
+static double computeZOffset(GDALDatasetH hA, const std::string &referencePath)
 {
-    auto alignedDs = raster::openArtefactRaster(io::fromUtf8(alignedPath));
-    auto refDs     = raster::openInputRaster(referencePath);
-    if (!alignedDs || !refDs) return 0.0;
-    GDALDatasetH hA = datasetHandle(alignedDs);
+    auto refDs = raster::openInputRaster(referencePath);
+    if (!refDs) return 0.0;
     GDALDatasetH hR = datasetHandle(refDs);
 
     // Both rasters share the source CRS at this point (the reference is
@@ -896,7 +899,7 @@ static double computeZOffset(const std::string &alignedPath,
     const bool readOk = readOverlap(hA, gtA, bufA) && readOverlap(hR, gtR, bufR);
     const BandNodata ndA = readBandNodata(GDALGetRasterBand(hA, 1));
     const BandNodata ndR = readBandNodata(GDALGetRasterBand(hR, 1));
-    alignedDs.reset(); refDs.reset();
+    refDs.reset();
     if (!readOk) return 0.0;
 
     std::vector<float> diffs;
@@ -911,11 +914,9 @@ static double computeZOffset(const std::string &alignedPath,
     return diffs[diffs.size() / 2];
 }
 
-void applyZOffset(const std::string &path, double zOffset) {
+void applyZOffset(GDALDatasetH hDs, double zOffset) {
     if (std::abs(zOffset) < 1e-6) return;
-    const auto dataset = raster::openArtefactRaster(io::fromUtf8(path), raster::ArtefactAccess::Update);
-    if (!dataset) throw GDALException("Cannot open " + path + " to apply the vertical offset");
-    GDALDatasetH hDs = datasetHandle(dataset);
+    const std::string path = GDALGetDescription(hDs);
     GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
     int W = GDALGetRasterXSize(hDs), H = GDALGetRasterYSize(hDs);
     const BandNodata nd = readBandNodata(hBand);
@@ -939,8 +940,8 @@ void applyZOffset(const std::string &path, double zOffset) {
 
 // ─── K  Public API ──────────────────────────────────────────────────────────
 
-AlignValidationResult validateAlignRaster(const std::string &sourcePath,
-                                          const std::string &referencePath)
+// What validateAlignRaster says, where the files are read (the helper)
+static AlignValidationResult validateAlignFiles(const std::string &sourcePath, const std::string &referencePath)
 {
     AlignValidationResult r;
 
@@ -1030,12 +1031,9 @@ struct AlignInputs {
     std::string effectiveReference; // in the CRS of the source
     std::string outputPath;
     std::string sourceCrs;
-    // The folder of this alignment for the rasters it writes and reads back: an artefact place
-    // (artefact_cache.h), so reading them needs no copy
+    // The folder of this alignment for the rasters it writes (the reprojected reference, the warp),
+    // in the folder of the request
     fs::path scratch;
-    // Replace an output that exists (AlignOptions::overwrite): checked again right before the
-    // aligned raster is published
-    bool overwrite = true;
     bool isDem = false;
     double targetGsd = 0;
     RasterGrid srcGrid, refGrid;
@@ -1094,12 +1092,9 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
     return in;
 }
 
-// Writes the uncompressed warp `produced` to `staged` compressed without loss: DEFLATE with the
+// Writes the uncompressed warp, open, to `staged` compressed without loss: DEFLATE with the
 // predictor of its data type
-void compressAligned(const fs::path &produced, const fs::path &staged) {
-    const auto src = raster::openArtefactRaster(produced);
-    if (!src) throw GDALException("Cannot open " + io::toUtf8(produced) + " to compress it");
-    GDALDatasetH hSrc = datasetHandle(src);
+void compressAligned(GDALDatasetH hSrc, const fs::path &staged) {
     CPLStringList args;
     args.AddString("-of");
     args.AddString("GTiff");
@@ -1114,35 +1109,18 @@ void compressAligned(const fs::path &produced, const fs::path &staged) {
 }
 
 // Applies the transform to the source and writes the aligned GTiff: an uncompressed warp into a
-// file of the scratch folder (the CRS and the grid of the source), the DEM Z offset in place in
-// it, then a copy of it compressed without loss in a private folder beside the output replaces the
-// output in one rename (raster::publishArtefact: a failed alignment leaves the output that was
-// there as it was); sets result.shiftZ for a DEM. The display COG is the one of the normal build
-// of the file.
+// file of the scratch folder (the CRS and the grid of the source), the DEM Z offset in place in it,
+// then a copy of it compressed without loss to the output of the request (the host publishes it);
+// sets result.shiftZ for a DEM. The display COG is the one of the normal build of the file.
 void writeAligned(const AlignInputs &in, const Similarity2D &sim, AlignResult &result) {
-    const fs::path target = fs::absolute(io::fromUtf8(in.outputPath));
-    if (!target.has_filename())
-        throw InvalidArgsException("Not the path of a file for an aligned raster: " + in.outputPath);
-
     const fs::path produced = in.scratch / "warp.tif";
-    const std::string tmpWarp = io::toUtf8(produced);
-    applyWarp(in.sourcePath, tmpWarp, sim, in.sourceCrs);
+    auto warped = applyWarp(in.sourcePath, io::toUtf8(produced), sim, in.sourceCrs);
     if (in.isDem) {
-        result.shiftZ = computeZOffset(tmpWarp, in.effectiveReference);
-        applyZOffset(tmpWarp, result.shiftZ);
+        result.shiftZ = computeZOffset(datasetHandle(warped), in.effectiveReference);
+        applyZOffset(datasetHandle(warped), result.shiftZ);
     }
-
-    // The staging folder beside the output, in which this process writes the file that is published
-    // (the scratch folder is one of the artefacts of the cache, which may be on another device and
-    // is not the place of a file of the user's)
-    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), AlignStagingPrefix,
-                                                                raster::PrivateFolderWriter::Host);
-    const fs::path staged = staging.path() / target.filename();
-    compressAligned(produced, staged);
-
-    // The output may have appeared while the alignment ran: it is replaced only when asked
-    io::assureReplaceable(io::fromUtf8(in.outputPath), in.overwrite);
-    raster::publishArtefact(staged, target);
+    compressAligned(datasetHandle(warped), io::fromUtf8(in.outputPath));
+    closeOutputOrThrow(std::move(warped), io::toUtf8(produced.filename()));
 }
 
 // The centre of the area that both rasters share: the point the reported shift is the shift of
@@ -1311,24 +1289,24 @@ void requireTexture(const AlignInputs &in) {
 
 }  // namespace
 
-AlignResult alignRaster(const std::string &sourcePath,
-                        const std::string &referencePath,
-                        const std::string &outputPath,
-                        const AlignOptions &opts)
+// What alignRaster does, where the files are read (the helper): writes the aligned raster to
+// outputPath, in the folder of the request
+static AlignResult alignFiles(const std::string &sourcePath,
+                       const std::string &referencePath,
+                       const std::string &outputPath,
+                       const AlignOptions &opts)
 {
     AlignResult result;
     result.mode = (opts.mode == AlignMode::Similarity) ? "similarity" : "translation";
 
-    // 1. Validation: the output first, before any raster is read
-    io::assureReplaceable(io::fromUtf8(outputPath), opts.overwrite,
-                          {io::fromUtf8(sourcePath), io::fromUtf8(referencePath)});
-    auto val = validateAlignRaster(sourcePath, referencePath);
+    // 1. Validation
+    auto val = validateAlignFiles(sourcePath, referencePath);
     if (!val.ok) throw AppException("Alignment validation failed: " + val.errors[0]);
 
     // 2. Optional reprojection of the reference into the source CRS
     // The rasters written on the way (the reprojected reference, the warped source) go to a
-    // folder of the artefacts of the cache, removed when the alignment ends
-    const io::ScopedTempDir scratch = raster::makeArtefactRequestFolder("align-");
+    // folder of the folder of the request, removed when the alignment ends
+    const io::ScopedTempDir scratch = io::ScopedTempDir::create(io::fromUtf8(outputPath).parent_path(), "scratch-");
     std::string effectiveRef = referencePath;
 
     if (val.summary.crsMismatch) {
@@ -1338,11 +1316,168 @@ AlignResult alignRaster(const std::string &sourcePath,
 
     // 3. The overlap of both rasters on one grid, then the estimate
     AlignInputs in = loadInputs(sourcePath, referencePath, effectiveRef, outputPath, scratch.path(), val);
-    in.overwrite = opts.overwrite;
     requireTexture(in);
     if (opts.mode == AlignMode::Translation)
         return alignByTranslation(in, opts, result);
     return alignBySimilarity(in, opts, result);
+}
+
+namespace {
+
+const char *modeName(AlignMode mode) { return mode == AlignMode::Translation ? "translation" : "similarity"; }
+
+json alignOptionsToJson(const AlignOptions &o) {
+    return {{"mode", modeName(o.mode)},
+            {"patchSize", o.patchSize},
+            {"searchRadius", o.searchRadius},
+            {"maxPatches", o.maxPatches},
+            {"ransacIterations", o.ransacIterations},
+            {"ransacThreshold", o.ransacThreshold},
+            {"minInliers", o.minInliers},
+            {"minInlierRatio", o.minInlierRatio},
+            {"usePhaseCorrelationSeed", o.usePhaseCorrelationSeed},
+            {"minCorrelation", o.minCorrelation},
+            {"minCorrelationOverChance", o.minCorrelationOverChance},
+            {"minOverlap", o.minOverlap},
+            {"maxScaleChange", o.maxScaleChange},
+            {"maxRotationDeg", o.maxRotationDeg}};
+}
+
+// The options of an alignment as the host sent them (every member: the host and the helper are one build)
+AlignOptions alignOptionsFromJson(const json &j) {
+    try {
+        AlignOptions o;
+        const std::string mode = j.at("mode").get<std::string>();
+        if (mode != "translation" && mode != "similarity")
+            throw raster::ProtocolError("'" + mode + "' is not a mode of alignment");
+        o.mode = mode == "translation" ? AlignMode::Translation : AlignMode::Similarity;
+        o.patchSize = j.at("patchSize").get<int>();
+        o.searchRadius = j.at("searchRadius").get<int>();
+        o.maxPatches = j.at("maxPatches").get<int>();
+        o.ransacIterations = j.at("ransacIterations").get<int>();
+        o.ransacThreshold = j.at("ransacThreshold").get<double>();
+        o.minInliers = j.at("minInliers").get<int>();
+        o.minInlierRatio = j.at("minInlierRatio").get<double>();
+        o.usePhaseCorrelationSeed = j.at("usePhaseCorrelationSeed").get<bool>();
+        o.minCorrelation = j.at("minCorrelation").get<double>();
+        o.minCorrelationOverChance = j.at("minCorrelationOverChance").get<double>();
+        o.minOverlap = j.at("minOverlap").get<double>();
+        o.maxScaleChange = j.at("maxScaleChange").get<double>();
+        o.maxRotationDeg = j.at("maxRotationDeg").get<double>();
+        return o;
+    } catch (const json::exception &e) {
+        throw raster::ProtocolError(std::string("the options of an alignment are not valid: ") + e.what());
+    }
+}
+
+AlignResult alignResultFromJson(const json &j) {
+    AlignResult r;
+    r.success = j.at("success").get<bool>();
+    r.txMapUnits = j.at("tx").get<double>();
+    r.tyMapUnits = j.at("ty").get<double>();
+    r.thetaDeg = j.at("thetaDeg").get<double>();
+    r.scale = j.at("scale").get<double>();
+    r.shiftZ = j.at("shiftZ").get<double>();
+    r.inlierCount = j.at("inlierCount").get<int>();
+    r.inlierRatio = j.at("inlierRatio").get<double>();
+    r.rmseMapUnits = j.at("rmse").get<double>();
+    r.confidence = j.at("confidence").get<double>();
+    r.correlation = j.at("correlation").get<double>();
+    r.overlap = j.at("overlap").get<double>();
+    r.pivotX = j.at("pivotX").get<double>();
+    r.pivotY = j.at("pivotY").get<double>();
+    r.mode = j.at("mode").get<std::string>();
+    r.warningMessage = j.at("warning").get<std::string>();
+    return r;
+}
+
+AlignValidationResult alignValidationFromJson(const json &j) {
+    AlignValidationResult r;
+    r.ok = j.at("ok").get<bool>();
+    r.errors = j.at("errors").get<std::vector<std::string>>();
+    r.warnings = j.at("warnings").get<std::vector<std::string>>();
+    const json &s = j.at("summary");
+    r.summary.sourceCrs = s.at("sourceCrs").get<std::string>();
+    r.summary.referenceCrs = s.at("referenceCrs").get<std::string>();
+    r.summary.crsMismatch = s.at("crsMismatch").get<bool>();
+    r.summary.overlapPercent = s.at("overlapPercent").get<double>();
+    r.summary.sourceType = s.at("sourceType").get<std::string>();
+    r.summary.referenceType = s.at("referenceType").get<std::string>();
+    r.summary.sourceGsdM = s.at("sourceGsdM").get<double>();
+    r.summary.referenceGsdM = s.at("referenceGsdM").get<double>();
+    return r;
+}
+
+// A response of the helper that is not what the host asked for is a broken helper
+template <typename Read> auto readResponse(const json &result, Read read) {
+    try {
+        return read(result);
+    } catch (const json::exception &e) {
+        throw raster::RasterOpException(raster::ErrorCode::Internal,
+                                        std::string(raster::kGdalUtilName) + " answered an alignment with a result that is not one: " + e.what());
+    }
+}
+
+}  // namespace
+
+namespace raster {
+
+json alignOperation(const fs::path &source, const fs::path &out, const json &params) {
+    const AlignParams p = alignParamsFromJson(params);
+    return json::parse(alignResultToJson(
+        alignFiles(io::toUtf8(source), io::toUtf8(p.reference), io::toUtf8(out), alignOptionsFromJson(p.options))));
+}
+
+json alignValidationOperation(const fs::path &source, const json &params) {
+    const AlignParams p = alignParamsFromJson(params);
+    return json::parse(alignValidationToJson(validateAlignFiles(io::toUtf8(source), io::toUtf8(p.reference))));
+}
+
+}  // namespace raster
+
+AlignValidationResult validateAlignRaster(const std::string &sourcePath, const std::string &referencePath) {
+    // The raster helper reads the rasters (a user's)
+    raster::AlignParams params;
+    params.reference = io::fromUtf8(referencePath);
+    const json result = raster::rasterHelper().operate(raster::op::kAlignValidation, fs::absolute(io::fromUtf8(sourcePath)),
+                                                       fs::path(), raster::toJson(params), raster::ProgressCallback());
+    return readResponse(result, alignValidationFromJson);
+}
+
+AlignResult alignRaster(const std::string &sourcePath,
+                        const std::string &referencePath,
+                        const std::string &outputPath,
+                        const AlignOptions &opts)
+{
+    const fs::path target = fs::absolute(io::fromUtf8(outputPath));
+    if (!target.has_filename())
+        throw InvalidArgsException("Not the path of a file for an aligned raster: " + outputPath);
+    // The output first, before any raster is read
+    io::assureReplaceable(io::fromUtf8(outputPath), opts.overwrite,
+                          {io::fromUtf8(sourcePath), io::fromUtf8(referencePath)});
+
+    // The raster helper reads the rasters (a user's) and writes the aligned raster to a file of a
+    // private folder beside the output, which is removed with whatever is left in it (its scratch
+    // rasters too): a failed alignment leaves the output that was there as it was
+    const io::ScopedTempDir staging = raster::makePrivateFolder(target.parent_path(), AlignStagingPrefix);
+    const fs::path staged = staging.path() / target.filename();
+    raster::AlignParams params;
+    params.reference = fs::absolute(io::fromUtf8(referencePath));
+    params.options = alignOptionsToJson(opts);
+    raster::ProgressLog log("Align");
+    const json response = raster::rasterHelper().operate(raster::op::kAlign, fs::absolute(io::fromUtf8(sourcePath)),
+                                                         staged, raster::toJson(params), std::ref(log));
+    const AlignResult result = readResponse(response, alignResultFromJson);
+    if (!raster::writtenRasterOpens(staged))
+        throw GDALException(std::string(raster::kGdalUtilName) + " wrote an aligned raster of " + sourcePath +
+                            " that cannot be read");
+
+    // A call canceled while the helper finished is canceled. The output may have appeared while the
+    // alignment ran: it is replaced only when asked
+    cancel::throwIfCanceled();
+    io::assureReplaceable(io::fromUtf8(outputPath), opts.overwrite);
+    raster::publishArtefact(staged, target);
+    return result;
 }
 
 std::string alignResultToJson(const AlignResult &r) {

@@ -18,10 +18,8 @@
 #include "gdal_raii.h"
 #include "gtest/gtest.h"
 #include "mio.h"
-#include "pdal_inc.h"
-#include <pdal/PointTable.hpp>
-#include <pdal/io/BufferReader.hpp>
-#include <pdal/io/LasWriter.hpp>
+#include "las_test_writer.h"
+#include "ogr_spatialref.h"
 #include "pointcloud.h"
 #include "raster_test_utils.h"
 #include "test.h"
@@ -67,44 +65,17 @@ namespace
     // The LAS file the CRS of a producer would be written in: LAS 1.4, point format 6, the CRS as WKT
     void writeLas(const fs::path &path, const std::string &wkt, const std::vector<XyzPoint> &points)
     {
-        pdal::PointTable table;
-        table.layout()->registerDim(pdal::Dimension::Id::X);
-        table.layout()->registerDim(pdal::Dimension::Id::Y);
-        table.layout()->registerDim(pdal::Dimension::Id::Z);
-
-        pdal::PointViewPtr view(new pdal::PointView(table));
-        for (size_t i = 0; i < points.size(); i++)
-        {
-            view->setField(pdal::Dimension::Id::X, i, points[i].x);
-            view->setField(pdal::Dimension::Id::Y, i, points[i].y);
-            view->setField(pdal::Dimension::Id::Z, i, points[i].z);
-        }
-
-        pdal::BufferReader reader;
-        reader.addView(view);
-
-        pdal::Options options;
-        options.add("filename", io::toUtf8(path));
-        options.add("a_srs", wkt);
-        options.add("minor_version", 4);
-        options.add("dataformat_id", 6);
-        options.add("scale_x", 0.001);
-        options.add("scale_y", 0.001);
-        options.add("scale_z", 0.001);
-        options.add("offset_x", "auto");
-        options.add("offset_y", "auto");
-        options.add("offset_z", "auto");
-        // The bytes of the file do not depend on the day or the PDAL version that wrote them
-        options.add("creation_year", 2024);
-        options.add("creation_doy", 1);
-        options.add("system_id", "ddb tests");
-        options.add("software_id", "ddb tests");
-
-        pdal::LasWriter writer;
-        writer.setOptions(options);
-        writer.setInput(reader);
-        writer.prepare(table);
-        writer.execute(table);
+        std::vector<testutils::LasPoint> las;
+        for (const auto &p : points)
+            las.push_back({p.x, p.y, p.z});
+        // The WKT as a producer that writes it with GDAL stores it (PDAL's LAS writer did)
+        OGRSpatialReference srs;
+        ASSERT_EQ(srs.importFromWkt(wkt.c_str()), OGRERR_NONE) << wkt;
+        char *normalised = nullptr;
+        ASSERT_EQ(srs.exportToWkt(&normalised), OGRERR_NONE);
+        const std::string stored(normalised);
+        CPLFree(normalised);
+        testutils::writeLas14(path, stored, las);
     }
 
     std::string wktOfEpsg(const std::string &userInput)

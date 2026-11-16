@@ -162,12 +162,11 @@ std::string optionNumber(double value) {
     return text;
 }
 
-// The band of a DEM as the contour generator reads it when the band has an alpha band or a dataset mask: the
-// raw samples (Float64) with NaN wherever a pixel has no value in the band-value model (FR-XC-24): NoData
-// (the override, else the value of the band), masked or not finite. The generator leaves NaN pixels out, as it
-// does NoData, but it knows no mask: without this view a transparent area of a mosaic drew contours. It reads
-// the band in blocks of rows as the generator asks for them (no copy of the raster in memory). The DEM must
-// outlive the view.
+// The band of a DEM as the contour generator reads it: the raw samples (Float64) with NaN wherever a pixel has
+// no value in the band-value model (FR-XC-24): NoData (the override, else the value of the band), masked or not
+// finite. The generator leaves NaN pixels out, as it does NoData, but it knows no mask: without this view a
+// transparent area of a mosaic drew contours. It reads the band (DemContext::raster) in blocks of rows as the
+// generator asks for them (no copy of the raster in memory). The DEM must outlive the view.
 class NoValueAsNanDataset : public GDALDataset {
 public:
     explicit NoValueAsNanDataset(const DemContext &dem) {
@@ -201,7 +200,7 @@ private:
             nBlockXSize = dem.width;
             // About 8 MB of samples per block
             nBlockYSize = std::max(1, std::min(256, static_cast<int>((1 << 20) / std::max(1, dem.width))));
-            floatSamples_ = GDALGetRasterDataType(dem.band) == GDT_Float32;
+            floatSamples_ = dem.dataType == GDT_Float32;
         }
 
     protected:
@@ -211,15 +210,13 @@ private:
             if (rows <= 0) return CE_None;
             const size_t count = static_cast<size_t>(rows) * nRasterXSize;
             double *samples = static_cast<double *>(pImage);
-            if (GDALRasterIO(dem_.band, GF_Read, 0, y, nRasterXSize, rows, samples, nRasterXSize, rows,
-                             GDT_Float64, 0, 0) != CE_None)
+            std::vector<uint8_t> mask(dem_.masked ? count : 0);
+            try {
+                dem_.raster->readBand(dem_.bandIndex, 0, y, nRasterXSize, rows, nRasterXSize, rows, samples,
+                                      dem_.masked ? mask.data() : nullptr);
+            } catch (const std::exception &e) {
+                CPLError(CE_Failure, CPLE_FileIO, "%s", e.what());
                 return CE_Failure;
-            std::vector<uint8_t> mask;
-            if (dem_.maskBand != nullptr) {
-                mask.resize(count);
-                if (GDALRasterIO(dem_.maskBand, GF_Read, 0, y, nRasterXSize, rows, mask.data(), nRasterXSize, rows,
-                                 GDT_Byte, 0, 0) != CE_None)
-                    return CE_Failure;
             }
             const double nan = std::numeric_limits<double>::quiet_NaN();
             for (size_t i = 0; i < count; i++) {
@@ -278,16 +275,9 @@ ContourLayer generateContourLayer(const DemContext &dem, double interval, const 
     opts.SetNameValue("LEVEL_INTERVAL", optionNumber(interval / rawScale).c_str());
     opts.SetNameValue("LEVEL_BASE", optionNumber(dem.toRaw(options.baseOffset)).c_str());
 
-    // A band with an alpha band or a dataset mask is read through a view in which every pixel without a
-    // value is NaN (the generator knows no mask); any other band directly, with its NoData value
-    GDALDatasetUniquePtr masked;
-    GDALRasterBandH source = dem.band;
-    if (dem.maskBand != nullptr) {
-        masked.reset(new NoValueAsNanDataset(dem));
-        source = GDALGetRasterBand(GDALDataset::ToHandle(masked.get()), 1);
-    } else if (dem.nodata.has) {
-        opts.SetNameValue("NODATA", optionNumber(dem.nodata.value).c_str());
-    }
+    // The band is read through a view in which every pixel without a value is NaN (the generator knows no mask)
+    const GDALDatasetUniquePtr view(new NoValueAsNanDataset(dem));
+    GDALRasterBandH source = GDALGetRasterBand(GDALDataset::ToHandle(view.get()), 1);
 
     // The generation stops when the call is canceled
     cancel::GdalProgress progress([&session](double fraction) {
@@ -432,8 +422,8 @@ std::string generateContoursJson(const std::string &rasterPath,
 
     // Band statistics drive interval-from-count and JSON metadata: the exact statistics of the pixels that
     // have a value, in physical values (RasterStatsProvider, FR-RAS-07; a pass that stops when the call is canceled)
-    const BandStatistics stats =
-        RasterStatsProvider::instance().get(rasterPath, dem.handle(), options.bandIndex, options.nodata);
+    const BandStatistics stats = RasterStatsProvider::instance().get(rasterPath, *rasterSourceOf(*dem.raster),
+                                                                     options.bandIndex, options.nodata);
     double bMin = dem.toPhysical(stats.min);
     double bMax = dem.toPhysical(stats.max);
     if (bMin > bMax) std::swap(bMin, bMax);

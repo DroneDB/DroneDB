@@ -13,6 +13,7 @@
 #include "mio.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
+#include "raster_stats.h"
 
 namespace ddb
 {
@@ -30,10 +31,9 @@ namespace ddb
                 const fs::path produced = request.path() / kProducedName;
                 rasterHelper().normalize(path, produced, json::object());
 
-                // What the helper wrote counts only when it opens as a GeoTIFF: it is a file that
-                // came out of a process that read a file of a user. The check closes it before the
-                // rename: Windows renames no file that a process holds open.
-                if (!openArtefactRaster(produced))
+                // What the helper wrote counts only when it reads as a GeoTIFF: it is a file that
+                // came out of a process that read a file of a user
+                if (!writtenRasterOpens(produced))
                     throw GDALException(std::string(kGdalUtilName) + " wrote a normalized copy of " +
                                         io::toUtf8(path) + " that is not a GeoTIFF");
 
@@ -60,7 +60,7 @@ namespace ddb
             if (fs::exists(target, ec))
             {
                 // Used: not one of the copies the cleanup removes
-                fs::last_write_time(target, fs::file_time_type::clock::now(), ec);
+                markArtefactUsed(target, {statsSidecarOf(target)});
                 return target;
             }
 
@@ -71,32 +71,11 @@ namespace ddb
 
         GDALDatasetUniquePtr openInputRaster(const std::string &path)
         {
-            // The raster helper is the process that reads files of users: the code of its
-            // operations that reads a raster by its path (the sensor a thumbnail detects, the
-            // filter of its formula) opens the file of the request, with the open policy
-            if (gdalopen::userFileOpensEnabled())
-                return openUserRaster(path);
-
-            const fs::path file = io::fromUtf8(path);
-            // A raster that is not there has no copy to make. An artefact is opened as it is, and
-            // GDAL says in the log why it cannot (the COG of a build that is gone)
-            std::error_code ec;
-            if (!isLibddbArtefact(file) && !fs::exists(file, ec))
-                return nullptr;
-
-            try
-            {
-                return openArtefactRaster(artefactFor(file));
-            }
-            catch (const RasterOpException &e)
-            {
-                // The raster cannot be opened, or the rules refuse it: a raster that does not
-                // open, as for any file GDAL cannot read. A failure of the helper itself is not.
-                if (e.code() == ErrorCode::Internal)
-                    throw;
-                LOGD << "Cannot open " << path << ": " << e.what();
-                return nullptr;
-            }
+            // The host reads rasters with ddb-tilers (tilers::Raster::openInput), never with GDAL
+            if (!gdalopen::userFileOpensEnabled())
+                throw std::logic_error("raster::openInputRaster runs in the raster helper: the host reads rasters "
+                                       "with ddb-tilers");
+            return openUserRaster(path);
         }
     } // namespace raster
 } // namespace ddb

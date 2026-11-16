@@ -4,159 +4,57 @@
 #include "tile_encoder.h"
 #include "stringutil.h"
 
-#include <utility>
-#include <algorithm>
 #include <cstring>
 #include <limits>
-#include <map>
-#include <mutex>
 
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "mio.h"
+#include "tilers_call.h"
 
 namespace ddb
 {
     namespace
     {
-        bool allEqual(const std::vector<uint8_t> &plane, uint8_t value)
+        // The pixels of a RasterImage interleaved (its colour planes, then its alpha), in `buffer`
+        // unless its one plane already is the image
+        InterleavedImage interleave(const RasterImage &image, std::vector<uint8_t> &buffer)
         {
-            return std::all_of(plane.begin(), plane.end(), [value](uint8_t v) { return v == value; });
-        }
-
-        const char *driverName(ImageFormat format)
-        {
-            switch (format)
-            {
-            case ImageFormat::Jpeg:
-                return "JPEG";
-            case ImageFormat::Webp:
-                return "WEBP";
-            default:
-                return "PNG";
-            }
-        }
-
-        // Builds the MEM dataset the format can store: JPEG takes no alpha (transparent
-        // pixels become white), WebP takes only RGB/RGBA (grey is expanded), an opaque
-        // alpha plane is dropped.
-        GDALDatasetUniquePtr toMemDataset(const RasterImage &image, ImageFormat format)
-        {
-            GDALDriverH memDrv = GDALGetDriverByName("MEM");
-            if (memDrv == nullptr)
-                throw GDALException("MEM driver not available");
-
-            const bool keepAlpha = format != ImageFormat::Jpeg && image.hasAlpha() && !allEqual(image.alpha, 255);
-            const int colorBands = format == ImageFormat::Webp ? 3 : image.colorBands;
-            const int bands = colorBands + (keepAlpha ? 1 : 0);
+            const int channels = image.colorBands + (image.hasAlpha() ? 1 : 0);
+            if (channels == 1)
+                return {image.color.data(), image.width, image.height, 1};
             const size_t pixels = image.pixels();
-
-            auto owned = adoptDataset(
-                GDALCreate(memDrv, "", image.width, image.height, bands, GDT_Byte, nullptr));
-            if (!owned)
-                throw GDALException("Cannot create in-memory image dataset");
-            GDALDatasetH ds = datasetHandle(owned);
-
-            std::vector<uint8_t> plane;
-            for (int b = 0; b < colorBands; b++)
+            buffer.resize(pixels * static_cast<size_t>(channels));
+            for (int c = 0; c < channels; c++)
             {
-                const uint8_t *src = image.band(std::min(b, image.colorBands - 1));
-                if (format == ImageFormat::Jpeg && image.hasAlpha())
-                {
-                    plane.assign(src, src + pixels);
-                    for (size_t i = 0; i < pixels; i++)
-                        if (image.alpha[i] == 0)
-                            plane[i] = 255;
-                    src = plane.data();
-                }
-
-                if (GDALRasterIO(GDALGetRasterBand(ds, b + 1), GF_Write, 0, 0, image.width, image.height,
-                                 const_cast<uint8_t *>(src), image.width, image.height, GDT_Byte, 0, 0) != CE_None)
-                    throw GDALException("Cannot write image band " + std::to_string(b + 1));
+                const uint8_t *plane = c < image.colorBands ? image.band(c) : image.alpha.data();
+                uint8_t *out = buffer.data() + c;
+                for (size_t i = 0; i < pixels; i++, out += channels)
+                    *out = plane[i];
             }
-
-            if (keepAlpha)
-            {
-                const GDALRasterBandH alphaBand = GDALGetRasterBand(ds, bands);
-                if (GDALRasterIO(alphaBand, GF_Write, 0, 0, image.width, image.height,
-                                 const_cast<uint8_t *>(image.alpha.data()), image.width, image.height,
-                                 GDT_Byte, 0, 0) != CE_None)
-                    throw GDALException("Cannot write image alpha");
-                if (GDALSetRasterColorInterpretation(alphaBand, GCI_AlphaBand) != CE_None)
-                    throw GDALException("Cannot set the alpha band of the image");
-            }
-
-            return owned;
+            return {buffer.data(), image.width, image.height, channels};
         }
 
-        void encodeToPath(const RasterImage &image, const EncodeOptions &options, const std::string &path)
+        // The bytes of image encoded by ddb-tilers (released with ddbtFree)
+        tilers::Bytes encodeBytes(const InterleavedImage &image, const EncodeOptions &options, int &size)
         {
-            GDALDriverH drv = GDALGetDriverByName(driverName(options.format));
-            if (drv == nullptr)
-                throw GDALException(std::string(driverName(options.format)) + " driver not available");
-
-            const auto mem = toMemDataset(image, options.format);
-            CPLStringList opts;
-            for (const auto &o : imageCreationOptions(options))
-                opts.AddString(o.c_str());
-            // A failed encode leaves no partial /vsimem/ file
-            VsiMemFile partial(path.starts_with("/vsimem/") ? path : std::string());
-            auto out = adoptDataset(
-                GDALCreateCopy(drv, path.c_str(), datasetHandle(mem), FALSE, opts.List(), nullptr, nullptr));
-            if (!out)
-                throw GDALException("Cannot encode image to " + path + ": " + CPLGetLastErrorMsg());
-            closeOutputOrThrow(std::move(out), path);
-            partial.release();
-        }
-
-        // Hands the encoded bytes of the /vsimem/ file to the caller (VSIFree); the file is gone
-        void stealBuffer(const std::string &path, uint8_t **outBuffer, int *outBufferSize)
-        {
-            int size = 0;
-            auto data = stealMemFileBuffer(path, size);
-            if (!data)
-                throw GDALException("Cannot read encoded image " + path);
-            *outBuffer = data.release();
-            *outBufferSize = size;
-        }
-
-        // Encoded bytes of fully transparent images, per format and size
-        const std::vector<uint8_t> &blankImageBytes(const RasterImage &shape, const EncodeOptions &options)
-        {
-            static std::mutex mutex;
-            static std::map<std::string, std::vector<uint8_t>> cache;
-
-            const std::string key = std::to_string(static_cast<int>(options.format)) + ":" +
-                                    std::to_string(options.quality) + ":" + std::to_string(options.pngZLevel) + ":" +
-                                    std::to_string(shape.width) + "x" + std::to_string(shape.height) + "x" +
-                                    std::to_string(shape.colorBands);
-
-            std::lock_guard<std::mutex> lock(mutex);
-            const auto it = cache.find(key);
-            if (it != cache.end())
-                return it->second;
-
-            const VsiMemFile file =
-                VsiMemFile::unique("ddb-blank-", std::string(".") + imageFormatExtension(options.format));
-            // Pixels under alpha 0 are not shown: encode zeros so that the bytes are the
-            // same for every blank image of this size
-            // Encoded once, so at the smallest size
-            EncodeOptions blankOptions = options;
-            blankOptions.pngZLevel = 9;
-            encodeToPath(RasterImage(shape.width, shape.height, shape.colorBands, true), blankOptions,
-                         file.path());
-            uint8_t *data = nullptr;
-            int size = 0;
-            stealBuffer(file.path(), &data, &size);
-            const VsiFreePtr<uint8_t> owned(data);
-            std::vector<uint8_t> bytes(data, data + size);
-            return cache.emplace(key, std::move(bytes)).first->second;
-        }
-
-        void writeBytes(const std::vector<uint8_t> &bytes, const std::string &path, uint8_t **outBuffer,
-                        int *outBufferSize)
-        {
-            TileEncoder::store(bytes.data(), bytes.size(), path, outBuffer, outBufferSize);
+            if (image.pixels == nullptr || image.width <= 0 || image.height <= 0)
+                throw InvalidArgsException("Invalid image buffer");
+            std::vector<uint8_t> palette;
+            if (image.palette != nullptr)
+                for (const auto &entry : *image.palette)
+                    palette.insert(palette.end(), entry.begin(), entry.end());
+            const ddbtImage view{image.pixels,
+                                 static_cast<uint32_t>(image.width),
+                                 static_cast<uint32_t>(image.height),
+                                 static_cast<uint32_t>(image.channels),
+                                 0,
+                                 palette.empty() ? nullptr : palette.data(),
+                                 static_cast<uint32_t>(palette.size() / 4)};
+            uint8_t *raw = nullptr;
+            tilers::check(
+                ddbtEncodeImage(&view, imageFormatExtension(options.format), options.quality, &raw, &size));
+            return tilers::Bytes(raw);
         }
     }
 
@@ -186,25 +84,10 @@ namespace ddb
         }
     }
 
-    std::vector<std::string> imageCreationOptions(const EncodeOptions &options)
-    {
-        switch (options.format)
-        {
-        case ImageFormat::Jpeg:
-            return {"QUALITY=" + std::to_string(options.quality > 0 ? std::min(options.quality, 100) : 75)};
-        case ImageFormat::Webp:
-            // libwebp effort 2 of 6: half the encode time of the default (4) for ~1.5 % more bytes
-            return {"QUALITY=" + std::to_string(options.quality > 0 ? std::min(options.quality, 100) : 80),
-                    "LOSSLESS=FALSE", "METHOD=2"};
-        default:
-            return {"ZLEVEL=" + std::to_string(std::clamp(options.pngZLevel, 1, 9))};
-        }
-    }
-
     RasterImage::RasterImage(int width, int height, int colorBands, bool withAlpha)
         : width(width), height(height), colorBands(colorBands)
     {
-        if (width <= 0 || height <= 0 || colorBands < 1 || colorBands > 3)
+        if (width <= 0 || height <= 0 || (colorBands != 1 && colorBands != 3))
             throw InvalidArgsException("Invalid image size " + std::to_string(width) + "x" +
                                        std::to_string(height) + "x" + std::to_string(colorBands));
         color.assign(pixels() * colorBands, 0);
@@ -222,26 +105,10 @@ namespace ddb
         if (outBuffer != nullptr && outBufferSize == nullptr)
             throw InvalidArgsException("Output buffer size pointer is null");
 
-        // A tile written to a file is encoded in memory and stored whole (store)
-        if (outBuffer == nullptr && !path.starts_with("/vsimem/"))
-        {
-            uint8_t *data = nullptr;
-            int size = 0;
-            encode(image, options, &data, &size);
-            const VsiFreePtr<uint8_t> owned(data);
-            store(data, static_cast<size_t>(size), path);
-            return;
-        }
-
-        if (image.hasAlpha() && allEqual(image.alpha, 0))
-        {
-            writeBytes(blankImageBytes(image, options), path, outBuffer, outBufferSize);
-            return;
-        }
-
-        encodeToPath(image, options, path);
-        if (outBuffer != nullptr)
-            stealBuffer(path, outBuffer, outBufferSize);
+        std::vector<uint8_t> buffer;
+        int size = 0;
+        const tilers::Bytes bytes = encodeBytes(interleave(image, buffer), options, size);
+        store(bytes.get(), static_cast<size_t>(size), path, outBuffer, outBufferSize);
     }
 
     void TileEncoder::encode(const RasterImage &image, const EncodeOptions &options, uint8_t **outBuffer,
@@ -249,9 +116,17 @@ namespace ddb
     {
         if (outBuffer == nullptr || outBufferSize == nullptr)
             throw InvalidArgsException("Output buffer pointers are null");
-        const VsiMemFile file =
-            VsiMemFile::unique("ddb-enc-", std::string(".") + imageFormatExtension(options.format));
-        write(image, options, file.path(), outBuffer, outBufferSize);
+        write(image, options, "", outBuffer, outBufferSize);
+    }
+
+    void TileEncoder::encode(const InterleavedImage &image, const EncodeOptions &options, uint8_t **outBuffer,
+                             int *outBufferSize)
+    {
+        if (outBuffer == nullptr || outBufferSize == nullptr)
+            throw InvalidArgsException("Output buffer pointers are null");
+        int size = 0;
+        const tilers::Bytes bytes = encodeBytes(image, options, size);
+        store(bytes.get(), static_cast<size_t>(size), "", outBuffer, outBufferSize);
     }
 
     void TileEncoder::store(const uint8_t *data, size_t size, const std::string &path, uint8_t **outBuffer,

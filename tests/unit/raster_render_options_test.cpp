@@ -164,21 +164,23 @@ namespace
         return rgb;
     }
 
-    // The PNG image encoded in format with the options of the map renders
+    // The PNG image encoded in format as the map renders encode their images (TileEncoder)
     std::vector<uint8_t> encodedAs(const std::vector<uint8_t> &png, ddb::ImageFormat format)
     {
-        const ddb::VsiMemFile in = ddb::VsiMemFile::unique("test-png-", ".png");
-        const ddb::VsiMemFile out = ddb::VsiMemFile::unique("test-enc-", std::string(".") + ddb::imageFormatExtension(format));
-        VSIFCloseL(VSIFileFromMemBuffer(in.c_str(), const_cast<uint8_t *>(png.data()), png.size(), FALSE));
-        const auto source = ddb::adoptDataset(GDALOpen(in.c_str(), GA_ReadOnly));
-        const CPLStringList options = ddb::cslFromStrings(ddb::imageCreationOptions({format}));
-        auto encoded = ddb::adoptDataset(GDALCreateCopy(GDALGetDriverByName(format == ddb::ImageFormat::Jpeg ? "JPEG" : "WEBP"),
-                                                        out.c_str(), ddb::datasetHandle(source), FALSE, options.List(),
-                                                        nullptr, nullptr));
-        ddb::closeOutputOrThrow(std::move(encoded), out.path());
+        const auto image = testutils::decodeImage(png);
+        const size_t pixels = static_cast<size_t>(image.width) * image.height;
+        const size_t channels = image.bands.size();
+        std::vector<uint8_t> interleaved(pixels * channels);
+        for (size_t c = 0; c < channels; c++)
+            for (size_t i = 0; i < pixels; i++)
+                interleaved[i * channels + c] = image.bands[c][i];
+        uint8_t *bytes = nullptr;
         int size = 0;
-        auto bytes = ddb::stealMemFileBuffer(out.path(), size);
-        return std::vector<uint8_t>(bytes.get(), bytes.get() + size);
+        ddb::TileEncoder::encode(
+            ddb::InterleavedImage{interleaved.data(), image.width, image.height, static_cast<int>(channels)},
+            {format}, &bytes, &size);
+        const ddb::VsiFreePtr<uint8_t> owned(bytes);
+        return std::vector<uint8_t>(bytes, bytes + size);
     }
 
     class RenderOptions : public ::testing::Test

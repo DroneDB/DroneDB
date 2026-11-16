@@ -7,6 +7,10 @@
 #include <string>
 #include <vector>
 
+#include "fs.h"
+#include "gdal_inc.h"
+#include "json.h"
+
 namespace ddb {
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -97,10 +101,19 @@ AlignResult alignRaster(
     const std::string &outputPath,
     const AlignOptions &opts = {});
 
-/** Adds zOffset to every sample of band 1 of the DEM at path, in place (nodata stays as it is),
- *  in double precision; an integer DEM gets zOffset rounded to a whole number. An offset below
- *  1e-6 (or that rounds to 0 for an integer DEM) leaves the file alone. */
-void applyZOffset(const std::string &path, double zOffset);
+/** Adds zOffset to every sample of band 1 of the DEM open for update, in place (nodata stays as it
+ *  is), in double precision; an integer DEM gets zOffset rounded to a whole number. An offset below
+ *  1e-6 (or that rounds to 0 for an integer DEM) leaves it alone. @throws GDALException */
+void applyZOffset(GDALDatasetH dataset, double zOffset);
+
+namespace raster {
+/** What the raster helper runs for an `align` request: aligns the user's raster `source` to the
+ *  `reference` of the params (AlignParams) and writes the result to `out`, in the folder of the
+ *  request; returns alignResultToJson. Only where users' files are opened (the helper). */
+json alignOperation(const fs::path &source, const fs::path &out, const json &params);
+/** What the raster helper runs for an `alignValidation` request: alignValidationToJson. */
+json alignValidationOperation(const fs::path &source, const json &params);
+}  // namespace raster
 
 std::string alignResultToJson(const AlignResult &r);
 std::string alignValidationToJson(const AlignValidationResult &r);

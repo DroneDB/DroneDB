@@ -1661,7 +1661,7 @@ namespace
 
         ddb::buildCog(io::toUtf8(user.input), io::toUtf8(out));
 
-        EXPECT_TRUE(raster::reopenWrittenRaster(out));
+        EXPECT_TRUE(raster::writtenRasterOpens(out));
         EXPECT_TRUE(fs::exists(statsSidecarOf(out)));
         std::vector<fs::path> entries;
         for (const auto &entry : fs::directory_iterator(user.folder))

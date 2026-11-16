@@ -188,7 +188,7 @@ namespace ddb
                 continue;
             }
 
-            if (!raster::openArtefactRaster(produced))
+            if (!raster::writtenRasterOpens(produced))
                 throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": " + raster::kGdalUtilName +
                                     " wrote a file that is not a GeoTIFF");
             // The output may have appeared while it was projected: replaced only when asked

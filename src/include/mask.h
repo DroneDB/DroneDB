@@ -6,6 +6,9 @@
 
 #include <string>
 
+#include "fs.h"
+#include "raster_protocol.h"
+
 
 namespace ddb {
 
@@ -24,6 +27,21 @@ void maskBorders(const std::string &input,
                  bool white = false,
                  const std::string &color = "",
                  bool overwrite = false);
+
+namespace raster {
+/**
+ * @brief Writes `out`, the user's raster `input` with its borders masked (gdal_nearblack -setmask
+ * -alg floodfill, an internal mask), compressed for its layout: what the raster helper runs for a
+ * `mask` request. Only where users' files are opened (the helper). A raster of one band of more
+ * than 8 bits (a DEM, a thermal raster) keeps its type and every sample: its mask is the one
+ * nearblack computes from which samples are near the border colour (one number), and it also hides
+ * the samples that are NoData or NaN.
+ * @throws InvalidArgsException for a raster masking does not cover (not 1, 3 or 4 bands, 3 or 4
+ * bands that are not 8-bit, a fourth band that is not alpha); GDALException
+ */
+void maskRasterFile(const fs::path &input, const fs::path &out, const MaskParams &params,
+                    const ProgressCallback &progress);
+}  // namespace raster
 
 }
 

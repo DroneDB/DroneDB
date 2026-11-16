@@ -5,6 +5,7 @@
 
 #include <cpl_string.h>
 
+#include "raster_source.h"
 #include "stringutil.h"
 
 namespace ddb::gdalmeta {
@@ -38,9 +39,14 @@ void appendValue(std::vector<std::string> &out, std::string_view entry, std::str
     if (!isPathOrUrl(value)) out.emplace_back(entry);
 }
 
-void appendList(std::vector<std::string> &out, CSLConstList list) {
-    if (!list) return;
-    for (int k = 0; list[k] != nullptr; k++) appendValue(out, list[k], entryValue(list[k]));
+void appendList(std::vector<std::string> &out, const std::vector<std::string> &list) {
+    for (const auto &entry : list) appendValue(out, entry, entryValue(entry));
+}
+
+std::vector<std::string> stringsOf(CSLConstList list) {
+    std::vector<std::string> out;
+    for (int k = 0; list != nullptr && list[k] != nullptr; k++) out.emplace_back(list[k]);
+    return out;
 }
 
 } // namespace
@@ -74,28 +80,46 @@ bool containsToken(std::string_view text, std::string_view token) {
     return false;
 }
 
-std::vector<std::string> collectMetadata(GDALDatasetH dataset, const CollectOptions &options) {
+RasterMetadata metadataOf(GDALDatasetH dataset) {
+    RasterMetadata metadata;
+    const CPLStringList domains(GDALGetMetadataDomainList(dataset), TRUE);
+    for (int d = 0; d < domains.size(); d++)
+        metadata.domains.push_back(Domain{domains[d], stringsOf(GDALGetMetadata(dataset, domains[d]))});
+    for (int b = 1; b <= GDALGetRasterCount(dataset); b++)
+        metadata.bandItems.push_back(stringsOf(GDALGetMetadata(GDALGetRasterBand(dataset, b), nullptr)));
+    return metadata;
+}
+
+std::optional<std::string> itemOf(const RasterMetadata &metadata, std::string_view domain, std::string_view name) {
+    for (const auto &d : metadata.domains) {
+        if (!EQUAL(d.name.c_str(), std::string(domain).c_str())) continue;
+        for (const auto &item : d.items)
+            if (item.size() > name.size() && EQUALN(item.c_str(), std::string(name).c_str(), name.size()) &&
+                (item[name.size()] == '=' || item[name.size()] == ':'))
+                return item.substr(name.size() + 1);
+    }
+    return std::nullopt;
+}
+
+std::vector<std::string> collectMetadata(const RasterSource &raster, const CollectOptions &options) {
     std::vector<std::string> out;
+    const RasterMetadata metadata = raster.metadata();
 
     for (const auto &item : options.datasetItems) {
-        const char *value = GDALGetMetadataItem(dataset, item.c_str(), nullptr);
-        if (value) appendValue(out, value, value);
+        if (const auto value = itemOf(metadata, "", item)) appendValue(out, *value, *value);
     }
 
-    const CPLStringList domains(GDALGetMetadataDomainList(dataset), TRUE);
-    for (int d = 0; d < domains.size(); d++) {
-        if (isPathDomain(domains[d])) continue;
-        appendList(out, GDALGetMetadata(dataset, domains[d]));
+    for (const auto &domain : metadata.domains) {
+        if (isPathDomain(domain.name.c_str())) continue;
+        appendList(out, domain.items);
     }
 
-    for (int b = 1; b <= options.bandCount; b++) {
-        GDALRasterBandH band = GDALGetRasterBand(dataset, b);
-        if (!band) continue;
+    for (int b = 1; b <= options.bandCount && b <= raster.bandCount(); b++) {
         if (options.bandDescriptions) {
-            const char *description = GDALGetDescription(band);
-            if (description && description[0]) appendValue(out, description, description);
+            const std::string description = raster.description(b);
+            if (!description.empty()) appendValue(out, description, description);
         }
-        appendList(out, GDALGetMetadata(band, nullptr));
+        appendList(out, metadata.bandItems[static_cast<size_t>(b - 1)]);
     }
     return out;
 }

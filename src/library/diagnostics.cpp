@@ -11,8 +11,7 @@
 
 #include <clocale>
 #include <cstdlib>
-#include "pdal_inc.h"
-#include <pdal/pdal_features.hpp>
+#include "ddbt/ddbt.h"
 #include <sstream>
 
 #include "logger.h"
@@ -54,7 +53,7 @@ void printVersions() {
     LOGV << "SpatiaLite: " << spatialite_version();
     LOGV << "GDAL: " << GDALVersionInfo("RELEASE_NAME");
     LOGV << "CURL: " << curl_version();
-    LOGV << "PDAL: " << pdal::pdalVersion;
+    LOGV << "ddb-tilers: " << ddbtVersion();
 
     LOGV << "PROJ: " << proj_info().release;
 

@@ -18,6 +18,7 @@
 #include "gtest/gtest-spi.h"
 #include "gtest/gtest.h"
 #include "mio.h"
+#include "pointcloud.h"
 #include "process_runner.h"
 #include "raster_ops.h"
 #include "raster_test_utils.h"
@@ -35,6 +36,7 @@ namespace
     {
         fs::path raster;
         fs::path vector;
+        fs::path cloud;
     };
 
     Files writeFiles(TestArea &ta)
@@ -52,6 +54,7 @@ namespace
         files.vector = writeFile(ta.getFolder("dataset") / "layer.geojson",
                                  R"({"type":"FeatureCollection","features":[{"type":"Feature","properties":{},)"
                                  R"("geometry":{"type":"Point","coordinates":[9.1,45.2]}}]})");
+        files.cloud = writeFile(ta.getFolder("dataset") / "cloud.xyz", "1 2 3\n4 5 6\n-1 0 2\n");
         return files;
     }
 
@@ -65,6 +68,7 @@ namespace
         EXPECT_TRUE(gdalopen::validateSidecars(io::toUtf8(files.raster)).ok);
         EXPECT_NO_THROW(isOptimizedCog(io::toUtf8(files.raster)));
         EXPECT_EQ(raster::probe(files.raster, raster::ProbeParams()).type, "GeoRaster");
+        EXPECT_EQ(readPointCloudInfo(files.cloud).pointCount, 3u);
     }
 
     TEST(UserOpenGate, theHostDoesNotOpenAFileOfAUserAndTheHelperDoes)
@@ -86,7 +90,14 @@ namespace
         EXPECT_THROW(isOptimizedCog(io::toUtf8(files.raster)), std::logic_error);
         // The operations of the helper are the helper's: run in the host they refuse as well
         EXPECT_THROW(raster::probe(files.raster, raster::ProbeParams()), std::logic_error);
+        EXPECT_THROW(readPointCloudInfo(files.cloud), std::logic_error);
         EXPECT_FALSE(gdalopen::userFileOpensEnabled());
+        // The host asks the helper for the info of a point cloud
+        PointCloudInfo info;
+        ASSERT_TRUE(getPointCloudInfo(io::toUtf8(files.cloud), info));
+        EXPECT_EQ(info.pointCount, 3u);
+        EXPECT_EQ(info.dimensions, (std::vector<std::string>{"X", "Y", "Z"}));
+        EXPECT_TRUE(info.bounds.empty()) << "a text file keeps no bounds";
 
         try
         {

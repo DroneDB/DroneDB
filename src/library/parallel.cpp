@@ -24,12 +24,9 @@ namespace ddb::parallel
         // Sends the GDAL errors raised on this thread to libddb's handler while in scope: the
         // host's log callback with the thread's operation id, or GDAL's default handler (stderr,
         // CPL_LOG) when none is registered (log_forwarding.h), whatever process-wide handler is
-        // installed: a thread-local handler takes precedence over the process-wide one. While any
-        // PDAL stage runs, PDAL installs its own process-wide GDAL handler
-        // (pdal::Stage::startLogging), which writes into that stage's Log; that Log is not
-        // synchronized with the stage's thread, so a GDAL error raised by another thread at the
-        // same time races with it (found by TSan). Parallel sections parse rasters while other
-        // threads run PDAL readers.
+        // installed: a thread-local handler takes precedence over the process-wide one, so a library
+        // that replaces the process-wide handler while it runs on another thread does not get the
+        // errors of this one.
         class ThreadGdalErrorHandler
         {
         public:
