@@ -360,10 +360,14 @@ namespace
         };
         // A palette band beside an alpha band (GDAL reads the colour table of a TIFF of 2 samples),
         // and beside an internal mask
-        Source paletteAlpha{"palette alpha", GDT_Byte, {GCI_PaletteIndex, GCI_AlphaBand}};
+        Source paletteAlpha;
+        paletteAlpha.name = "palette alpha";
+        paletteAlpha.interps = {GCI_PaletteIndex, GCI_AlphaBand};
         paletteAlpha.palette = true;
-        Source paletteMask{"palette mask", GDT_Byte, {GCI_PaletteIndex}};
-        paletteMask.palette = paletteMask.mask = true;
+        Source paletteMask = paletteAlpha;
+        paletteMask.name = "palette mask";
+        paletteMask.interps = {GCI_PaletteIndex};
+        paletteMask.mask = true;
         std::vector<Source> all = sources;
         all.push_back(paletteAlpha);
         all.push_back(paletteMask);
