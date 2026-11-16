@@ -876,7 +876,9 @@ extern "C"
      * @return as DDBBuildEx, with the codes of the exports added in 2.0 (DDBERR_INVALIDARGS for a refused
      *         option, DDBERR_RETRYABLE, DDBERR_NOTFOUND), and DDBERR_CANCELED when the callback cancels or
      *         the cancel token is canceled (DDBBuildEx2 is in "cancellable" of DDBGetCapabilities). A build
-     *         that is canceled keeps the pending state it had: a pending build stays pending. */
+     *         that is canceled keeps the pending state it had: a pending build stays pending.
+     * Changed in 2.7.2: the COG of a palette raster beside an alpha band, or with an internal mask (which the warp
+     * turns into an alpha band), keeps its colour table, as gdalwarp and GTiff kept it (2.6.0 to 2.7.1 dropped it). */
     DDB_DLL DDBErr DDBBuildEx2(const char *ddbPath, const char *source, const char *dest, bool force,
                                bool pendingOnly, const char *optionsJson, DDBProgressCallback progress,
                                void *progressUserData);
@@ -1806,7 +1808,11 @@ extern "C"
      * and unit only when the values and the extent are those of the raster) and the colour table of a palette band
      * (its overviews averaged in the colours of the table, as GDAL does; a palette raster with a mask is written
      * without its table). Every export of a raster whose pixels are points (AREA_OR_POINT=Point) is again where the
-     * raster is: 2.7.0 wrote it half a pixel away. */
+     * raster is: 2.7.0 wrote it half a pixel away.
+     * Changed in 2.7.2: the GeoTIFF of the bands has the mask and the colour table gdal_translate keeps, with the
+     * overviews GDALBuildOverviews AVERAGE gives them, as 2.6.0 wrote them: a palette band beside an internal mask or
+     * an alpha band keeps its table (its overviews computed from the full resolution), an internal mask beside an
+     * alpha band is kept, and the overviews of a mask are GDAL's on a raster wider than 10240 pixels too. */
     DDB_DLL DDBErr DDBExportRaster3(const char *inputPath, const char *outputPath,
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,
@@ -2039,7 +2045,9 @@ extern "C"
      * @param bandCount Number of entries in @p bands.
      * Changed in 2.7.1: the GeoTIFF has what gdalwarp copies from the raster, which 2.7.0 lost: its metadata items,
      * the scale and offset of each band, and when the render has as many bands as the raster the items,
-     * description and unit of each band; AREA_OR_POINT=Point for a raster whose pixels are points. */
+     * description and unit of each band; AREA_OR_POINT=Point for a raster whose pixels are points.
+     * Changed in 2.7.2: a palette band beside an alpha band shows the colours of its table, as a palette band alone
+     * does (2.7.0 and 2.7.1 showed its indices as grey), in every render and thumbnail of it. */
     DDB_DLL DDBErr DDBRenderRasterRegionEx(const char *inputPath,
                                            const double *bbox,
                                            const char *bboxSrs,

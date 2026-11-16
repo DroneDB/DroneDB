@@ -23,7 +23,7 @@ TARGET_DIR="${1:-build}"
 
 # Resolve default version: env var > scripts/obj2tiles-version > fallback
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_DEFAULT_VERSION="$(cat "${_SCRIPT_DIR}/obj2tiles-version" 2>/dev/null | tr -d '[:space:]' || echo 'v1.10.1')"
+_DEFAULT_VERSION="$(cat "${_SCRIPT_DIR}/obj2tiles-version" 2>/dev/null | tr -d '[:space:]' || echo 'v1.10.2')"
 VERSION="${2:-${OBJ2TILES_VERSION:-${_DEFAULT_VERSION}}}"
 
 BIN="Obj2Tiles"
@@ -126,7 +126,8 @@ else
 fi
 
 # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary, with the
-# notices of the libraries the binary bundles (THIRD_PARTY_NOTICES.md, since v1.8.1: LibTiff.Net, BSD).
+# notices of the libraries the binary bundles (THIRD_PARTY_NOTICES.md: LibTiff.Net since v1.8.1; libktx and the
+# code it is built from since v1.10.2).
 for DOC in LICENSE THIRD_PARTY_NOTICES; do
     DOC_URL="https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/${VERSION}/${DOC}.md"
     if curl -fL --retry 3 --retry-delay 5 -o "${TARGET_DIR}/Obj2Tiles.${DOC}.md" "${DOC_URL}"; then

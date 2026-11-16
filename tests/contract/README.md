@@ -784,3 +784,16 @@ Registry has to adopt first.
   pixels without georeferencing again (2.7.0 gave a PNG). A point cloud the raster helper cannot read is again a
   `PDALException`, the add error code "PDAL", for its info and the sample of the splat training export (2.7.0 gave
   "GDAL"), as for its COPC build.
+* 2026-11-16: 2.7.2 (ABI 2.7, a patch: no export is added or removed, `capabilities` is unchanged and no schema or
+  fixture changes).
+  Palette and masked rasters are written as 2.6.0 wrote them with GDAL's tools. The export of bands keeps the mask
+  gdal_translate keeps (band 1's own, `GMF_PER_DATASET`: an internal mask, beside an alpha band too) and the colour
+  table of band 1 for 1 or 2 bands whatever the mask, with the overviews of GDALBuildOverviews AVERAGE: a palette band
+  beside an internal mask or an alpha band computed from the full resolution for every level, the mask and the alpha
+  band beside a palette regenerated in GDAL's chunks of rows (by blocks past 10 MiB). 2.7.0 and 2.7.1 exported a
+  palette raster with a mask or an alpha band without its table, an RGBA raster without its internal mask, and the
+  overviews of a mask wider than 10240 pixels differently where its rows cross a chunk. The colour table of a raster
+  of 2 samples (a palette band and an alpha band) is read, so its renders and thumbnails show its colours (2.7.0 and
+  2.7.1: grey), and the COG of a palette raster beside an alpha band or with an internal mask keeps its table
+  (2.6.0 to 2.7.1 dropped it). The 3D Tiles of models are built by Obj2Tiles v1.10.2 (the same binaries as v1.10.1;
+  its notices list libktx and the code it is built from).

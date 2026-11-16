@@ -64,7 +64,8 @@ tool, a precompiled .NET application redistributed **unmodified**
   OpenDroneMap packaging); the upstream `LICENSE.md` is preserved
   alongside it as `Obj2Tiles.LICENSE.md`, with the notices of the
   libraries the binary bundles (LibTiff.Net, BSD 3-Clause, since
-  v1.8.1) as `Obj2Tiles.THIRD_PARTY_NOTICES.md`.
+  v1.8.1; libktx and the code it is built from, since v1.10.2) as
+  `Obj2Tiles.THIRD_PARTY_NOTICES.md`.
 
 ### Why AGPL is compatible with MPL-licensed DroneDB
 
@@ -114,6 +115,14 @@ and is copied next to the `Obj2Tiles` / `Obj2Tiles.exe` binary by
 - **Source**: https://github.com/KhronosGroup/KTX-Software
 - **Distributed copy**: the precompiled `ktx.dll` / `libktx.so` /
   `libktx.dylib` binary placed next to the Obj2Tiles executable.
+- **Code it is built from**: libktx includes code of other projects
+  under their own licences: dfdutils, astc-encoder and Basis Universal
+  (Apache-2.0), and through Basis Universal the Android ASTC decoder
+  (Apache-2.0), Zstandard and TinyEXR (BSD 3-Clause), QOI and tiny_dds
+  (MIT), jpgd and pvpngreader (public domain); and the Ericsson ETC
+  decoder, under Ericsson's own licence agreement, which is not open
+  source. Their licences and notices are in
+  `Obj2Tiles.THIRD_PARTY_NOTICES.md`, shipped next to it.
 
 Like Obj2Tiles itself, libktx is invoked only by the separate Obj2Tiles
 subprocess and is never linked into `ddbcmd` / `libddb`; it does not

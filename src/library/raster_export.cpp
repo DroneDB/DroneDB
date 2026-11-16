@@ -537,12 +537,12 @@ void exportBands(const RasterExport &request, ExportSession &session, const Expo
     }
     const bool wholeExtent = part.x == 0 && part.y == 0 && part.width == source.width() && part.height == source.height();
     layout.metadata = translatedMetadata(source, selected, scale, wholeExtent);
-    // gdal_translate's MASK_AUTO: a source whose first band has a dataset mask (not alpha, not NoData) keeps it
-    layout.mask = detectBandNodata(source, source.bandCount()).datasetMask;
-    // and the colour table of band 1, which GTiff writes for a raster of 1 or 2 bands. ddb-tilers averages the
-    // overviews of a palette band as GDAL does when they are computed each from the level above, which GDAL
-    // does not do beside an internal mask: a palette raster with a mask is exported without its table
-    if (selected.front() == 1 && selected.size() <= 2 && !layout.mask)
+    // gdal_translate's MASK_AUTO: a source whose first band's mask is the dataset's own
+    // (GMF_PER_DATASET: an internal mask, beside an alpha band too) keeps it
+    layout.mask = src.raster().hasDatasetMask();
+    // and the colour table of band 1, which GTiff writes for a raster of 1 or 2 bands (the second
+    // one alpha)
+    if (selected.front() == 1 && selected.size() <= 2)
         layout.colorTable = src.raster().band(1).colorTable;
 
     const int bandCount = static_cast<int>(plans.size());
