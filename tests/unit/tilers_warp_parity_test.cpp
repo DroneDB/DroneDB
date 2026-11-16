@@ -358,8 +358,16 @@ namespace
             {"half", GDT_Float16, {GCI_GrayIndex}, 32633, 400, 300, 0.5, -9999.0, false, true, false},
             {"int64", GDT_Int64, {GCI_GrayIndex, GCI_GrayIndex}, 32633, 400, 300, 0.5, -5.0, false, false, false},
         };
-        for (const Source &s : sources)
-        {
+        // A palette band beside an alpha band (GDAL reads the colour table of a TIFF of 2 samples),
+        // and beside an internal mask
+        Source paletteAlpha{"palette alpha", GDT_Byte, {GCI_PaletteIndex, GCI_AlphaBand}};
+        paletteAlpha.palette = true;
+        Source paletteMask{"palette mask", GDT_Byte, {GCI_PaletteIndex}};
+        paletteMask.palette = paletteMask.mask = true;
+        std::vector<Source> all = sources;
+        all.push_back(paletteAlpha);
+        all.push_back(paletteMask);
+        for (const Source& s : all) {
             SCOPED_TRACE(s.name);
             const fs::path file = writeSource(ta.getPath(s.name + ".tif"), s);
             std::vector<Render> renders;

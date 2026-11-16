@@ -86,6 +86,10 @@ namespace ddb::tilers
         // GMF_PER_DATASET and without GMF_NODATA or GMF_ALL_VALID): the mask of the file, or the alpha band
         // of an RGBA or grey + alpha raster for its other bands. The bands that have one share it.
         bool hasMask(int band1) const;
+        // Whether band 1's mask is a mask of the dataset that is neither the alpha band nor the
+        // NoData value (GDALGetMaskFlags == GMF_PER_DATASET: an internal mask, which wins over an
+        // alpha band)
+        bool hasDatasetMask() const { return mask_ == Mask::PerDataset; }
 
         // read() of `bands`, and in `mask` (when one of them hasMask, else left untouched) the samples of
         // their mask band as GDAL's RasterIO reads it into Byte: 0 where a pixel is transparent.

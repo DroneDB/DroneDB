@@ -6,28 +6,29 @@
 // them: the export of bands as gdal_translate, the GeoTIFF of a region render as gdalwarp. Each output is
 // compared with the one the tool writes from the same file, with the arguments libddb gave it.
 
+#include "copied_metadata.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <fstream>
 #include <cstring>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "gtest/gtest.h"
-#include "test.h"
-#include "testarea.h"
-#include "raster_test_utils.h"
-
-#include "copied_metadata.h"
-#include "mio.h"
 #include "ddb.h"
 #include "gdal_metadata.h"
 #include "gdal_raii.h"
+#include "gtest/gtest.h"
+#include "gtiff_options.h"
+#include "mio.h"
 #include "raster_export.h"
 #include "raster_region.h"
 #include "raster_source.h"
+#include "raster_test_utils.h"
+#include "test.h"
+#include "testarea.h"
 #include "tilers_raster.h"
 
 namespace
@@ -47,7 +48,27 @@ namespace
         bool palette = false;
         bool point = false;  // AREA_OR_POINT=Point: the georeferencing names pixel centres
         std::vector<std::string> interps;
+        bool mask = false;             // an internal mask (GDAL's per-dataset mask band)
+        std::optional<double> nodata;  // of every band
     };
+
+    // The pixels of a source: palette indices of 40 colours, values of every byte for the other
+    // bands, and for an alpha band opaque, transparent and partly transparent pixels
+    uint16_t sampleOf(const SourceSpec& spec, int band, int x, int y) {
+        if (static_cast<size_t>(band) <= spec.interps.size() &&
+            spec.interps[static_cast<size_t>(band - 1)] == "Alpha")
+            return (x / 7 + y / 5) % 9 == 0 ? 0 : (x + y) % 13 == 0 ? 100 : 255;
+        if (spec.palette)
+            return static_cast<uint16_t>((x * 7 + y * 13 + (x * y) % 11) % 40);
+        return static_cast<uint16_t>(30 + (x * 3 + y * 5 + band * 11) % 200);
+    }
+
+    // The internal mask of a source: scattered transparent pixels, a corner and a block 600 pixels
+    // wide (whole tiles and overview blocks without a valid pixel)
+    uint8_t maskOf(const SourceSpec& spec, int x, int y) {
+        const bool block = x >= spec.width / 2 && x < spec.width / 2 + 600 && y < 700;
+        return ((x / 5 + y / 3) % 7 == 0 || x + y < 300 || block) ? 0 : 255;
+    }
 
     fs::path writeSource(const fs::path &path, const SourceSpec &spec)
     {
@@ -95,12 +116,33 @@ namespace
                 GDALSetRasterColorTable(band, table);
                 GDALDestroyColorTable(table);
             }
+            if (spec.nodata)
+                GDALSetRasterNoDataValue(band, *spec.nodata);
             for (int y = 0; y < spec.height; y++)
                 for (int x = 0; x < spec.width; x++)
-                    plane[static_cast<size_t>(y) * spec.width + x] =
-                        static_cast<uint16_t>(spec.palette ? (x * 7 + y * 13 + (x * y) % 11) % 40 : 30 + (x * 3 + y * 5 + b * 11) % 200);
+                    plane[static_cast<size_t>(y) * spec.width + x] = sampleOf(spec, b, x, y);
             EXPECT_EQ(GDALRasterIO(band, GF_Write, 0, 0, spec.width, spec.height, plane.data(), spec.width, spec.height,
                                    GDT_UInt16, 0, 0),
+                      CE_None);
+        }
+        if (spec.mask) {
+            EXPECT_EQ(GDALCreateDatasetMaskBand(h, GMF_PER_DATASET), CE_None);
+            std::vector<uint8_t> mask(static_cast<size_t>(spec.width) * spec.height);
+            for (int y = 0; y < spec.height; y++)
+                for (int x = 0; x < spec.width; x++)
+                    mask[static_cast<size_t>(y) * spec.width + x] = maskOf(spec, x, y);
+            EXPECT_EQ(GDALRasterIO(GDALGetMaskBand(GDALGetRasterBand(h, 1)),
+                                   GF_Write,
+                                   0,
+                                   0,
+                                   spec.width,
+                                   spec.height,
+                                   mask.data(),
+                                   spec.width,
+                                   spec.height,
+                                   GDT_Byte,
+                                   0,
+                                   0),
                       CE_None);
         }
         return path;
@@ -172,15 +214,24 @@ namespace
                 << "band " << b;
     }
 
-    // The samples of every band and every overview level of `got` are those of `want`
+    // The samples of every band and every overview level of `got` are those of `want`, and so is
+    // its mask: its mask flags, and the samples of a mask of the dataset and of its overviews (band
+    // 0 below)
     void expectSamePixels(const fs::path &want, const fs::path &got)
     {
         const auto w = testutils::openRaster(want);
         const auto g = testutils::openRaster(got);
         ASSERT_TRUE(w && g);
-        for (int b = 1; b <= GDALGetRasterCount(datasetHandle(w)); b++)
-        {
-            GDALRasterBandH wb = GDALGetRasterBand(datasetHandle(w), b), gb = GDALGetRasterBand(datasetHandle(g), b);
+        const int flags = GDALGetMaskFlags(GDALGetRasterBand(datasetHandle(w), 1));
+        EXPECT_EQ(GDALGetMaskFlags(GDALGetRasterBand(datasetHandle(g), 1)), flags)
+            << "the mask flags of band 1";
+        for (int b = flags == GMF_PER_DATASET ? 0 : 1; b <= GDALGetRasterCount(datasetHandle(w));
+             b++) {
+            const auto bandOf = [b](const GDALDatasetUniquePtr& ds) {
+                GDALRasterBandH first = GDALGetRasterBand(datasetHandle(ds), 1);
+                return b == 0 ? GDALGetMaskBand(first) : GDALGetRasterBand(datasetHandle(ds), b);
+            };
+            GDALRasterBandH wb = bandOf(w), gb = bandOf(g);
             ASSERT_EQ(GDALGetOverviewCount(gb), GDALGetOverviewCount(wb)) << "band " << b;
             for (int level = -1; level < GDALGetOverviewCount(wb); level++)
             {
@@ -290,17 +341,119 @@ namespace
 
     // ---- The outputs, against the tools
 
-    // The export of bands is written as gdal_translate -ot Byte [-srcwin] -b ... [-scale] wrote it from the
-    // same file, then given its overviews: its metadata is the one gdal_translate copies
-    TEST_F(CopiedMetadataTest, anExportOfBandsHasTheMetadataGdalTranslateCopies)
-    {
-        struct Case
+    // An export of bands of a source written from `spec`: the bands asked for ("" for libddb's
+    // choice), and the part of the source (a window of pixels x, y, width, height), or all of it
+    struct ExportCase {
+        std::string name;
+        SourceSpec spec;
+        std::string bands;
+        std::optional<std::array<int, 4>> window;
+    };
+
+    // The bounding box (EPSG:4326, longitude first) of the centres of a window of pixels of a
+    // source
+    std::array<double, 4> boundsOfPixels(const std::array<int, 4>& window) {
+        SrsPtr mercator(OSRNewSpatialReference(nullptr)), wgs84(OSRNewSpatialReference(nullptr));
+        OSRImportFromEPSG(mercator.get(), 3857);
+        OSRImportFromEPSG(wgs84.get(), 4326);
+        OSRSetAxisMappingStrategy(wgs84.get(), OAMS_TRADITIONAL_GIS_ORDER);
+        const auto ct = OCTNewCoordinateTransformation(mercator.get(), wgs84.get());
+        // A quarter of a pixel inside the centres of the pixels at the edges of the window
+        double x[2] = {kOriginX + (window[0] + 0.75) * kPixel,
+                       kOriginX + (window[0] + window[2] - 0.75) * kPixel};
+        double y[2] = {kOriginY - (window[1] + window[3] - 0.75) * kPixel,
+                       kOriginY - (window[1] + 0.75) * kPixel};
+        EXPECT_TRUE(OCTTransform(ct, 2, x, y, nullptr));
+        OCTDestroyCoordinateTransformation(ct);
+        return {x[0], y[0], x[1], y[1]};
+    }
+
+    // The export of bands is written as gdal_translate -ot Byte [-srcwin] -b ... [-scale] -co
+    // TILED=YES -co COMPRESS=DEFLATE wrote it from the same file, then given its overviews
+    // (DroneDB 2.6.0): its metadata, its bands, its mask and the overviews of both are those of the
+    // file the tools write (GDAL reads the overviews in chunks of the blocks of the file: 256 x 256
+    // tiles)
+    void expectExportLikeGdalTranslate(TestArea& area, const ExportCase& c) {
+        SCOPED_TRACE(c.name);
+        const fs::path input = writeSource(area.getPath(c.name + ".tif"), c.spec);
+        RasterExport request;
+        request.input = io::toUtf8(input);
+        request.output = io::toUtf8(area.getPath(c.name + "-ddb.tif"));
+        request.bands = c.bands;
+        if (c.window)
+            request.bbox = boundsOfPixels(*c.window);
+        ASSERT_NO_THROW(exportRaster(request));
+
+        // gdal_translate with the arguments libddb gave it
+        CPLStringList args;
+        args.AddString("-ot");
+        args.AddString("Byte");
+        const auto written = testutils::openRaster(request.output);
+        ASSERT_TRUE(written);
+        const int width = GDALGetRasterXSize(datasetHandle(written)),
+                  height = GDALGetRasterYSize(datasetHandle(written));
+        if (c.window) {
+            // The window libddb exported: the corner of its geotransform, its size
+            double gt[6];
+            ASSERT_EQ(GDALGetGeoTransform(datasetHandle(written), gt), CE_None);
+            args.AddString("-srcwin");
+            args.AddString(
+                std::to_string(static_cast<int>(std::lround((gt[0] - kOriginX) / kPixel))).c_str());
+            args.AddString(
+                std::to_string(static_cast<int>(std::lround((kOriginY - gt[3]) / kPixel))).c_str());
+            args.AddString(std::to_string(width).c_str());
+            args.AddString(std::to_string(height).c_str());
+        }
+        std::vector<std::string> bands;
+        if (c.bands.empty())
+            for (int b = 1; b <= std::min(3, c.spec.bands); b++)
+                bands.push_back(std::to_string(b));
+        else
+            for (size_t from = 0; from <= c.bands.size();) {
+                const size_t comma = std::min(c.bands.find(',', from), c.bands.size());
+                bands.push_back(c.bands.substr(from, comma - from));
+                from = comma + 1;
+            }
+        for (const std::string& b : bands) {
+            args.AddString("-b");
+            args.AddString(b.c_str());
+        }
+        if (c.spec.type != GDT_Byte)
+            args.AddString("-scale");
+        GtiffOptions().tiled().compress(GtiffOptions::Codec::Deflate).appendTo(args);
+        const fs::path reference = area.getPath(c.name + "-gdal.tif");
         {
-            std::string name;
-            SourceSpec spec;
-            std::string bands;
-            bool window = false;
-        };
+            const GdalOptionsPtr<GDALTranslateOptions> options(
+                GDALTranslateOptionsNew(args.List(), nullptr));
+            const auto src = testutils::openRaster(readFile(input));
+            ASSERT_TRUE(src);
+            auto out = adoptDataset(GDALTranslate(io::toUtf8(reference).c_str(),
+                                                  datasetHandle(src),
+                                                  options.get(),
+                                                  nullptr));
+            ASSERT_TRUE(out);
+            // and the overviews libddb gave it: power-of-two AVERAGE levels while the larger side
+            // of the export is 256 or more
+            std::vector<int> levels;
+            for (int f = 2; std::max(width, height) / f >= 256 && levels.size() < 8; f *= 2)
+                levels.push_back(f);
+            if (!levels.empty()) {
+                ASSERT_EQ(GDALBuildOverviews(datasetHandle(out),
+                                             "AVERAGE",
+                                             static_cast<int>(levels.size()),
+                                             levels.data(),
+                                             0,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr),
+                          CE_None);
+            }
+        }
+        expectSameMetadata(reference, request.output);
+        expectSamePixels(reference, request.output);
+    }
+
+    TEST_F(CopiedMetadataTest, anExportOfBandsHasTheMetadataGdalTranslateCopies) {
         SourceSpec thermal;
         SourceSpec rgb;
         rgb.bands = 3;
@@ -315,72 +468,93 @@ namespace
         largePalette.height = 700;
         SourceSpec point;
         point.point = true;
-        const std::vector<Case> cases = {
-            {"thermal", thermal, "", false},      {"thermal-window", thermal, "", true}, {"rgb", rgb, "", false},
-            {"rgb-window", rgb, "", true},        {"rgb-bands", rgb, "3,1", false},      {"palette", palette, "", false},
-            {"point", point, "", false},          {"point-window", point, "", true},
-            {"palette-overviews", largePalette, "", false},
-        };
-        for (const Case &c : cases)
-        {
-            SCOPED_TRACE(c.name);
-            const fs::path input = writeSource(area_->getPath(c.name + ".tif"), c.spec);
-            RasterExport request;
-            request.input = io::toUtf8(input);
-            request.output = io::toUtf8(area_->getPath(c.name + "-ddb.tif"));
-            request.bands = c.bands;
-            if (c.window)
-                // The pixels 8..39 x 16..47 of the source (centres inside the window)
-                request.bbox = std::array<double, 4>{9.9985455563, 44.9954740746, 9.9996774336, 44.9962744903};
-            ASSERT_NO_THROW(exportRaster(request));
+        // The pixels 8..39 x 16..47 of the source
+        const std::array<int, 4> window{8, 16, 32, 32};
+        for (const ExportCase& c : std::vector<ExportCase>{
+                 {"thermal", thermal, "", std::nullopt},
+                 {"thermal-window", thermal, "", window},
+                 {"rgb", rgb, "", std::nullopt},
+                 {"rgb-window", rgb, "", window},
+                 {"rgb-bands", rgb, "3,1", std::nullopt},
+                 {"palette", palette, "", std::nullopt},
+                 {"point", point, "", std::nullopt},
+                 {"point-window", point, "", window},
+                 {"palette-overviews", largePalette, "", std::nullopt},
+             })
+            expectExportLikeGdalTranslate(*area_, c);
+    }
 
-            // gdal_translate with the arguments libddb gave it
-            CPLStringList args;
-            args.AddString("-ot");
-            args.AddString("Byte");
-            const auto written = testutils::openRaster(request.output);
-            ASSERT_TRUE(written);
-            if (c.window)
-            {
-                // The window libddb exported: the corner of its geotransform, its size
-                double gt[6];
-                ASSERT_EQ(GDALGetGeoTransform(datasetHandle(written), gt), CE_None);
-                args.AddString("-srcwin");
-                args.AddString(std::to_string(static_cast<int>(std::lround((gt[0] - kOriginX) / kPixel))).c_str());
-                args.AddString(std::to_string(static_cast<int>(std::lround((kOriginY - gt[3]) / kPixel))).c_str());
-                args.AddString(std::to_string(GDALGetRasterXSize(datasetHandle(written))).c_str());
-                args.AddString(std::to_string(GDALGetRasterYSize(datasetHandle(written))).c_str());
-            }
-            const std::vector<std::string> bands =
-                c.bands.empty() ? std::vector<std::string>(c.spec.bands == 1 ? 1 : 3) : std::vector<std::string>{"3", "1"};
-            for (size_t i = 0; i < bands.size(); i++)
-            {
-                args.AddString("-b");
-                args.AddString(c.bands.empty() ? std::to_string(i + 1).c_str() : bands[i].c_str());
-            }
-            if (c.spec.type != GDT_Byte)
-                args.AddString("-scale");
-            const fs::path reference = area_->getPath(c.name + "-gdal.tif");
-            {
-                const GdalOptionsPtr<GDALTranslateOptions> options(GDALTranslateOptionsNew(args.List(), nullptr));
-                const auto src = testutils::openRaster(readFile(input));
-                ASSERT_TRUE(src);
-                auto out = adoptDataset(GDALTranslate(io::toUtf8(reference).c_str(), datasetHandle(src), options.get(), nullptr));
-                ASSERT_TRUE(out);
-                // and the overviews libddb gave it: power-of-two AVERAGE levels while the larger side is 256 or more
-                std::vector<int> levels;
-                for (int f = 2; std::max(c.spec.width, c.spec.height) / f >= 256 && levels.size() < 8; f *= 2)
-                    levels.push_back(f);
-                if (!levels.empty())
-                {
-                    ASSERT_EQ(GDALBuildOverviews(datasetHandle(out), "AVERAGE", static_cast<int>(levels.size()),
-                                                 levels.data(), 0, nullptr, nullptr, nullptr),
-                              CE_None);
-                }
-            }
-            expectSameMetadata(reference, request.output);
-            expectSamePixels(reference, request.output);
-        }
+    // The mask and the colour table of a raster are exported as gdal_translate keeps them, with the
+    // overviews GDALBuildOverviews AVERAGE gives them: a mask is regenerated level after level in
+    // chunks of rows (by blocks when a chunk would exceed 10 MiB); a palette band in colour, level
+    // after level beside its nodata value, from the full resolution for every level beside a mask
+    // or an alpha band, in chunks twice its largest factor high at least; a second band of a
+    // palette is alpha. Rasters wider than 10240 pixels have overviews read in more than one chunk;
+    // 70000 x 601 pixels make a level-1 chunk larger than 10 MiB (no row is half of two) and the
+    // largest factor 255.
+    TEST_F(CopiedMetadataTest, anExportOfAMaskedOrPaletteRasterHasGdalsMaskColoursAndOverviews) {
+        SourceSpec grey;
+        grey.type = GDT_Byte;
+        grey.width = 10241;
+        grey.height = 1537;
+        grey.mask = true;
+        SourceSpec rgb = grey;
+        rgb.bands = 3;
+        rgb.interps = {"Red", "Green", "Blue"};
+        SourceSpec rgba = rgb;
+        rgba.bands = 4;
+        rgba.interps.push_back("Alpha");
+        SourceSpec smallRgba = rgba;
+        smallRgba.width = 1100;
+        smallRgba.height = 700;
+        SourceSpec palette;
+        palette.type = GDT_Byte;
+        palette.palette = true;
+        palette.width = 1100;
+        palette.height = 700;
+        palette.mask = true;
+        SourceSpec widePalette = palette;
+        widePalette.width = 10241;
+        widePalette.height = 1537;
+        SourceSpec paletteNodata = palette;
+        paletteNodata.nodata = 3;
+        // A second band beside a palette: alpha, or not said (GTiff writes it alpha)
+        SourceSpec paletteAlpha = palette;
+        paletteAlpha.mask = false;
+        paletteAlpha.bands = 2;
+        paletteAlpha.interps = {"Palette", "Alpha"};
+        SourceSpec paletteSecond = paletteAlpha;
+        paletteSecond.interps.clear();
+        SourceSpec widePaletteAlpha = paletteAlpha;
+        widePaletteAlpha.width = 10241;
+        widePaletteAlpha.height = 1537;
+        SourceSpec paletteAlphaMask = paletteAlpha;
+        paletteAlphaMask.mask = true;
+        SourceSpec widePaletteAlphaMask = widePaletteAlpha;
+        widePaletteAlphaMask.mask = true;
+        SourceSpec longPaletteAlphaMask = widePaletteAlphaMask;
+        longPaletteAlphaMask.width = 70000;
+        longPaletteAlphaMask.height = 601;
+        for (const ExportCase& c : std::vector<ExportCase>{
+                 {"grey-mask", grey, "", std::nullopt},
+                 {"rgb-mask", rgb, "", std::nullopt},
+                 {"rgba-mask", smallRgba, "1,2,3,4", std::nullopt},
+                 {"rgba-mask-wide", rgba, "1,2,3,4", std::nullopt},
+                 {"palette-mask", palette, "", std::nullopt},
+                 {"palette-mask-wide", widePalette, "", std::nullopt},
+                 {"palette-mask-window",
+                  widePalette,
+                  "",
+                  std::array<int, 4>{1000, 100, 2600, 1201}},
+                 {"palette-mask-nodata", paletteNodata, "", std::nullopt},
+                 {"palette-alpha", paletteAlpha, "", std::nullopt},
+                 {"palette-second-band", paletteSecond, "", std::nullopt},
+                 {"palette-alpha-wide", widePaletteAlpha, "", std::nullopt},
+                 {"palette-alpha-mask", paletteAlphaMask, "", std::nullopt},
+                 {"palette-alpha-mask-wide", widePaletteAlphaMask, "", std::nullopt},
+                 {"palette-alpha-mask-long", longPaletteAlphaMask, "", std::nullopt},
+             })
+            expectExportLikeGdalTranslate(*area_, c);
     }
 
     // An export written without the metadata of its source (the styled picture of a band, the formula) is

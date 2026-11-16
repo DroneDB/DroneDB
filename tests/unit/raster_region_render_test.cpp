@@ -190,18 +190,23 @@ namespace
         }
     }
 
-    // A raster of classes with a colour table (a land cover, a classified orthophoto): every format shows
-    // the colours of its classes, and the warp of the render does not blend two classes into a third
-    // (2.6 showed the indices as grey in PNG and JPEG, and resampled them bilinearly)
-    TEST_F(RasterRegionRender, aRasterWithAColourTableShowsTheColoursOfItsClasses)
-    {
-        TestArea ta(TEST_NAME, true);
+    // A raster of 4 classes, one per quadrant, with a colour table, and with an alpha band
+    // transparent on the last quadrant or not: a region render shows the colours of the classes
+    // where it is opaque
+    void expectTheColoursOfItsClasses(TestArea& ta, bool alpha) {
+        SCOPED_TRACE(alpha ? "beside an alpha band" : "alone");
         const std::array<std::array<uint8_t, 4>, 4> colours = {
             {{230, 25, 75, 255}, {60, 180, 75, 255}, {0, 130, 200, 255}, {255, 225, 25, 255}}};
-        const fs::path raster = ta.getPath("classes.tif");
+        const int bands = alpha ? 2 : 1;
+        const fs::path raster = ta.getPath(alpha ? "classes-alpha.tif" : "classes.tif");
         {
-            auto ds = adoptDataset(GDALCreate(GDALGetDriverByName("GTiff"), raster.string().c_str(), kSize, kSize, 1,
-                                              GDT_Byte, nullptr));
+            auto ds = adoptDataset(GDALCreate(GDALGetDriverByName("GTiff"),
+                                              raster.string().c_str(),
+                                              kSize,
+                                              kSize,
+                                              bands,
+                                              GDT_Byte,
+                                              nullptr));
             ASSERT_TRUE(ds);
             const double transform[6] = {kOriginX, kPixel, 0, kOriginY, 0, -kPixel};
             GDALSetGeoTransform(datasetHandle(ds), const_cast<double *>(transform));
@@ -217,14 +222,36 @@ namespace
             }
             GDALSetRasterColorTable(GDALGetRasterBand(datasetHandle(ds), 1), table);
             GDALDestroyColorTable(table);
-            std::vector<uint8_t> classes(static_cast<size_t>(kSize) * kSize);
+            std::vector<uint8_t> classes(static_cast<size_t>(kSize) * kSize),
+                opacity(classes.size());
             for (int y = 0; y < kSize; y++)
-                for (int x = 0; x < kSize; x++)
+                for (int x = 0; x < kSize; x++) {
                     classes[static_cast<size_t>(y) * kSize + x] = static_cast<uint8_t>(quadrant(x, y));
+                    opacity[static_cast<size_t>(y) * kSize + x] = quadrant(x, y) == 3 ? 0 : 255;
+                }
             ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(datasetHandle(ds), 1), GF_Write, 0, 0, kSize, kSize,
                                    classes.data(), kSize, kSize, GDT_Byte, 0, 0),
                       CE_None);
+            if (alpha) {
+                GDALSetRasterColorInterpretation(GDALGetRasterBand(datasetHandle(ds), 2),
+                                                 GCI_AlphaBand);
+                ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(datasetHandle(ds), 2),
+                                       GF_Write,
+                                       0,
+                                       0,
+                                       kSize,
+                                       kSize,
+                                       opacity.data(),
+                                       kSize,
+                                       kSize,
+                                       GDT_Byte,
+                                       0,
+                                       0),
+                          CE_None);
+            }
         }
+        // The quadrants the render shows
+        const auto shown = [alpha](int q) { return !alpha || q != 3; };
 
         // A window a third of a pixel off the grid of the raster, and larger than it: every pixel of the
         // render is resampled, and the pixels outside the raster are transparent
@@ -253,11 +280,16 @@ namespace
                 << "pixel " << p / 4 << " is " << int(pixel[0]) << "," << int(pixel[1]) << "," << int(pixel[2]) << ","
                 << int(pixel[3]) << ": not the colour of a class";
         }
-        EXPECT_GT(opaque, static_cast<size_t>(kSize - 1) * (kSize - 1));
-        // The centre of each quadrant has the colour of its class
+        EXPECT_GT(opaque, static_cast<size_t>(kSize - 1) * (kSize - 1) * (alpha ? 3 : 4) / 4);
+        // The centre of each quadrant has the colour of its class, or none where the alpha band
+        // hides it
         for (int q = 0; q < 4; q++)
         {
             const size_t p = (static_cast<size_t>(centreY(q) + 4) * size + centreX(q) + 4) * 4;
+            if (!shown(q)) {
+                EXPECT_EQ(rgba[p + 3], 0) << "quadrant " << q;
+                continue;
+            }
             for (int c = 0; c < 4; c++)
                 EXPECT_EQ(rgba[p + c], colours[q][c]) << "quadrant " << q << ", channel " << c;
         }
@@ -271,6 +303,8 @@ namespace
             ASSERT_GE(lossy.bands.size(), 3u);
             for (int q = 0; q < 4; q++)
             {
+                if (!shown(q))
+                    continue;
                 for (int c = 0; c < 3; c++)
                 {
                     EXPECT_NEAR(at(lossy, c, centreX(q) + 4, centreY(q) + 4), colours[q][c], 6)
@@ -292,6 +326,17 @@ namespace
                     }
                 }
             }
+    }
+
+    // A raster of classes with a colour table (a land cover, a classified orthophoto): every format
+    // shows the colours of its classes, and the warp of the render does not blend two classes into
+    // a third (2.6 showed the indices as grey in PNG and JPEG, and resampled them bilinearly). GDAL
+    // reads the colour table of band 1 whatever the bands beside it: a palette band beside an alpha
+    // band shows its colours too
+    TEST_F(RasterRegionRender, aRasterWithAColourTableShowsTheColoursOfItsClasses) {
+        TestArea ta(TEST_NAME, true);
+        expectTheColoursOfItsClasses(ta, false);
+        expectTheColoursOfItsClasses(ta, true);
     }
 
     // Renders of one raster made by several threads at once are those made one at a time, with a block
