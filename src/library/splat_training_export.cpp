@@ -32,6 +32,7 @@
 #include "raster_helper.h"
 #include "raster_protocol.h"
 #include "ply.h"
+#include "pointcloud.h"
 #include "stringutil.h"
 
 // The binary files of a COLMAP model are little-endian and are written from memory as they are
@@ -517,8 +518,10 @@ namespace ddb
             params.limit = limit;
             const io::ScopedTempDir folder = raster::makePrivateFolder(workFolder, CloudSamplePrefix);
             const fs::path sample = folder.path() / "sample.bin";
-            raster::rasterHelper().sampleCloud(cloud.path, sample, raster::toJson(params), [&progress](double f) {
-                progress.report(within(CamerasEnd, PointsEnd, f), "points");
+            readPointCloud("Cannot read " + io::toUtf8(cloud.path) + ": ", [&] {
+                raster::rasterHelper().sampleCloud(cloud.path, sample, raster::toJson(params), [&progress](double f) {
+                    progress.report(within(CamerasEnd, PointsEnd, f), "points");
+                });
             });
 
             Cloud result;

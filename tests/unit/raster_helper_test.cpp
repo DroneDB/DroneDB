@@ -463,6 +463,23 @@ namespace
         EXPECT_EQ(result.errors[0].code, "FS");
     }
 
+    // A point cloud the helper cannot read is the failure of a point cloud, as when libddb read the clouds
+    // with PDAL: a PDALException, and the add error "PDAL", which a client takes for content it cannot read
+    TEST_F(RasterHelperTest, aPointCloudTheHelperCannotReadIsAnItemErrorOfPdal)
+    {
+        Entry cloud;
+        EXPECT_THROW(parseEntry(touch("unreadable.laz"), root_, cloud, false), PDALException);
+
+        initIndex(root_.string());
+        auto db = ddb::open(root_.string(), true);
+        AddOptions options;
+        options.stopOnError = false;
+        AddResult result;
+        addToIndexEx(db.get(), {(root_ / "unreadable.laz").string()}, options, result);
+        ASSERT_EQ(result.errors.size(), 1u);
+        EXPECT_EQ(result.errors[0].code, "PDAL");
+    }
+
     TEST_F(RasterHelperTest, theClientMapsEachFailureToItsException)
     {
         const auto codeOf = [&](const std::string &name) {

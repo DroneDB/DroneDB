@@ -568,6 +568,27 @@ namespace
         }
     }
 
+    // A cloud the raster helper cannot read stops the export as a point cloud that cannot be read did when
+    // libddb read the clouds with PDAL: a PDALException, which names the file
+    TEST(SplatTrainingExport, aCloudThatCannotBeReadIsTheFailureOfAPointCloud)
+    {
+        Exported e(TEST_NAME);
+        e.spec.cloud = OdmCloud::None;
+        e.write();
+        const fs::path las = e.project / "odm_georeferencing" / "odm_georeferenced_model.laz";
+        fs::create_directories(las.parent_path());
+        std::ofstream(las, std::ios::binary) << "not a point cloud";
+        try
+        {
+            e.run();
+            FAIL() << "no exception";
+        }
+        catch (const PDALException &ex)
+        {
+            EXPECT_NE(std::string(ex.what()).find("odm_georeferenced_model.laz"), std::string::npos) << ex.what();
+        }
+    }
+
     // ---- The georeference ----
 
     TEST(SplatTrainingExport, writesTheGeorefOfASplatTrainedFromIt)
