@@ -715,7 +715,8 @@ Registry has to adopt first.
   fraction -1 until it was done). `DDB_UNTWINE_PATH`, `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose
   between Untwine and PDAL's writers.copc in 2.5, are no longer read, and the packages have no Untwine.
 
-* 2026-11-15: next release (no export, schema or fixture change).
+* 2026-11-16: 2.7.0 (ABI 2.7: `capabilities` has `abi.minor` 7; no export is added or removed, no schema or
+  other fixture changes).
   The images that libddb renders itself, the region and index renders (`DDBRenderRasterRegionEx*`,
   `DDBRenderRasterIndex*`) and the thumbnails, are encoded by ddb-tilers with the encoders and rules of the tiles
   instead of GDAL's PNG, JPEG and WEBP drivers. A PNG decodes to the pixels of 2.6 and JPEG is the same bytes; an
@@ -745,3 +746,23 @@ Registry has to adopt first.
   xerces-c, eigen3, h3, nanoflann, rapidxml, crcpp, json-schema-validator) leave the packages. The diagnostics
   print the version of ddb-tilers instead of PDAL's. `PDALException` and the add error code "PDAL" stay: they
   are what a point cloud that cannot be read throws and reports, as before.
+  The rasters libddb reads in its process (the COG of a build, the copy of a user's raster that the raster helper
+  writes) are read by ddb-tilers instead of GDAL: the values, statistics, formulas, exports, region and index
+  renders and the sensor and thermal detections are those of 2.6 (checked against GDAL bit for bit), but a few:
+  the GeoTIFF of a region render (WCS) is DEFLATE-compressed (smaller files, the same samples); a raster whose CRS
+  is a WKT that is not its authority's definition can differ by one float step in one sample per render; and
+  rasters of 1-bit, Float16 and 64-bit integer samples are read, rendered and exported where 2.6 failed on them.
+  The operations on users' rasters run in the raster helper on the file of the user, instead of GDAL in the
+  process of libddb on a normalized copy of it, which is no longer written: the mask of borders
+  (`DDBMaskBorders*`), the photos of the training export of splats, the multispectral merge, its preview and
+  validation (`DDB*MergeMultispectral*`) and the alignment and its validation (`DDBAlignRaster*`,
+  `DDBValidateAlignRaster`). Their outputs are those of 2.6 byte for byte. A raster helper of protocol 1.3 is
+  required (operations `mask`, `rasterShapes`, `resizeImages`, `mergeBands`, `mergePreview`, `align`,
+  `alignValidation`; error kind `invalid`, which keeps `DDBERR_INVALIDARGS` for the arguments an operation
+  refuses). The mask of a raster of one band of more than 8 bits (a DEM, a thermal raster) keeps its type and
+  every sample, with the mask nearblack computes from them and NoData masked too (2.6 cut the samples to 8 bits,
+  and failed on Float32 and Float64); its border colour is one number. The message of a mask GDAL cannot write
+  names the output by its file. The scratch rasters of an alignment are written in a private folder beside its
+  output instead of the cache. The process of libddb opens no raster with GDAL.
+  The 3D Tiles of models are built by Obj2Tiles v1.10.0, whose KTX2 encoder (libktx 5.0.0-rc2) no longer hangs at
+  the end of a multi-threaded encode.

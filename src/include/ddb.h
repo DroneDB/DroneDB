@@ -127,7 +127,9 @@ extern "C"
      * is missing from a 2.0 library, so a host checks DDBGetAbiVersion() for 2.4 (0x00020004) before it calls
      * them or sets them, and the DDBGetCapabilities() "symbols" tell which exports the library has. ABI 2.5
      * (libddb 2.5.0) adds DDBMemoryTileEx3, DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (0x00020005).
-     * ABI 2.6 (libddb 2.6.0, 0x00020006) adds no export: the DDBConfigure setting "artefactCacheMb". */
+     * ABI 2.6 (libddb 2.6.0, 0x00020006) adds no export: the DDBConfigure setting "artefactCacheMb".
+     * ABI 2.7 (libddb 2.7.0, 0x00020007) adds no export: the renders, reads and operations of rasters through
+     * ddb-tilers and the raster helper (protocol 1.3). */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
