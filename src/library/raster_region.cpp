@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "copied_metadata.h"
 #include "cancellation.h"
 #include "stringutil.h"
 #include "coordstransformer.h"
@@ -222,11 +223,22 @@ namespace ddb
             return std::nullopt;
         }
 
+        // Hands the caller the bytes of `image` written as a GeoTIFF (in a private folder, written whole)
+        void writeTiffBytes(const tilers::WarpedImage &image, const tilers::GeoTiffOptions &options,
+                            const std::string &label, uint8_t **outBytes, int *outSize)
+        {
+            const io::ScopedTempDir folder = io::ScopedTempDir::create(fs::temp_directory_path(), "ddb-render-");
+            const fs::path out = folder.path() / "render.tif";
+            tilers::writeGeoTiff(image, out, options);
+            takeFileBytes(out, outBytes, outSize, label);
+        }
+
         // Writes the RGBA pixels of a render in the format of the request: composited over `background`
-        // when it is set, then given as they are for kRgbaPixelsFormat, else encoded (an alpha that is
-        // 255 everywhere is not written)
+        // when it is set, then given as they are for kRgbaPixelsFormat, a TIFF of them for a GeoTIFF (the
+        // pixels of a render have no georeferencing: GDAL's GTiff copy of them, uncompressed, its fourth
+        // band alpha), else encoded (an alpha that is 255 everywhere is not written)
         void writeRgba(VsiFreePtr<GByte> rgba, int width, int height, const std::optional<RgbColor> &background,
-                       const FormatInfo &fi, uint8_t **outBytes, int *outSize)
+                       const FormatInfo &fi, const std::string &label, uint8_t **outBytes, int *outSize)
         {
             const size_t pixels = static_cast<size_t>(width) * height;
             if (background)
@@ -235,6 +247,24 @@ namespace ddb
             {
                 *outBytes = rgba.release();
                 *outSize = static_cast<int>(pixels * 4);
+                return;
+            }
+            if (fi.geoTiff())
+            {
+                tilers::WarpedImage image;
+                image.width = width;
+                image.height = height;
+                image.dataType = "Byte";
+                image.colorInterp = {"Red", "Green", "Blue", "Alpha"};
+                image.alphaBand = 4;
+                image.pixels.resize(pixels * 4);
+                for (size_t i = 0; i < pixels; i++)
+                    for (size_t b = 0; b < 4; b++)
+                        image.pixels[b * pixels + i] = rgba.get()[i * 4 + b];
+                rgba.reset();
+                tilers::GeoTiffOptions options;
+                options.compress = false;
+                writeTiffBytes(image, options, label, outBytes, outSize);
                 return;
             }
             TileEncoder::encode(InterleavedImage{rgba.get(), width, height, 4}, {fi.image}, outBytes, outSize);
@@ -282,7 +312,7 @@ namespace ddb
 
             VsiFreePtr<GByte> rgba = readRgba(image, bands, request.inputPath);
             image = {};
-            writeRgba(std::move(rgba), width, height, background, fi, outBytes, outSize);
+            writeRgba(std::move(rgba), width, height, background, fi, request.inputPath, outBytes, outSize);
         }
 
         // Fails unless every requested band exists in the source (none requested: all do)
@@ -486,12 +516,12 @@ namespace ddb
             if (b != warped.alphaBand)
                 warped.colorInterp[static_cast<size_t>(b - 1)] =
                     raster->band(bands.empty() ? b : bands[static_cast<size_t>(b - 1)]).colorInterp;
-        // The GeoTIFF of the warp, written whole in a private folder, then handed over
-        const io::ScopedTempDir folder = io::ScopedTempDir::create(fs::temp_directory_path(), "ddb-render-");
-        const fs::path out = folder.path() / "render.tif";
-        tilers::writeGeoTiff(warped, tSrs, out);
-        warped = {};
-        takeFileBytes(out, outBytes, outSize, inputPath);
+        // The GeoTIFF of the warp, with what gdalwarp copies from the raster (the alpha band is the one it
+        // adds: asked for, or that of a raster with one)
+        tilers::GeoTiffOptions tiff;
+        tiff.crs = tSrs;
+        tiff.metadata = warpedMetadata(*rasterSourceOf(*raster), bands, warped.bandCount(), warped.alphaBand > 0);
+        writeTiffBytes(warped, tiff, inputPath, outBytes, outSize);
     }
 
     // ---------------------------------------------------------------------
@@ -877,7 +907,8 @@ namespace ddb
         if (!pixels)
             throw std::bad_alloc();
         std::memcpy(pixels.get(), rgba.data(), rgba.size());
-        writeRgba(std::move(pixels), width, height, imageBackground(fi, request, true), fi, outBytes, outSize);
+        writeRgba(std::move(pixels), width, height, imageBackground(fi, request, true), fi, request.inputPath, outBytes,
+                  outSize);
     }
 
 } // namespace ddb

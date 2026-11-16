@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "cancellation.h"
+#include "copied_metadata.h"
 #include "dem.h"
 #include "exceptions.h"
 #include "json.h"
@@ -278,10 +279,11 @@ struct TileFill
 struct ExportLayout
 {
     std::vector<std::string> colorInterp;  // one per band
-    std::vector<std::string> descriptions; // one per band ("" for none), or none
+    CopiedMetadata metadata;               // what it copies from its source (descriptions among it)
     std::optional<double> nodata;
     bool mask = false;                     // an internal mask, filled after the bands of each pixel
     int predictor = 2;                     // the horizontal differencing of DEFLATE (1: none)
+    std::vector<std::array<uint8_t, 4>> colorTable;  // of band 1 (RGBA), empty when it has none
 };
 
 // Writes the export of the part of the source: the tiles the filler computes, a tiled DEFLATE GeoTIFF with the
@@ -299,8 +301,9 @@ void writeExport(const RasterExport &request, const ExportSource &src, const Sou
                     {"overviewFactors", overviewFactorsOf(part.width, part.height)}};
     if (layout.nodata)
         options["nodata"] = std::isnan(*layout.nodata) ? json("nan") : json(*layout.nodata);
-    if (!layout.descriptions.empty())
-        options["descriptions"] = layout.descriptions;
+    layout.metadata.addTo(options);
+    if (!layout.colorTable.empty())
+        options["colorTable"] = layout.colorTable;
     if (layout.mask)
         options["mask"] = true;
     const tilers::Raster &raster = src.raster();
@@ -345,7 +348,7 @@ void writeRgba(const RasterExport &request, const ExportSource &src, const Sourc
             std::memcpy(out + static_cast<size_t>(row) * stride, rgba.data() + static_cast<size_t>(row) * rowBytes,
                         rowBytes);
     };
-    writeExport(request, src, part, tileSize, ExportLayout{{"Red", "Green", "Blue", "Alpha"}, {}, std::nullopt, false, 2},
+    writeExport(request, src, part, tileSize, ExportLayout{{"Red", "Green", "Blue", "Alpha"}, {}, std::nullopt, false, 2, {}},
                 filler, session);
 }
 
@@ -528,13 +531,19 @@ void exportBands(const RasterExport &request, ExportSession &session, const Expo
             plan.offset = -1 * lo * plan.ratio + 0.0;
             plan.linear = plan.offset != 0.0 || plan.ratio != 1.0;
         }
-        // gdal_translate copies the colour interpretation and the description of each band
+        // gdal_translate copies the colour interpretation of each band (its other information: below)
         layout.colorInterp.push_back(source.colorInterp(b));
-        layout.descriptions.push_back(source.description(b));
         plans.push_back(plan);
     }
+    const bool wholeExtent = part.x == 0 && part.y == 0 && part.width == source.width() && part.height == source.height();
+    layout.metadata = translatedMetadata(source, selected, scale, wholeExtent);
     // gdal_translate's MASK_AUTO: a source whose first band has a dataset mask (not alpha, not NoData) keeps it
     layout.mask = detectBandNodata(source, source.bandCount()).datasetMask;
+    // and the colour table of band 1, which GTiff writes for a raster of 1 or 2 bands. ddb-tilers averages the
+    // overviews of a palette band as GDAL does when they are computed each from the level above, which GDAL
+    // does not do beside an internal mask: a palette raster with a mask is exported without its table
+    if (selected.front() == 1 && selected.size() <= 2 && !layout.mask)
+        layout.colorTable = src.raster().band(1).colorTable;
 
     const int bandCount = static_cast<int>(plans.size());
     const int samples = bandCount + (layout.mask ? 1 : 0);

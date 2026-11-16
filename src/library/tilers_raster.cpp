@@ -350,7 +350,7 @@ namespace ddb::tilers
         return image;
     }
 
-    void writeGeoTiff(const WarpedImage &image, const std::string &crs, const fs::path &output)
+    void writeGeoTiff(const WarpedImage &image, const fs::path &output, const GeoTiffOptions &geoTiff)
     {
         // Floating-point samples (Float16 among them) with the floating-point predictor
         const bool floating = GDALDataTypeIsFloating(dataTypeOf(image.dataType)) != 0;
@@ -358,10 +358,14 @@ namespace ddb::tilers
                         {"height", image.height},
                         {"type", image.dataType},
                         {"colorInterp", image.colorInterp},
-                        {"geoTransform", image.geoTransform},
-                        {"crs", crs},
-                        {"codec", "deflate"},
-                        {"predictor", floating ? 3 : 2}};
+                        {"codec", geoTiff.compress ? "deflate" : "none"},
+                        {"predictor", !geoTiff.compress ? 1 : floating ? 3 : 2}};
+        if (!geoTiff.crs.empty())
+        {
+            options["geoTransform"] = image.geoTransform;
+            options["crs"] = geoTiff.crs;
+        }
+        geoTiff.metadata.addTo(options);
         if (image.nodata)
             options["nodata"] = std::isnan(*image.nodata) ? json("nan") : json(*image.nodata);
         if (!image.colorTable.empty())
