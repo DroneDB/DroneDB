@@ -116,7 +116,7 @@ class VectorEntryHandler : public EntryHandler {
     // sentinel files rather than a directory scan, since both artifacts are always
     // co-produced and uniquely identify a complete build. A local CAD drawing (no CRS) has no
     // MVT: vec/local.json replaces mvt/metadata.json as the second sentinel.
-    bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {
+    bool isComplete(const Entry& /*e*/, const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {
         return fileExistsAndNonEmpty(baseOutputPath / VectorBuildSubfolder / VectorGpkgFileName) &&
                (fileExistsAndNonEmpty(baseOutputPath / MvtBuildSubfolder / MvtMetadataFileName) ||
                 fileExistsAndNonEmpty(baseOutputPath / VectorBuildSubfolder / VectorLocalFileName));

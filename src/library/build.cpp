@@ -181,7 +181,7 @@ bool isBuildable(Database* db, const std::string& path) {
 // isBuildComplete() for a resolved target. For dependencies, completeness is
 // defined by the main file's artifacts.
 static bool isTargetBuildComplete(const fs::path& buildDirectory, const BuildTarget& target) {
-    return target.handler->isComplete(buildDirectory / io::fromUtf8(target.key));
+    return target.handler->isComplete(target.entry, buildDirectory / io::fromUtf8(target.key));
 }
 
 bool isBuildComplete(Database* db, const std::string& path) {

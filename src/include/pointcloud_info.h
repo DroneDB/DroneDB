@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "basicgeometry.h"
+#include "pointcloud_crs.h"
 
 namespace ddb
 {
@@ -23,9 +24,15 @@ namespace ddb
         BasicPointGeometry centroid;
         BasicPolygonGeometry polyBounds;
         /// Why polyBounds and centroid are empty although the file has a coordinate reference
-        /// system and bounds (a CRS that has no transformation to EPSG:4326, for one); "" otherwise.
+        /// system and bounds (a CRS that has no transformation to EPSG:4326, for one; for a CRS the
+        /// coordinates do not fit, the warning of PointCloudCrsPolicy::classify); "" otherwise.
         /// The native bounds are kept: a build needs no footprint. Not part of the properties JSON.
         std::string footprintWarning;
+        /// What the CRS of the file is, checked against its bounds (PointCloudCrsPolicy::classify)
+        PointCloudCrsStatus crsStatus = PointCloudCrsStatus::None;
+        /// The CRS its COPC is built in (PointCloudCrsPolicy::target), "" to keep the CRS of the
+        /// file. Set for the file of a user (readPointCloudInfo), not for a COPC (getCopcInfo).
+        std::string targetCrs;
     };
 }
 

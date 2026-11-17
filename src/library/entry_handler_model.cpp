@@ -114,7 +114,7 @@ class ModelEntryHandler : public EntryHandler {
     // an identifiable interrupted tiles swap (usable backup and missing/incomplete final):
     // it is reported incomplete so the normal completeness sweep can enqueue recovery
     // without rebuilding bm3d/. A model with only the legacy nxs/ is incomplete: it is rebuilt.
-    bool isComplete(const fs::path& baseOutputPath, bool reportRecoverable) const override {
+    bool isComplete(const Entry& /*e*/, const fs::path& baseOutputPath, bool reportRecoverable) const override {
         if (reportRecoverable && hasRecoverableModel3DTilesSwap(baseOutputPath / Tiles3DBuildSubfolder))
             return false;
         return directoryHasNonEmptyContent(baseOutputPath / Bm3dBuildSubfolder);

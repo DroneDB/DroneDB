@@ -566,6 +566,9 @@ namespace ddb
                 out["polygonGeom"] = polygonGeometryJson(info.polyBounds);
             if (!info.footprintWarning.empty())
                 out["warning"] = cutAtCharacter(info.footprintWarning, kMaxMessageBytes);
+            out["crsStatus"] = toString(info.crsStatus);
+            if (!info.targetCrs.empty())
+                out["targetCrs"] = info.targetCrs;
             return out;
         }
 
@@ -614,6 +617,17 @@ namespace ddb
                 if (!warning->is_string())
                     throw ProtocolError("'warning' is not a string");
                 out.footprintWarning = cutAtCharacter(warning->get<std::string>(), kMaxMessageBytes);
+            }
+            const json &status = required(result, "crsStatus");
+            const auto parsedStatus = status.is_string() ? parsePointCloudCrsStatus(status.get<std::string>()) : std::nullopt;
+            if (!parsedStatus)
+                throw ProtocolError("'crsStatus' is not a status of a coordinate system");
+            out.crsStatus = *parsedStatus;
+            if (const json *target = member(result, "targetCrs"))
+            {
+                if (!target->is_string())
+                    throw ProtocolError("'targetCrs' is not a string");
+                out.targetCrs = target->get<std::string>();
             }
             return out;
         }
@@ -870,6 +884,8 @@ namespace ddb
             json result = json::object();
             setInputs(result, params.inputs);
             setBuildThreads(result, params.threads);
+            if (!params.targetCrs.empty())
+                result["targetCrs"] = params.targetCrs;
             return result;
         }
 
@@ -880,7 +896,48 @@ namespace ddb
             CopcParams result;
             result.inputs = getInputs(params);
             result.threads = buildThreadsFromJson(params);
+            if (const json *target = member(params, "targetCrs"))
+            {
+                if (!target->is_string())
+                    throw ProtocolError("'targetCrs' is not a string");
+                result.targetCrs = target->get<std::string>();
+            }
             return result;
+        }
+
+        json toJson(const CopcResult &result)
+        {
+            json out = {{"transformed", result.transformed}, {"warnings", result.warnings}};
+            if (result.maxNodePoints)
+                out["maxNodePoints"] = *result.maxNodePoints;
+            return out;
+        }
+
+        CopcResult copcResultFromJson(const json &result)
+        {
+            if (!result.is_object())
+                throw ProtocolError("the copc result is not an object");
+            CopcResult out;
+            const json &transformed = required(result, "transformed");
+            if (!transformed.is_boolean())
+                throw ProtocolError("'transformed' is not a boolean");
+            out.transformed = transformed.get<bool>();
+            if (const json *points = member(result, "maxNodePoints"))
+            {
+                if (!points->is_number_unsigned())
+                    throw ProtocolError("'maxNodePoints' is not a count");
+                out.maxNodePoints = points->get<uint64_t>();
+            }
+            const json &warnings = required(result, "warnings");
+            if (!warnings.is_array())
+                throw ProtocolError("'warnings' is not an array");
+            for (const auto &w : warnings)
+            {
+                if (!w.is_string())
+                    throw ProtocolError("a warning is not a string");
+                out.warnings.push_back(cutAtCharacter(w.get<std::string>(), kMaxMessageBytes));
+            }
+            return out;
         }
 
         json toJson(const RasterShapesParams &params)

@@ -129,7 +129,9 @@ extern "C"
      * (libddb 2.5.0) adds DDBMemoryTileEx3, DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (0x00020005).
      * ABI 2.6 (libddb 2.6.0, 0x00020006) adds no export: the DDBConfigure setting "artefactCacheMb".
      * ABI 2.7 (libddb 2.7.0, 0x00020007) adds no export: the renders, reads and operations of rasters through
-     * ddb-tilers and the raster helper (protocol 1.3). */
+     * ddb-tilers and the raster helper (protocol 1.3).
+     * libddb 2.8.0 adds no export: point clouds in any CRS (the raster helper of protocol 1.4, the "crsStatus"
+     * property of a point cloud entry, the "crs" of the pointcloud.copc artifact). */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -514,6 +516,16 @@ extern "C"
      * @param geometry type of geometry to return when format is "geojson". One of: ["auto", "point" or "polygon"]
      * @param withHash whether to compute SHA256 hashes
      * @param stopOnError whether to stop on failure
+     * The properties of a point cloud entry: "pointCount", "projection" (the CRS the file states,
+     * WKT; "" without one), "dimensions" and (new in 2.8) "crsStatus": "projected", "geographic",
+     * "geocentric", "local" (an engineering CRS), "none" or "implausible". A CRS is implausible when the
+     * coordinates do not fit it (a geographic CRS with x outside [-180, 180] or y outside [-90, 90],
+     * a geocentric one whose corners are not 6,300 to 6,420 km from the centre of the earth, a
+     * projected one far outside its area of use): the entry is handled as having no CRS (no
+     * footprint, its COPC is not transformed) and "warning" is "coordinate system ignored: the
+     * coordinates do not fit <name of the CRS>". The footprint of a geocentric cloud is transformed
+     * in 3-D. A footprint that is not a longitude/latitude envelope is left out, with "warning"
+     * "footprint unavailable: <why>".
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth,
                            const char *geometry, bool withHash, bool stopOnError);
@@ -944,6 +956,12 @@ extern "C"
      *  Reports whether the build artifacts for the given entry exist and have
      *  non-zero content. Returns false for non-buildable entries, missing
      *  outputs, or empty stub folders left by interrupted builds.
+     *  Changed in 2.8: the COPC of a point cloud whose CRS is geographic or geocentric (its
+     *  "crsStatus" property, or for an entry indexed before 2.8 the kind of its "projection") is
+     *  complete only when it was built in a projected CRS (the record "copc/build.json" beside it
+     *  says so): a COPC built before 2.8 is incomplete, and the next DDBBuild without force builds it
+     *  again; the old COPC is served until the new one replaces it. Other point clouds are not
+     *  affected.
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param path Entry path (see "Entry paths") to check
      * @param isBuildComplete out: true if build output is complete and valid
@@ -992,7 +1010,7 @@ extern "C"
      *                    removes it (downloadable)
      *
      * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?,
-     *              "version"}
+     *              "version", "crs"?}
      *   path          relative to the build root ("root" below), '/'-separated; URLs append it
      *                 to ".../build/{hash}/" and DDBResolveBuildFile takes it
      *   kind          "file", or "dir" for a directory (index names its descriptor file; its
@@ -1015,6 +1033,16 @@ extern "C"
      *                 of the artifact and let clients keep what such a URL returns while it is
      *                 the version DDBResolveBuildFile gives. Empty only when the file went away
      *                 while it was read
+     *   crs           (new in 2.8) pointcloud.copc only, when the COPC has a CRS: {"name": "WGS 84 /
+     *                 UTM zone 33N", "epsg": 32633 or null, "transformed": bool}, the CRS of the
+     *                 COPC file (as its header states it). transformed is true when the build
+     *                 transformed the points of the source to it: the COPC of a geographic or
+     *                 geocentric cloud is built in a metric projected CRS (UTM of its centre, on the
+     *                 datum of the cloud when EPSG has one; UPS near the poles; a transverse Mercator
+     *                 centred on a cloud wider than a UTM zone; a compound source keeps its vertical
+     *                 CRS, a geocentric or 3-D geographic one gets the ellipsoidal height). epsg is
+     *                 null for a CRS without a code (a compound CRS, a centred transverse Mercator, a
+     *                 3-D UTM). The source file and the properties of its entry are not changed
      *
      * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
      *   {"buildable": bool, "source": string|null, "hash": string|null, "key": string|null, "root": string|null,

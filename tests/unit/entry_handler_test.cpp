@@ -14,11 +14,15 @@
 
 #include "build.h"
 #include "build_layout.h"
+#include "build_manifest.h"
 #include "dbops.h"
 #include "entry.h"
 #include "entry_handler.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "gtest/gtest.h"
+#include "json.h"
+#include "pointcloud.h"
 #include "test.h"
 #include "testarea.h"
 #include "thumbs.h"
@@ -299,7 +303,7 @@ TEST(entryHandler, CompletenessRules) {
     TestArea ta(TEST_NAME, true);
     const fs::path base = ta.getFolder("hash");
 
-    const auto complete = [&](EntryType t) { return entryHandler(t).isComplete(base); };
+    const auto complete = [&](EntryType t) { return entryHandler(t).isComplete(Entry(), base); };
 
     // Folder types: an empty folder is incomplete, any non-empty file completes it
     fs::create_directories(base / "cog");
@@ -328,6 +332,114 @@ TEST(entryHandler, CompletenessRules) {
 
     // Not built: never complete
     EXPECT_FALSE(complete(EntryType::Image));
+}
+
+namespace {
+
+std::string wktOfEpsg(int code) {
+    const SrsPtr srs = srsFromEpsg(code);
+    EXPECT_TRUE(srs) << code;
+    char* wkt = nullptr;
+    srsOf(srs).exportToWkt(&wkt);
+    return takeGdalString(wkt);
+}
+
+Entry pointCloudEntry(json properties) {
+    Entry e;
+    e.type = EntryType::PointCloud;
+    e.properties = std::move(properties);
+    return e;
+}
+
+}  // namespace
+
+// The COPC of a point cloud completes its build, unless the cloud is geographic or geocentric: then
+// its COPC has to be built under the current CRS policy (the build record beside it says so), and a
+// COPC built before, in degrees, is built again. The status comes from the index; an entry indexed
+// before it was recorded has the kind of its CRS.
+TEST(entryHandler, TheCopcOfAGeographicCloudIsCompleteOnlyWhenBuiltUnderTheCrsPolicy) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path base = ta.getFolder("hash");
+    const EntryHandler& handler = entryHandler(EntryType::PointCloud);
+
+    const std::string utm = wktOfEpsg(32633);
+    const std::string wgs84 = wktOfEpsg(4326);
+    const std::string geocentric = wktOfEpsg(4978);
+    const Entry projected = pointCloudEntry({{"projection", utm}, {"crsStatus", "projected"}});
+    const Entry geographic = pointCloudEntry({{"projection", wgs84}, {"crsStatus", "geographic"}});
+    const Entry indexedBefore = pointCloudEntry({{"projection", wgs84}, {"pointCount", 3}});
+    const Entry ecef = pointCloudEntry({{"projection", geocentric}, {"crsStatus", "geocentric"}});
+    const Entry implausible = pointCloudEntry({{"projection", geocentric}, {"crsStatus", "implausible"}});
+    const Entry projectedBefore = pointCloudEntry({{"projection", utm}});
+    const Entry local = pointCloudEntry({{"projection", ""}, {"crsStatus", "none"}});
+    const std::vector<const Entry*> all = {&projected, &geographic, &indexedBefore, &ecef,
+                                           &implausible, &projectedBefore, &local};
+
+    for (const Entry* e : all)
+        EXPECT_FALSE(handler.isComplete(*e, base)) << "no COPC";
+
+    // A COPC of an older build: no record
+    writeFile(base / "copc" / "cloud.copc.laz", "x");
+    EXPECT_TRUE(handler.isComplete(projected, base));
+    EXPECT_TRUE(handler.isComplete(projectedBefore, base));
+    EXPECT_TRUE(handler.isComplete(local, base));
+    EXPECT_TRUE(handler.isComplete(implausible, base)) << "handled as no CRS: never transformed";
+    EXPECT_FALSE(handler.isComplete(geographic, base));
+    EXPECT_FALSE(handler.isComplete(indexedBefore, base));
+    EXPECT_FALSE(handler.isComplete(ecef, base));
+
+    // A record of an older policy, or one that is not a record
+    const fs::path record = base / "copc" / CopcBuildRecordFileName;
+    writeFile(record, R"({"crsPolicy": 0, "sourceCrs": "", "copcCrs": "", "transformed": false})");
+    EXPECT_FALSE(handler.isComplete(geographic, base));
+    writeFile(record, "not json");
+    EXPECT_FALSE(handler.isComplete(geographic, base));
+
+    // The record of a build under the current policy
+    CopcBuildRecord current;
+    current.sourceCrs = wgs84;
+    current.copcCrs = utm;
+    current.transformed = true;
+    writeCopcBuildRecord(record, current);
+    for (const Entry* e : all)
+        EXPECT_TRUE(handler.isComplete(*e, base));
+    const auto back = readCopcBuildRecord(record);
+    ASSERT_TRUE(back.has_value());
+    EXPECT_EQ(back->crsPolicy, 1);
+    EXPECT_EQ(back->copcCrs, utm);
+    EXPECT_TRUE(back->transformed);
+}
+
+// The manifest names the CRS of a COPC: the one its build recorded, else the CRS of the cloud
+TEST(entryHandler, TheCopcArtifactNamesItsCrs) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path base = ta.getFolder("hash");
+    const EntryHandler& handler = entryHandler(EntryType::PointCloud);
+    writeFile(base / "copc" / "cloud.copc.laz", "x");
+    const auto describe = [&](const Entry& e) {
+        std::vector<BuildArtifact> artifacts = {handler.artifacts().front()};
+        handler.describeArtifacts(e, base, artifacts);
+        return json(artifacts.front());
+    };
+
+    // Built before the record: the CRS of the cloud, not transformed
+    json copc = describe(pointCloudEntry({{"projection", wktOfEpsg(32632)}, {"crsStatus", "projected"}}));
+    EXPECT_EQ(copc["role"], "pointcloud.copc");
+    EXPECT_EQ(copc["crs"], (json{{"name", "WGS 84 / UTM zone 32N"}, {"epsg", 32632}, {"transformed", false}}));
+    // A cloud without a CRS: no member
+    EXPECT_FALSE(describe(pointCloudEntry({{"projection", ""}})).contains("crs"));
+
+    // The record of a build that transformed the points
+    CopcBuildRecord record;
+    record.sourceCrs = wktOfEpsg(4326);
+    record.copcCrs = wktOfEpsg(32633);
+    record.transformed = true;
+    writeCopcBuildRecord(base / "copc" / CopcBuildRecordFileName, record);
+    copc = describe(pointCloudEntry({{"projection", record.sourceCrs}, {"crsStatus", "geographic"}}));
+    EXPECT_EQ(copc["crs"], (json{{"name", "WGS 84 / UTM zone 33N"}, {"epsg", 32633}, {"transformed", true}}));
+
+    // Other artifacts are not described
+    EXPECT_FALSE(json(entryHandler(EntryType::GeoRaster).artifacts().front()).contains("crs"));
 }
 
 TEST(entryHandler, ExtensionsBelongToOneType) {
@@ -371,7 +483,7 @@ class FakeEntryHandler : public EntryHandler {
         return {BuildArtifact::file("fake.out", "fake/out.txt", "text/plain", "out.txt")};
     }
 
-    bool isComplete(const fs::path& baseOutputPath, bool) const override {
+    bool isComplete(const Entry&, const fs::path& baseOutputPath, bool) const override {
         return fileExistsAndNonEmpty(baseOutputPath / "fake" / "out.txt");
     }
 

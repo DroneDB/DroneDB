@@ -16,6 +16,7 @@
       "mtime": 1700000000,
       "path": "file://<root>/site-contract.las",
       "properties": {
+        "crsStatus": "local",
         "dimensions": [
           "X",
           "Y",

@@ -105,8 +105,9 @@ namespace ddb
             // process one with the reason IdleTimeout.
             virtual void buildCog(const fs::path &path, const fs::path &out, const json &params,
                                   const ProgressCallback &progress) = 0;
-            // `path` is the first of the point clouds of the COPC, the others are in `params`
-            virtual void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+            // `path` is the first of the point clouds of the COPC, the others are in `params`.
+            // Returns the result of the operation (copcResultFromJson reads it).
+            virtual json buildCopc(const fs::path &path, const fs::path &out, const json &params,
                                    const ProgressCallback &progress) = 0;
             virtual void buildVector(const fs::path &path, const fs::path &out, const json &params,
                                      const ProgressCallback &progress) = 0;
@@ -191,7 +192,7 @@ namespace ddb
             void geoproject(const fs::path &path, const fs::path &out, const json &params) override;
             void buildCog(const fs::path &path, const fs::path &out, const json &params,
                           const ProgressCallback &progress) override;
-            void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+            json buildCopc(const fs::path &path, const fs::path &out, const json &params,
                            const ProgressCallback &progress) override;
             void buildVector(const fs::path &path, const fs::path &out, const json &params,
                              const ProgressCallback &progress) override;

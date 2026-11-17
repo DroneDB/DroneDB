@@ -141,9 +141,9 @@ class CountingProbe : public BuildProbe {
         calls["isLockHeld"]++;
         return BuildProbe::isLockHeld(outputFolder);
     }
-    bool isComplete(const EntryHandler& handler, const fs::path& root) const override {
+    bool isComplete(const EntryHandler& handler, const Entry& e, const fs::path& root) const override {
         calls["isComplete"]++;
-        return BuildProbe::isComplete(handler, root);
+        return BuildProbe::isComplete(handler, e, root);
     }
     std::string version(const fs::path& file) const override {
         calls["version"]++;
@@ -877,7 +877,7 @@ TEST(BuildManifest, AnExportedSplatIsListedWhileItExistsAndCleanupLeavesIt) {
     // An export is no model: without model.rad the build is not complete, and the export does not
     // stand in for it
     fs::remove(root / "gsplat" / "model.rad");
-    EXPECT_FALSE(handler.isComplete(root));
+    EXPECT_FALSE(handler.isComplete(Entry(), root));
     EXPECT_EQ(listed(), (Roles{"gsplat.export"}));
 }
 

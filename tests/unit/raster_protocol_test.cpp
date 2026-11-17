@@ -425,8 +425,12 @@ namespace
         info.bounds = {576662.6, 5188115.1, 156.0, 576767.5, 5188210.8, 169.4};
         info.polyBounds = footprint();
         info.centroid.addPoint(9.15, 45.25, 156.0);
+        info.crsStatus = PointCloudCrsStatus::Geographic;
+        info.targetCrs = "EPSG:32633";
 
         const PointCloudInfo back = raster::pointCloudInfoFromJson(json::parse(raster::pointCloudInfoJson(info).dump()));
+        EXPECT_EQ(back.crsStatus, PointCloudCrsStatus::Geographic);
+        EXPECT_EQ(back.targetCrs, "EPSG:32633");
         EXPECT_EQ(back.pointCount, info.pointCount);
         EXPECT_EQ(back.wktProjection, info.wktProjection);
         EXPECT_EQ(back.dimensions, info.dimensions);
@@ -444,9 +448,12 @@ namespace
         bare.dimensions = {"X", "Y", "Z"};
         bare.footprintWarning = "No coordinate transformation from Site to EPSG:4326";
         const json encoded = raster::pointCloudInfoJson(bare);
-        for (const char *member : {"wkt", "bounds", "pointGeom", "polygonGeom"})
+        for (const char *member : {"wkt", "bounds", "pointGeom", "polygonGeom", "targetCrs"})
             EXPECT_FALSE(encoded.contains(member)) << member;
+        EXPECT_EQ(encoded["crsStatus"], "none");
         const PointCloudInfo bareBack = raster::pointCloudInfoFromJson(encoded);
+        EXPECT_EQ(bareBack.crsStatus, PointCloudCrsStatus::None);
+        EXPECT_TRUE(bareBack.targetCrs.empty());
         EXPECT_TRUE(bareBack.bounds.empty());
         EXPECT_TRUE(bareBack.polyBounds.empty());
         EXPECT_EQ(bareBack.footprintWarning, bare.footprintWarning);
@@ -465,7 +472,7 @@ namespace
                 return true;
             }
         };
-        const json ok = {{"pointCount", 3}, {"dimensions", {"X", "Y", "Z"}}};
+        const json ok = {{"pointCount", 3}, {"dimensions", {"X", "Y", "Z"}}, {"crsStatus", "local"}};
         EXPECT_FALSE(refused(ok));
         EXPECT_TRUE(refused(json::array()));
         EXPECT_TRUE(refused({{"dimensions", {"X"}}}));                       // no count
@@ -488,6 +495,49 @@ namespace
         bad = ok;
         bad["warning"] = json::object();
         EXPECT_TRUE(refused(bad));
+        // The status of the CRS, which a helper of 1.4 always gives, and the target
+        bad = ok;
+        bad.erase("crsStatus");
+        EXPECT_TRUE(refused(bad));
+        bad["crsStatus"] = "Geographic";
+        EXPECT_TRUE(refused(bad));
+        bad["crsStatus"] = 1;
+        EXPECT_TRUE(refused(bad));
+        bad = ok;
+        bad["targetCrs"] = 32633;
+        EXPECT_TRUE(refused(bad));
+    }
+
+    TEST(RasterProtocol, theTargetCrsOfACopcAndItsResultSurviveEncodingAndDecoding)
+    {
+        raster::CopcParams params;
+        params.inputs = {io::fromUtf8("/data/b.laz")};
+        params.threads = 4;
+        params.targetCrs = "EPSG:6346+5703";
+        const raster::CopcParams back = raster::copcParamsFromJson(raster::toJson(params));
+        EXPECT_EQ(back.inputs, params.inputs);
+        EXPECT_EQ(back.threads, params.threads);
+        EXPECT_EQ(back.targetCrs, "EPSG:6346+5703");
+        // No target: the member is left out, and the COPC keeps the CRS of its clouds
+        EXPECT_FALSE(raster::toJson(raster::CopcParams()).contains("targetCrs"));
+        EXPECT_TRUE(raster::copcParamsFromJson(json::object()).targetCrs.empty());
+        EXPECT_THROW(raster::copcParamsFromJson({{"targetCrs", 32633}}), ProtocolError);
+
+        raster::CopcResult result;
+        result.transformed = true;
+        result.maxNodePoints = 214000;
+        result.warnings = {"degenerate octree: 2718009 points in one node"};
+        const raster::CopcResult resultBack = raster::copcResultFromJson(json::parse(raster::toJson(result).dump()));
+        EXPECT_TRUE(resultBack.transformed);
+        EXPECT_EQ(resultBack.maxNodePoints, std::optional<uint64_t>(214000));
+        EXPECT_EQ(resultBack.warnings, result.warnings);
+        EXPECT_FALSE(raster::copcResultFromJson(raster::toJson(raster::CopcResult())).maxNodePoints.has_value());
+
+        for (const json &bad : {json::array(), json{{"warnings", json::array()}}, json{{"transformed", true}},
+                                json{{"transformed", 1}, {"warnings", json::array()}},
+                                json{{"transformed", true}, {"warnings", {1}}},
+                                json{{"transformed", true}, {"warnings", json::array()}, {"maxNodePoints", -1}}})
+            EXPECT_THROW(raster::copcResultFromJson(bad), ProtocolError) << bad.dump();
     }
 
     TEST(RasterProtocol, theParamsOfAProbeSurviveEncodingAndDecoding)

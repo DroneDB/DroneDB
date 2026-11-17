@@ -103,7 +103,7 @@ class GaussianSplatEntryHandler : public EntryHandler {
                                     GsplatMediaType, GsplatExportFileName)};
     }
 
-    bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {
+    bool isComplete(const Entry& /*e*/, const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {
         return fileExistsAndNonEmpty(baseOutputPath / GsplatBuildSubfolder / GsplatRadFileName);
     }
 

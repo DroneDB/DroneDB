@@ -78,7 +78,7 @@ class Tiles3DEntryHandler : public EntryHandler {
                                          TilesetFileName)};
     }
 
-    bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {
+    bool isComplete(const Entry& /*e*/, const fs::path& baseOutputPath, bool /*reportRecoverable*/) const override {
         return fileExistsAndNonEmpty(baseOutputPath / Tiles3DBuildSubfolder / TilesetFileName);
     }
 

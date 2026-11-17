@@ -147,7 +147,14 @@ namespace
         cloud.pointCount = 7;
         cloud.wktProjection = "WKT";
         cloud.dimensions = {"X", "Y"};
-        EXPECT_EQ(json(cloud), (json{{"pointCount", 7}, {"projection", "WKT"}, {"dimensions", json::array({"X", "Y"})}}));
+        EXPECT_EQ(json(cloud), (json{{"pointCount", 7},
+                                     {"projection", "WKT"},
+                                     {"dimensions", json::array({"X", "Y"})},
+                                     {"crsStatus", "none"}}));
+        cloud.crsStatus = PointCloudCrsStatus::Geographic;
+        cloud.targetCrs = "EPSG:32633";
+        EXPECT_EQ(json(cloud)["crsStatus"], "geographic");
+        EXPECT_FALSE(json(cloud).contains("targetCrs")) << "how the COPC is built is not a property of the file";
 
         GaussianSplatInfo splat;
         splat.splatCount = 5;

@@ -130,8 +130,8 @@ class BuildProbe {
     virtual std::optional<PendingMarker> readPendingMarker(const fs::path& path) const;
     // BuildLock::isHeld(outputFolder): never reclaims a stale lock
     virtual bool isLockHeld(const fs::path& outputFolder) const;
-    // handler.isComplete(root): the rule of isBuildComplete() and getBuildStatus()
-    virtual bool isComplete(const EntryHandler& handler, const fs::path& root) const;
+    // handler.isComplete(e, root): the rule of isBuildComplete() and getBuildStatus()
+    virtual bool isComplete(const EntryHandler& handler, const Entry& e, const fs::path& root) const;
     // buildFileVersion(file): the version of an artifact that exists
     virtual std::string version(const fs::path& file) const;
 };

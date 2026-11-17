@@ -90,6 +90,7 @@ with ddb).
 | `raster-metadata` | `DDBGetRasterMetadata(<root>/ortho.tif, NULL, NULL)`: per-band statistics | `raster-metadata` | - |
 | `raster-metadata-formula` | `DDBGetRasterMetadata(<root>/ortho.tif, "VARI", "RGB")`: formula statistics and histogram | `raster-metadata` | - |
 | `build-artifacts` | `DDBBuild(<root>, "ortho.tif")`, then `DDBGetBuildArtifacts` of a built (COG), two buildable and not built, a non-buildable file, a folder and a missing path (see [Build manifest](#build-manifest)) | `build-artifacts` | - |
+| `build-artifacts-pointcloud` | `DDBBuild(<root>, "cloud.las")`, then `DDBGetBuildArtifacts(<root>, ["cloud.las"])`: the `crs` of the `pointcloud.copc` artifact (see [Build manifest](#build-manifest)) | `build-artifacts` | `version` |
 | `build-artifacts-pending` | The `pending-build-info` dataset (`roads.shp` deferred), then `DDBGetBuildArtifacts(<root>, ["roads.shp"])` | `build-artifacts` | `lastAttempt`, `retryAfter` |
 | `list-entries-ex` | `DDBBuild(<root>, "ortho.tif")`, then `DDBListEntriesEx(<root>, "", "", "", {recursive=true, withDetails=false, withBuild=true})` | `list-entries-ex` | - |
 | `resolve-build-file` | `DDBResolveBuildFile(<root>, <hash of ortho.tif>, "cog/cog.tif")` after its build: an object with the absolute `path` and the artifact's `mediaType` | `build-file` | - |
@@ -168,6 +169,12 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   not empty): no timer retries that build, adding one of the files releases it. It is the
   `awaitingFiles` of `DDBGetPendingBuildInfo`, and false without a marker, so a host reads the
   flag and does not derive it from `state` and `missingDependencies`.
+* `crs` (2.8.0) is on the `pointcloud.copc` artifact when the COPC has a CRS:
+  `{"name": "WGS 84 / UTM zone 33N", "epsg": 32633, "transformed": true}`, the CRS of the COPC file
+  (`epsg` null for a CRS without a code: a compound CRS, a centred transverse Mercator, a 3-D UTM),
+  and whether the build transformed the points of the source to it (the COPC of a geographic or
+  geocentric cloud is built in a projected CRS). A host shows it ("built in ...") when
+  `transformed`, and reads the CRS itself from the COPC header as before.
 * `version` identifies the bytes of the file a client opens (the file, or the index of a
   directory) as they are now: lowercase hex, from the file's modification time, size and, on
   POSIX, device and inode, so it changes whenever a build rewrites or replaces that file under
@@ -797,3 +804,16 @@ Registry has to adopt first.
   2.7.1: grey), and the COG of a palette raster beside an alpha band or with an internal mask keeps its table
   (2.6.0 to 2.7.1 dropped it). The 3D Tiles of models are built by Obj2Tiles v1.10.2 (the same binaries as v1.10.1;
   its notices list libktx and the code it is built from).
+* Next release (2.8.0, no export added or removed): point clouds in any CRS. The entry `properties` of a point
+  cloud gain `crsStatus` (`projected`, `geographic`, `geocentric`, `local`, `none`, `implausible`; the `add`,
+  `list`, `list-entries`, `info-pointcloud`, `info-pointcloud-no-footprint`, `stac-item-collection` and
+  `stac-data-item-collection` fixtures have it), and the `pointcloud.copc` artifact gains `crs` (new fixture
+  `build-artifacts-pointcloud`; `build-artifacts.schema.json` has the member). A CRS the coordinates do not fit is
+  ignored: no footprint, `warning` "coordinate system ignored: the coordinates do not fit <name>". The COPC of a
+  geographic or geocentric cloud is built in a metric projected CRS (UTM of the centre of its footprint, on its
+  datum when EPSG has one; UPS near the poles; a centred transverse Mercator for a cloud wider than a zone; a
+  compound source keeps its vertical CRS in metres; a geocentric or 3-D geographic one the ellipsoidal height), with
+  `copc/build.json` beside it; such a COPC built before is incomplete for `DDBIsBuildComplete` and the build
+  objects, and is built again by the next `DDBBuild`. The footprint of a geocentric cloud is the envelope of its
+  points, transformed in 3-D. The raster helper speaks protocol 1.4 (`pointCloudInfo` gains `crsStatus` and
+  `targetCrs`, `copc` takes `targetCrs` and answers the octree its builder reports); a helper of 1.3 is refused.

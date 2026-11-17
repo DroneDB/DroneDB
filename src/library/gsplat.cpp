@@ -305,7 +305,7 @@ namespace ddb
         // The lock of the whole build of a splat is the one of its output folder: a build that runs
         // holds it until it has published gsplat/, and none starts while this export writes into it
         BuildLock lock(io::toUtf8(outputFolder));
-        if (!entryHandler(entry->type).isComplete(baseOutputPath))
+        if (!entryHandler(entry->type).isComplete(*entry, baseOutputPath))
             throw EntryNotFoundException("The Gaussian splat " + entryPath + " is not built: build it first");
 
         const fs::path exported = outputFolder / GsplatExportFileName;

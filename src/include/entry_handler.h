@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,6 +39,14 @@ struct FingerprintContext;
 
 enum class ArtifactKind { File, Directory };
 
+// The coordinate system of an artifact a client places on the map itself (a COPC): its name, its
+// EPSG code when it has one, and whether the build transformed the data of the entry to it
+struct ArtifactCrs {
+    std::string name;
+    std::optional<int> epsg;
+    bool transformed = false;
+};
+
 // The artifacts of a type are listed in the order of artifacts(), its primary output first:
 // the file thumbnails and tiles are made from.
 struct BuildArtifact {
@@ -63,6 +72,9 @@ struct BuildArtifact {
     // opens (openedPath()) as they are now, so it changes whenever a build rewrites it, also under
     // the same entry hash. Opaque; empty in the manifest of a type
     std::string version;
+    // Of an artifact that exists, when its handler describes it (EntryHandler::describeArtifacts):
+    // the CRS of the file. Nothing in the manifest of a type.
+    std::optional<ArtifactCrs> crs;
 
     // Not an aggregate on purpose: an artifact is made by file(), directory() and legacyFor(), so a
     // member added later has its default in one place instead of in every list of artifacts, and a
@@ -251,12 +263,19 @@ class EntryHandler {
     virtual bool usesTempFolder() const { return true; }
     // Repairs an interrupted publish under the build lock, before completeness is checked
     virtual void recoverOutput(const fs::path& /*baseOutputPath*/) const {}
-    // The artifacts in baseOutputPath ("<build root>/<key>") exist and are not empty.
+    // The artifacts of e (an entry of this type, with its properties) in baseOutputPath
+    // ("<build root>/<key>") exist, are not empty and are of the current layout: a handler may
+    // consider an older build of some entries incomplete, so that they are built again.
     // reportRecoverable: an output recoverOutput() would repair counts as incomplete.
     // The default: the output subfolder holds a non-empty file (the file names may vary by input).
-    virtual bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/ = true) const {
+    virtual bool isComplete(const Entry& /*e*/, const fs::path& baseOutputPath, bool /*reportRecoverable*/ = true) const {
         return buildable() && directoryHasNonEmptyContent(baseOutputPath / subfolder());
     }
+    // What the manifest says of the artifacts of e that exist in baseOutputPath, besides where they
+    // are (the CRS of a COPC): `artifacts` are the ones existingArtifacts() found. The default adds
+    // nothing.
+    virtual void describeArtifacts(const Entry& /*e*/, const fs::path& /*baseOutputPath*/,
+                                   std::vector<BuildArtifact>& /*artifacts*/) const {}
     virtual void build(const BuildContext& /*ctx*/) const {
         throw AppException(name_ + " entries are not built");
     }

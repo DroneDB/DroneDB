@@ -86,6 +86,8 @@ constexpr const char* Tiles3DBuildSubfolder = "3dtiles";
 
 constexpr const char* CogFileName = "cog.tif";
 constexpr const char* CopcFileName = "cloud.copc.laz";
+// Beside the COPC: the coordinate systems of its build (CopcBuildRecord, pointcloud.h)
+constexpr const char* CopcBuildRecordFileName = "build.json";
 constexpr const char* Bm3dFileName = "model.bm3d";
 // Vector: the GeoPackage copy, the MVT pyramid descriptor, and the drawing-coordinate
 // metadata of a CAD vector without CRS (written instead of an MVT pyramid).

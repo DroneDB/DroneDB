@@ -82,6 +82,7 @@
         "type": "Feature"
       },
       "properties": {
+        "crsStatus": "projected",
         "dimensions": [
           "X",
           "Y",

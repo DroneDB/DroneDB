@@ -6,8 +6,14 @@
 // vertical part is bound to a geoid grid that is not installed (DJI Terra writes them), and a CRS
 // that has no transformation to WGS84. The footprint is computed from the horizontal CRS, and when it
 // cannot be, the file is still indexed and built, without a footprint and with a warning.
+//
+// Point clouds in any CRS: a geographic or geocentric cloud is indexed with its status and the
+// projected CRS its COPC is built in, and its COPC is built in it; a CRS the coordinates do not fit
+// is ignored with a warning; a geocentric footprint is transformed in 3-D.
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -20,7 +26,9 @@
 #include "mio.h"
 #include "las_test_writer.h"
 #include "ogr_spatialref.h"
+#include "build.h"
 #include "pointcloud.h"
+#include "raster_ops.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
@@ -361,5 +369,360 @@ namespace
             contract::takeJson(out));
 
         DDBReleaseConnections(root.string().c_str(), nullptr);
+    }
+
+    // ---- Point clouds in any CRS
+
+    // A grid of n x n points over `size` degrees around lon, lat, heights from 582 m rising to 730 m
+    // across it
+    std::vector<testutils::LasPoint> lonLatGrid(double lon, double lat, double size, int n)
+    {
+        std::vector<testutils::LasPoint> points;
+        points.reserve(static_cast<size_t>(n) * n);
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < n; j++)
+                points.push_back({lon - size / 2 + size * i / (n - 1), lat - size / 2 + size * j / (n - 1),
+                                  582.0 + 148.0 * (i + j) / (2.0 * (n - 1))});
+        return points;
+    }
+
+    // The grid in `crs`, longitude and latitude in steps of 1e-7 degrees: a Metashape export
+    void writeLonLatLas(const fs::path &path, const std::string &crs, double lon, double lat, double size, int n)
+    {
+        testutils::writeLas14(path, wktOfEpsg(crs), lonLatGrid(lon, lat, size, n), testutils::DegreeScale);
+    }
+
+    TEST(PointCloudCrs, AGeographicCloudIsIndexedWithTheUtmZoneOfItsCentreForItsCopc)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path las = ta.getPath("lonlat.las");
+        writeLonLatLas(las, "EPSG:4326", 13.84, 46.68, 0.014, 20);
+
+        PointCloudInfo info;
+        ASSERT_NO_THROW(ASSERT_TRUE(getPointCloudInfo(io::toUtf8(las), info)));
+        EXPECT_EQ(info.crsStatus, PointCloudCrsStatus::Geographic);
+        EXPECT_EQ(info.targetCrs, "EPSG:32633");
+        EXPECT_TRUE(info.footprintWarning.empty()) << info.footprintWarning;
+        ASSERT_EQ(info.polyBounds.size(), 5);
+        EXPECT_NEAR(info.polyBounds.points[0].x, 13.833, 1e-3);
+        EXPECT_NEAR(info.polyBounds.points[2].y, 46.687, 1e-3);
+
+        Entry entry;
+        ASSERT_NO_THROW(parseEntry(las, ta.getFolder(), entry, false));
+        EXPECT_EQ(entry.properties["crsStatus"], "geographic");
+        EXPECT_FALSE(entry.properties.contains("targetCrs")) << "how the COPC is built is not a property of the file";
+        EXPECT_FALSE(entry.properties.contains("warning"));
+        EXPECT_EQ(entry.polygon_geom.size(), 5);
+    }
+
+    TEST(PointCloudCrs, ACompoundGeographicCloudKeepsItsVerticalCrsForItsCopc)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path las = ta.getPath("florida.las");
+        writeLonLatLas(las, "EPSG:6318+5703", -82.59, 27.53, 0.01, 10);
+
+        PointCloudInfo info;
+        ASSERT_TRUE(getPointCloudInfo(io::toUtf8(las), info));
+        EXPECT_EQ(info.crsStatus, PointCloudCrsStatus::Geographic);
+        EXPECT_EQ(info.targetCrs, "EPSG:6346+5703");
+    }
+
+    // Points around lon, lat (a grid of `size` degrees, heights h to h + 20 m), written in EPSG:4978
+    struct GeocentricCloud
+    {
+        std::vector<testutils::LasPoint> points;
+        double minLon = 1e300, minLat = 1e300, maxLon = -1e300, maxLat = -1e300;
+    };
+
+    GeocentricCloud geocentricCloud(double lon, double lat, double h, double size, int n)
+    {
+        const SrsPtr from = srsFromEpsg(4979);
+        const SrsPtr to = srsFromEpsg(4978);
+        CoordsTransformer transform(srsOf(from), srsOf(to));
+        GeocentricCloud cloud;
+        for (const auto &p : lonLatGrid(lon, lat, size, n))
+        {
+            double x = p.x, y = p.y, z = h + (p.z - 582.0) / 148.0 * 20.0;
+            cloud.minLon = std::min(cloud.minLon, x);
+            cloud.maxLon = std::max(cloud.maxLon, x);
+            cloud.minLat = std::min(cloud.minLat, y);
+            cloud.maxLat = std::max(cloud.maxLat, y);
+            EXPECT_TRUE(transform.tryTransform(1, &x, &y, &z));
+            cloud.points.push_back({x, y, z});
+        }
+        return cloud;
+    }
+
+    TEST(PointCloudCrs, AGeocentricCloudHasTheFootprintOfItsPointsWithinMetres)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path las = ta.getPath("ecef.las");
+        const GeocentricCloud cloud = geocentricCloud(-83.6, 41.65, 180.0, 0.01, 30);
+        testutils::writeLas14(las, wktOfEpsg("EPSG:4978"), cloud.points);
+
+        PointCloudInfo info;
+        ASSERT_NO_THROW(ASSERT_TRUE(getPointCloudInfo(io::toUtf8(las), info)));
+        EXPECT_EQ(info.crsStatus, PointCloudCrsStatus::Geocentric);
+        EXPECT_TRUE(info.footprintWarning.empty()) << info.footprintWarning;
+        ASSERT_EQ(info.polyBounds.size(), 5);
+
+        // Within a metre of the envelope of the points (1e-5 degrees): the corners of the box of the
+        // points lie 80 m east and west and 60 m north and south of it
+        const auto &sw = info.polyBounds.points[0];
+        const auto &ne = info.polyBounds.points[2];
+        EXPECT_NEAR(sw.x, cloud.minLon, 1e-5);
+        EXPECT_NEAR(sw.y, cloud.minLat, 1e-5);
+        EXPECT_NEAR(ne.x, cloud.maxLon, 1e-5);
+        EXPECT_NEAR(ne.y, cloud.maxLat, 1e-5);
+        ASSERT_EQ(info.centroid.size(), 1);
+        EXPECT_NEAR(info.centroid.points[0].x, -83.6, 1e-5);
+        EXPECT_NEAR(info.centroid.points[0].y, 41.65, 1e-5);
+        // The height of the centre of the box: within the 20 m of the points and the bulge of the earth
+        EXPECT_NEAR(info.centroid.points[0].z, 190.0, 15.0);
+
+        // Its COPC is in UTM zone 17N with the ellipsoidal height
+        const SrsPtr target = srsFromUserInput(info.targetCrs.c_str());
+        ASSERT_TRUE(target) << info.targetCrs;
+        EXPECT_STREQ(srsOf(target).GetName(), "WGS 84 / UTM zone 17N");
+        EXPECT_EQ(srsOf(target).GetAxesCount(), 3);
+    }
+
+    // The COPC of a geocentric cloud is in UTM with the ellipsoidal height, every point where it was
+    TEST(PointCloudCrs, TheCopcOfAGeocentricCloudIsBuiltInUtmWithTheEllipsoidalHeight)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path las = ta.getPath("ecef-build.las");
+        const GeocentricCloud cloud = geocentricCloud(-83.6, 41.65, 180.0, 0.01, 30);
+        testutils::writeLas14(las, wktOfEpsg("EPSG:4978"), cloud.points);
+        PointCloudInfo source;
+        ASSERT_TRUE(getPointCloudInfo(io::toUtf8(las), source));
+
+        const fs::path out = ta.getFolder("copc");
+        CopcBuildRecord record;
+        ASSERT_NO_THROW(record = buildCopc({io::toUtf8(las)}, io::toUtf8(out)));
+        EXPECT_TRUE(record.transformed);
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(record.copcCrs, source.targetCrs)) << record.copcCrs;
+
+        PointCloudInfo copc;
+        ASSERT_TRUE(getCopcInfo(io::toUtf8(out / CopcFileName), copc));
+        EXPECT_EQ(copc.pointCount, cloud.points.size());
+        EXPECT_EQ(copc.crsStatus, PointCloudCrsStatus::Projected);
+        // Heights above the ellipsoid: 180 to 200 m
+        EXPECT_NEAR(copc.bounds[2], 180.0, 0.01);
+        EXPECT_NEAR(copc.bounds[5], 200.0, 0.01);
+        // The footprint of the COPC is where the source is (the envelope of its box in UTM, which
+        // the convergence of the meridians turns by 1.7 degrees here: within 50 m)
+        ASSERT_EQ(copc.polyBounds.size(), 5);
+        EXPECT_NEAR(copc.polyBounds.points[0].x, cloud.minLon, 6e-4);
+        EXPECT_NEAR(copc.polyBounds.points[2].y, cloud.maxLat, 4.5e-4);
+    }
+
+    // The header of the toledo cloud of the corpus says EPSG:4978, and its points are within 300 m of
+    // 0, 0, 0: the CRS is ignored, the entry says so and has no footprint, and the cloud builds as one
+    // without a CRS
+    TEST(PointCloudCrs, AGeocentricCrsOverLocalCoordinatesIsIgnoredWithAWarning)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path las = ta.getPath("toledo.las");
+        std::vector<testutils::LasPoint> points;
+        for (int i = 0; i <= 30; i++)
+            for (int j = 0; j <= 30; j++)
+                points.push_back({-88.0 + i * 10.0, -95.0 + j * 9.5, 1.0 + (i + j) * 0.5});
+        testutils::writeLas14(las, wktOfEpsg("EPSG:4978"), points);
+
+        PointCloudInfo info;
+        ASSERT_TRUE(getPointCloudInfo(io::toUtf8(las), info));
+        EXPECT_EQ(info.crsStatus, PointCloudCrsStatus::Implausible);
+        EXPECT_TRUE(info.targetCrs.empty());
+        EXPECT_TRUE(info.polyBounds.empty());
+        EXPECT_TRUE(info.centroid.empty());
+
+        Entry entry;
+        ASSERT_NO_THROW(parseEntry(las, ta.getFolder(), entry, false));
+        EXPECT_TRUE(entry.polygon_geom.empty());
+        EXPECT_TRUE(entry.point_geom.empty());
+        EXPECT_EQ(entry.properties["crsStatus"], "implausible");
+        EXPECT_EQ(entry.properties["warning"], "coordinate system ignored: the coordinates do not fit WGS 84");
+        EXPECT_FALSE(entry.properties["projection"].get<std::string>().empty()) << "the CRS the file states stays";
+
+        // Built as it is, and complete without a transform
+        const fs::path root = ta.getFolder("dataset");
+        contract::makeDataset(root, {las});
+        EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+        ASSERT_EQ(DDBBuild(root.string().c_str(), "toledo.las", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+        bool complete = false;
+        ASSERT_EQ(DDBIsBuildComplete(root.string().c_str(), "toledo.las", &complete), DDBERR_NONE);
+        EXPECT_TRUE(complete);
+        DDBReleaseConnections(root.string().c_str(), nullptr);
+    }
+
+    TEST(PointCloudCrs, AGeographicCrsBeyondThePolesIsIgnoredWithAWarning)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path las = ta.getPath("beyond.las");
+        testutils::writeLas14(las, wktOfEpsg("EPSG:4326"), {{13.8, 46.6, 500.0}, {13.9, 95.0, 600.0}});
+
+        Entry entry;
+        ASSERT_NO_THROW(parseEntry(las, ta.getFolder(), entry, false));
+        EXPECT_EQ(entry.properties["crsStatus"], "implausible");
+        EXPECT_EQ(entry.properties["warning"], "coordinate system ignored: the coordinates do not fit WGS 84");
+        EXPECT_TRUE(entry.polygon_geom.empty());
+    }
+
+    // A cloud in US feet (Autzen: NAD83(HARN) / Oregon GIC Lambert, international feet) keeps its CRS
+    TEST(PointCloudCrs, AProjectedCloudInFeetKeepsItsCrs)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path las = ta.getPath("autzen.las");
+        std::vector<testutils::LasPoint> points;
+        for (int i = 0; i <= 20; i++)
+            for (int j = 0; j <= 20; j++)
+                points.push_back({635577.0 + i * 100.0, 848882.0 + j * 100.0, 406.0 + i});
+        testutils::writeLas14(las, wktOfEpsg("EPSG:2994"), points);
+
+        PointCloudInfo info;
+        ASSERT_TRUE(getPointCloudInfo(io::toUtf8(las), info));
+        EXPECT_EQ(info.crsStatus, PointCloudCrsStatus::Projected);
+        EXPECT_TRUE(info.targetCrs.empty());
+        EXPECT_EQ(info.polyBounds.size(), 5);
+
+        const fs::path out = ta.getFolder("copc");
+        CopcBuildRecord record;
+        ASSERT_NO_THROW(record = buildCopc({io::toUtf8(las)}, io::toUtf8(out)));
+        EXPECT_FALSE(record.transformed);
+        EXPECT_EQ(record.crsPolicy, 1);
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(record.copcCrs, "EPSG:2994")) << record.copcCrs;
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(record.sourceCrs, "EPSG:2994"));
+    }
+
+    // ---- The COPC of a geographic cloud
+
+    // A cloud of 0.014 x 0.014 degrees and 148 m of height in EPSG:4326 (the meadows export of the
+    // release benchmark, smaller): a cube sized by its heights in degrees would hold it in a sliver
+    constexpr int GeographicGrid = 700;
+
+    TEST(PointCloudCrs, TheCopcOfAGeographicCloudIsBuiltInUtmWithAnOctreeThatSplitsIt)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path las = ta.getPath("meadows.las");
+        writeLonLatLas(las, "EPSG:4326", 13.84, 46.68, 0.014, GeographicGrid);
+        const size_t count = static_cast<size_t>(GeographicGrid) * GeographicGrid;
+
+        const fs::path out = ta.getFolder("copc");
+        CopcBuildRecord record;
+        ASSERT_NO_THROW(record = buildCopc({io::toUtf8(las)}, io::toUtf8(out))) << DDBGetLastError();
+        EXPECT_TRUE(record.transformed);
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(record.sourceCrs, "EPSG:4326"));
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(record.copcCrs, "EPSG:32633")) << record.copcCrs;
+
+        const fs::path copc = out / CopcFileName;
+        PointCloudInfo info;
+        ASSERT_TRUE(getCopcInfo(io::toUtf8(copc), info));
+        EXPECT_EQ(info.pointCount, count);
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(info.wktProjection, "EPSG:32633"));
+        // Metres of UTM 33N: about 1,070 m by 1,560 m
+        EXPECT_NEAR(info.bounds[3] - info.bounds[0], 1070.0, 30.0);
+        EXPECT_NEAR(info.bounds[4] - info.bounds[1], 1557.0, 30.0);
+        EXPECT_NEAR(info.bounds[2], 582.0, 0.01);
+        EXPECT_NEAR(info.bounds[5], 730.0, 0.01);
+        // Its footprint is where the cloud is
+        ASSERT_EQ(info.polyBounds.size(), 5);
+        EXPECT_NEAR(info.polyBounds.points[0].x, 13.833, 1e-3);
+        EXPECT_NEAR(info.polyBounds.points[0].y, 46.673, 1e-3);
+
+        // The octree splits the cloud: its largest node holds about 40,000 points, where a cube in
+        // degrees (148 "degrees" wide for 0.014 degrees of cloud) keeps 107,000 in one node of this
+        // cloud, and millions in one of the 160 M points of the meadows export
+        raster::CopcParams params;
+        params.threads = 4;
+        params.targetCrs = "EPSG:32633";
+        const fs::path again = ta.getFolder("again") / CopcFileName;
+        const raster::CopcResult result = raster::buildCopcFile(las, again, params, {});
+        EXPECT_TRUE(result.transformed);
+        ASSERT_TRUE(result.maxNodePoints.has_value());
+        EXPECT_LE(*result.maxNodePoints, 80000u);
+
+        // A tile of the deepest level draws the points, quickly
+        TilersTiler tiler(io::toUtf8(copc), "", 256, false);
+        const int maxZ = tiler.getMinMaxZ().max;
+        const auto tiles = tiler.getTilesForZoomLevel(maxZ);
+        ASSERT_FALSE(tiles.empty());
+        const auto &middle = tiles[tiles.size() / 2];
+        uint8_t *buf = nullptr;
+        int size = 0;
+        const auto start = std::chrono::steady_clock::now();
+        tiler.tile(middle.tz, middle.tx, middle.ty, &buf, &size);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 1000);
+        const auto image = testutils::decodeImage(testutils::takeBuffer(buf, size));
+        EXPECT_GT(std::count(image.alpha().begin(), image.alpha().end(), 255), 1000);
+    }
+
+    // The build of a geographic entry records its CRSs beside the COPC, which completes it; a COPC
+    // without the record (built before the CRS policy) is built again by the next build
+    TEST(PointCloudCrs, AGeographicEntryBuiltBeforeTheCrsPolicyIsBuiltAgain)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path las = ta.getPath("lonlat.las");
+        writeLonLatLas(las, "EPSG:4326", 13.84, 46.68, 0.014, 100);
+        const fs::path root = ta.getFolder("dataset");
+        const json added = contract::makeDataset(root, {las});
+        const std::string r = root.string();
+        EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+
+        ASSERT_EQ(DDBBuild(r.c_str(), "lonlat.las", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+        bool complete = false;
+        ASSERT_EQ(DDBIsBuildComplete(r.c_str(), "lonlat.las", &complete), DDBERR_NONE);
+        EXPECT_TRUE(complete);
+
+        const std::string hash = added[0]["hash"].get<std::string>();
+        const fs::path folder = root / ".ddb" / "build" / hash / CopcBuildSubfolder;
+        const auto record = readCopcBuildRecord(folder / CopcBuildRecordFileName);
+        ASSERT_TRUE(record.has_value());
+        EXPECT_TRUE(record->transformed);
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(record->copcCrs, "EPSG:32633"));
+
+        // The manifest says in which CRS the COPC is
+        const char *paths[] = {"lonlat.las"};
+        char *out = nullptr;
+        ASSERT_EQ(DDBGetBuildArtifacts(r.c_str(), paths, 1, &out), DDBERR_NONE) << DDBGetLastError();
+        const json artifacts = contract::takeJson(out);
+        const json &copc = artifacts[0]["build"]["artifacts"][0];
+        EXPECT_EQ(copc["role"], "pointcloud.copc");
+        EXPECT_EQ(copc["crs"], (json{{"name", "WGS 84 / UTM zone 33N"}, {"epsg", 32633}, {"transformed", true}}));
+
+        // A COPC of a build before the policy: the same file, no record
+        fs::remove(folder / CopcBuildRecordFileName);
+        ASSERT_EQ(DDBIsBuildComplete(r.c_str(), "lonlat.las", &complete), DDBERR_NONE);
+        EXPECT_FALSE(complete);
+        ASSERT_EQ(DDBBuild(r.c_str(), "lonlat.las", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+        ASSERT_EQ(DDBIsBuildComplete(r.c_str(), "lonlat.las", &complete), DDBERR_NONE);
+        EXPECT_TRUE(complete);
+        EXPECT_TRUE(fs::exists(folder / CopcBuildRecordFileName));
+        DDBReleaseConnections(r.c_str(), nullptr);
+    }
+
+    // The Florida file of the corpus (4.7 M points, NAD83(2011) + NAVD88, longitude and latitude):
+    // its COPC is in NAD83(2011) / UTM zone 17N + NAVD88 height, with every point
+    MANUAL_TEST(PointCloudCrs, TheFloridaCloudIsBuiltInUtmOnItsDatum)
+    {
+        const fs::path las = "/mnt/data/datasets/point-clouds/test-crash/20210126_342500e_3046000n.laz";
+        if (!fs::exists(las))
+            GTEST_SKIP() << las << " is not on this machine";
+        TestArea ta(TEST_NAME, true);
+
+        PointCloudInfo info;
+        ASSERT_TRUE(getPointCloudInfo(io::toUtf8(las), info));
+        EXPECT_EQ(info.crsStatus, PointCloudCrsStatus::Geographic);
+        EXPECT_EQ(info.targetCrs, "EPSG:6346+5703");
+
+        const fs::path out = ta.getFolder("copc");
+        CopcBuildRecord record;
+        ASSERT_NO_THROW(record = buildCopc({io::toUtf8(las)}, io::toUtf8(out)));
+        EXPECT_TRUE(record.transformed);
+        PointCloudInfo copc;
+        ASSERT_TRUE(getCopcInfo(io::toUtf8(out / CopcFileName), copc));
+        EXPECT_EQ(copc.pointCount, info.pointCount);
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(copc.wktProjection, "EPSG:6346+5703")) << copc.wktProjection;
     }
 }

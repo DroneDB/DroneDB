@@ -1697,11 +1697,8 @@ namespace
             ADD_FAILURE() << "no probe is asked for";
             return ProbeResult();
         }
-        PointCloudInfo pointCloudInfo(const fs::path &) override
-        {
-            ADD_FAILURE() << "no point cloud info is asked for";
-            return PointCloudInfo();
-        }
+        // The clouds of these tests are text files: no CRS
+        PointCloudInfo pointCloudInfo(const fs::path &) override { return PointCloudInfo(); }
         void thumbnail(const fs::path &, const fs::path &, const ThumbnailParams &) override
         {
             ADD_FAILURE() << "no thumbnail is asked for";
@@ -1720,11 +1717,14 @@ namespace
             ASSERT_TRUE(onCog) << "no COG is built";
             onCog(path, out, params);
         }
-        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+        // A COPC of clouds without a CRS: nothing transformed, an octree the builder does not warn of
+        json buildCopc(const fs::path &path, const fs::path &out, const json &params,
                        const ProgressCallback &progress) override
         {
-            ASSERT_TRUE(onCopc) << "no COPC is built";
-            onCopc(path, out, params, progress);
+            EXPECT_TRUE(onCopc) << "no COPC is built";
+            if (onCopc)
+                onCopc(path, out, params, progress);
+            return toJson(CopcResult());
         }
         void buildVector(const fs::path &path, const fs::path &out, const json &params, const ProgressCallback &) override
         {

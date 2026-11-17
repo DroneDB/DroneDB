@@ -34,7 +34,7 @@ namespace ddb
         // The version this side implements. A helper is accepted when its major version is the
         // same and its minor version is not lower.
         constexpr int kMajorVersion = 1;
-        constexpr int kMinorVersion = 3;
+        constexpr int kMinorVersion = 4;
 
         // The longest line of either side
         constexpr size_t kMaxLineBytes = 16 * 1024 * 1024;
@@ -237,7 +237,9 @@ namespace ddb
 
         // The result of kPointCloudInfo: {"pointCount", "wkt" (when the cloud has a CRS), "dimensions",
         // "bounds" (6 numbers, when known), "pointGeom" and "polygonGeom" (its footprint in EPSG:4326),
-        // "warning" (why it has no footprint)}
+        // "warning" (why it has no footprint), "crsStatus" (new in 1.4: toString(PointCloudCrsStatus)),
+        // "targetCrs" (new in 1.4, when the COPC of the cloud is built in another CRS:
+        // PointCloudCrsPolicy::target)}
         json pointCloudInfoJson(const PointCloudInfo &info);
         // @throws ProtocolError
         PointCloudInfo pointCloudInfoFromJson(const json &result);
@@ -321,16 +323,37 @@ namespace ddb
         CogParams cogParamsFromJson(const json &params);
 
         // The params of a `copc`: the point clouds merged with `path` into one, in their order
-        // after it (`inputs`), and the threads of the build
+        // after it (`inputs`), the threads of the build, and the CRS the points are transformed to
+        // (`targetCrs`, new in 1.4: "EPSG:<code>", "EPSG:<h>+<v>" or a WKT; absent or empty, the
+        // COPC keeps the CRS of its clouds). The host chooses it (PointCloudCrsPolicy), the helper
+        // builds with it.
         struct CopcParams
         {
             std::vector<fs::path> inputs;
             std::optional<int> threads;
+            std::string targetCrs;
         };
 
         json toJson(const CopcParams &params);
         // @throws ProtocolError
         CopcParams copcParamsFromJson(const json &params);
+
+        // The result of a `copc` (new in 1.4): what the builder reports of the octree of the COPC
+        // it wrote, which the header of the file does not tell. `transformed` whether its points
+        // were transformed to the target, `maxNodePoints` the most points of one node (when the
+        // builder reports it), `warnings` the builder's warnings ("degenerate octree" for an octree
+        // that does not split the cloud). The host reads the rest from the file itself (its CRS,
+        // count and bounds).
+        struct CopcResult
+        {
+            bool transformed = false;
+            std::optional<uint64_t> maxNodePoints;
+            std::vector<std::string> warnings;
+        };
+
+        json toJson(const CopcResult &result);
+        // @throws ProtocolError
+        CopcResult copcResultFromJson(const json &result);
 
         // The params of a `vector` build. `source` is the file the user named when `path` is a
         // conversion of it (a DWG converted to a DXF by the host): its sidecars give the drawing

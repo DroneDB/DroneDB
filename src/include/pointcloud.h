@@ -5,6 +5,7 @@
 #define POINTCLOUD_H
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 #include "build_budget.h"
@@ -12,14 +13,34 @@
 #include "fs.h"
 #include "json_fwd.h"
 #include "basicgeometry.h"
+#include "pointcloud_crs.h"
 #include "pointcloud_info.h"
 
 namespace ddb
 {
 
 
-    /// The properties of a point cloud entry: {"pointCount", "projection", "dimensions"}
+    /// The properties of a point cloud entry: {"pointCount", "projection" (the CRS the file states,
+    /// WKT), "dimensions", "crsStatus" (toString(PointCloudCrsStatus))}
     void to_json(json &j, const PointCloudInfo &info);
+
+    // What a COPC build did with the coordinate systems of its clouds. The build of an entry writes
+    // it beside the COPC (CopcBuildRecordFileName) as {"crsPolicy", "sourceCrs", "copcCrs",
+    // "transformed"}: the version of PointCloudCrsPolicy it was built under, the WKT of the CRS of the
+    // (first) cloud and of the COPC ("" without one), and whether the points were transformed.
+    struct CopcBuildRecord
+    {
+        int crsPolicy = PointCloudCrsPolicy::kVersion;
+        std::string sourceCrs;
+        std::string copcCrs;
+        bool transformed = false;
+    };
+
+    void to_json(json &j, const CopcBuildRecord &record);
+    // @throws FSException when the file cannot be written
+    void writeCopcBuildRecord(const fs::path &file, const CopcBuildRecord &record);
+    // Nothing when the file does not exist or is not a build record
+    std::optional<CopcBuildRecord> readCopcBuildRecord(const fs::path &file);
 
     // The info of the point cloud of a user (LAS, LAZ, E57, XYZ, PTS, read by ddb-tilers in the raster
     // helper; a PLY point cloud from its header), with its footprint in EPSG:4326. False for a file
@@ -45,7 +66,11 @@ namespace ddb
 
     // Builds a Cloud Optimized Point Cloud (COPC) file from one or more input point cloud files
     // (LAS, LAZ, E57, PTS, XYZ, a PLY point cloud), merged into one. Output is a single file named
-    // `cloud.copc.laz` placed inside `outdir`. ddb-tilers builds it in the raster helper
+    // `cloud.copc.laz` placed inside `outdir`. The COPC of a geographic or geocentric cloud is built
+    // in the projected CRS PointCloudCrsPolicy chooses for it (for clouds merged into one, the
+    // choice for the first that has one), and the build fails when the COPC is not in that CRS or
+    // its octree still does not split the cloud. Returns what was done with the CRSs, which the
+    // build of an entry records (writeCopcBuildRecord). ddb-tilers builds it in the raster helper
     // (IRasterHelper::buildCopc), on the threads of one build (DDB_BUILD_THREADS, lowered to
     // options.threads) and within the memory of DDBT_COPC_BUILD_MEM_MB (else 4 GiB, at most half
     // the memory of the machine). The progress goes to options with the phases of
@@ -57,10 +82,11 @@ namespace ddb
     // one that exists unless overwrite (OutputExistsException; true for the build handler).
     // @throws FSException for an input that does not exist; InvalidArgsException for one that is
     // not a point cloud, and for a cloud of fewer than 2 points or of no extent in X or Y;
-    // PDALException for a cloud that cannot be read; RetryableBuildException when the device is
+    // PDALException for a cloud that cannot be read; AppException for a COPC that is not in the
+    // CRS asked for or whose octree is still degenerate; RetryableBuildException when the device is
     // full; the other exceptions of IRasterHelper
-    void buildCopc(const std::vector<std::string> &filenames, const std::string &outdir,
-                   const BuildOptions &options = {}, bool overwrite = true);
+    CopcBuildRecord buildCopc(const std::vector<std::string> &filenames, const std::string &outdir,
+                              const BuildOptions &options = {}, bool overwrite = true);
 
     // The phase of a COPC build at a fraction of its work, as ddb-tilers reports them: "planning"
     // (the inputs are opened and the octree planned) below 0.05, "reading" (the points are read

@@ -282,6 +282,24 @@ namespace
         DDBReleaseConnections(r.c_str(), nullptr);
     }
 
+    // The build manifest of a point cloud: the COPC artifact names its CRS. cloud.las is in
+    // EPSG:32632, projected, so its COPC keeps it
+    TEST_F(ContractFixtures, BuildArtifactsOfAPointCloud)
+    {
+        EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+        const std::string r = root.string();
+        ASSERT_DDB_OK(DDBBuild(r.c_str(), "cloud.las", nullptr, false, false));
+
+        const char *paths[] = {"cloud.las"};
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetBuildArtifacts(r.c_str(), paths, 1, &out));
+        contract::expectMatchesFixture(
+            fixture("build-artifacts-pointcloud",
+                    "DDBBuild(<root>, \"cloud.las\"), then DDBGetBuildArtifacts(<root>, [\"cloud.las\"])",
+                    "build-artifacts.schema.json", {"version"}),
+            contract::takeJson(out));
+    }
+
     // The build manifest. ortho.tif built (COG), layer.geojson and cloud.las buildable and
     // not built, a.txt and the folder sub not buildable, a path that is not indexed
     TEST_F(ContractFixtures, BuildArtifacts)

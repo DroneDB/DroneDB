@@ -91,6 +91,7 @@
           }
         ],
         "properties": {
+          "crsStatus": "projected",
           "datetime": "2023-11-14T22:13:20Z",
           "dimensions": [
             "X",

@@ -115,7 +115,7 @@ class BuildAttempt {
 
             // Recheck primary artifacts after serialized recovery. Success consumes
             // pending work even when the output was already complete before this attempt.
-            if (handler_.isComplete(baseOutputPath_, false) && !force_) {
+            if (handler_.isComplete(target_, baseOutputPath_, false) && !force_) {
                 LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder_;
                 // A process that died after the publish, or a removal that failed then, left
                 // the superseded output behind: it is removed here, under the same lock
