@@ -4,8 +4,11 @@
 #ifndef COG_BUILD_POLICY_H
 #define COG_BUILD_POLICY_H
 
+#include <array>
 #include <optional>
+#include <string>
 
+#include "basicgeometry.h"
 #include "fs.h"
 #include "json_fwd.h"
 
@@ -20,6 +23,15 @@ struct RasterTransparency {
     int noDataBands = 0;   // the bands other than an alpha band that have a nodata value
 };
 
+// What the header of a COG says (no pixel is read): what makes its pixels transparent, and where
+// its grid lies.
+struct BuiltCog {
+    RasterTransparency transparency;
+    std::string wkt;                 // its CRS
+    std::array<double, 4> extent{};  // minX, minY, maxX, maxY of its grid, in its CRS
+    double pixelSize = 0;            // of its full resolution (the larger side of a pixel)
+};
+
 // The rules of the COG build of a GeoRaster that changed what it writes. A COG built before them
 // differs from the one built now only for some sources, and only those are built again:
 //   - a source without nodata, mask or alpha band: the pixels the warp adds around it (up to the
@@ -30,7 +42,11 @@ struct RasterTransparency {
 //   - a source with a colour table: its indices were warped bilinearly, averaging unrelated
 //     colours; they are now warped by nearest neighbour.
 // Sources with an alpha band, a mask or the nodata of one band (an RGBA orthophoto, a DEM with
-// nodata) get the same COG.
+// nodata) get the same COG, unless it lies elsewhere than the raster (misplaces()): the CRS the
+// builds before derived from some GeoTIFFs was wrong (a prime meridian in grads, as NTF Paris; an
+// EPSG CRS whose linear unit the file changes to feet or US feet; an IMAGINE citation that names a
+// unit), which put their COG up to thousands of kilometres away, and the COG of a raster around a
+// pole stopped at the latitude of its edges.
 class CogBuildPolicy {
   public:
     // The version of the rules. A COG built by this release records it (CogBuildRecord); a COG
@@ -48,12 +64,27 @@ class CogBuildPolicy {
     // bands are neither.
     static std::optional<RasterTransparency> indexed(const json& properties);
 
-    // The facts of a COG that a build before kVersion made, read from its header (no pixel is
-    // read), for an entry whose index does not decide (indexed()): such a build kept the nodata of
-    // the source, turned its mask into an alpha band or a mask and kept its alpha, so the COG shows
-    // what its source had. (A colour table, which some builds dropped beside an alpha band or a
-    // mask, is in the index of every entry.) @throws AppException when the COG cannot be read
-    static RasterTransparency ofBuiltCog(const fs::path& cog);
+    // The header of a COG that a build before kVersion made (no pixel is read): where it lies,
+    // for misplaces(), and its transparency, for an entry whose index does not decide (indexed()):
+    // such a build kept the nodata of the source, turned its mask into an alpha band or a mask and
+    // kept its alpha, so the COG shows what its source had. (A colour table, which some builds
+    // dropped beside an alpha band or a mask, is in the index of every entry.)
+    // @throws AppException when the COG cannot be read or has no geotransform
+    static BuiltCog ofBuiltCog(const fs::path& cog);
+
+    // Whether a COG a build before kVersion made lies elsewhere than its raster: a corner of the
+    // footprint of the raster (the index's polygon in EPSG:4326, which the probe computes with
+    // GDAL) is outside the grid of the COG by more than kPlacementTolerancePixels of its pixels.
+    // The grid of a build covers the whole raster and more (it is padded to whole tiles), so a COG
+    // in the right place holds every corner. A latitude past the limit of Web Mercator, the CRS of
+    // every grid a build writes, is taken at that limit (a raster beyond it is cut there).
+    // Nothing to compare without a footprint: not misplaced.
+    // @throws AppException when the footprint cannot be transformed into the CRS of the COG
+    static bool misplaces(const BuiltCog& cog, const BasicPolygonGeometry& footprint);
+
+    // The rounding misplaces() allows, in pixels of the COG: far below the distance a wrong CRS
+    // moves a raster (tens of kilometres at least)
+    static constexpr double kPlacementTolerancePixels = 4.0;
 };
 
 // Beside the COG of a build (CogBuildRecordFileName, build_layout.h): {"version"}, the version of

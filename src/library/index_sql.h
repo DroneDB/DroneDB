@@ -51,6 +51,9 @@ namespace ddb
     /// none. A key that ends with the list suffix (metakey.h) holds an array. The expression may
     /// refer to the enclosing query, so the SELECT can be used as a scalar subquery.
     std::string metaAggregateSql(std::string_view pathExpression);
+    // The GeoJSON coordinates of a geometry column, as Entry::parsePointGeometry and
+    // Entry::parsePolygonGeometry read them
+    std::string geometryCoordinatesSql(std::string_view column);
 
     // ---------------------------------------------------------------------------- IN lists
 

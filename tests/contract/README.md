@@ -835,7 +835,7 @@ Registry has to adopt first.
   a raster of 5 x 5000 pixels of 240 x 0.24 m has a thumbnail of 512 x 512, no longer 1 x 512.
   A `ddb` command whose input the library refuses (`DDBERR_INVALIDARGS` while it works) prints the message alone,
   without the usage of the command; an argument it cannot read (an option, a format, a filter) still prints both.
-  ddb-tilers 0.13.1 changes what the COG of a GeoRaster holds and how tiles are drawn (no schema or fixture
+  ddb-tilers 0.13.2 changes what the COG of a GeoRaster holds and how tiles are drawn (no schema or fixture
   changed): a source without nodata, mask or alpha band gets an internal mask of the pixels the warp writes (the
   padding up to the tiles of the grid and the corners of a rotated raster were opaque 0, in the statistics too);
   the nodata of several bands comes with an internal mask of the pixels where not every band is at nodata (a pixel
@@ -844,7 +844,9 @@ Registry has to adopt first.
   now the default; `DDBT_TILER_MODE=compat` keeps the tiles of 2.4.1), a palette band in its colours, NaN
   transparent, two bands as red and green, and keep drawing far above the resolution of the raster; a tile that
   no pixel of the raster is under is blank, whatever the formula asked. Point-cloud tiles have no gaps where the
-  cloud has points. bm3d is 1.1.3 and the 3D Tiles of models are built by Obj2Tiles v1.10.3 (OBJ models whose
+  cloud has points. A nodata override (`DDB_RASTER_OPT_NODATA`) makes the pixels where every band is at that
+  value transparent in the band tiles of a COG with an internal mask too (with ddb-tilers 0.13.1 it had no effect
+  on the COGs that now get one). bm3d is 1.1.3 and the 3D Tiles of models are built by Obj2Tiles v1.10.3 (OBJ models whose
   parts differ are tiled whole; KTX2 textures are a multiple of 4 in size).
   The entry `properties` of a GeoRaster gain `hasMask` (true when the raster has a mask of its own, an internal or
   external mask that is neither its alpha band nor its nodata) and, in each band, `noData` when the band has one
@@ -856,7 +858,12 @@ Registry has to adopt first.
   before 2.8.0) is incomplete for `DDBIsBuildComplete` and the build objects of `DDBGetBuildArtifacts`,
   `DDBListEntriesEx` and `DDBGetBuildStatus`, and is built again by the next `DDBBuild`, only when the COG built
   now differs from it: a source without nodata, mask or alpha band, a source with the nodata of several bands and
-  no alpha band, a source with a colour table (a `Palette` band 1). An entry indexed by 2.8.0 is judged from its
-  `bands` and `hasMask`; one indexed before from the colour interpretations of its bands (a palette or an alpha
-  band) and otherwise from the header of the COG it has (its nodata, mask and alpha band, which the builds before
-  kept from the source). A COG that cannot be read is incomplete.
+  no alpha band, a source with a colour table (a `Palette` band 1), and a COG that lies elsewhere than its raster.
+  An entry indexed by 2.8.0 is judged from its `bands` and `hasMask`; one indexed before from the colour
+  interpretations of its bands (a palette or an alpha band) and otherwise from the header of the COG it has (its
+  nodata, mask and alpha band, which the builds before kept from the source). A COG these facts find healthy is
+  read (its header) to check its place: it is outdated when a corner of the entry's footprint (`polygon_geom`, a
+  latitude past 85.0511 taken at 85.0511) is outside its grid by more than 4 of its pixels; the builds before put the
+  COG of some GeoTIFFs tens to thousands of kilometres away (NTF Paris with its prime meridian in grads, an EPSG CRS
+  whose linear unit the file changes to feet or US feet, an IMAGINE citation that names a unit) and cut the COG of
+  a raster around a pole at the latitude of its edges. A COG that cannot be read is incomplete.

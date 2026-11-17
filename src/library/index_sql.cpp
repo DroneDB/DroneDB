@@ -21,8 +21,7 @@ namespace ddb
                 select += "e.properties, ";
             select += "e.mtime, e.size, e.depth";
             if (columns >= EntryColumns::Geometries)
-                select += ", json_extract(AsGeoJSON(e.point_geom), '$.coordinates'), "
-                          "json_extract(AsGeoJSON(e.polygon_geom), '$.coordinates')";
+                select += ", " + geometryCoordinatesSql("e.point_geom") + ", " + geometryCoordinatesSql("e.polygon_geom");
             if (columns >= EntryColumns::Meta)
                 select += ", (" + metaAggregateSql("e.path") + ") AS meta";
             return select + " FROM entries e";
@@ -81,6 +80,11 @@ namespace ddb
         if (meta)
             row.metaJson = statement.getText(9);
         entry.parseFields(row);
+    }
+
+    std::string geometryCoordinatesSql(std::string_view column)
+    {
+        return std::format("json_extract(AsGeoJSON({}), '$.coordinates')", column);
     }
 
     std::string metaAggregateSql(std::string_view pathExpression)

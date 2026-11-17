@@ -15,6 +15,7 @@
 #include "build.h"
 #include "build_layout.h"
 #include "build_manifest.h"
+#include "cog_build_policy.h"
 #include "dbops.h"
 #include "entry.h"
 #include "entry_handler.h"
@@ -307,13 +308,14 @@ TEST(entryHandler, CompletenessRules) {
 
     const auto complete = [&](EntryType t) { return entryHandler(t).isComplete(Entry(), base); };
 
-    // Folder types: an empty folder is incomplete, any non-empty file completes it (for a raster whose
-    // COG does not depend on when it was built: a DEM with nodata)
+    // Folder types: an empty folder is incomplete, any non-empty file completes it (for a raster, with
+    // the record of a build of this release: a COG built before is checked, CogBuildPolicy)
     Entry dem;
     dem.properties = {{"bands", {{{"type", "Float32"}, {"colorInterp", "Gray"}, {"noData", -9999}}}}, {"hasMask", false}};
     fs::create_directories(base / "cog");
     EXPECT_FALSE(entryHandler(EntryType::GeoRaster).isComplete(dem, base));
     writeFile(base / "cog" / "whatever.tif", "x");
+    writeCogBuildRecord(base / "cog" / CogBuildRecordFileName, CogBuildRecord{});
     EXPECT_TRUE(entryHandler(EntryType::GeoRaster).isComplete(dem, base));
 
     // Vector: source.gpkg and (metadata.json or local.json)

@@ -22,6 +22,7 @@
 #include "dbops.h"
 #include "entry_handler.h"
 #include "exceptions.h"
+#include "index_sql.h"
 #include "json.h"
 #include "mio.h"
 
@@ -143,13 +144,15 @@ std::string buildKeyOfRow(const std::string& hash, EntryType type, const json& p
     return entryHandler(type).buildKey(e);
 }
 
-// The target of a build of entry by handler. Its build rules read properties of the entry: an entry
-// that does not carry them (a summary) gets them from the index.
+// The target of a build of entry by handler. Its build rules read properties of the entry (and its
+// footprint): an entry that does not carry them (a summary) gets them from the index.
 static BuildTarget makeBuildTarget(Entry entry, const EntryHandler& handler, bool viaDependency,
                                    const EntryLookup& lookup) {
-    if (!handler.buildPropertyKeys().empty() && !entry.properties.is_object())
-        if (const auto indexed = lookup(entry.path))
+    if (handler.buildReadsIndex() && !entry.properties.is_object())
+        if (const auto indexed = lookup(entry.path)) {
             entry.properties = indexed->properties;
+            entry.polygon_geom = indexed->polygon_geom;
+        }
     std::string key = handler.buildKey(entry);
     return BuildTarget{std::move(entry), std::move(key), handler.subfolder(), &handler, viaDependency};
 }
@@ -219,9 +222,22 @@ bool isBuildComplete(Database* db, const std::string& path) {
     return target && isTargetBuildComplete(db->buildDirectory(), *target);
 }
 
+// The footprint of the entries whose build rules read it (EntryHandler::buildReadsFootprint), NULL
+// for the others: a column of a query of the index that reads entries for their builds
+static std::string footprintColumnSql() {
+    std::string types;
+    for (const EntryHandler* handler : entryHandlers())
+        if (handler->buildReadsFootprint())
+            types += (types.empty() ? "" : ", ") + std::to_string(static_cast<int>(handler->type()));
+    if (types.empty())
+        return "NULL";
+    return "CASE WHEN type IN (" + types + ") THEN " + geometryCoordinatesSql("polygon_geom") + " END";
+}
+
 IndexBuildTargets::IndexBuildTargets(Database* db)
     // Only the columns the build rules read
-    : byPath_(db->query("SELECT path, hash, type, " + properties_.sql() + " FROM entries WHERE path = ?")),
+    : byPath_(db->query("SELECT path, hash, type, " + properties_.sql() + ", " + footprintColumnSql() +
+                        " FROM entries WHERE path = ?")),
       byPrefix_(db->query(PathsWithPrefixQuery)) {}
 
 std::optional<Entry> IndexBuildTargets::lookup(const std::string& path) {
@@ -233,6 +249,7 @@ std::optional<Entry> IndexBuildTargets::lookup(const std::string& path) {
         found->hash = byPath_->getText(1);
         found->type = static_cast<EntryType>(byPath_->getInt(2));
         found->properties = properties_.read(*byPath_, 3, found->type);
+        found->parsePolygonGeometry(byPath_->getText(3 + properties_.columnCount()));
     }
     byPath_->reset();
     return found;

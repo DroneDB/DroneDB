@@ -74,6 +74,8 @@ class BuildPropertyColumns {
     BuildPropertyColumns();
     // "properties -> '$.<key>', ...": the JSON text of each property (NULL when it is absent)
     const std::string& sql() const { return sql_; }
+    // The number of columns of sql()
+    int columnCount() const { return keys_.empty() ? 1 : static_cast<int>(keys_.size()); }
     // The properties of the entry of a row (an object, also when it has none) whose columns from
     // `first` are sql(): the ones the build rules of `type` read
     json read(const Statement& row, int first, EntryType type) const;
@@ -95,13 +97,14 @@ using IndexedBuildVisitor =
 void forEachIndexedBuild(Database* db, const IndexedBuildVisitor& visit);
 
 // The build targets of many entries of one index, with two prepared statements reused for
-// every lookup (getBuildStatus, the build manifest): only path, hash, type and the properties the
-// build rules read are read.
+// every lookup (getBuildStatus, the build manifest): only path, hash, type, the properties the
+// build rules read and the footprint of the types whose rules read it are read.
 class IndexBuildTargets {
   public:
     explicit IndexBuildTargets(Database* db);
-    // Reads path, hash and type of the entry at path, and the properties its build rules read
-    // (BuildPropertyColumns); nothing when there is none
+    // Reads path, hash and type of the entry at path, and the properties (BuildPropertyColumns)
+    // and the footprint (EntryHandler::buildReadsFootprint) its build rules read; nothing when
+    // there is none
     std::optional<Entry> lookup(const std::string& path);
     // resolveBuildTarget() over this index
     std::optional<BuildTarget> resolve(const Entry& e);

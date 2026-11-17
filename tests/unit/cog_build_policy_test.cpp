@@ -4,13 +4,17 @@
 
 // The COG of a GeoRaster built before the rules of CogBuildPolicy is built again only when the COG
 // built now differs from it: for a source without nodata, mask or alpha band, with the nodata of
-// several bands, or with a colour table. The probe records the nodata of the bands and the mask of
-// the raster, so the index decides; for an entry indexed before, the header of the COG it has does.
-// Every API that reports the state of a build agrees (DDBIsBuildComplete, the manifest the
+// several bands, or with a colour table, and for a COG that lies elsewhere than its raster (a CRS
+// the builds before read wrongly, a raster around a pole cut at its edges). The probe records the
+// nodata of the bands and the mask of the raster, so the index decides; for an entry indexed
+// before, the header of the COG it has does; the header of a COG the facts find healthy says where
+// it lies. Every API that reports the state of a build agrees (DDBIsBuildComplete, the manifest the
 // completeness sweep of Registry reads, the listing with builds, the status).
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -23,6 +27,7 @@
 #include "ddb.h"
 #include "dbops.h"
 #include "gdal_raii.h"
+#include "gdal_utils.h"
 #include "gtest/gtest.h"
 #include "mio.h"
 #include "test.h"
@@ -43,6 +48,8 @@ struct Source {
     bool mask;                     // an internal mask
     bool palette;                  // band 1 has a colour table
     bool outdated;                 // a COG built before the rules differs from the one built now
+    int epsg = 32632;              // where it lies: its CRS, the corner of its first pixel and the size of a pixel
+    double originX = 500000.0, originY = 5000000.0, pixel = 2.0;
 };
 
 const std::vector<Source> kSources = {
@@ -57,7 +64,8 @@ const std::vector<Source> kSources = {
     {"rgb-mask", 3, GDT_Byte, false, std::nullopt, true, false, false},
 };
 
-// A GeoTIFF in UTM 32N (its COG is warped to the tiles of EPSG:3857) with the transparency of `s`
+// A GeoTIFF (UTM 32N unless `s` says otherwise; its COG is warped to the tiles of EPSG:3857) with
+// the transparency of `s`
 fs::path writeSource(const fs::path& path, const Source& s) {
     CPLSetThreadLocalConfigOption("GDAL_TIFF_INTERNAL_MASK", "YES");
     {
@@ -65,10 +73,10 @@ fs::path writeSource(const fs::path& path, const Source& s) {
                                           s.bands, s.type, nullptr));
         EXPECT_TRUE(ds);
         GDALDatasetH h = datasetHandle(ds);
-        double gt[6] = {500000.0, 2.0, 0.0, 5000000.0, 0.0, -2.0};
+        double gt[6] = {s.originX, s.pixel, 0.0, s.originY, 0.0, -s.pixel};
         GDALSetGeoTransform(h, gt);
         SrsPtr srs(OSRNewSpatialReference(nullptr));
-        OSRImportFromEPSG(srs.get(), 32632);
+        OSRImportFromEPSG(srs.get(), s.epsg);
         GDALSetSpatialRef(h, srs.get());
         // Before the pixels: GTiff writes the photometric interpretation with the first block
         if (s.palette) {
@@ -120,6 +128,87 @@ void writeOldCog(const fs::path& source, const fs::path& cog) {
     auto out = adoptDataset(GDALCreateCopy(GDALGetDriverByName("COG"), io::toUtf8(cog).c_str(), datasetHandle(src),
                                            FALSE, nullptr, nullptr, nullptr));
     ASSERT_TRUE(out);
+}
+
+// The COG a build before the rules made of `source` on the tiles of EPSG:3857, as those builds warped
+// it (gdalwarp -of COG -t_srs EPSG:3857 -co TILING_SCHEME=GoogleMapsCompatible); `sourceSrs`, when
+// set, is the CRS they read for it instead of its own, and `shiftX` moves the COG that many metres
+// east, as a CRS read wrongly moved it
+void writeOldGridCog(const fs::path& source, const fs::path& cog, const std::string& sourceSrs = "",
+                     double shiftX = 0) {
+    auto src = adoptDataset(GDALOpen(io::toUtf8(source).c_str(), GA_ReadOnly));
+    ASSERT_TRUE(src);
+    io::assureIsRemoved(cog);
+    const fs::path warped = shiftX != 0 ? fs::path(io::toUtf8(cog) + ".grid.tif") : cog;
+    std::vector<std::string> args = {"-of",        "COG", "-t_srs", "EPSG:3857", "-r", "bilinear",
+                                     "-co",        "TILING_SCHEME=GoogleMapsCompatible",
+                                     "-co",        "ZOOM_LEVEL_STRATEGY=UPPER"};
+    if (!sourceSrs.empty())
+        args.insert(args.end(), {"-s_srs", sourceSrs});
+    {
+        CPLStringList list = cslFromStrings(args);
+        const GdalOptionsPtr<GDALWarpAppOptions> options(GDALWarpAppOptionsNew(list.List(), nullptr));
+        ASSERT_TRUE(options);
+        GDALDatasetH h = datasetHandle(src);
+        auto out = adoptDataset(GDALWarp(io::toUtf8(warped).c_str(), nullptr, 1, &h, options.get(), nullptr));
+        ASSERT_TRUE(out);
+    }
+    if (shiftX == 0)
+        return;
+    {
+        auto grid = adoptDataset(GDALOpen(io::toUtf8(warped).c_str(), GA_ReadOnly));
+        ASSERT_TRUE(grid);
+        double gt[6];
+        ASSERT_EQ(GDALGetGeoTransform(datasetHandle(grid), gt), CE_None);
+        const double w = GDALGetRasterXSize(datasetHandle(grid)), h = GDALGetRasterYSize(datasetHandle(grid));
+        const std::vector<std::string> shift = {"-of",
+                                                "COG",
+                                                "-a_ullr",
+                                                std::to_string(gt[0] + shiftX),
+                                                std::to_string(gt[3]),
+                                                std::to_string(gt[0] + w * gt[1] + shiftX),
+                                                std::to_string(gt[3] + h * gt[5])};
+        CPLStringList list = cslFromStrings(shift);
+        const GdalOptionsPtr<GDALTranslateOptions> options(GDALTranslateOptionsNew(list.List(), nullptr));
+        ASSERT_TRUE(options);
+        auto out = adoptDataset(GDALTranslate(io::toUtf8(cog).c_str(), datasetHandle(grid), options.get(), nullptr));
+        ASSERT_TRUE(out);
+    }
+    fs::remove(warped);
+}
+
+// The WKT of an EPSG code
+std::string wktOfEpsg(int epsg) {
+    const SrsPtr srs = srsFromEpsg(epsg);
+    char* wkt = nullptr;
+    OSRExportToWkt(srs.get(), &wkt);
+    std::string text = wkt != nullptr ? wkt : "";
+    CPLFree(wkt);
+    return text;
+}
+
+// Web Mercator (EPSG:3857) of a longitude and a latitude in degrees
+std::array<double, 2> mercator(double lon, double lat) {
+    constexpr double r = 6378137.0, rad = 3.14159265358979323846 / 180.0;
+    return {r * lon * rad, r * std::log(std::tan(3.14159265358979323846 / 4 + lat * rad / 2))};
+}
+
+// The ring of a box of longitudes and latitudes, as the probe writes a footprint
+BasicPolygonGeometry footprintOf(double west, double south, double east, double north) {
+    BasicPolygonGeometry g;
+    for (const auto& [x, y] : {std::pair{west, north}, {east, north}, {east, south}, {west, south}, {west, north}})
+        g.addPoint(x, y, 0.0);
+    return g;
+}
+
+// A COG of EPSG:3857 whose grid covers a box of longitudes and latitudes, of 1 m pixels
+BuiltCog cogOver(double west, double south, double east, double north) {
+    BuiltCog cog;
+    cog.wkt = wktOfEpsg(3857);
+    const auto sw = mercator(west, south), ne = mercator(east, north);
+    cog.extent = {sw[0], sw[1], ne[0], ne[1]};
+    cog.pixelSize = 1.0;
+    return cog;
 }
 
 // Whether every API that reports the state of the build of `path` says it is complete; the test
@@ -306,5 +395,180 @@ TEST(CogBuildPolicy, aCogBuiltBeforeTheRulesIsIncompleteOnlyWhenItsSourceIsAffec
         EXPECT_EQ(fs::exists(folder / CogBuildRecordFileName), s.outdated);
         EXPECT_EQ(fs::last_write_time(folder / CogFileName) != before[i], s.outdated);
     }
+    DDBReleaseConnections(r.c_str(), nullptr);
+}
+
+// A COG holds its raster when its grid holds every corner of the footprint, within a few of its pixels;
+// a pole of the footprint is taken at the limit of Web Mercator
+TEST(CogBuildPolicy, misplacesACogWhoseGridDoesNotHoldEveryCornerOfTheFootprint) {
+    // A raster of about 700 x 1100 m at 11 E, 45 N, its COG padded to a box of 2 km more
+    const BasicPolygonGeometry footprint = footprintOf(11.0, 45.0, 11.01, 45.01);
+    const BuiltCog cog = cogOver(10.99, 44.99, 11.02, 45.02);
+    EXPECT_FALSE(CogBuildPolicy::misplaces(cog, footprint));
+    // Nothing to compare
+    EXPECT_FALSE(CogBuildPolicy::misplaces(cog, BasicPolygonGeometry()));
+
+    // Moved 34 km west (the prime meridian of NTF Paris in grads, read wrongly)
+    BuiltCog moved = cog;
+    moved.extent[0] -= 34000;
+    moved.extent[2] -= 34000;
+    EXPECT_TRUE(CogBuildPolicy::misplaces(moved, footprint));
+
+    // A grid that ends right at a corner holds it within the tolerance, not past it
+    const auto ne = mercator(11.01, 45.01);
+    BuiltCog tight = cog;
+    tight.extent[2] = ne[0] - (CogBuildPolicy::kPlacementTolerancePixels - 0.5) * cog.pixelSize;
+    EXPECT_FALSE(CogBuildPolicy::misplaces(tight, footprint));
+    tight.extent[2] = ne[0] - (CogBuildPolicy::kPlacementTolerancePixels + 0.5) * cog.pixelSize;
+    EXPECT_TRUE(CogBuildPolicy::misplaces(tight, footprint));
+
+    // The whole world, up to the limit of Web Mercator
+    const BuiltCog world = cogOver(-180, -85.0511287798066, 180, 85.0511287798066);
+    EXPECT_FALSE(CogBuildPolicy::misplaces(world, footprintOf(-180, -90, 180, 90)));
+    // A raster around the south pole (its footprint: every longitude from the pole to 60 S): a COG
+    // that reaches the limit of Web Mercator holds it, one cut at the latitude of its edges does not
+    EXPECT_FALSE(CogBuildPolicy::misplaces(cogOver(-180, -85.0511287798066, 180, -59.9),
+                                           footprintOf(-180, -90, 180, -60)));
+    EXPECT_TRUE(CogBuildPolicy::misplaces(cogOver(-180, -71.5, 180, -59.9), footprintOf(-180, -90, 180, -60)));
+
+    // A COG without a CRS cannot hold the footprint
+    BuiltCog noCrs = cog;
+    noCrs.wkt.clear();
+    EXPECT_THROW(CogBuildPolicy::misplaces(noCrs, footprint), AppException);
+}
+
+// A healthy COG built before the rules (no record) is built again when it lies elsewhere than its
+// raster: moved 34 km, as a CRS read wrongly moved it. The COG of the builds before, on the tiles of
+// EPSG:3857, and GDAL's COG in the CRS of the source both hold it where it is
+TEST(CogBuildPolicy, aHealthyCogBuiltBeforeTheRulesIsIncompleteWhenItLiesElsewhereThanItsRaster) {
+    TestArea ta(TEST_NAME, true);
+    EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+    std::vector<Source> healthy;
+    std::copy_if(kSources.begin(), kSources.end(), std::back_inserter(healthy), [](const Source& s) { return !s.outdated; });
+    std::vector<fs::path> inputs;
+    for (const Source& s : healthy)
+        inputs.push_back(writeSource(ta.getPath(std::string(s.name) + ".tif"), s));
+    const fs::path root = ta.getFolder("dataset");
+    const json added = contract::makeDataset(root, inputs);
+    const std::string r = root.string();
+    ASSERT_EQ(DDBBuild(r.c_str(), "", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+
+    std::vector<fs::path> folders;
+    for (size_t i = 0; i < healthy.size(); i++) {
+        const std::string path = std::string(healthy[i].name) + ".tif";
+        ASSERT_EQ(added[i]["path"], path);
+        const fs::path folder = root / ".ddb" / "build" / added[i]["hash"].get<std::string>() / CogBuildSubfolder;
+        folders.push_back(folder);
+        SCOPED_TRACE(path);
+        fs::remove(folder / CogBuildRecordFileName);
+
+        // In place: on the tiles of EPSG:3857, as the builds before warped it, or in the CRS of the source
+        writeOldGridCog(inputs[i], folder / CogFileName);
+        EXPECT_TRUE(reportedComplete(r, path));
+        writeOldCog(inputs[i], folder / CogFileName);
+        EXPECT_TRUE(reportedComplete(r, path));
+
+        // Moved 34 km east
+        writeOldGridCog(inputs[i], folder / CogFileName, "", 34000);
+        EXPECT_FALSE(reportedComplete(r, path));
+    }
+
+    // The next build builds them again
+    ASSERT_EQ(DDBBuild(r.c_str(), "", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+    for (size_t i = 0; i < healthy.size(); i++) {
+        SCOPED_TRACE(healthy[i].name);
+        EXPECT_TRUE(fs::exists(folders[i] / CogBuildRecordFileName));
+        EXPECT_TRUE(reportedComplete(r, std::string(healthy[i].name) + ".tif"));
+    }
+    DDBReleaseConnections(r.c_str(), nullptr);
+}
+
+// GeoTIFFs whose CRS the builds before read wrongly, which put their COG away from the raster: NTF
+// (Paris) in grads 34 km west, EPSG:2853 in US feet and EPSG:2838 with an IMAGINE citation in feet
+// read in metres (thousands of kilometres). Their old COGs, on the tiles of EPSG:3857 from the CRS
+// read wrongly, are incomplete; COGs from their own CRS are complete. The rasters have no nodata,
+// mask or alpha band, whose COG is outdated anyway: their index says they have a mask, so that the
+// placement alone decides. Files of GDAL's test data, when present
+TEST(CogBuildPolicy, theCogOfAGeoTiffWhoseCrsTheBuildsBeforeReadWronglyIsIncomplete) {
+    const fs::path data = "/mnt/data/datasets/orthos/geotiff-edge-cases/pangeo-example-tiff/gdal/gcore/data";
+    struct Case {
+        const char* file;
+        std::string wrongSrs;  // the CRS read wrongly, else a shift east in metres
+        double shiftX;
+    };
+    const std::vector<Case> cases = {{"test_gf.tif", "", -34000},
+                                     {"epsg_2853_with_us_feet.tif", "EPSG:2853", 0},
+                                     {"citation_mixedcase.tif", "EPSG:2838", 0}};
+    for (const Case& c : cases)
+        if (!fs::exists(data / c.file))
+            GTEST_SKIP() << (data / c.file).string() << " is not present";
+
+    TestArea ta(TEST_NAME, true);
+    EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+    std::vector<fs::path> inputs;
+    for (const Case& c : cases) {
+        inputs.push_back(ta.getPath(c.file));
+        fs::copy_file(data / c.file, inputs.back(), fs::copy_options::overwrite_existing);
+    }
+    const fs::path root = ta.getFolder("dataset");
+    const json added = contract::makeDataset(root, inputs);
+    const std::string r = root.string();
+    ASSERT_EQ(DDBBuild(r.c_str(), "", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+    {
+        const auto db = ddb::open(r, false);
+        db->query("UPDATE entries SET properties = json_set(properties, '$.hasMask', json('true'))")->execute();
+    }
+
+    for (size_t i = 0; i < cases.size(); i++) {
+        const Case& c = cases[i];
+        ASSERT_EQ(added[i]["path"], c.file);
+        ASSERT_EQ(added[i]["type"], static_cast<int>(EntryType::GeoRaster));
+        const fs::path folder = root / ".ddb" / "build" / added[i]["hash"].get<std::string>() / CogBuildSubfolder;
+        SCOPED_TRACE(c.file);
+        EXPECT_TRUE(reportedComplete(r, c.file));
+
+        fs::remove(folder / CogBuildRecordFileName);
+        writeOldGridCog(inputs[i], folder / CogFileName);
+        EXPECT_TRUE(reportedComplete(r, c.file));
+        writeOldGridCog(inputs[i], folder / CogFileName, c.wrongSrs, c.shiftX);
+        EXPECT_FALSE(reportedComplete(r, c.file));
+    }
+    DDBReleaseConnections(r.c_str(), nullptr);
+}
+
+// A raster around a pole: its COG built now reaches the limit of Web Mercator at that pole over every
+// longitude and holds it; the COG of a build that stopped at the latitude of its edges does not
+TEST(CogBuildPolicy, theCogOfARasterAroundAPoleHoldsItWhenItReachesTheLimitOfWebMercator) {
+    TestArea ta(TEST_NAME, true);
+    EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+    // RGBA in EPSG:3031, 6400 x 4800 km round the south pole
+    const Source polar{"polar-rgba", 4, GDT_Byte, true, std::nullopt, false, false, false, 3031, -1500000.0, 1500000.0,
+                       100000.0};
+    const fs::path input = writeSource(ta.getPath("polar-rgba.tif"), polar);
+    const fs::path root = ta.getFolder("dataset");
+    const json added = contract::makeDataset(root, {input});
+    const std::string r = root.string();
+    ASSERT_EQ(added[0]["polygon_geom"]["geometry"]["coordinates"][0][2][1], -90.0) << added[0].dump();
+    ASSERT_EQ(DDBBuild(r.c_str(), "", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+    const fs::path folder = root / ".ddb" / "build" / added[0]["hash"].get<std::string>() / CogBuildSubfolder;
+
+    // Without its record, the COG built now holds the raster
+    fs::remove(folder / CogBuildRecordFileName);
+    EXPECT_TRUE(reportedComplete(r, "polar-rgba.tif"));
+
+    // Its northern half: cut short of the pole
+    const fs::path half = ta.getPath("half.tif");
+    {
+        auto cog = adoptDataset(GDALOpen(io::toUtf8(folder / CogFileName).c_str(), GA_ReadOnly));
+        ASSERT_TRUE(cog);
+        const int w = GDALGetRasterXSize(datasetHandle(cog)), h = GDALGetRasterYSize(datasetHandle(cog));
+        CPLStringList list = cslFromStrings({"-of", "COG", "-srcwin", "0", "0", std::to_string(w), std::to_string(h / 2)});
+        const GdalOptionsPtr<GDALTranslateOptions> options(GDALTranslateOptionsNew(list.List(), nullptr));
+        ASSERT_TRUE(options);
+        auto out = adoptDataset(GDALTranslate(io::toUtf8(half).c_str(), datasetHandle(cog), options.get(), nullptr));
+        ASSERT_TRUE(out);
+    }
+    fs::copy_file(half, folder / CogFileName, fs::copy_options::overwrite_existing);
+    EXPECT_FALSE(reportedComplete(r, "polar-rgba.tif"));
     DDBReleaseConnections(r.c_str(), nullptr);
 }

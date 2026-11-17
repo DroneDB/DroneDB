@@ -244,6 +244,12 @@ class EntryHandler {
     virtual std::vector<std::string> buildPropertyKeys() const {
         return buildDependsOnGeoref() ? std::vector<std::string>{"georef"} : std::vector<std::string>{};
     }
+    // The build rules of this type read the footprint of the entry (polygon_geom) too; where
+    // libddb reads entries from the index for their builds, it reads the footprint of these types
+    // only. The default: they do not.
+    virtual bool buildReadsFootprint() const { return false; }
+    // The rules read something of the index beyond path, hash and type
+    bool buildReadsIndex() const { return !buildPropertyKeys().empty() || buildReadsFootprint(); }
     // The key of the build folder of e, an entry of this type: its hash, with the digest of its
     // georeference when buildDependsOnGeoref() (build_layout.h buildKey()). e holds its properties.
     std::string buildKey(const Entry& e) const;
