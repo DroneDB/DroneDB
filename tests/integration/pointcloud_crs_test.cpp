@@ -12,7 +12,10 @@
 // is ignored with a warning; a geocentric footprint is transformed in 3-D.
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <functional>
+#include <optional>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -31,6 +34,7 @@
 #include "pointcloud.h"
 #include "raster_ops.h"
 #include "raster_test_utils.h"
+#include "real_raster_helper.h"
 #include "test.h"
 #include "testarea.h"
 #include "tile_test_support.h"
@@ -803,6 +807,129 @@ namespace
         const json status = contract::takeJson(out);
         EXPECT_EQ(status[0]["complete"], false) << status.dump();
         DDBReleaseConnections(r.c_str(), nullptr);
+    }
+
+    // The real program, counting the reads of a cloud's info and the COPC builds
+    class CountingCloudHelper : public testutils::RealRasterHelper
+    {
+      public:
+        PointCloudInfo pointCloudInfo(const fs::path &path) override
+        {
+            infos++;
+            return RealRasterHelper::pointCloudInfo(path);
+        }
+        json buildCopc(const fs::path &path, const fs::path &out, const json &params,
+                       const raster::ProgressCallback &progress) override
+        {
+            builds++;
+            return RealRasterHelper::buildCopc(path, out, params, progress);
+        }
+
+        std::atomic<int> infos{0};
+        std::atomic<int> builds{0};
+    };
+
+    // A dataset of one cloud, indexed, and what its build recorded
+    struct IndexedCloud
+    {
+        fs::path root;
+        std::string hash;
+
+        std::optional<CopcBuildRecord> record() const
+        {
+            return readCopcBuildRecord(root / ".ddb" / "build" / hash / CopcBuildSubfolder / CopcBuildRecordFileName);
+        }
+    };
+
+    IndexedCloud indexCloud(TestArea &ta, const std::string &name, const std::function<void(const fs::path &)> &write)
+    {
+        const fs::path las = ta.getPath(name);
+        write(las);
+        const fs::path root = ta.getFolder("dataset-" + name);
+        const json added = contract::makeDataset(root, {las});
+        return {root, added[0]["hash"].get<std::string>()};
+    }
+
+    // The index of 2.8 has what the CRS policy needs of a cloud (its status, its CRS, its footprint):
+    // the build of its entry asks the helper for the COPC only, whatever the status
+    TEST(PointCloudCrs, AnEntryIndexedWithItsCrsStatusBuildsWithTheCopcRequestOnly)
+    {
+        TestArea ta(TEST_NAME, true);
+        EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+        const IndexedCloud geographic = indexCloud(ta, "geo.las", [](const fs::path &p) {
+            writeLonLatLas(p, "EPSG:4326", 13.84, 46.68, 0.014, 40);
+        });
+        const IndexedCloud projected = indexCloud(ta, "utm.las", [](const fs::path &p) {
+            testutils::writeLas14(p, wktOfEpsg("EPSG:32633"), {{410000, 5170000, 580}, {410500, 5170600, 600}});
+        });
+        const IndexedCloud implausible = indexCloud(ta, "site.las", [](const fs::path &p) {
+            testutils::writeLas14(p, wktOfEpsg("EPSG:4978"), {{-88, -95, 1}, {212, 190, 40}, {50, 60, 20}});
+        });
+
+        CountingCloudHelper helper;
+        const raster::ScopedRasterHelper installed(helper);
+        for (const auto *cloud : {&geographic, &projected, &implausible})
+        {
+            const std::string r = cloud->root.string();
+            ASSERT_EQ(DDBBuild(r.c_str(), nullptr, nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+            DDBReleaseConnections(r.c_str(), nullptr);
+        }
+        EXPECT_EQ(helper.infos, 0) << "the index has what the policy needs";
+        EXPECT_EQ(helper.builds, 3);
+
+        // The same COPCs as when the helper reads the clouds
+        const auto geoRecord = geographic.record();
+        ASSERT_TRUE(geoRecord.has_value());
+        EXPECT_TRUE(geoRecord->transformed);
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(geoRecord->copcCrs, "EPSG:32633")) << geoRecord->copcCrs;
+        const auto utmRecord = projected.record();
+        ASSERT_TRUE(utmRecord.has_value());
+        EXPECT_FALSE(utmRecord->transformed);
+        EXPECT_TRUE(PointCloudCrsPolicy::isSame(utmRecord->copcCrs, "EPSG:32633"));
+        const auto siteRecord = implausible.record();
+        ASSERT_TRUE(siteRecord.has_value());
+        EXPECT_EQ(siteRecord->copcCrs, "");
+
+        // A single entry, forced
+        const std::string r = geographic.root.string();
+        ASSERT_EQ(DDBBuild(r.c_str(), "geo.las", nullptr, true, false), DDBERR_NONE) << DDBGetLastError();
+        EXPECT_EQ(helper.infos, 0);
+        EXPECT_EQ(helper.builds, 4);
+        DDBReleaseConnections(r.c_str(), nullptr);
+    }
+
+    // An entry indexed before the status was recorded, and a cloud that is no entry, are read by the
+    // helper first
+    TEST(PointCloudCrs, ACloudWithoutAnIndexedStatusIsReadByTheHelperBeforeItsBuild)
+    {
+        TestArea ta(TEST_NAME, true);
+        EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+        const IndexedCloud before = indexCloud(ta, "geo27.las", [](const fs::path &p) {
+            writeLonLatLas(p, "EPSG:4326", 13.84, 46.68, 0.014, 40);
+        });
+        {
+            const auto db = ddb::open(before.root.string(), false);
+            auto q = db->query("UPDATE entries SET properties = json_remove(properties, '$.crsStatus')");
+            q->execute();
+        }
+
+        CountingCloudHelper helper;
+        const raster::ScopedRasterHelper installed(helper);
+        const std::string r = before.root.string();
+        ASSERT_EQ(DDBBuild(r.c_str(), "geo27.las", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+        DDBReleaseConnections(r.c_str(), nullptr);
+        EXPECT_EQ(helper.infos, 1);
+        EXPECT_EQ(helper.builds, 1);
+        const auto record = before.record();
+        ASSERT_TRUE(record.has_value());
+        EXPECT_TRUE(record->transformed);
+
+        const fs::path out = ta.getFolder("loose");
+        CopcBuildRecord loose;
+        ASSERT_NO_THROW(loose = buildCopc({io::toUtf8(before.root / "geo27.las")}, io::toUtf8(out)));
+        EXPECT_TRUE(loose.transformed);
+        EXPECT_EQ(helper.infos, 2);
+        EXPECT_EQ(helper.builds, 2);
     }
 
     // The Florida file of the corpus (4.7 M points, NAD83(2011) + NAVD88, longitude and latitude):

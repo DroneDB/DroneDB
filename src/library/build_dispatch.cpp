@@ -390,13 +390,15 @@ void buildAll(Database* db, const std::string& outputPath, bool force, const Bui
             total = static_cast<size_t>(countQ->getInt64(0));
     }
 
-    auto q = db->query(selectEntries(EntryColumns::Properties) + " WHERE e.type IN " + inListSql(types.size()));
+    // The entries as a build of one reads them (getEntry): with their footprints, which the build of
+    // a point cloud reads
+    auto q = db->query(selectEntries(EntryColumns::Geometries) + " WHERE e.type IN " + inListSql(types.size()));
     bindEntryTypes(*q, 1, types);
 
     size_t done = 0;
     while (q->fetch()) {
         Entry e;
-        readEntry(*q, EntryColumns::Properties, e);
+        readEntry(*q, EntryColumns::Geometries, e);
 
         // Call build on each of them; a canceled call stops before the next one
         cancel::throwIfCanceled();

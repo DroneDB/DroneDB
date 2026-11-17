@@ -221,14 +221,15 @@ std::vector<fs::path> collectPendingFiles(const fs::path& buildDir) {
     return pendingFiles;
 }
 
-// The entries of db with this hash (all their properties: the build key reads the georeference)
+// The entries of db with this hash, as a build of one reads them (getEntry): all their properties
+// and their footprints, which the build rules read (the georeference, the CRS of a point cloud)
 std::vector<Entry> entriesOfHash(Database* db, const std::string& hash) {
     std::vector<Entry> entries;
-    auto q = db->query(selectEntries(EntryColumns::Properties) + " WHERE e.hash = ?");
+    auto q = db->query(selectEntries(EntryColumns::Geometries) + " WHERE e.hash = ?");
     q->bind(1, hash);
     while (q->fetch()) {
         Entry e;
-        readEntry(*q, EntryColumns::Properties, e);
+        readEntry(*q, EntryColumns::Geometries, e);
         entries.push_back(std::move(e));
     }
     return entries;

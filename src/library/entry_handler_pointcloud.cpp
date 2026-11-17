@@ -60,23 +60,37 @@ void parsePointCloudMetadata(const fs::path &path, Entry &entry)
 // The status of the CRS of the cloud of an entry, as its index records it. An entry indexed before
 // the status was recorded has only the CRS the file states: its kind, without the check against the
 // coordinates (the index has no bounds), stands for it.
-PointCloudCrsStatus crsStatusOf(const Entry& e) {
-    if (!e.properties.is_object())
-        return PointCloudCrsStatus::None;
-    if (const auto status = e.properties.find("crsStatus"); status != e.properties.end() && status->is_string())
-        if (const auto parsed = parsePointCloudCrsStatus(status->get<std::string>()))
-            return *parsed;
-    if (const auto projection = e.properties.find("projection");
-        projection != e.properties.end() && projection->is_string())
-        return PointCloudCrsPolicy::classify(projection->get<std::string>(), {}).status;
-    return PointCloudCrsStatus::None;
-}
-
 std::string projectionOf(const Entry& e) {
     if (!e.properties.is_object())
         return {};
     const auto projection = e.properties.find("projection");
     return projection != e.properties.end() && projection->is_string() ? projection->get<std::string>() : std::string();
+}
+
+PointCloudCrsStatus crsStatusOf(const Entry& e) {
+    if (const auto status = indexedCrsStatus(e.properties))
+        return *status;
+    return PointCloudCrsPolicy::classify(projectionOf(e), {}).status;
+}
+
+// What the index holds of the CRS of the cloud of an entry, as the build needs it: its status, its
+// CRS and the target of its COPC, chosen from its footprint as when the helper reads the cloud.
+// Nothing for an entry indexed before the status was recorded, or one whose COPC is reprojected
+// and that is read without its footprint: the helper reads the cloud then.
+std::optional<PointCloudInfo> indexedCrsOf(const Entry& e) {
+    const auto status = indexedCrsStatus(e.properties);
+    if (!status)
+        return std::nullopt;
+    PointCloudInfo info;
+    info.crsStatus = *status;
+    info.wktProjection = projectionOf(e);
+    if (PointCloudCrsPolicy::reprojects(*status)) {
+        if (e.polygon_geom.empty())
+            return std::nullopt;
+        info.polyBounds = e.polygon_geom;
+    }
+    chooseCopcTarget(info, e.path);
+    return info;
 }
 
 class PointCloudEntryHandler : public EntryHandler {
@@ -145,7 +159,7 @@ class PointCloudEntryHandler : public EntryHandler {
         io::assureIsRemoved(ctx.tempFolder / LegacyEptFileName);
         io::assureIsRemoved(ctx.tempFolder / LegacyEptDataFolder);
         io::assureIsRemoved(ctx.tempFolder / LegacyEptHierarchyFolder);
-        const CopcBuildRecord record = buildCopc(vec, io::toUtf8(ctx.tempFolder), ctx.options, true);
+        const CopcBuildRecord record = buildCopc(vec, io::toUtf8(ctx.tempFolder), ctx.options, true, {indexedCrsOf(ctx.entry)});
         writeCopcBuildRecord(ctx.tempFolder / CopcBuildRecordFileName, record);
     }
 

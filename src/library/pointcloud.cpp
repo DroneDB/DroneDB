@@ -276,20 +276,24 @@ LonLatEnvelope envelopeOf(const BasicPolygonGeometry& polygon) {
 
 }  // namespace
 
+void chooseCopcTarget(PointCloudInfo& info, const std::string& cloud) {
+    info.targetCrs.clear();
+    if (!PointCloudCrsPolicy::reprojects(info.crsStatus) || info.polyBounds.empty())
+        return;
+    try {
+        info.targetCrs = PointCloudCrsPolicy::target(info.wktProjection, info.crsStatus, envelopeOf(info.polyBounds));
+    } catch (const GDALException& e) {
+        // The COPC keeps the CRS of the cloud, as before the policy
+        LOGW << "No projected coordinate system for the COPC of " << cloud << ": " << e.what();
+    }
+}
+
 PointCloudInfo readPointCloudInfo(const fs::path& path) {
     gdalopen::requireUserFileOpens("readPointCloudInfo");
     // The bounds of a text file (XYZ, PTS) were never kept: only a header gives them
     const bool text = io::Path(path).checkExtension({"pts", "xyz"});
     PointCloudInfo info = tilersPointCloudInfo(io::toUtf8(path), !text, 4326);
-    if (PointCloudCrsPolicy::reprojects(info.crsStatus) && !info.polyBounds.empty()) {
-        try {
-            info.targetCrs =
-                PointCloudCrsPolicy::target(info.wktProjection, info.crsStatus, envelopeOf(info.polyBounds));
-        } catch (const GDALException& e) {
-            // The COPC keeps the CRS of the cloud, as before the policy
-            LOGW << "No projected coordinate system for the COPC of " << io::toUtf8(path) << ": " << e.what();
-        }
-    }
+    chooseCopcTarget(info, io::toUtf8(path));
     return info;
 }
 
@@ -486,6 +490,15 @@ PointCloudInfo checkBuiltCopc(const fs::path& produced, const raster::CopcParams
 
 }  // namespace
 
+std::optional<PointCloudCrsStatus> indexedCrsStatus(const json& properties) {
+    if (!properties.is_object())
+        return std::nullopt;
+    const auto status = properties.find("crsStatus");
+    if (status == properties.end() || !status->is_string())
+        return std::nullopt;
+    return parsePointCloudCrsStatus(status->get<std::string>());
+}
+
 void to_json(json& j, const CopcBuildRecord& record) {
     j = {{"crsPolicy", record.crsPolicy},
          {"sourceCrs", record.sourceCrs},
@@ -514,7 +527,8 @@ std::optional<CopcBuildRecord> readCopcBuildRecord(const fs::path& file) {
 }
 
 CopcBuildRecord buildCopc(const std::vector<std::string>& filenames, const std::string& outdir,
-                          const BuildOptions& options, bool overwrite) {
+                          const BuildOptions& options, bool overwrite,
+                          const std::vector<std::optional<PointCloudInfo>>& known) {
     const fs::path dest = io::fromUtf8(outdir);
     const fs::path outPath = dest / CopcFileName;
     // Before anything is read or written: the COPC replaces only cloud.copc.laz in dest
@@ -523,11 +537,14 @@ CopcBuildRecord buildCopc(const std::vector<std::string>& filenames, const std::
     checkSources(filenames);
 
     // The CRS of each cloud, as the policy judges it: the host chooses the CRS of the COPC, the
-    // helper builds it
+    // helper builds it. What the caller knows of a cloud is not read again.
     std::vector<PointCloudInfo> inputs(filenames.size());
-    for (size_t i = 0; i < filenames.size(); i++)
-        if (!getPointCloudInfo(filenames[i], inputs[i]))
+    for (size_t i = 0; i < filenames.size(); i++) {
+        if (i < known.size() && known[i])
+            inputs[i] = *known[i];
+        else if (!getPointCloudInfo(filenames[i], inputs[i]))
             throw InvalidArgsException(filenames[i] + " is not a supported point cloud file");
+    }
 
     // The folder of the output is the caller's: the helper writes the COPC and its temporary files
     // in a private folder made in it, removed with whatever is left in it, and the COPC is moved to

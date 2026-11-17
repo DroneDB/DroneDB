@@ -86,8 +86,23 @@ namespace ddb
     // PDALException for a cloud that cannot be read; AppException for a COPC that is not in the
     // CRS asked for or whose octree is still degenerate; RetryableBuildException when the device is
     // full; the other exceptions of IRasterHelper
+    // `known` (in the order of filenames, nothing for a cloud the helper reads) is what the caller
+    // already knows of the CRS of a cloud: its crsStatus, wktProjection and targetCrs
+    // (chooseCopcTarget), as the index of a dataset has them.
     CopcBuildRecord buildCopc(const std::vector<std::string> &filenames, const std::string &outdir,
-                              const BuildOptions &options = {}, bool overwrite = true);
+                              const BuildOptions &options = {}, bool overwrite = true,
+                              const std::vector<std::optional<PointCloudInfo>> &known = {});
+
+    // Sets info.targetCrs, the CRS the COPC of the cloud is built in, from its crsStatus,
+    // wktProjection and footprint in WGS 84 (polyBounds): PointCloudCrsPolicy::target for a
+    // geographic or geocentric cloud with a footprint, "" otherwise (also when PROJ cannot make
+    // the target, which is logged with the name of the cloud). The one choice of the target for a
+    // cloud the helper reads and for an entry of the index.
+    void chooseCopcTarget(PointCloudInfo &info, const std::string &cloud);
+
+    // The crsStatus an entry's properties record; nothing for an entry indexed before it was
+    // recorded, or with a value that is not a status
+    std::optional<PointCloudCrsStatus> indexedCrsStatus(const json &properties);
 
     // The phase of a COPC build at a fraction of its work, as ddb-tilers reports them: "planning"
     // (the inputs are opened and the octree planned) below 0.05, "reading" (the points are read
