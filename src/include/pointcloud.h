@@ -69,7 +69,8 @@ namespace ddb
     // `cloud.copc.laz` placed inside `outdir`. The COPC of a geographic or geocentric cloud is built
     // in the projected CRS PointCloudCrsPolicy chooses for it (for clouds merged into one, the
     // choice for the first that has one), and the build fails when the COPC is not in that CRS or
-    // its octree still does not split the cloud. Returns what was done with the CRSs, which the
+    // its octree still does not split the cloud. The COPC of a cloud whose CRS does not fit its
+    // coordinates (an implausible one) states no CRS, its points as they are. Returns what was done with the CRSs, which the
     // build of an entry records (writeCopcBuildRecord). ddb-tilers builds it in the raster helper
     // (IRasterHelper::buildCopc), on the threads of one build (DDB_BUILD_THREADS, lowered to
     // options.threads) and within the memory of DDBT_COPC_BUILD_MEM_MB (else 4 GiB, at most half

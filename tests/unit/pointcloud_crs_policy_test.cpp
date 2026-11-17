@@ -90,17 +90,16 @@ namespace
         EXPECT_EQ(targetOf("EPSG:4326", {12.0005, 46.0, 500.0, 12.015, 46.01, 510.0}), "EPSG:32633");
     }
 
-    TEST(PointCloudCrsPolicy, aCloudAcrossTheEdgeOfAZoneGetsATransverseMercatorCentredOnIt)
+    TEST(PointCloudCrsPolicy, aSmallCloudAcrossTheEdgeOfAZoneStaysInTheUtmZoneOfItsCentre)
     {
-        const std::string target = targetOf("EPSG:4326", {11.99, 46.0, 500.0, 12.03, 46.01, 510.0});
-        const OGRSpatialReference tm = read(target);
-        ASSERT_TRUE(tm.IsProjected()) << target;
-        EXPECT_STREQ(tm.GetAttrValue("PROJECTION"), SRS_PT_TRANSVERSE_MERCATOR);
-        EXPECT_NEAR(tm.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN), 12.01, 1e-9);
-        EXPECT_NEAR(tm.GetNormProjParm(SRS_PP_SCALE_FACTOR), 1.0, 1e-12);
-        EXPECT_NEAR(tm.GetLinearUnits(), 1.0, 1e-12) << "metres";
+        // 18 E, between zones 33 (central meridian 15) and 34 (21): the zone of the centre
+        EXPECT_EQ(targetOf("EPSG:4326", {17.98, 46.0, 500.0, 18.01, 46.01, 510.0}), "EPSG:32633");
+        EXPECT_EQ(targetOf("EPSG:4326", {17.99, 46.0, 500.0, 18.02, 46.01, 510.0}), "EPSG:32634");
+        // Up to 4.5 degrees from the central meridian: 19.4 E is 4.4 degrees from 15
+        EXPECT_EQ(targetOf("EPSG:4326", {16.0, 46.0, 500.0, 19.4, 46.5, 510.0}), "EPSG:32633");
     }
 
+    // 10 degrees wide: 5 degrees from the central meridian of any zone of its centre
     TEST(PointCloudCrsPolicy, aCloudWiderThanAZoneGetsATransverseMercatorCentredOnIt)
     {
         const std::string target = targetOf("EPSG:4326", {10.0, 45.0, 0.0, 20.0, 46.0, 100.0});
@@ -110,6 +109,11 @@ namespace
         EXPECT_NEAR(tm.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN), 15.0, 1e-9);
         // The same footprint gives the same text, so the COPC of a rebuild is in the same CRS
         EXPECT_EQ(targetOf("EPSG:4326", {10.0, 45.0, 0.0, 20.0, 46.0, 100.0}), target);
+
+        // Past 4.5 degrees from the central meridian: 19.6 E is 4.6 degrees from 15
+        const OGRSpatialReference past = read(targetOf("EPSG:4326", {16.0, 46.0, 500.0, 19.6, 46.5, 510.0}));
+        EXPECT_STREQ(past.GetAttrValue("PROJECTION"), SRS_PT_TRANSVERSE_MERCATOR);
+        EXPECT_NEAR(past.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN), 17.8, 1e-9);
     }
 
     TEST(PointCloudCrsPolicy, aPolarCloudGetsTheUniversalPolarStereographic)

@@ -522,6 +522,16 @@ namespace
         EXPECT_FALSE(raster::toJson(raster::CopcParams()).contains("targetCrs"));
         EXPECT_TRUE(raster::copcParamsFromJson(json::object()).targetCrs.empty());
         EXPECT_THROW(raster::copcParamsFromJson({{"targetCrs", 32633}}), ProtocolError);
+        EXPECT_FALSE(back.dropCrs);
+        EXPECT_FALSE(raster::toJson(params).contains("dropCrs"));
+
+        // A COPC without the CRS of its clouds
+        raster::CopcParams drop;
+        drop.dropCrs = true;
+        EXPECT_EQ(raster::toJson(drop)["dropCrs"], true);
+        EXPECT_TRUE(raster::copcParamsFromJson(raster::toJson(drop)).dropCrs);
+        EXPECT_THROW(raster::copcParamsFromJson({{"dropCrs", "yes"}}), ProtocolError);
+        EXPECT_THROW(raster::copcParamsFromJson({{"dropCrs", true}, {"targetCrs", "EPSG:32633"}}), ProtocolError);
 
         raster::CopcResult result;
         result.transformed = true;

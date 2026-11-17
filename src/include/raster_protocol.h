@@ -325,13 +325,15 @@ namespace ddb
         // The params of a `copc`: the point clouds merged with `path` into one, in their order
         // after it (`inputs`), the threads of the build, and the CRS the points are transformed to
         // (`targetCrs`, new in 1.4: "EPSG:<code>", "EPSG:<h>+<v>" or a WKT; absent or empty, the
-        // COPC keeps the CRS of its clouds). The host chooses it (PointCloudCrsPolicy), the helper
-        // builds with it.
+        // COPC keeps the CRS of its clouds), or none (`dropCrs`, new in 1.4, absent when false: the
+        // clouds state a CRS their coordinates do not fit, and the COPC states none; not with
+        // targetCrs). The host chooses (PointCloudCrsPolicy), the helper builds with it.
         struct CopcParams
         {
             std::vector<fs::path> inputs;
             std::optional<int> threads;
             std::string targetCrs;
+            bool dropCrs = false;
         };
 
         json toJson(const CopcParams &params);

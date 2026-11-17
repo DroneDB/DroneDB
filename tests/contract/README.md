@@ -169,7 +169,8 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   not empty): no timer retries that build, adding one of the files releases it. It is the
   `awaitingFiles` of `DDBGetPendingBuildInfo`, and false without a marker, so a host reads the
   flag and does not derive it from `state` and `missingDependencies`.
-* `crs` (2.8.0) is on the `pointcloud.copc` artifact when the COPC has a CRS:
+* `crs` (2.8.0) is on the `pointcloud.copc` artifact when the COPC has a CRS (the COPC of a cloud whose CRS does not
+  fit its coordinates has none):
   `{"name": "WGS 84 / UTM zone 33N", "epsg": 32633, "transformed": true}`, the CRS of the COPC file
   (`epsg` null for a CRS without a code: a compound CRS, a centred transverse Mercator, a 3-D UTM),
   and whether the build transformed the points of the source to it (the COPC of a geographic or
@@ -809,11 +810,13 @@ Registry has to adopt first.
   `list`, `list-entries`, `info-pointcloud`, `info-pointcloud-no-footprint`, `stac-item-collection` and
   `stac-data-item-collection` fixtures have it), and the `pointcloud.copc` artifact gains `crs` (new fixture
   `build-artifacts-pointcloud`; `build-artifacts.schema.json` has the member). A CRS the coordinates do not fit is
-  ignored: no footprint, `warning` "coordinate system ignored: the coordinates do not fit <name>". The COPC of a
+  ignored: no footprint, `warning` "coordinate system ignored: the coordinates do not fit <name>", and a COPC that
+  states no CRS (no `crs` in the manifest). The COPC of a
   geographic or geocentric cloud is built in a metric projected CRS (UTM of the centre of its footprint, on its
-  datum when EPSG has one; UPS near the poles; a centred transverse Mercator for a cloud wider than a zone; a
+  datum when EPSG has one; UPS near the poles; a centred transverse Mercator for a cloud that reaches more than 4.5
+  degrees from the central meridian of that zone; a
   compound source keeps its vertical CRS in metres; a geocentric or 3-D geographic one the ellipsoidal height), with
-  `copc/build.json` beside it; such a COPC built before is incomplete for `DDBIsBuildComplete` and the build
+  `copc/build.json` beside it; such a COPC built before (and one of an implausible CRS) is incomplete for `DDBIsBuildComplete` and the build
   objects, and is built again by the next `DDBBuild`. The footprint of a geocentric cloud is the envelope of its
   points, transformed in 3-D. The raster helper speaks protocol 1.4 (`pointCloudInfo` gains `crsStatus` and
-  `targetCrs`, `copc` takes `targetCrs` and answers the octree its builder reports); a helper of 1.3 is refused.
+  `targetCrs`, `copc` takes `targetCrs` or `dropCrs` and answers the octree its builder reports); a helper of 1.3 is refused.

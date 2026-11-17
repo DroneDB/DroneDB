@@ -886,6 +886,8 @@ namespace ddb
             setBuildThreads(result, params.threads);
             if (!params.targetCrs.empty())
                 result["targetCrs"] = params.targetCrs;
+            if (params.dropCrs)
+                result["dropCrs"] = true;
             return result;
         }
 
@@ -902,6 +904,14 @@ namespace ddb
                     throw ProtocolError("'targetCrs' is not a string");
                 result.targetCrs = target->get<std::string>();
             }
+            if (const json *drop = member(params, "dropCrs"))
+            {
+                if (!drop->is_boolean())
+                    throw ProtocolError("'dropCrs' is not a boolean");
+                result.dropCrs = drop->get<bool>();
+            }
+            if (result.dropCrs && !result.targetCrs.empty())
+                throw ProtocolError("'dropCrs' and 'targetCrs' cannot be set together");
             return result;
         }
 

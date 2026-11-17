@@ -522,7 +522,7 @@ extern "C"
      * coordinates do not fit it (a geographic CRS with x outside [-180, 180] or y outside [-90, 90],
      * a geocentric one whose corners are not 6,300 to 6,420 km from the centre of the earth, a
      * projected one far outside its area of use): the entry is handled as having no CRS (no
-     * footprint, its COPC is not transformed) and "warning" is "coordinate system ignored: the
+     * footprint, and its COPC states no CRS, its points as they are) and "warning" is "coordinate system ignored: the
      * coordinates do not fit <name of the CRS>". The footprint of a geocentric cloud is transformed
      * in 3-D. A footprint that is not a longitude/latitude envelope is left out, with "warning"
      * "footprint unavailable: <why>".
@@ -957,9 +957,9 @@ extern "C"
      *  non-zero content. Returns false for non-buildable entries, missing
      *  outputs, or empty stub folders left by interrupted builds.
      *  Changed in 2.8: the COPC of a point cloud whose CRS is geographic or geocentric (its
-     *  "crsStatus" property, or for an entry indexed before 2.8 the kind of its "projection") is
-     *  complete only when it was built in a projected CRS (the record "copc/build.json" beside it
-     *  says so): a COPC built before 2.8 is incomplete, and the next DDBBuild without force builds it
+     *  "crsStatus" property, or for an entry indexed before 2.8 the kind of its "projection"), or
+     *  implausible, is complete only when it was built in a projected CRS, or without the CRS (the
+     *  record "copc/build.json" beside it says so): a COPC built before 2.8 is incomplete, and the next DDBBuild without force builds it
      *  again; the old COPC is served until the new one replaces it. Other point clouds are not
      *  affected.
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -1033,13 +1033,15 @@ extern "C"
      *                 of the artifact and let clients keep what such a URL returns while it is
      *                 the version DDBResolveBuildFile gives. Empty only when the file went away
      *                 while it was read
-     *   crs           (new in 2.8) pointcloud.copc only, when the COPC has a CRS: {"name": "WGS 84 /
+     *   crs           (new in 2.8) pointcloud.copc only, when the COPC has a CRS (the COPC of a point
+     *                 cloud whose CRS is implausible has none): {"name": "WGS 84 /
      *                 UTM zone 33N", "epsg": 32633 or null, "transformed": bool}, the CRS of the
      *                 COPC file (as its header states it). transformed is true when the build
      *                 transformed the points of the source to it: the COPC of a geographic or
      *                 geocentric cloud is built in a metric projected CRS (UTM of its centre, on the
      *                 datum of the cloud when EPSG has one; UPS near the poles; a transverse Mercator
-     *                 centred on a cloud wider than a UTM zone; a compound source keeps its vertical
+     *                 centred on a cloud that reaches more than 4.5 degrees from the central
+     *                 meridian of that zone; a compound source keeps its vertical
      *                 CRS, a geocentric or 3-D geographic one gets the ellipsoidal height). epsg is
      *                 null for a CRS without a code (a compound CRS, a centred transverse Mercator, a
      *                 3-D UTM). The source file and the properties of its entry are not changed

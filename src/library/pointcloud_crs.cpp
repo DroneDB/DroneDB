@@ -43,9 +43,11 @@ namespace ddb
         constexpr int kUpsNorthEpsg = 5041;
         constexpr int kUpsSouthEpsg = 5042;
 
-        // Half the width of a UTM zone: a footprint that reaches past it is in a centred transverse
-        // Mercator
-        constexpr double kUtmHalfZoneDegrees = 3.0;
+        // How far from the central meridian of its zone a footprint may reach and stay in UTM: 1.5
+        // degrees into the next zone, where the scale of UTM is 0.25 % off at the equator and less
+        // elsewhere. A small cloud across the edge of a zone stays in the zone of its centre (an
+        // EPSG code the viewers know); a wider one is in a centred transverse Mercator.
+        constexpr double kUtmReachDegrees = 4.5;
 
         // The confidence PROJ gives a CRS that is equivalent to the one asked for under another name
         // (proj_identify): a UTM CRS built here is unnamed
@@ -406,6 +408,11 @@ namespace ddb
         return status == PointCloudCrsStatus::Geographic || status == PointCloudCrsStatus::Geocentric;
     }
 
+    bool PointCloudCrsPolicy::changesCrs(PointCloudCrsStatus status)
+    {
+        return reprojects(status) || status == PointCloudCrsStatus::Implausible;
+    }
+
     std::string PointCloudCrsPolicy::target(const std::string &wkt, PointCloudCrsStatus status,
                                             const LonLatEnvelope &footprint)
     {
@@ -428,8 +435,8 @@ namespace ddb
         {
             const int zone = utmZone(lon);
             const double centralMeridian = zone * 6.0 - 183.0;
-            if (footprint.minLon < centralMeridian - kUtmHalfZoneDegrees ||
-                footprint.maxLon > centralMeridian + kUtmHalfZoneDegrees)
+            if (footprint.minLon < centralMeridian - kUtmReachDegrees ||
+                footprint.maxLon > centralMeridian + kUtmReachDegrees)
                 horizontal = centredTransverseMercator(geog, lon);
             else
                 horizontal = utm(geog, zone, lat >= 0.0);

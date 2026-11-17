@@ -353,9 +353,10 @@ Entry pointCloudEntry(json properties) {
 
 }  // namespace
 
-// The COPC of a point cloud completes its build, unless the cloud is geographic or geocentric: then
-// its COPC has to be built under the current CRS policy (the build record beside it says so), and a
-// COPC built before, in degrees, is built again. The status comes from the index; an entry indexed
+// The COPC of a point cloud completes its build, unless the cloud is geographic or geocentric, or
+// states a CRS its coordinates do not fit: then its COPC has to be built under the current CRS
+// policy (the build record beside it says so), and a COPC built before (in degrees, or with that
+// CRS) is built again. The status comes from the index; an entry indexed
 // before it was recorded has the kind of its CRS.
 TEST(entryHandler, TheCopcOfAGeographicCloudIsCompleteOnlyWhenBuiltUnderTheCrsPolicy) {
     TestArea ta(TEST_NAME, true);
@@ -383,7 +384,7 @@ TEST(entryHandler, TheCopcOfAGeographicCloudIsCompleteOnlyWhenBuiltUnderTheCrsPo
     EXPECT_TRUE(handler.isComplete(projected, base));
     EXPECT_TRUE(handler.isComplete(projectedBefore, base));
     EXPECT_TRUE(handler.isComplete(local, base));
-    EXPECT_TRUE(handler.isComplete(implausible, base)) << "handled as no CRS: never transformed";
+    EXPECT_FALSE(handler.isComplete(implausible, base)) << "its COPC has to be built without the CRS it states";
     EXPECT_FALSE(handler.isComplete(geographic, base));
     EXPECT_FALSE(handler.isComplete(indexedBefore, base));
     EXPECT_FALSE(handler.isComplete(ecef, base));
@@ -437,6 +438,13 @@ TEST(entryHandler, TheCopcArtifactNamesItsCrs) {
     writeCopcBuildRecord(base / "copc" / CopcBuildRecordFileName, record);
     copc = describe(pointCloudEntry({{"projection", record.sourceCrs}, {"crsStatus", "geographic"}}));
     EXPECT_EQ(copc["crs"], (json{{"name", "WGS 84 / UTM zone 33N"}, {"epsg", 32633}, {"transformed", true}}));
+
+    // The COPC of a cloud whose CRS does not fit its coordinates states none: no member
+    CopcBuildRecord dropped;
+    dropped.sourceCrs = wktOfEpsg(4978);
+    writeCopcBuildRecord(base / "copc" / CopcBuildRecordFileName, dropped);
+    EXPECT_FALSE(describe(pointCloudEntry({{"projection", dropped.sourceCrs}, {"crsStatus", "implausible"}}))
+                     .contains("crs"));
 
     // Other artifacts are not described
     EXPECT_FALSE(json(entryHandler(EntryType::GeoRaster).artifacts().front()).contains("crs"));

@@ -106,14 +106,15 @@ class PointCloudEntryHandler : public EntryHandler {
     }
 
     // The COPC folder has its output (the default rule). The COPC of a geographic or geocentric
-    // cloud is built in a projected CRS (PointCloudCrsPolicy): one built under an older policy, or
-    // before the policy (no build record), is incomplete, so that it is built again; the one it has
-    // is served meanwhile. The status comes from the index, so the check reads no point cloud.
+    // cloud is built in a projected CRS, the one of a cloud whose CRS does not fit its coordinates
+    // without a CRS (PointCloudCrsPolicy::changesCrs): one built under an older policy, or before the
+    // policy (no build record), is incomplete, so that it is built again; the one it has is served
+    // meanwhile. The status comes from the index, so the check reads no point cloud.
     bool isComplete(const Entry& e, const fs::path& baseOutputPath, bool reportRecoverable) const override {
         if (!EntryHandler::isComplete(e, baseOutputPath, reportRecoverable))
             return false;
         const fs::path folder = baseOutputPath / CopcBuildSubfolder;
-        if (!PointCloudCrsPolicy::reprojects(crsStatusOf(e)))
+        if (!PointCloudCrsPolicy::changesCrs(crsStatusOf(e)))
             return true;
         const auto record = readCopcBuildRecord(folder / CopcBuildRecordFileName);
         return record && record->crsPolicy >= PointCloudCrsPolicy::kVersion;

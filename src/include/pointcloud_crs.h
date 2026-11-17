@@ -57,8 +57,9 @@ namespace ddb
     class PointCloudCrsPolicy
     {
       public:
-        // The version of the rules below. A COPC built from a geographic or geocentric cloud records
-        // it (CopcBuildRecord::crsPolicy); one that records an older version, or none, is rebuilt.
+        // The version of the rules below. A COPC records it (CopcBuildRecord::crsPolicy); the COPC
+        // of a cloud whose CRS it changes (changesCrs) that records an older version, or none, is
+        // rebuilt.
         static constexpr int kVersion = 1;
 
         // The status of the CRS `wkt` states for a cloud with `bounds` (min x, min y, min z, max x,
@@ -80,14 +81,20 @@ namespace ddb
         // Whether the COPC of a cloud of this status is built in a CRS of its own (target())
         static bool reprojects(PointCloudCrsStatus status);
 
+        // Whether the COPC of a cloud of this status is in another CRS than the one the cloud states:
+        // a CRS of its own (reprojects), or none for a CRS the coordinates do not fit (the COPC states
+        // none, so that no reader of it places the cloud where that CRS says)
+        static bool changesCrs(PointCloudCrsStatus status);
+
         // The CRS the COPC of a cloud is built in: "" to keep the CRS of the cloud (any status but
         // Geographic and Geocentric). `footprint` is the cloud's envelope in WGS 84. The horizontal
         // part is:
         //   - UPS North (EPSG:5041) when the centre is north of 84 degrees, UPS South (EPSG:5042)
         //     south of 80 degrees south, where UTM ends;
         //   - else a transverse Mercator centred on the footprint when the footprint reaches more than
-        //     3 degrees from the central meridian of the UTM zone of its centre (the zone of the 6-degree
-        //     band, without the Norway and Svalbard exceptions);
+        //     4.5 degrees from the central meridian of the UTM zone of its centre (the zone of the
+        //     6-degree band, without the Norway and Svalbard exceptions), where the scale of UTM
+        //     is 0.25 % off at the equator: a small cloud across the edge of a zone stays in UTM;
         //   - else that UTM zone, on the datum of the cloud when EPSG has a UTM CRS of that datum
         //     (ETRS89 / UTM zone 33N, NAD83(2011) / UTM zone 17N), on WGS 84 otherwise.
         // A compound source keeps its vertical CRS, in metres (a vertical CRS in feet becomes the

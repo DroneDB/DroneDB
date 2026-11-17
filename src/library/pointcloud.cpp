@@ -384,10 +384,13 @@ CopcResult buildCopcFile(const fs::path& path, const fs::path& outFile, const Co
     }
     if (!params.targetCrs.empty())
         options["targetCrs"] = params.targetCrs;
+    if (params.dropCrs)
+        options["dropCrs"] = true;
 
     LOGD << "Building COPC from " << io::toUtf8(path) << " and " << params.inputs.size()
          << " more file(s) with ddb-tilers (" << cpu.threads() << " threads"
-         << (params.targetCrs.empty() ? std::string() : ", in " + params.targetCrs) << ")";
+         << (params.targetCrs.empty() ? std::string() : ", in " + params.targetCrs)
+         << (params.dropCrs ? ", without its coordinate system" : "") << ")";
     tilers::BuildProgress forward("COPC", progress);
     const ddbtErr rc = ddbtBuildCopc2(io::toUtf8(path).c_str(), io::toUtf8(outFile).c_str(), options.dump().c_str(),
                                       &tilers::BuildProgress::forward, &forward);
@@ -420,14 +423,21 @@ void checkSources(const std::vector<std::string>& filenames) {
 // What the builder reports for an octree with a node far larger than its leaves
 constexpr const char* DegenerateOctreeWarning = "degenerate octree";
 
-// The CRS the COPC of clouds merged into one is built in: the one the policy chose for the first of
-// them that has one (the builder transforms every input from its own CRS to it), else the CRS of
-// the clouds
-std::string copcTargetCrs(const std::vector<PointCloudInfo>& inputs) {
+// The CRS of the COPC of clouds merged into one: the target the policy chose for the first of them
+// that has one (the builder transforms every input from its own CRS to it); else none when a cloud
+// states a CRS its coordinates do not fit (handled as no CRS, by every reader of the COPC too);
+// else the CRS of the clouds
+void planCopcCrs(const std::vector<PointCloudInfo>& inputs, raster::CopcParams& params) {
+    params.targetCrs.clear();
+    params.dropCrs = false;
     for (const PointCloudInfo& info : inputs)
-        if (!info.targetCrs.empty())
-            return info.targetCrs;
-    return {};
+        if (!info.targetCrs.empty()) {
+            params.targetCrs = info.targetCrs;
+            return;
+        }
+    params.dropCrs = std::any_of(inputs.begin(), inputs.end(), [](const PointCloudInfo& info) {
+        return info.crsStatus == PointCloudCrsStatus::Implausible;
+    });
 }
 
 // The COPC the helper wrote is published as the point cloud of the build and then trusted by its
@@ -435,8 +445,9 @@ std::string copcTargetCrs(const std::vector<PointCloudInfo>& inputs) {
 // points of every source, whatever their format: a cloud of fewer than 2 points, or of no extent in
 // X or Y, has no COPC. When the points were to be transformed, the COPC is in that CRS and its
 // octree splits the cloud: a COPC that does not would serve tiles at the cost the transform avoids.
-// Returns what the COPC reads as.
-PointCloudInfo checkBuiltCopc(const fs::path& produced, const std::string& targetCrs, const raster::CopcResult& result) {
+// When the CRS was to be dropped, the COPC states none. Returns what the COPC reads as.
+PointCloudInfo checkBuiltCopc(const fs::path& produced, const raster::CopcParams& params, const raster::CopcResult& result) {
+    const std::string& targetCrs = params.targetCrs;
     constexpr size_t MinPointCount = 2;
     // In the point cloud's native units
     constexpr double MinExtent = 1e-10;
@@ -454,6 +465,9 @@ PointCloudInfo checkBuiltCopc(const fs::path& produced, const std::string& targe
         throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " + std::to_string(extentX) +
                                    ", Y: " + std::to_string(extentY) +
                                    "). Point cloud must have spatial extent for COPC generation.");
+    if (params.dropCrs && !info.wktProjection.empty())
+        throw AppException(std::string(raster::kGdalUtilName) + " wrote a COPC in " + info.wktProjection +
+                           " where no coordinate system was asked for");
     if (targetCrs.empty())
         return info;
 
@@ -530,7 +544,7 @@ CopcBuildRecord buildCopc(const std::vector<std::string>& filenames, const std::
     params.threads = static_cast<int>(cpu.threads());
     for (size_t i = 1; i < filenames.size(); i++)
         params.inputs.push_back(fs::absolute(io::fromUtf8(filenames[i])).lexically_normal());
-    params.targetCrs = copcTargetCrs(inputs);
+    planCopcCrs(inputs, params);
 
     // The plan is announced when it starts: the helper forwards a fraction only once it passes a
     // whole percent, and the builder reports 0.05 next
@@ -543,7 +557,7 @@ CopcBuildRecord buildCopc(const std::vector<std::string>& filenames, const std::
         result = raster::copcResultFromJson(raster::rasterHelper().buildCopc(
             io::fromUtf8(filenames.front()), produced, raster::toJson(params), report));
     });
-    const PointCloudInfo copc = checkBuiltCopc(produced, params.targetCrs, result);
+    const PointCloudInfo copc = checkBuiltCopc(produced, params, result);
 
     // The output may have appeared while the COPC was built: replaced only when asked
     io::assureReplaceable(outPath, overwrite);

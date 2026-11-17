@@ -208,7 +208,7 @@
         },
         "crs": {
           "type": "object",
-          "description": "pointcloud.copc only, when the COPC has a CRS: the CRS of the file (which is not the CRS of the source when the build transformed the points)",
+          "description": "pointcloud.copc only, when the COPC has a CRS (none for a cloud whose CRS does not fit its coordinates): the CRS of the file (which is not the CRS of the source when the build transformed the points)",
           "required": [
             "name",
             "epsg",

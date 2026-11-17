@@ -518,8 +518,8 @@ namespace
     }
 
     // The header of the toledo cloud of the corpus says EPSG:4978, and its points are within 300 m of
-    // 0, 0, 0: the CRS is ignored, the entry says so and has no footprint, and the cloud builds as one
-    // without a CRS
+    // 0, 0, 0: the CRS is ignored, the entry says so and has no footprint, and its COPC states no CRS
+    // (tiles and thumbnail as for a cloud without one)
     TEST(PointCloudCrs, AGeocentricCrsOverLocalCoordinatesIsIgnoredWithAWarning)
     {
         TestArea ta(TEST_NAME, true);
@@ -545,15 +545,63 @@ namespace
         EXPECT_EQ(entry.properties["warning"], "coordinate system ignored: the coordinates do not fit WGS 84");
         EXPECT_FALSE(entry.properties["projection"].get<std::string>().empty()) << "the CRS the file states stays";
 
-        // Built as it is, and complete without a transform
+        // Built without the CRS: no reader of the COPC places it at the centre of the earth
         const fs::path root = ta.getFolder("dataset");
-        contract::makeDataset(root, {las});
+        const json added = contract::makeDataset(root, {las});
+        const std::string r = root.string();
         EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
-        ASSERT_EQ(DDBBuild(root.string().c_str(), "toledo.las", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+        ASSERT_EQ(DDBBuild(r.c_str(), "toledo.las", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
         bool complete = false;
-        ASSERT_EQ(DDBIsBuildComplete(root.string().c_str(), "toledo.las", &complete), DDBERR_NONE);
+        ASSERT_EQ(DDBIsBuildComplete(r.c_str(), "toledo.las", &complete), DDBERR_NONE);
         EXPECT_TRUE(complete);
-        DDBReleaseConnections(root.string().c_str(), nullptr);
+
+        const fs::path folder = root / ".ddb" / "build" / added[0]["hash"].get<std::string>() / CopcBuildSubfolder;
+        const fs::path copc = folder / CopcFileName;
+        PointCloudInfo built;
+        ASSERT_TRUE(getCopcInfo(io::toUtf8(copc), built));
+        EXPECT_EQ(built.wktProjection, "") << "the COPC states no CRS";
+        EXPECT_EQ(built.pointCount, points.size());
+        EXPECT_NEAR(built.bounds[0], -88.0, 1e-3) << "the points as they are";
+        EXPECT_NEAR(built.bounds[4], 190.0, 1e-3);
+        const auto record = readCopcBuildRecord(folder / CopcBuildRecordFileName);
+        ASSERT_TRUE(record.has_value());
+        EXPECT_EQ(record->copcCrs, "");
+        EXPECT_FALSE(record->transformed);
+        EXPECT_FALSE(record->sourceCrs.empty());
+
+        // The manifest names no CRS for it
+        const char *paths[] = {"toledo.las"};
+        char *out = nullptr;
+        ASSERT_EQ(DDBGetBuildArtifacts(r.c_str(), paths, 1, &out), DDBERR_NONE) << DDBGetLastError();
+        const json artifacts = contract::takeJson(out);
+        const json &artifact = artifacts[0]["build"]["artifacts"][0];
+        EXPECT_EQ(artifact["role"], "pointcloud.copc");
+        EXPECT_FALSE(artifact.contains("crs")) << artifact.dump();
+
+        // No map tile, as for a cloud without a CRS
+        const fs::path plain = ta.getPath("nocrs.las");
+        testutils::writeLas14(plain, "", points);
+        const fs::path plainOut = ta.getFolder("nocrs");
+        ASSERT_NO_THROW(buildCopc({io::toUtf8(plain)}, io::toUtf8(plainOut)));
+        for (const fs::path &cloud : {copc, plainOut / CopcFileName})
+        {
+            uint8_t *buf = nullptr;
+            int size = 0;
+            EXPECT_THROW(TilerHelper::getTile(inMemory(testTile(cloud, 20, 0, 0, 256, false, true), &buf, &size)),
+                         InvalidArgsException)
+                << io::toUtf8(cloud);
+            EXPECT_EQ(buf, nullptr);
+        }
+
+        // A thumbnail in its own coordinates, filling the square
+        uint8_t *thumb = nullptr;
+        int thumbSize = 0;
+        ASSERT_NO_THROW(generatePointCloudThumb(copc, 64, "", &thumb, &thumbSize));
+        const auto image = testutils::decodeImage(testutils::takeBuffer(thumb, thumbSize));
+        EXPECT_EQ(image.width, 64);
+        const auto opaque = image.hasAlpha() ? std::count(image.alpha().begin(), image.alpha().end(), 255) : 64 * 64;
+        EXPECT_GT(opaque, 64 * 64 / 2);
+        DDBReleaseConnections(r.c_str(), nullptr);
     }
 
     TEST(PointCloudCrs, AGeographicCrsBeyondThePolesIsIgnoredWithAWarning)
