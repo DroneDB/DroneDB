@@ -826,3 +826,6 @@ Registry has to adopt first.
   `targetCrs`, `copc` takes `targetCrs` or `dropCrs` and answers the octree its builder reports); a helper of 1.3 is refused.
   `entry-types`: the `Vector` type gains the sidecars `xsd` and `gfs` (the schemas of a GML, now indexed as a
   `Vector`); no other fixture changed.
+  `ddb tile` writes and reads XYZ rows (row 0 in the north), as its help says, and TMS rows with `--tms`, for
+  the rows of `-x`/`-y` and for the folders it writes (`<z>/<x>/<y>.png`), for rasters and point clouds; 2.0 to 2.7
+  did the opposite. `DDBTile` and `DDBMemoryTile*` keep their flag (`tms` true: `ty` is an XYZ row).

@@ -14,7 +14,9 @@
 #include "gdal_priv.h"
 #include "gdal_raii.h"
 #include "ogr_spatialref.h"
+#include "las_test_writer.h"
 #include "mio.h"
+#include "pointcloud.h"
 #include "raster_tiler.h"
 #include "tile_test_support.h"
 #include "test.h"
@@ -53,6 +55,23 @@ namespace
         return tif;
     }
 
+    // Whether the tile file `path` shows a pixel: an image without an alpha band, or one whose alpha is not
+    // 0 everywhere
+    bool showsAPixel(const std::string &path)
+    {
+        auto ds = GDALDatasetUniquePtr(GDALDataset::Open(path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY));
+        if (!ds)
+        {
+            ADD_FAILURE() << "no tile " << path;
+            return false;
+        }
+        if (ds->GetRasterCount() != 4)
+            return true;
+        double minMax[2] = {0, 0};
+        EXPECT_EQ(ds->GetRasterBand(4)->ComputeRasterMinMax(FALSE, minMax), CE_None);
+        return minMax[1] > 0;
+    }
+
     // A 64x64 3-band byte GeoTIFF in EPSG:3857, 10 m pixels: it spans several zoom levels
     fs::path makeRaster(TestArea &ta)
     {
@@ -67,11 +86,14 @@ namespace
                 std::stoi(io::toUtf8(p.parent_path().filename())), std::stoi(io::toUtf8(p.stem()))};
     }
 
-    // The tiles runTiler lists for the zoom levels zRange of tif
-    std::set<std::array<int, 3>> listedTiles(TestArea &ta, const fs::path &tif, const std::string &zRange)
+    // The tiles runTiler lists for the zoom levels zRange of input, with XYZ rows (TMS rows with `tms`)
+    std::set<std::array<int, 3>> listedTiles(TestArea &ta, const fs::path &input, const std::string &zRange,
+                                             bool tms = false)
     {
         std::ostringstream out;
-        TilerHelper::runTiler(tif, ta.getFolder("tiles-" + zRange), out, tilerRun(OutputFormat::Text, zRange));
+        TilerRun run = tilerRun(OutputFormat::Text, zRange);
+        run.tms = tms;
+        TilerHelper::runTiler(input, ta.getFolder(std::string(tms ? "tms-" : "xyz-") + zRange), out, run);
         std::set<std::array<int, 3>> tiles;
         std::istringstream in(out.str());
         for (std::string line; std::getline(in, line);)
@@ -152,36 +174,108 @@ namespace
             EXPECT_TRUE(fs::exists(io::fromUtf8(t))) << t;
     }
 
-    // A raster of one pixel of 4.9 km, the pixel of zoom level 5, has a COG of one tile of that zoom level:
-    // its pixel among transparent ones. The tiles of a zoom level above it are the ones over that pixel, not
-    // every tile of the tile of zoom level 5 (64 x 64 at zoom level 11, 512 x 512 at 14). The pixel is the
-    // tile (3622, 5896) of zoom level 13 (rows from the south, as runTiler names them without tms)
+    // A raster of one pixel of 4.9 km, the pixel of zoom level 5: the tile (3622, 2295) of zoom level 13 (XYZ
+    // rows, from the north; 5896 from the south)
+    fs::path writeOnePixelRaster(TestArea &ta)
+    {
+        return writeRaster(ta, "pixel.tif",
+                           {-2318793.689736329950392, 4891.969809570309735, 0.0, 8810437.627036130055785, 0.0,
+                            -4891.969809570309735},
+                           1, 1, true);
+    }
+
+    // The raster of one pixel has a COG of one tile of zoom level 5: its pixel among transparent ones. The
+    // tiles of a zoom level above it are the ones over that pixel, not every tile of the tile of zoom level 5
+    // (64 x 64 at zoom level 11, 512 x 512 at 14)
     TEST(TilerOutput, AZoomLevelAboveARasterListsOnlyTheTilesOverItsPixels)
     {
         TestArea ta(TEST_NAME, true);
-        const auto tif = writeRaster(ta, "pixel.tif",
-                                     {-2318793.689736329950392, 4891.969809570309735, 0.0, 8810437.627036130055785,
-                                      0.0, -4891.969809570309735},
-                                     1, 1, true);
+        const auto tif = writeOnePixelRaster(ta);
 
         using Tiles = std::set<std::array<int, 3>>;
-        EXPECT_EQ(listedTiles(ta, tif, "11"), (Tiles{{11, 905, 1474}}));
-        EXPECT_EQ(listedTiles(ta, tif, "13"), (Tiles{{13, 3622, 5896}}));
+        EXPECT_EQ(listedTiles(ta, tif, "11"), (Tiles{{11, 905, 573}}));
+        EXPECT_EQ(listedTiles(ta, tif, "13"), (Tiles{{13, 3622, 2295}}));
         EXPECT_EQ(listedTiles(ta, tif, "14"),
-                  (Tiles{{14, 7244, 11792}, {14, 7245, 11792}, {14, 7244, 11793}, {14, 7245, 11793}}));
+                  (Tiles{{14, 7244, 4591}, {14, 7245, 4591}, {14, 7244, 4590}, {14, 7245, 4590}}));
     }
 
-    // Whether the tile file `path` shows a pixel: an image without an alpha band, or one whose alpha is not
-    // 0 everywhere
-    bool showsAPixel(const std::string &path)
+    // The row of a tile of zoom level z counted from the other side (XYZ from TMS and back)
+    int flippedRow(int z, int y)
     {
-        auto ds = GDALDatasetUniquePtr(GDALDataset::Open(path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY));
-        EXPECT_TRUE(ds != nullptr) << path;
-        if (ds->GetRasterCount() != 4)
-            return true;
-        double minMax[2] = {0, 0};
-        EXPECT_EQ(ds->GetRasterBand(4)->ComputeRasterMinMax(FALSE, minMax), CE_None);
-        return minMax[1] > 0;
+        return (1 << z) - 1 - y;
+    }
+
+    std::set<std::array<int, 3>> withFlippedRows(const std::set<std::array<int, 3>> &tiles)
+    {
+        std::set<std::array<int, 3>> result;
+        for (const auto &[z, x, y] : tiles)
+            result.insert({z, x, flippedRow(z, y)});
+        return result;
+    }
+
+    // `ddb tile` writes XYZ rows, as its help says, and TMS rows with --tms: it wrote TMS rows without
+    // --tms and XYZ rows with it (the flag of the tilers, inverted with respect to its name, was passed as
+    // the option)
+    TEST(TilerOutput, TheTilesOfARasterHaveXyzRowsUnlessTmsIsAsked)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto tif = writeOnePixelRaster(ta);
+
+        using Tiles = std::set<std::array<int, 3>>;
+        EXPECT_EQ(listedTiles(ta, tif, "13"), (Tiles{{13, 3622, 2295}}));
+        EXPECT_EQ(listedTiles(ta, tif, "13", true), (Tiles{{13, 3622, 5896}}));
+        EXPECT_TRUE(showsAPixel(io::toUtf8(ta.getFolder("xyz-13") / "13" / "3622" / "2295.png")));
+        EXPECT_TRUE(showsAPixel(io::toUtf8(ta.getFolder("tms-13") / "13" / "3622" / "5896.png")));
+    }
+
+    // -x and -y name an XYZ tile, a TMS tile with --tms: the tile of the pixel, written where its rows say
+    TEST(TilerOutput, ASingleTileIsAnXyzTileUnlessTmsIsAsked)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto tif = writeOnePixelRaster(ta);
+
+        const auto single = [&](const std::string &folder, int y, bool tms)
+        {
+            std::ostringstream out;
+            TilerRun run = tilerRun(OutputFormat::Text, "13", "3622", std::to_string(y));
+            run.tms = tms;
+            TilerHelper::runTiler(tif, ta.getFolder(folder), out, run);
+            return lines(out.str());
+        };
+        const auto xyz = single("xyz", 2295, false);
+        ASSERT_EQ(xyz.size(), 1u);
+        EXPECT_EQ(tileOf(*xyz.begin()), (std::array<int, 3>{13, 3622, 2295}));
+        EXPECT_TRUE(showsAPixel(*xyz.begin()));
+
+        const auto tms = single("tms", 5896, true);
+        ASSERT_EQ(tms.size(), 1u);
+        EXPECT_EQ(tileOf(*tms.begin()), (std::array<int, 3>{13, 3622, 5896}));
+        EXPECT_TRUE(showsAPixel(*tms.begin()));
+    }
+
+    // The tiles of a point cloud have XYZ rows too: a cloud of a few metres in EPSG:3857 at (1000000,
+    // 5000000) is in the tile (17201, 12295) of zoom level 15 (row 20472 from the south)
+    TEST(TilerOutput, TheTilesOfAPointCloudHaveXyzRowsUnlessTmsIsAsked)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto las = ta.getPath("cloud.las");
+        OGRSpatialReference srs;
+        srs.importFromEPSG(3857);
+        char *wkt = nullptr;
+        srs.exportToWkt(&wkt);
+        const std::string crs = wkt;
+        CPLFree(wkt);
+        testutils::writeLas14(las, crs,
+                              {{1000000.0, 5000000.0, 10.0}, {1000004.0, 5000003.0, 11.0},
+                               {1000008.0, 5000001.0, 12.0}, {1000002.0, 5000006.0, 13.0}});
+        const fs::path copcFolder = ta.getFolder("copc");
+        buildCopc({las.string()}, copcFolder.string());
+        const fs::path copc = copcFolder / "cloud.copc.laz";
+
+        const auto xyz = listedTiles(ta, copc, "15");
+        EXPECT_EQ(xyz, (std::set<std::array<int, 3>>{{15, 17201, 12295}}));
+        EXPECT_EQ(listedTiles(ta, copc, "15", true), withFlippedRows(xyz));
+        EXPECT_TRUE(fs::exists(ta.getFolder("xyz-15") / "15" / "17201" / "12295.png"));
     }
 
     // The tiles runTiler lists are exactly those that show a pixel of the raster, from the zoom levels below
@@ -202,7 +296,7 @@ namespace
             for (int x = bounds.min.x; x <= bounds.max.x; x++)
                 for (int y = bounds.min.y; y <= bounds.max.y; y++)
                     if (showsAPixel(tiler.tile(z, x, y)))
-                        showing.insert({z, x, y});
+                        showing.insert({z, x, flippedRow(z, y)}); // the tiler takes TMS rows
             ASSERT_FALSE(showing.empty()) << z;
             EXPECT_EQ(listedTiles(ta, tif, std::to_string(z)), showing) << "zoom level " << z;
         }

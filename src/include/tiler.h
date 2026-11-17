@@ -70,6 +70,8 @@ namespace ddb
         std::string inputPath;
         fs::path outputFolder;
         int tileSize;
+        // DDBTile's flag, inverted with respect to its name: true when the rows of tile() and
+        // getTilesForZoomLevel() are XYZ rows, false when they are TMS rows
         bool tms;
         int nBands;
         double oMinX, oMaxX, oMaxY, oMinY;
