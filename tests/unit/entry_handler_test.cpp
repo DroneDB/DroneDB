@@ -284,7 +284,7 @@ TEST(entryHandler, ModelTilesAreDownloadableAsAnArchive) {
 
 TEST(entryHandler, SidecarRulesArePinned) {
     EXPECT_EQ(entryHandler(EntryType::Vector).sidecarExtensions(),
-              (std::vector<std::string>{"cpg", "dbf", "shx", "prj"}));
+              (std::vector<std::string>{"cpg", "dbf", "shx", "prj", "xsd", "gfs"}));
     for (const auto t : AllBuiltinTypes) {
         if (t != EntryType::Vector) {
             EXPECT_TRUE(entryHandler(t).sidecarRules().empty()) << typeToHuman(t);
@@ -294,6 +294,8 @@ TEST(entryHandler, SidecarRulesArePinned) {
     EXPECT_EQ(sidecarMainExtensions("a/roads.dbf"), (std::vector<std::string>{"shp"}));
     EXPECT_EQ(sidecarMainExtensions("a/roads.CPG"), (std::vector<std::string>{"shp"}));
     EXPECT_EQ(sidecarMainExtensions("a/plan.prj"), (std::vector<std::string>{"shp", "dxf", "dwg"}));
+    EXPECT_EQ(sidecarMainExtensions("a/parcels.xsd"), (std::vector<std::string>{"gml"}));
+    EXPECT_EQ(sidecarMainExtensions("a/parcels.gfs"), (std::vector<std::string>{"gml"}));
     EXPECT_TRUE(sidecarMainExtensions("a/roads.shp").empty());
     EXPECT_TRUE(sidecarMainExtensions("a/noext").empty());
 }
@@ -559,7 +561,7 @@ TEST(entryHandler, ExtensionsArePinned) {
         {EntryType::GaussianSplat, {"splat", "spz", "ksplat", "sog", "rad"}},
         {EntryType::Model, {"obj", "ply", "stl", "gltf", "glb"}},
         {EntryType::Tiles3D, {"3tz"}},
-        {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx"}},
+        {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx", "gml"}},
         {EntryType::Image, {"jpg", "jpeg", "dng", "tif", "tiff", "jp2", "j2k", "png", "gif", "webp", "mp4", "mov", "webm",
                  "m4v", "avi", "mkv"}}};
     for (const auto t : AllBuiltinTypes) {

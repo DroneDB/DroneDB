@@ -10,6 +10,9 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
+#include <memory>
+#include <set>
 #include <assimp/Exporter.hpp>
 #include <assimp/Importer.hpp>
 #include <cctype>
@@ -77,6 +80,105 @@ static bool sceneHasVertexColors(const aiScene* s) {
             return true;
     }
     return false;
+}
+
+/** @brief The name the OBJ exporter gives a material: its own, or "$Material_<index>" without one */
+static std::string materialName(const aiScene* s, unsigned index) {
+    aiString name;
+    if (s->mMaterials[index]->Get(AI_MATKEY_NAME, name) == AI_SUCCESS)
+        return std::string(name.data, name.length);
+    return "$Material_" + std::to_string(index);
+}
+
+/**
+ * @brief Adds to the scene a copy of a material, under its name followed by "_white" (and a
+ * number when another material has that name)
+ * @return The index of the copy
+ */
+static unsigned addMaterialCopy(aiScene* s, unsigned index) {
+    std::set<std::string> names;
+    for (unsigned m = 0; m < s->mNumMaterials; ++m)
+        names.insert(materialName(s, m));
+    const std::string base = materialName(s, index) + "_white";
+    std::string name = base;
+    for (unsigned n = 2; names.count(name); ++n)
+        name = base + "_" + std::to_string(n);
+
+    auto* copy = new aiMaterial();
+    aiMaterial::CopyPropertyList(copy, s->mMaterials[index]);
+    const aiString copyName(name);
+    copy->AddProperty(&copyName, AI_MATKEY_NAME);
+
+    auto** materials = new aiMaterial*[s->mNumMaterials + 1];
+    std::copy(s->mMaterials, s->mMaterials + s->mNumMaterials, materials);
+    materials[s->mNumMaterials] = copy;
+    delete[] s->mMaterials;
+    s->mMaterials = materials;
+    return s->mNumMaterials++;
+}
+
+/**
+ * @brief Gives vertex colours to the meshes without any, when other meshes of the scene have some
+ *
+ * The exporters write a colour for every vertex of the file once one mesh has colours: the OBJ
+ * exporter writes black ("v x y z 0 0 0") for the vertices of a mesh without, the PLY exporter
+ * nothing or garbage. A part with no vertex colours of a glTF next to parts with (a glass cover
+ * among coloured dishes) was black in every viewer of the build.
+ *
+ * Such a mesh gets the diffuse colour of its material as the colour of each vertex, and its
+ * material a white diffuse colour (a copy of the material when a mesh with vertex colours uses it
+ * too). The part looks the same to the viewers that multiply the vertex colour by the colour of
+ * the material (glTF, the 3D Tiles that Obj2Tiles writes), to those in which the vertex colour
+ * replaces that of the material (bm3d) and in a PLY, which has no material. Opacity and textures
+ * stay in the material; meshes with their own vertex colours are not changed.
+ */
+static void colourMeshesWithoutVertexColours(aiScene* s) {
+    if (!sceneHasVertexColors(s))
+        return;
+
+    // Materials used by meshes with vertex colours keep their diffuse colour
+    std::set<unsigned> materialsOfColouredMeshes;
+    for (unsigned m = 0; m < s->mNumMeshes; ++m)
+        if (s->mMeshes[m]->mColors[0])
+            materialsOfColouredMeshes.insert(s->mMeshes[m]->mMaterialIndex);
+
+    // A material of meshes without vertex colours: its diffuse colour, read before it is made white,
+    // and the material (itself or its copy) with the white diffuse colour these meshes now use
+    struct Whitened {
+        aiColor4D diffuse;
+        unsigned material;
+    };
+    std::map<unsigned, Whitened> whitened;
+
+    for (unsigned m = 0; m < s->mNumMeshes; ++m) {
+        aiMesh* mesh = s->mMeshes[m];
+        if (mesh->mColors[0])
+            continue;
+
+        aiColor4D colour(1, 1, 1, 1);
+        if (mesh->mMaterialIndex < s->mNumMaterials) {
+            const unsigned source = mesh->mMaterialIndex;
+            auto it = whitened.find(source);
+            if (it == whitened.end()) {
+                aiColor4D diffuse(1, 1, 1, 1);
+                const bool hasDiffuse =
+                    s->mMaterials[source]->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS;
+                unsigned target = source;
+                if (hasDiffuse) {
+                    if (materialsOfColouredMeshes.count(source))
+                        target = addMaterialCopy(s, source);
+                    const aiColor4D whiteDiffuse(1, 1, 1, diffuse.a);
+                    s->mMaterials[target]->AddProperty(&whiteDiffuse, 1, AI_MATKEY_COLOR_DIFFUSE);
+                }
+                it = whitened.emplace(source, Whitened{diffuse, target}).first;
+            }
+            colour = it->second.diffuse;
+            mesh->mMaterialIndex = it->second.material;
+        }
+
+        mesh->mColors[0] = new aiColor4D[mesh->mNumVertices];
+        std::fill_n(mesh->mColors[0], mesh->mNumVertices, aiColor4D(colour.r, colour.g, colour.b, 1));
+    }
 }
 
 /**
@@ -367,9 +469,10 @@ static void fixEmbeddedTextureReferences(const fs::path& mtl, const std::map<int
 
 /** How a scene is exported by @ref exportWithAssimp */
 struct AssimpExportOptions {
-    bool forcePLY;         ///< Force PLY format even if UVs are present
-    bool preferPLYIfNoUV;  ///< Prefer PLY if no UVs and vertex colors are present
-    bool hasUVs;           ///< Whether the scene has UV coordinates
+    bool forcePLY;          ///< Force PLY format even if UVs are present
+    bool preferPLYIfNoUV;   ///< Prefer PLY if the scene has no UVs and no vertex colours
+    bool hasUVs;            ///< Whether the scene has UV coordinates
+    bool hasVertexColors;   ///< Whether the scene has vertex colours
 };
 
 /** The files @ref exportWithAssimp wrote */
@@ -393,6 +496,7 @@ static AssimpOutputs exportWithAssimp(const aiScene* scene,
     const bool forcePLY = options.forcePLY;
     const bool preferPLYIfNoUV = options.preferPLYIfNoUV;
     const bool hasUVs = options.hasUVs;
+    const bool hasVertexColors = options.hasVertexColors;
     Assimp::Exporter exporter;
     fs::create_directories(outBaseNoExt.parent_path());
 
@@ -402,7 +506,11 @@ static AssimpOutputs exportWithAssimp(const aiScene* scene,
         extractEmbeddedTextures(scene, outBaseNoExt.parent_path(), textureMap);
     }
 
-    bool usePLY = forcePLY || (!hasUVs && preferPLYIfNoUV);
+    // Assimp's PLY exporter declares the colour properties of the vertices only when the mesh has
+    // texture coordinates, yet writes the colours in every row: a PLY of a scene with vertex
+    // colours and no UVs cannot be read (bm3d: "face 0 ... has 0 vertex indices"). The OBJ
+    // keeps the colours ("v x y z r g b") and the materials.
+    bool usePLY = forcePLY || (!hasUVs && !hasVertexColors && preferPLYIfNoUV);
     const char* fmt = usePLY ? "ply" : "obj";
 
     fs::path geomPath = outBaseNoExt;
@@ -500,7 +608,7 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
  * @param outGeomPath Output parameter for the generated geometry file path
  * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
  * @param forcePLY Force PLY format output even if UVs are present
- * @param preferPLYIfNoUV Prefer PLY format if no UVs and vertex colors are present
+ * @param preferPLYIfNoUV Prefer PLY format if the scene has no UVs and no vertex colours
  * @throws AppException if conversion fails
  */
 void convertGltfTo3dModel(const std::string& inputGltf,
@@ -522,20 +630,24 @@ void convertGltfTo3dModel(const std::string& inputGltf,
     // PLY/OBJ exporter and desyncs bm3d's triangle-soup reader.
     importer.SetPropertyInteger(AI_CONFIG_PP_SBP_REMOVE,
                                 aiPrimitiveType_POINT | aiPrimitiveType_LINE);
-    const aiScene* scene = importer.ReadFile(inputGltf, pp);
-    if (!scene) {
+    if (!importer.ReadFile(inputGltf, pp)) {
         throw AppException("Assimp import failed: " + std::string(importer.GetErrorString()));
     }
+    // Owned here (Assimp is linked statically, or with the same runtime): the vertex colours
+    // are changed before the export
+    const std::unique_ptr<aiScene> owned(importer.GetOrphanedScene());
+    aiScene* scene = owned.get();
 
     bool hasUV = sceneHasUVs(scene);
     bool hasVC = sceneHasVertexColors(scene);
+    colourMeshesWithoutVertexColours(scene);
     LOGD << "[assimp] meshes=" << scene->mNumMeshes << " UV=" << (hasUV ? "Y" : "N")
          << " VCols=" << (hasVC ? "Y" : "N");
 
     // Export geometry
     fs::path outBase = io::fromUtf8(outputBasePath);
 
-    const AssimpOutputs exported = exportWithAssimp(scene, outBase, {forcePLY, preferPLYIfNoUV, hasUV});
+    const AssimpOutputs exported = exportWithAssimp(scene, outBase, {forcePLY, preferPLYIfNoUV, hasUV, hasVC});
     outGeomPath = exported.geomPath;
     outMtlPath = exported.mtlPath;
 

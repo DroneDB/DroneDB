@@ -429,7 +429,7 @@ TEST(BuildManifest, EntryTypes) {
     EXPECT_EQ(byName["PointCloud"]["thumbnail"], "build");
     EXPECT_EQ(byName["Model"]["roles"],
               json::parse(R"(["model.bm3d", "model.nexus", "model.3dtiles"])"));
-    EXPECT_EQ(byName["Vector"]["sidecarExtensions"], json::parse(R"(["cpg", "dbf", "shx", "prj"])"));
+    EXPECT_EQ(byName["Vector"]["sidecarExtensions"], json::parse(R"(["cpg", "dbf", "shx", "prj", "xsd", "gfs"])"));
     EXPECT_EQ(byName["Panorama"]["thumbnail"], "file");
     EXPECT_EQ(byName["GeoPanorama"]["thumbnail"], "file");
     EXPECT_EQ(byName["Video"]["thumbnail"], "none");

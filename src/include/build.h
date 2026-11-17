@@ -27,7 +27,8 @@ namespace ddb
 
     /**
      * The indexed main files the sidecar at path belongs to (the SidecarRules of the entry
-     * handlers): .cpg/.dbf/.shx belong to a shapefile; a .prj also gives a CAD drawing its CRS.
+     * handlers): .cpg/.dbf/.shx belong to a shapefile; a .prj also gives a CAD drawing its CRS;
+     * the .xsd or .gfs schema of a GML belongs to the GML.
      * A main file has the sidecar's folder and stem (exact bytes) and a main
      * extension in any letter case (.shp, .SHP, .Shp). Lookup order: the extensions in rule
      * order, then lowercase, uppercase and other spellings, then byte order of the path.

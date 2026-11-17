@@ -451,8 +451,8 @@ TEST(tiles3dBuild, plyIsConvertedToObjForTiles) {
     expectNoLeftovers(out);
 }
 
-// A glTF without texture coordinates becomes an OBJ (not a PLY) for the
-// tiles path, and the OBJ exporter keeps its vertex colours.
+// A glTF with vertex colours and without texture coordinates becomes an OBJ (not a PLY)
+// for the tiles path and for bm3d, and the OBJ exporter keeps its vertex colours.
 TEST(tiles3dBuild, noUvGltfConvertsToColouredObj) {
     TestArea ta(TEST_NAME);
     const fs::path gltf = ta.getPath("quad.gltf");
@@ -482,10 +482,11 @@ TEST(tiles3dBuild, noUvGltfConvertsToColouredObj) {
     EXPECT_EQ(f, 2u);
     EXPECT_GT(colourSum, 0.0);
 
-    // The bm3d path keeps the previous PLY output for a no-UV glTF.
-    std::string geomPly, mtlPly;
-    convertGltfTo3dModel(gltf.string(), ta.getPath("out2/quad").string(), geomPly, mtlPly, false, true);
-    EXPECT_EQ(fs::path(geomPly).extension(), ".ply");
+    // The bm3d path too: Assimp's PLY of a scene with vertex colours and no UVs does not
+    // declare the colours its rows hold, so that a reader cannot read it.
+    std::string geomBm3d, mtlBm3d;
+    convertGltfTo3dModel(gltf.string(), ta.getPath("out2/quad").string(), geomBm3d, mtlBm3d, false, true);
+    EXPECT_EQ(fs::path(geomBm3d).extension(), ".obj");
 }
 
 TEST(tiles3dBuild, noUvGltfReachesObj2TilesAsObj) {

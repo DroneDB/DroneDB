@@ -824,3 +824,5 @@ Registry has to adopt first.
   around the globe). A projected CRS is implausible only when PROJ cannot take its corners to WGS 84 or they land 30
   degrees or more outside its area of use. The raster helper speaks protocol 1.4 (`pointCloudInfo` gains `crsStatus` and
   `targetCrs`, `copc` takes `targetCrs` or `dropCrs` and answers the octree its builder reports); a helper of 1.3 is refused.
+  `entry-types`: the `Vector` type gains the sidecars `xsd` and `gfs` (the schemas of a GML, now indexed as a
+  `Vector`); no other fixture changed.
