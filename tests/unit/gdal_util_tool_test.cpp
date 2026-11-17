@@ -329,6 +329,40 @@ namespace
         EXPECT_NEAR(result.pointGeom.points[0].x, 9.0, 1.5);
     }
 
+    // GeoTIFFs compressed with ZSTD, WebP or LERC (GDAL and rasterio write them, and so do the
+    // COGs of public data) are rasters to the helper, as DEFLATE ones are: its libtiff has their
+    // codecs. Without them the probe found no raster, the file was indexed as an Image and its
+    // thumbnail failed.
+    TEST_F(GdalUtilToolTest, probeAndThumbnailReadTheCodecsGdalWritesInAGeoTiff)
+    {
+        Server server;
+        int64_t id = 300;
+        const auto source = adoptDataset(GDALOpen(io::toUtf8(geotiff_).c_str(), GA_ReadOnly));
+        ASSERT_TRUE(source);
+        for (const char *codec : {"DEFLATE", "ZSTD", "WEBP", "LERC", "LERC_ZSTD"})
+        {
+            SCOPED_TRACE(codec);
+            const fs::path copy = area_->getFolder() / (std::string("codec_") + codec + ".tif");
+            const CPLStringList options(cslFromStrings({"TILED=YES", std::string("COMPRESS=") + codec}));
+            ASSERT_TRUE(adoptDataset(GDALCreateCopy(GDALGetDriverByName("GTiff"), io::toUtf8(copy).c_str(),
+                                                    datasetHandle(source), FALSE, options.List(), nullptr, nullptr)));
+
+            const auto probe = server.ask(probeRequest(++id, copy));
+            ASSERT_TRUE(probe.ok) << probe.message;
+            const raster::ProbeResult result = raster::probeResultFromJson(probe.result);
+            EXPECT_EQ(result.type, "GeoRaster");
+            EXPECT_EQ(result.properties.at("width"), 200);
+            EXPECT_NE(result.wkt.find("32632"), std::string::npos) << result.wkt;
+
+            const fs::path out = area_->getFolder() / (std::string("codec_") + codec + ".webp");
+            raster::ThumbnailParams params;
+            params.size = 32;
+            const auto thumb = server.ask(thumbnailRequest(++id, copy, out, params));
+            ASSERT_TRUE(thumb.ok) << thumb.message;
+            EXPECT_EQ(testutils::decodeImageFile(out).width, 32);
+        }
+    }
+
     TEST_F(GdalUtilToolTest, probeOfARasterWithoutProjectionSaysSo)
     {
         const fs::path plain = area_->getFolder() / "plain.tif";

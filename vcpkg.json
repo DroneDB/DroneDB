@@ -59,7 +59,14 @@
       ]
     },
     "sqlite3",
-    "tiff",
+    {
+      "name": "tiff",
+      "features": [
+        "lerc",
+        "webp",
+        "zstd"
+      ]
+    },
     "zlib",
     "zstd",
     "assimp",
