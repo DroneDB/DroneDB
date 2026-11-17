@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
@@ -19,6 +20,7 @@
 #include "mio.h"
 #include "raster_artefacts.h"
 #include "raster_ops.h"
+#include "raster_utils.h"
 #include "tilers_call.h"
 
 namespace ddb::tilers
@@ -269,6 +271,72 @@ namespace ddb::tilers
                          check(ddbtRasterReadLevel(handle_, level, x, y, width, height, b.data(),
                                                    static_cast<int>(b.size()), type, o, m));
                      });
+    }
+
+    std::optional<BoundingBox<Projected2Di>> Raster::opaqueWindow() const
+    {
+        using Box = BoundingBox<Projected2Di>;
+        BandNodata nodata;
+        if (const std::optional<double> value = band(1).nodata)
+            nodata = BandNodata{true, *value};
+        const int bw = std::max(1, blockWidth_), bh = std::max(1, blockHeight_);
+        std::vector<float> values;
+        std::vector<uint8_t> mask;
+
+        // The box of the visible pixels of the window (x0, y0, w, h), read a block at a time
+        const auto opaqueIn = [&](const std::array<int, 4> &window) {
+            const auto [x0, y0, w, h] = window;
+            std::optional<Box> box;
+            for (int by = y0; by < y0 + h; by += bh)
+                for (int bx = x0; bx < x0 + w; bx += bw)
+                {
+                    const int cw = std::min(bw, x0 + w - bx), ch = std::min(bh, y0 + h - by);
+                    const size_t count = static_cast<size_t>(cw) * static_cast<size_t>(ch);
+                    values.resize(count);
+                    mask.assign(count, 255); // left as it is without a mask
+                    readBand(1, bx, by, cw, ch, cw, ch, values.data(), mask.data());
+                    for (size_t i = 0; i < count; i++)
+                    {
+                        if (mask[i] == 0 || isNodata(values[i], nodata))
+                            continue;
+                        const Projected2Di p(bx + static_cast<int>(i % static_cast<size_t>(cw)),
+                                             by + static_cast<int>(i / static_cast<size_t>(cw)));
+                        if (!box)
+                            box.emplace(p, p);
+                        box->min = Projected2Di(std::min(box->min.x, p.x), std::min(box->min.y, p.y));
+                        box->max = Projected2Di(std::max(box->max.x, p.x), std::max(box->max.y, p.y));
+                    }
+                }
+            return box;
+        };
+
+        // The box of the first of `strips` windows (strip(i): the i-th row or column of blocks inwards from
+        // one side) that holds a visible pixel: the pixel nearest that side is in it
+        const auto firstOpaque = [&](int strips, const std::function<std::array<int, 4>(int)> &strip) {
+            for (int i = 0; i < strips; i++)
+                if (std::optional<Box> box = opaqueIn(strip(i)))
+                    return box;
+            return std::optional<Box>();
+        };
+
+        const int W = width_, H = height_;
+        const int rows = (H + bh - 1) / bh, cols = (W + bw - 1) / bw;
+        const auto top = firstOpaque(rows, [&](int i) { return std::array{0, i * bh, W, std::min(bh, H - i * bh)}; });
+        if (!top)
+            return std::nullopt;
+        const auto bottom = firstOpaque(rows, [&](int i) {
+            const int y = (rows - 1 - i) * bh;
+            return std::array{0, y, W, std::min(bh, H - y)};
+        });
+        // Every visible pixel is in the rows from the top one to the bottom one
+        const int y0 = top->min.y, y1 = bottom->max.y;
+        const auto left =
+            firstOpaque(cols, [&](int i) { return std::array{i * bw, y0, std::min(bw, W - i * bw), y1 - y0 + 1}; });
+        const auto right = firstOpaque(cols, [&](int i) {
+            const int x = (cols - 1 - i) * bw;
+            return std::array{x, y0, std::min(bw, W - x), y1 - y0 + 1};
+        });
+        return Box(Projected2Di(left->min.x, y0), Projected2Di(right->max.x, y1));
     }
 
     void Raster::read(int x, int y, int width, int height, int bufWidth, int bufHeight, std::span<const int> bands,
