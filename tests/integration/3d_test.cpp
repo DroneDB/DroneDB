@@ -13,10 +13,12 @@
 #include "testarea.h"
 #include "utils.h"
 #include <cpr/cpr.h>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <filesystem>
+#include <map>
 #include <sstream>
 #include "exceptions.h"
 #include <tiny_obj_loader.h>
@@ -216,6 +218,91 @@ namespace
              "\"scene\":0"
              "}";
         return j.str();
+    }
+
+    // Three triangles side by side, a primitive each: the first (x 0..1) has red vertex colours
+    // and the grey material "painted"; the second (x 2..3) has no vertex colours and the blue
+    // material "glass"; the third (x 4..5) has no vertex colours and the material "painted" of
+    // the first. A glTF multiplies the vertex colour by the base colour of the material.
+    std::string partlyVertexColouredGltfJson() {
+        std::vector<float> positions;
+        for (float x : {0.0f, 2.0f, 4.0f}) {
+            const std::vector<float> triangle = {x, 0, 0, x + 1, 0, 0, x, 1, 0};
+            positions.insert(positions.end(), triangle.begin(), triangle.end());
+        }
+        const std::vector<float> red = {1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1};
+        std::vector<uint8_t> bin = toBytes(positions);
+        const auto colours = toBytes(red);
+        bin.insert(bin.end(), colours.begin(), colours.end());
+
+        std::ostringstream j;
+        j << "{\"asset\":{\"version\":\"2.0\"},"
+             "\"buffers\":[{\"uri\":\"" << dataUri(bin) << "\",\"byteLength\":" << bin.size() << "}],"
+             "\"bufferViews\":["
+             "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+             "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36},"
+             "{\"buffer\":0,\"byteOffset\":72,\"byteLength\":36},"
+             "{\"buffer\":0,\"byteOffset\":108,\"byteLength\":48}],"
+             "\"accessors\":["
+             "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"max\":[1,1,0],\"min\":[0,0,0]},"
+             "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"max\":[3,1,0],\"min\":[2,0,0]},"
+             "{\"bufferView\":2,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"max\":[5,1,0],\"min\":[4,0,0]},"
+             "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC4\"}],"
+             "\"materials\":["
+             "{\"name\":\"painted\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.5,0.5,0.5,1]}},"
+             "{\"name\":\"glass\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.2,0.4,0.8,1]}}],"
+             "\"meshes\":[{\"primitives\":["
+             "{\"attributes\":{\"POSITION\":0,\"COLOR_0\":3},\"material\":0},"
+             "{\"attributes\":{\"POSITION\":1},\"material\":1},"
+             "{\"attributes\":{\"POSITION\":2},\"material\":0}]}],"
+             "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+        return j.str();
+    }
+
+    // The colour a vertex shows: its own (bm3d draws it instead of that of the material) and
+    // the diffuse colour of its material (3D Tiles multiply the two)
+    struct ShownColour {
+        std::array<float, 3> vertex;
+        std::array<float, 3> diffuse;
+        std::string material;
+    };
+
+    // The colours of the vertices of an OBJ by the triangle they belong to: 0 for x below 2,
+    // 1 for x below 4, 2 beyond
+    std::map<int, std::vector<ShownColour>> shownColoursByTriangle(const std::string& obj) {
+        tinyobj::ObjReader reader;
+        tinyobj::ObjReaderConfig config;
+        config.triangulate = true;
+        EXPECT_TRUE(reader.ParseFromFile(obj, config)) << reader.Error();
+        const auto& attrib = reader.GetAttrib();
+        const auto& materials = reader.GetMaterials();
+
+        std::map<int, std::vector<ShownColour>> byTriangle;
+        for (const auto& shape : reader.GetShapes()) {
+            for (size_t f = 0; f < shape.mesh.material_ids.size(); ++f) {
+                const int materialId = shape.mesh.material_ids[f];
+                EXPECT_GE(materialId, 0);
+                if (materialId < 0)
+                    continue;
+                const auto& m = materials[static_cast<size_t>(materialId)];
+                for (size_t k = 0; k < 3; ++k) {
+                    const auto v = static_cast<size_t>(shape.mesh.indices[f * 3 + k].vertex_index);
+                    const float x = attrib.vertices[v * 3];
+                    const int triangle = x < 1.5f ? 0 : x < 3.5f ? 1 : 2;
+                    byTriangle[triangle].push_back(
+                        {{attrib.colors[v * 3], attrib.colors[v * 3 + 1], attrib.colors[v * 3 + 2]},
+                         {m.diffuse[0], m.diffuse[1], m.diffuse[2]},
+                         m.name});
+                }
+            }
+        }
+        return byTriangle;
+    }
+
+    void expectColour(const std::array<float, 3>& actual, const std::array<float, 3>& expected,
+                      const std::string& what) {
+        for (size_t c = 0; c < 3; ++c)
+            EXPECT_NEAR(actual[c], expected[c], 1e-3) << what << ", channel " << c;
     }
 
     // Helper function to verify OBJ file content and MTL texture references using tinyobj
@@ -951,6 +1038,65 @@ namespace
         ASSERT_NO_THROW(outBm3d = buildBm3d(gltf.string(), bm3dFile.string(), true));
         ASSERT_TRUE(fs::exists(outBm3d));
         EXPECT_GT(fs::file_size(outBm3d), 0);
+    }
+
+    // A part of a glTF without vertex colours, next to parts with them (the glass cover of a
+    // dish of coloured olives), keeps the colour of its material in the OBJ: its vertices get
+    // that colour and its material a white one, so that it shows the same where the vertex
+    // colour replaces the material's (bm3d) and where the two are multiplied (3D Tiles). It was
+    // black: the exporter gives such vertices (0, 0, 0). The parts with vertex colours keep
+    // them and their material.
+    TEST(file3d, partWithoutVertexColoursKeepsTheColourOfItsMaterialInTheObj) {
+        TestArea ta(TEST_NAME);
+        const fs::path gltf = ta.getPath("partly-coloured.gltf");
+        writeFile(gltf, partlyVertexColouredGltfJson());
+
+        std::string geom, mtl;
+        convertGltfTo3dModel(gltf.string(), ta.getPath("obj/partly-coloured").string(), geom, mtl, false, false);
+        ASSERT_EQ(fs::path(geom).extension(), ".obj");
+
+        auto shown = shownColoursByTriangle(geom);
+        ASSERT_EQ(shown[0].size(), 3u);
+        ASSERT_EQ(shown[1].size(), 3u);
+        ASSERT_EQ(shown[2].size(), 3u);
+
+        // The coloured part: its red vertices and its grey material
+        for (const auto& c : shown[0]) {
+            expectColour(c.vertex, {1, 0, 0}, "vertex colour of the coloured part");
+            expectColour(c.diffuse, {0.5f, 0.5f, 0.5f}, "material of the coloured part");
+            EXPECT_EQ(c.material, "painted");
+        }
+        // The blue part: blue vertices, white material
+        for (const auto& c : shown[1]) {
+            expectColour(c.vertex, {0.2f, 0.4f, 0.8f}, "vertex colour of the part without");
+            expectColour(c.diffuse, {1, 1, 1}, "material of the part without");
+            EXPECT_EQ(c.material, "glass");
+        }
+        // The part that shares its material with the coloured part: a white copy of it
+        for (const auto& c : shown[2]) {
+            expectColour(c.vertex, {0.5f, 0.5f, 0.5f}, "vertex colour of the part sharing a material");
+            expectColour(c.diffuse, {1, 1, 1}, "material of the part sharing a material");
+            EXPECT_NE(c.material, "painted");
+        }
+    }
+
+    // A glTF with vertex colours and no texture coordinates becomes an OBJ for bm3d, not a PLY:
+    // Assimp's PLY exporter does not declare the colours it writes in the rows of the vertices
+    // of such a scene, and bm3d refused the PLY ("face 0 ... has 0 vertex indices")
+    TEST(file3d, buildBm3dGltfWithVertexColoursAndNoUvs) {
+        TestArea ta(TEST_NAME);
+        const fs::path gltf = ta.getPath("partly-coloured.gltf");
+        writeFile(gltf, partlyVertexColouredGltfJson());
+
+        std::string geom, mtl;
+        convertGltfTo3dModel(gltf.string(), ta.getPath("bm3d-input/partly-coloured").string(), geom, mtl, false, true);
+        EXPECT_EQ(fs::path(geom).extension(), ".obj");
+
+        const fs::path bm3dFile = ta.getPath("partly-coloured.bm3d");
+        std::string outBm3d;
+        ASSERT_NO_THROW(outBm3d = buildBm3d(gltf.string(), bm3dFile.string(), true));
+        ASSERT_TRUE(fs::exists(outBm3d));
+        EXPECT_GT(fs::file_size(outBm3d), 0u);
     }
 
     // ---------------------------------------------------------------------------

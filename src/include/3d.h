@@ -229,8 +229,9 @@ namespace ddb
      * @param outGeomPath Output parameter for the generated geometry file path
      * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
      * @param forcePLY Force PLY format output even if UVs are present
-     * @param preferPLYIfNoUV Write PLY instead of OBJ when the scene has no UVs (the OBJ
-     *                        output keeps vertex colours as `v x y z r g b` either way)
+     * @param preferPLYIfNoUV Write PLY instead of OBJ when the scene has no UVs and no vertex
+     *                        colours (a scene with vertex colours is an OBJ, which keeps them as
+     *                        `v x y z r g b`)
      * @throws AppException if conversion fails
      */
     void convertGltfTo3dModel(const std::string &inputGltf,

@@ -523,9 +523,9 @@ struct AssimpConversion {
 };
 
 // Convert a model Assimp reads (glTF/GLB, STL) to OBJ in a temporary directory. With
-// preferPLYIfNoUV a model without texture coordinates is written as PLY instead (keeps
-// vertex colours as properties of the mesh); Obj2Tiles reads OBJ only, and
-// the OBJ exporter writes vertex colours as `v x y z r g b`.
+// preferPLYIfNoUV a model without texture coordinates nor vertex colours is written as PLY
+// instead; Obj2Tiles reads OBJ only, and the OBJ exporter writes vertex colours as
+// `v x y z r g b`.
 AssimpConversion convertWithAssimp(const std::string& input,
                                    io::ScopedTempDir& tempGuard,
                                    bool preferPLYIfNoUV) {
@@ -593,7 +593,7 @@ void validateConvertedDependencies(const std::string& convertedObj, const std::s
 // Validates the dependencies of the input and converts it when the consumer
 // cannot read it as is:
 //   - glTF/GLB: validated, then converted to OBJ in a temp folder. For bm3d a
-//     glTF without UVs becomes a PLY; for Obj2Tiles it is always an OBJ.
+//     glTF without UVs nor vertex colours becomes a PLY; for Obj2Tiles it is always an OBJ.
 //   - STL: bm3d reads it natively; Obj2Tiles reads OBJ only, so it becomes an OBJ in a temp
 //     folder (an STL has no texture: the OBJ has no dependency).
 //   - PLY: never text-scanned as an OBJ. Its TextureFile (if any) is checked from
