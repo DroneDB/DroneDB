@@ -53,6 +53,11 @@ namespace
         return PointCloudCrsPolicy::target(wkt, check.status, envelopeOf(bounds));
     }
 
+    PointCloudCrsStatus PointCloudPolicyStatus(const std::string &wkt, const std::vector<double> &bounds)
+    {
+        return PointCloudCrsPolicy::classify(wkt, bounds).status;
+    }
+
     OGRSpatialReference read(const std::string &text)
     {
         OGRSpatialReference srs;
@@ -114,6 +119,56 @@ namespace
         const OGRSpatialReference past = read(targetOf("EPSG:4326", {16.0, 46.0, 500.0, 19.6, 46.5, 510.0}));
         EXPECT_STREQ(past.GetAttrValue("PROJECTION"), SRS_PT_TRANSVERSE_MERCATOR);
         EXPECT_NEAR(past.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN), 17.8, 1e-9);
+    }
+
+    // Fiji, the Aleutians: clouds across the antimeridian, with longitudes written from -180 to 180 (a
+    // header then says -179.99 to 179.99), past 180 (179.9 to 180.1) or from 0 to 360
+    TEST(PointCloudCrsPolicy, aCloudAcrossTheAntimeridianIsCentredThere)
+    {
+        const std::string wgs84 = wktOf("EPSG:4326");
+        for (const std::vector<double> &bounds :
+             {std::vector<double>{-179.99, -17.01, 0.0, 179.99, -17.0, 50.0}, {179.9, -17.01, 0.0, 180.1, -17.0, 50.0},
+              {190.0, 51.8, 0.0, 190.01, 51.81, 50.0}, {0.5, 10.0, 0.0, 359.5, 10.1, 5.0}})
+            EXPECT_EQ(PointCloudPolicyStatus(wgs84, bounds), PointCloudCrsStatus::Geographic) << bounds[0];
+        EXPECT_EQ(PointCloudPolicyStatus(wgs84, {-181.0, 0.0, 0.0, -170.0, 1.0, 1.0}), PointCloudCrsStatus::Implausible);
+        EXPECT_EQ(PointCloudPolicyStatus(wgs84, {350.0, 0.0, 0.0, 361.0, 1.0, 1.0}), PointCloudCrsStatus::Implausible);
+
+        const auto target = [&](const LonLatEnvelope &footprint) {
+            return PointCloudCrsPolicy::target(wgs84, PointCloudCrsStatus::Geographic, footprint);
+        };
+        // The least and greatest longitudes of a header: the cloud is 179.99 to 180.01, zone 1 by its
+        // centre, 180
+        EXPECT_EQ(target({-179.99, -17.01, 179.99, -17.0}), "EPSG:32701");
+        EXPECT_EQ(target({179.9, -17.01, 180.1, -17.0}), "EPSG:32701");
+        EXPECT_EQ(target({179.9, -17.01, 179.99, -17.0}), "EPSG:32760");
+        // 0 to 360: 190 E is 170 W, zone 2
+        EXPECT_EQ(target({190.0, 51.8, 190.01, 51.81}), "EPSG:32602");
+        // 10 degrees across the antimeridian: a transverse Mercator centred on it
+        const OGRSpatialReference tm = read(target({175.0, -17.1, 185.0, -17.0}));
+        EXPECT_STREQ(tm.GetAttrValue("PROJECTION"), SRS_PT_TRANSVERSE_MERCATOR);
+        EXPECT_NEAR(std::abs(tm.GetNormProjParm(SRS_PP_CENTRAL_MERIDIAN)), 180.0, 1e-9);
+    }
+
+    TEST(PointCloudCrsPolicy, theLongitudesOfACloudAreOneRangeOnTheCircle)
+    {
+        LongitudeRange across;
+        for (const double lon : {179.99, -179.99, 179.995, -179.995})
+            across.add(lon);
+        EXPECT_NEAR(across.west(), 179.99, 1e-9);
+        EXPECT_NEAR(across.east(), 180.01, 1e-9);
+        LongitudeRange greenwich;
+        for (const double lon : {-1.0, 1.0, 359.5})
+            greenwich.add(lon);
+        EXPECT_NEAR(greenwich.west(), -1.0, 1e-9);
+        EXPECT_NEAR(greenwich.east(), 1.0, 1e-9);
+        EXPECT_TRUE(LongitudeRange().empty());
+
+        const LonLatEnvelope wrapped = continuousEnvelope({-179.99, -17.01, 179.99, -17.0});
+        EXPECT_NEAR(wrapped.minLon, 179.99, 1e-9);
+        EXPECT_NEAR(wrapped.maxLon, 180.01, 1e-9);
+        const LonLatEnvelope east = continuousEnvelope({190.0, 51.8, 190.01, 51.81});
+        EXPECT_NEAR(east.minLon, -170.0, 1e-9);
+        EXPECT_NEAR(east.maxLon, -169.99, 1e-9);
     }
 
     TEST(PointCloudCrsPolicy, aPolarCloudGetsTheUniversalPolarStereographic)
@@ -226,7 +281,8 @@ namespace
 
     TEST(PointCloudCrsPolicy, aProjectedCrsFarFromItsAreaOfUseIsImplausible)
     {
-        // Swiss LV95 (2.4 to 2.9 million metres east) given coordinates of UTM
+        // Swiss LV95 (2.4 to 2.9 million metres east) given coordinates of UTM: 55 W 73 N, 60 degrees
+        // west of Switzerland
         const PointCloudCrsCheck check =
             PointCloudCrsPolicy::classify(wktOf("EPSG:2056"), {576662.6, 5188115.1, 156.0, 576767.5, 5188210.8, 169.4});
         EXPECT_EQ(check.status, PointCloudCrsStatus::Implausible);
@@ -236,6 +292,17 @@ namespace
         EXPECT_EQ(PointCloudCrsPolicy::classify(wktOf("EPSG:32632"), {955000.0, 6100000.0, 0.0, 956000.0, 6101000.0, 10.0})
                       .status,
                   PointCloudCrsStatus::Projected);
+        // Nor EUREF89 / UTM 33 (EPSG:25833, an area from 12 to 18 E) for the north of Norway at 30 E
+        // 70 N and for Svalbard at 34 E 79 N, as Norway maps them
+        EXPECT_EQ(PointCloudCrsPolicy::classify(wktOf("EPSG:25833"), {1067500.0, 7836100.0, 0.0, 1067600.0, 7836200.0, 10.0})
+                      .status,
+                  PointCloudCrsStatus::Projected);
+        EXPECT_EQ(PointCloudCrsPolicy::classify(wktOf("EPSG:25833"), {897800.0, 8835300.0, 0.0, 897900.0, 8835400.0, 10.0})
+                      .status,
+                  PointCloudCrsStatus::Projected);
+        // Coordinates PROJ cannot take back to WGS 84
+        EXPECT_EQ(PointCloudCrsPolicy::classify(wktOf("EPSG:32633"), {1e12, 1e12, 0.0, 1.1e12, 1.1e12, 1.0}).status,
+                  PointCloudCrsStatus::Implausible);
     }
 
     TEST(PointCloudCrsPolicy, aProjectedCloudKeepsItsCrsInAnyUnit)

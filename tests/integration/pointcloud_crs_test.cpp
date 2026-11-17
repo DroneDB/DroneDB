@@ -809,6 +809,65 @@ namespace
         DDBReleaseConnections(r.c_str(), nullptr);
     }
 
+    // A cloud of Fiji across the antimeridian, 0.1 degree wide around 180.02: its longitudes written
+    // from -180 to 180 (the header then says -180 to 180) or past 180. Its footprint is one narrow
+    // range, and its COPC is in UTM zone 1 south (its centre is 179.98 W), every point kept.
+    TEST(PointCloudCrs, ACloudAcrossTheAntimeridianIsBuiltInTheUtmZoneOfItsCentre)
+    {
+        TestArea ta(TEST_NAME, true);
+        for (const bool wrapped : {true, false})
+        {
+            SCOPED_TRACE(wrapped ? "-180 to 180" : "past 180");
+            auto points = lonLatGrid(180.02, -17.0, 0.1, 101);
+            if (wrapped)
+                for (auto &p : points)
+                    if (p.x > 180.0)
+                        p.x -= 360.0;
+            const fs::path las = ta.getPath(wrapped ? "fiji-wrapped.las" : "fiji.las");
+            // 1e-6 degrees: from -180 to 180 at 1e-7 would not fit the 32-bit integers of LAS
+            testutils::writeLas14(las, wktOfEpsg("EPSG:4326"), points, {1e-6, 1e-6, 0.001});
+
+            PointCloudInfo info;
+            ASSERT_TRUE(getPointCloudInfo(io::toUtf8(las), info));
+            EXPECT_EQ(info.crsStatus, PointCloudCrsStatus::Geographic);
+            EXPECT_EQ(info.targetCrs, "EPSG:32701");
+            EXPECT_TRUE(info.footprintWarning.empty()) << info.footprintWarning;
+            ASSERT_EQ(info.polyBounds.size(), 5);
+            // Never a polygon around the globe: from 179.97 to 180.07, its centre at 179.98 W
+            EXPECT_NEAR(info.polyBounds.points[0].x, 179.97, 1e-5);
+            EXPECT_NEAR(info.polyBounds.points[2].x, 180.07, 1e-5);
+            ASSERT_EQ(info.centroid.size(), 1);
+            EXPECT_NEAR(info.centroid.points[0].x, -179.98, 1e-5);
+
+            const fs::path out = ta.getFolder(wrapped ? "copc-wrapped" : "copc");
+            CopcBuildRecord record;
+            ASSERT_NO_THROW(record = buildCopc({io::toUtf8(las)}, io::toUtf8(out)));
+            EXPECT_TRUE(record.transformed);
+            PointCloudInfo copc;
+            ASSERT_TRUE(getCopcInfo(io::toUtf8(out / CopcFileName), copc));
+            EXPECT_EQ(copc.pointCount, points.size());
+            EXPECT_TRUE(PointCloudCrsPolicy::isSame(copc.wktProjection, "EPSG:32701"));
+            // 0.1 degree of longitude at 17 S: 10.6 km, one piece (the box of the grid, turned by the
+            // convergence of the meridians 3 degrees from the central one, a little wider)
+            EXPECT_NEAR(copc.bounds[3] - copc.bounds[0], 10650.0, 300.0);
+
+            // The footprint the index keeps gives the build of the entry the same CRS
+            const fs::path root = ta.getFolder(wrapped ? "dataset-wrapped" : "dataset");
+            const json added = contract::makeDataset(root, {las});
+            ASSERT_EQ(added[0]["polygon_geom"]["geometry"]["coordinates"][0][1][0].get<double>() > 180.0, true)
+                << added.dump();
+            EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+            const std::string r = root.string();
+            ASSERT_EQ(DDBBuild(r.c_str(), las.filename().string().c_str(), nullptr, false, false), DDBERR_NONE)
+                << DDBGetLastError();
+            const auto built = readCopcBuildRecord(root / ".ddb" / "build" / added[0]["hash"].get<std::string>() /
+                                                   CopcBuildSubfolder / CopcBuildRecordFileName);
+            ASSERT_TRUE(built.has_value());
+            EXPECT_TRUE(PointCloudCrsPolicy::isSame(built->copcCrs, "EPSG:32701")) << built->copcCrs;
+            DDBReleaseConnections(r.c_str(), nullptr);
+        }
+    }
+
     // The real program, counting the reads of a cloud's info and the COPC builds
     class CountingCloudHelper : public testutils::RealRasterHelper
     {

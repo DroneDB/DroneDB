@@ -818,5 +818,7 @@ Registry has to adopt first.
   compound source keeps its vertical CRS in metres; a geocentric or 3-D geographic one the ellipsoidal height), with
   `copc/build.json` beside it; such a COPC built before (and one of an implausible CRS) is incomplete for `DDBIsBuildComplete` and the build
   objects, and is built again by the next `DDBBuild`. The footprint of a geocentric cloud is the envelope of its
-  points, transformed in 3-D. The raster helper speaks protocol 1.4 (`pointCloudInfo` gains `crsStatus` and
+  points, transformed in 3-D; the polygon of a cloud across the antimeridian has its east past 180 (never a ring
+  around the globe). A projected CRS is implausible only when PROJ cannot take its corners to WGS 84 or they land 30
+  degrees or more outside its area of use. The raster helper speaks protocol 1.4 (`pointCloudInfo` gains `crsStatus` and
   `targetCrs`, `copc` takes `targetCrs` or `dropCrs` and answers the octree its builder reports); a helper of 1.3 is refused.

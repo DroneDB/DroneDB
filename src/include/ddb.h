@@ -519,12 +519,14 @@ extern "C"
      * The properties of a point cloud entry: "pointCount", "projection" (the CRS the file states,
      * WKT; "" without one), "dimensions" and (new in 2.8) "crsStatus": "projected", "geographic",
      * "geocentric", "local" (an engineering CRS), "none" or "implausible". A CRS is implausible when the
-     * coordinates do not fit it (a geographic CRS with x outside [-180, 180] or y outside [-90, 90],
-     * a geocentric one whose corners are not 6,300 to 6,420 km from the centre of the earth, a
-     * projected one far outside its area of use): the entry is handled as having no CRS (no
+     * coordinates do not fit it (a geographic CRS with x outside [-180, 360] (-180 to 180 or 0 to 360)
+     * or y outside [-90, 90], a geocentric one whose corners are not 6,300 to 6,420 km from the centre
+     * of the earth, a projected one whose corners PROJ cannot take to WGS 84 or that land 30 degrees or
+     * more outside its area of use): the entry is handled as having no CRS (no
      * footprint, and its COPC states no CRS, its points as they are) and "warning" is "coordinate system ignored: the
      * coordinates do not fit <name of the CRS>". The footprint of a geocentric cloud is transformed
-     * in 3-D. A footprint that is not a longitude/latitude envelope is left out, with "warning"
+     * in 3-D. The polygon of a cloud across the antimeridian has its east past 180 (179.9 to 180.1),
+     * never a ring around the globe, and its centroid a longitude in [-180, 180). A footprint that is not a longitude/latitude envelope is left out, with "warning"
      * "footprint unavailable: <why>".
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth,

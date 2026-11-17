@@ -77,6 +77,13 @@ namespace ddb
             return PointCloudCrsStatus::Local;
         }
 
+        // lon in [-180, 180)
+        double normalizedLongitude(double lon)
+        {
+            const double turned = std::fmod(lon + 180.0, 360.0);
+            return (turned < 0.0 ? turned + 360.0 : turned) - 180.0;
+        }
+
         bool within(double value, double low, double high)
         {
             return std::isfinite(value) && value >= low && value <= high;
@@ -88,9 +95,9 @@ namespace ddb
             constexpr double Pi = 3.14159265358979323846;
             const double toDegrees = srs.GetAngularUnits() * 180.0 / Pi;
             constexpr double Slack = 1e-9;
-            return within(b[0] * toDegrees, -180.0 - Slack, 180.0 + Slack) &&
-                   within(b[3] * toDegrees, -180.0 - Slack, 180.0 + Slack) &&
-                   within(b[1] * toDegrees, -90.0 - Slack, 90.0 + Slack) &&
+            const double west = b[0] * toDegrees, east = b[3] * toDegrees;
+            return within(west, -180.0 - Slack, 360.0 + Slack) && within(east, -180.0 - Slack, 360.0 + Slack) &&
+                   east - west <= 360.0 + Slack && within(b[1] * toDegrees, -90.0 - Slack, 90.0 + Slack) &&
                    within(b[4] * toDegrees, -90.0 - Slack, 90.0 + Slack);
         }
 
@@ -182,7 +189,8 @@ namespace ddb
                 return false;
             const double m = PointCloudCrsPolicy::kProjectedMarginDegrees;
             for (size_t i = 0; i < x.size(); i++)
-                if (!withinLongitudes(x[i], west, east, m) || !within(y[i], south - m, north + m))
+                if (!within(y[i], -90.0, 90.0) || !withinLongitudes(x[i], west, east, m) ||
+                    !within(y[i], south - m, north + m))
                     return false;
             return true;
         }
@@ -353,6 +361,49 @@ namespace ddb
         }
     }
 
+    void LongitudeRange::add(double lon)
+    {
+        if (!std::isfinite(lon))
+            return;
+        const double a = normalizedLongitude(lon);
+        const double b = a < 0.0 ? a + 360.0 : a;
+        minA_ = std::min(minA_, a);
+        maxA_ = std::max(maxA_, a);
+        minB_ = std::min(minB_, b);
+        maxB_ = std::max(maxB_, b);
+    }
+
+    double LongitudeRange::west() const
+    {
+        if (maxB_ - minB_ < maxA_ - minA_)
+            return normalizedLongitude(minB_);
+        return minA_;
+    }
+
+    double LongitudeRange::east() const
+    {
+        if (maxB_ - minB_ < maxA_ - minA_)
+            return normalizedLongitude(minB_) + (maxB_ - minB_);
+        return maxA_;
+    }
+
+    LonLatEnvelope continuousEnvelope(const LonLatEnvelope &envelope)
+    {
+        LonLatEnvelope out = envelope;
+        double west = envelope.minLon, east = envelope.maxLon;
+        if (east - west > 180.0)
+        {
+            // Written from -180 to 180 across the antimeridian: the cloud is between the greatest
+            // longitude and the least
+            west = envelope.maxLon;
+            east = envelope.minLon + 360.0;
+        }
+        const double shift = normalizedLongitude(west) - west;
+        out.minLon = west + shift;
+        out.maxLon = east + shift;
+        return out;
+    }
+
     const char *toString(PointCloudCrsStatus status)
     {
         for (const auto &s : kStatusNames)
@@ -424,8 +475,12 @@ namespace ddb
         const OGRSpatialReference &source = srsOf(srs);
         const OGRSpatialReference geog = geographic2D(source);
 
-        const double lon = (footprint.minLon + footprint.maxLon) / 2.0;
-        const double lat = (footprint.minLat + footprint.maxLat) / 2.0;
+        // On the circle: the centre of a cloud across the antimeridian is there, and its distance
+        // to a central meridian is measured the short way
+        const LonLatEnvelope continuous = continuousEnvelope(footprint);
+        const double centre = (continuous.minLon + continuous.maxLon) / 2.0;
+        const double lon = normalizedLongitude(centre);
+        const double lat = (continuous.minLat + continuous.maxLat) / 2.0;
         OGRSpatialReference horizontal;
         if (lat > kUtmNorthLimit)
             horizontal = fromEpsg(kUpsNorthEpsg);
@@ -434,9 +489,10 @@ namespace ddb
         else
         {
             const int zone = utmZone(lon);
-            const double centralMeridian = zone * 6.0 - 183.0;
-            if (footprint.minLon < centralMeridian - kUtmReachDegrees ||
-                footprint.maxLon > centralMeridian + kUtmReachDegrees)
+            // The central meridian on the side of the circle of the continuous range
+            const double centralMeridian = zone * 6.0 - 183.0 + (centre - lon);
+            if (continuous.minLon < centralMeridian - kUtmReachDegrees ||
+                continuous.maxLon > centralMeridian + kUtmReachDegrees)
                 horizontal = centredTransverseMercator(geog, lon);
             else
                 horizontal = utm(geog, zone, lat >= 0.0);

@@ -9,9 +9,12 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <tuple>
+#include <utility>
 #include <cctype>
 
 
@@ -62,65 +65,85 @@ std::unique_ptr<CoordsTransformer> transformTo(const OGRSpatialReference& from, 
     return transform;
 }
 
+// Hands every point of the cloud at utf8Path to `batch` (count, x y z interleaved), as ddb-tilers
+// reads them: for the footprints that the bounds of a header cannot give
+void readCloudPoints(const std::string& utf8Path, const std::function<void(uint64_t, const double*)>& batch) {
+    struct Reading {
+        const std::function<void(uint64_t, const double*)>* batch;
+        static int forward(uint64_t count, const double* xyz, const uint16_t* /*rgb*/, void* user) {
+            if (cancel::isCanceled())
+                return 1;
+            (*static_cast<Reading*>(user)->batch)(count, xyz);
+            return 0;
+        }
+    } reading{&batch};
+    const ddbtErr rc = ddbtReadPoints(utf8Path.c_str(), &Reading::forward, &reading);
+    cancel::throwIfCanceled();
+    tilers::check(rc);
+}
+
+// The footprint in WGS 84 (EPSG:4326) as the polygon of an entry holds it: a cloud across the
+// antimeridian has its longitudes as one range past 180 (179.9 to 180.1), never one around the
+// globe, and its centre within [-180, 180)
+void unwrapLongitudes(Footprint& f) {
+    if (f.maxX < f.minX)
+        f.maxX += 360.0;
+    LongitudeRange centre;
+    centre.add(f.centreX);
+    f.centreX = centre.west();
+}
+
+// A geographic cloud's longitudes as one range on the circle, in the angular unit of its CRS. The
+// header gives their least and greatest: a cloud across the antimeridian written from -180 to 180
+// spans more than 180 degrees there, and only its points tell where it is.
+std::pair<double, double> geographicLongitudes(const std::string& utf8Path, const std::vector<double>& b,
+                                               const OGRSpatialReference& fileSrs) {
+    constexpr double Pi = 3.14159265358979323846;
+    const double toDegrees = fileSrs.GetAngularUnits() * 180.0 / Pi;
+    LonLatEnvelope envelope =
+        continuousEnvelope({b[0] * toDegrees, b[1] * toDegrees, b[3] * toDegrees, b[4] * toDegrees});
+    if ((b[3] - b[0]) * toDegrees > 180.0) {
+        LongitudeRange range;
+        readCloudPoints(utf8Path, [&](uint64_t count, const double* xyz) {
+            for (uint64_t i = 0; i < count; ++i)
+                range.add(xyz[3 * i] * toDegrees);
+        });
+        if (range.empty())
+            throw GDALException("The cloud has no point to place on the earth");
+        envelope.minLon = range.west();
+        envelope.maxLon = range.east();
+    }
+    return {envelope.minLon / toDegrees, envelope.maxLon / toDegrees};
+}
+
 // Only the horizontal part of the CRS of the file takes part: x and y are transformed, z is not (a
 // height in the vertical unit of the CRS, converted to metres), so a vertical datum that PROJ cannot
 // use here (a geoid grid that is not installed) does not matter
-Footprint horizontalFootprint(const std::vector<double>& b, const OGRSpatialReference& fileSrs,
-                              const OGRSpatialReference& target, int targetEpsg) {
+Footprint horizontalFootprint(const std::string& utf8Path, const std::vector<double>& b,
+                              const OGRSpatialReference& fileSrs, const OGRSpatialReference& target, int targetEpsg) {
     const auto transform = transformTo(horizontalSrs(fileSrs), target, targetEpsg);
-    Footprint f{b[0], b[1], b[3], b[4], (b[0] + b[3]) / 2.0, (b[1] + b[4]) / 2.0, 0, 0};
+    double west = b[0], east = b[3];
+    if (fileSrs.IsGeographic())
+        std::tie(west, east) = geographicLongitudes(utf8Path, b, fileSrs);
+    Footprint f{west, b[1], east, b[4], (west + east) / 2.0, (b[1] + b[4]) / 2.0, 0, 0};
     if (!transform->tryTransform(1, &f.minX, &f.minY) || !transform->tryTransform(1, &f.maxX, &f.maxY) ||
         !transform->tryTransform(1, &f.centreX, &f.centreY))
         throw GDALException("Cannot transform the bounds " + boundsText(b) + " to EPSG:" + std::to_string(targetEpsg));
+    if (targetEpsg == 4326)
+        unwrapLongitudes(f);
     const double zToMeters = verticalUnitInMeters(fileSrs);
     f.minZ = b[2] * zToMeters;
     f.maxZ = b[5] * zToMeters;
     return f;
 }
 
-// What ddbtReadPoints hands over of a geocentric cloud, transformed to longitude, latitude and
-// ellipsoidal height, into the envelope of its points
-struct GeocentricEnvelope {
-    CoordsTransformer* toLonLat = nullptr;
-    Footprint f{1e300, 1e300, -1e300, -1e300, 0, 0, 1e300, -1e300};
-    std::vector<double> x, y, z;
-    std::vector<int> ok;
-
-    static int batch(uint64_t count, const double* xyz, const uint16_t* /*rgb*/, void* user) {
-        auto& self = *static_cast<GeocentricEnvelope*>(user);
-        if (cancel::isCanceled())
-            return 1;
-        self.x.resize(count);
-        self.y.resize(count);
-        self.z.resize(count);
-        self.ok.resize(count);
-        for (uint64_t i = 0; i < count; ++i) {
-            self.x[i] = xyz[3 * i];
-            self.y[i] = xyz[3 * i + 1];
-            self.z[i] = xyz[3 * i + 2];
-        }
-        // A point PROJ cannot transform is left out
-        self.toLonLat->get()->Transform(static_cast<size_t>(count), self.x.data(), self.y.data(), self.z.data(),
-                                        nullptr, self.ok.data());
-        for (uint64_t i = 0; i < count; ++i) {
-            if (!self.ok[i] || !std::isfinite(self.x[i]) || !std::isfinite(self.y[i]))
-                continue;
-            self.f.minX = std::min(self.f.minX, self.x[i]);
-            self.f.maxX = std::max(self.f.maxX, self.x[i]);
-            self.f.minY = std::min(self.f.minY, self.y[i]);
-            self.f.maxY = std::max(self.f.maxY, self.y[i]);
-        }
-        return 0;
-    }
-};
-
 // The footprint of a geocentric cloud. An x, y, z is a point only as a whole, and the box of a patch
 // of the curved earth says little of where the patch is: its corners lie above and below the ground,
 // their longitudes and latitudes tens of metres outside the cloud for every kilometre of it, and
 // whether a box is a tilted plate or a block cannot be told from it. The points are read (as the
 // bounds of a cloud whose header has none are) and transformed in 3-D to longitude, latitude and
-// ellipsoidal height (EPSG:4979): the footprint is their envelope, and its height the one of the
-// centre of the bounds.
+// ellipsoidal height (EPSG:4979): the footprint is their envelope (one range of longitudes on the
+// circle), and its height the one of the centre of the bounds.
 Footprint geocentricFootprint(const std::string& utf8Path, const std::vector<double>& b,
                               const OGRSpatialReference& fileSrs, const OGRSpatialReference& target, int targetEpsg) {
     constexpr int Geographic3D = 4979;
@@ -137,19 +160,38 @@ Footprint geocentricFootprint(const std::string& utf8Path, const std::vector<dou
     if (!toLonLat->tryTransform(1, &cx, &cy, &cz))
         throw cannotTransform();
 
-    GeocentricEnvelope reading;
-    reading.toLonLat = toLonLat.get();
-    const ddbtErr rc = ddbtReadPoints(utf8Path.c_str(), &GeocentricEnvelope::batch, &reading);
-    cancel::throwIfCanceled();
-    tilers::check(rc);
-    Footprint f = reading.f;
-    if (f.minX > f.maxX)
+    LongitudeRange longitudes;
+    double minLat = 1e300, maxLat = -1e300;
+    std::vector<double> x, y, z;
+    std::vector<int> ok;
+    readCloudPoints(utf8Path, [&](uint64_t count, const double* xyz) {
+        x.resize(count);
+        y.resize(count);
+        z.resize(count);
+        ok.resize(count);
+        for (uint64_t i = 0; i < count; ++i) {
+            x[i] = xyz[3 * i];
+            y[i] = xyz[3 * i + 1];
+            z[i] = xyz[3 * i + 2];
+        }
+        // A point PROJ cannot transform is left out
+        toLonLat->get()->Transform(static_cast<size_t>(count), x.data(), y.data(), z.data(), nullptr, ok.data());
+        for (uint64_t i = 0; i < count; ++i) {
+            if (!ok[i] || !std::isfinite(x[i]) || !std::isfinite(y[i]))
+                continue;
+            longitudes.add(x[i]);
+            minLat = std::min(minLat, y[i]);
+            maxLat = std::max(maxLat, y[i]);
+        }
+    });
+    if (longitudes.empty())
         throw cannotTransform();
+    Footprint f{longitudes.west(), minLat, longitudes.east(), maxLat, 0, (minLat + maxLat) / 2.0, cz, cz};
     f.centreX = (f.minX + f.maxX) / 2.0;
-    f.centreY = (f.minY + f.maxY) / 2.0;
-    f.minZ = f.maxZ = cz;
-    if (targetEpsg == 4326)
+    if (targetEpsg == 4326) {
+        unwrapLongitudes(f);
         return f;
+    }
 
     const SrsPtr wgs84 = srsFromEpsg(4326);
     if (!wgs84)
@@ -161,9 +203,17 @@ Footprint geocentricFootprint(const std::string& utf8Path, const std::vector<dou
     return f;
 }
 
+// A footprint in WGS 84 as an entry holds it: a longitude/latitude envelope (isWgs84Envelope), or
+// one across the antimeridian whose east is past 180, at most 180 degrees wide
+bool isFootprintEnvelope(const Footprint& f) {
+    if (f.maxX > 180.0)
+        return f.maxX - f.minX <= 180.0 && isWgs84Envelope(f.minX, f.minY, 180.0, f.maxY);
+    return isWgs84Envelope(f.minX, f.minY, f.maxX, f.maxY);
+}
+
 // Fills the polygon and the centroid of the point cloud (in EPSG:footprintSrs) from its bounds.
 // Throws GDALException when the CRS cannot be transformed, or when a footprint in WGS 84 is not
-// a longitude/latitude envelope (isWgs84Envelope): a wrong polygon is worse than none.
+// a longitude/latitude envelope (isFootprintEnvelope): a wrong polygon is worse than none.
 void populatePointCloudFootprint(PointCloudInfo& info, int footprintSrs, const std::string& utf8Path) {
     const std::vector<double>& b = info.bounds;  // minX, minY, minZ, maxX, maxY, maxZ
 
@@ -177,7 +227,7 @@ void populatePointCloudFootprint(PointCloudInfo& info, int footprintSrs, const s
 
     const OGRSpatialReference& fullSrs = srsOf(fileSrs);
     const Footprint f = fullSrs.IsGeocentric() ? geocentricFootprint(utf8Path, b, fullSrs, srsOf(tgt), footprintSrs)
-                                               : horizontalFootprint(b, fullSrs, srsOf(tgt), footprintSrs);
+                                               : horizontalFootprint(utf8Path, b, fullSrs, srsOf(tgt), footprintSrs);
 
     if (f.minZ < -30000 || f.maxZ > 30000) {
         LOGD << "Strange point cloud bounds [[" << f.minX << ", " << f.maxX << "], [" << f.minY << ", "
@@ -185,7 +235,7 @@ void populatePointCloudFootprint(PointCloudInfo& info, int footprintSrs, const s
         info.bounds.clear();
         return;
     }
-    if (footprintSrs == 4326 && !isWgs84Envelope(f.minX, f.minY, f.maxX, f.maxY)) {
+    if (footprintSrs == 4326 && !isFootprintEnvelope(f)) {
         std::ostringstream envelope;
         envelope << "[" << f.minX << ", " << f.minY << ", " << f.maxX << ", " << f.maxY << "]";
         throw GDALException("The bounds " + boundsText(b) + " give the envelope " + envelope.str() +
@@ -570,7 +620,12 @@ CopcBuildRecord buildCopc(const std::vector<std::string>& filenames, const std::
         options.reportProgress(fraction, copcPhaseOfFraction(fraction));
     };
     raster::CopcResult result;
-    readPointCloud("COPC build failed: ", [&] {
+    // A failure to transform the points names the CRS they were transformed to: the build of such a
+    // cloud fails the same way every time (a host backs off), and the reason says why
+    const std::string failure = params.targetCrs.empty()
+                                    ? std::string("COPC build failed: ")
+                                    : "COPC build failed (the points transformed to " + params.targetCrs + "): ";
+    readPointCloud(failure, [&] {
         result = raster::copcResultFromJson(raster::rasterHelper().buildCopc(
             io::fromUtf8(filenames.front()), produced, raster::toJson(params), report));
     });

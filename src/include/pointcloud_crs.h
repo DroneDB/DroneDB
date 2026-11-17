@@ -37,6 +37,30 @@ namespace ddb
         double maxLat = 0;
     };
 
+    // The longitudes of a cloud as one range on the circle, in degrees: the narrower of their range in
+    // [-180, 180) and in [0, 360), so that a cloud across the antimeridian is one narrow range (179.9
+    // to 180.1) and not the whole globe. A cloud never spans more than 180 degrees of longitude.
+    class LongitudeRange
+    {
+      public:
+        void add(double lon);
+        bool empty() const { return !(minA_ <= maxA_); }
+        // West in [-180, 180), east = west + the width of the range (past 180 for a range across the
+        // antimeridian)
+        double west() const;
+        double east() const;
+
+      private:
+        double minA_ = 1e300, maxA_ = -1e300; // in [-180, 180)
+        double minB_ = 1e300, maxB_ = -1e300; // in [0, 360)
+    };
+
+    // The envelope of a cloud whose longitudes are only known by their least and greatest value (a
+    // header), as a continuous range: west in [-180, 180), east = west + width. A range wider than 180
+    // degrees is a cloud across the antimeridian whose longitudes are written from -180 to 180 (its
+    // west is the greatest, its east the least plus 360); 0 to 360 is folded into -180 to 180.
+    LonLatEnvelope continuousEnvelope(const LonLatEnvelope &envelope);
+
     // The status of a cloud's CRS and, for one the coordinates do not fit, the warning of its entry
     struct PointCloudCrsCheck
     {
@@ -65,18 +89,20 @@ namespace ddb
         // The status of the CRS `wkt` states for a cloud with `bounds` (min x, min y, min z, max x,
         // max y, max z, in the units of the CRS; empty when they are not known, and then the CRS is
         // not checked against them). The CRS fits the coordinates when:
-        //   - geographic: x is within [-180, 180] and y within [-90, 90] (longitude first, as LAS
-        //     stores them whatever the axis order of the authority);
+        //   - geographic: x is within [-180, 360] (-180 to 180 or 0 to 360, also across the
+        //     antimeridian), spanning at most 360 degrees, and y within [-90, 90] (longitude first,
+        //     as LAS stores them whatever the axis order of the authority);
         //   - geocentric: every corner of the bounds is 6,300 to 6,420 km from the centre of the
         //     earth;
-        //   - projected: the corners of the bounds fall within the area of use of the CRS, widened
-        //     by kProjectedMarginDegrees (a CRS is often used past its area: a country mapped in one
-        //     UTM zone reaches 3 degrees past its edges). A CRS without an area of use, or without a
-        //     transformation to WGS 84, is not judged.
+        //   - projected: the corners of the bounds transform to WGS 84, to finite longitudes and
+        //     latitudes within [-90, 90], no more than kProjectedMarginDegrees outside the area of
+        //     use of the CRS (a CRS is used far past its area: Norway maps up to 31 E, Svalbard 34
+        //     E, in EUREF89 / UTM 33, whose area ends at 18 E). A CRS without an area of use, or
+        //     without a transformation to WGS 84, is not judged.
         static PointCloudCrsCheck classify(const std::string &wkt, const std::vector<double> &bounds);
 
         // How far outside the area of use of a projected CRS the coordinates may lie, in degrees
-        static constexpr double kProjectedMarginDegrees = 5.0;
+        static constexpr double kProjectedMarginDegrees = 30.0;
 
         // Whether the COPC of a cloud of this status is built in a CRS of its own (target())
         static bool reprojects(PointCloudCrsStatus status);
@@ -87,8 +113,8 @@ namespace ddb
         static bool changesCrs(PointCloudCrsStatus status);
 
         // The CRS the COPC of a cloud is built in: "" to keep the CRS of the cloud (any status but
-        // Geographic and Geocentric). `footprint` is the cloud's envelope in WGS 84. The horizontal
-        // part is:
+        // Geographic and Geocentric). `footprint` is the cloud's envelope in WGS 84 (continuousEnvelope
+        // reads it, so a cloud across the antimeridian is centred there). The horizontal part is:
         //   - UPS North (EPSG:5041) when the centre is north of 84 degrees, UPS South (EPSG:5042)
         //     south of 80 degrees south, where UTM ends;
         //   - else a transverse Mercator centred on the footprint when the footprint reaches more than
