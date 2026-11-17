@@ -130,8 +130,9 @@ extern "C"
      * ABI 2.6 (libddb 2.6.0, 0x00020006) adds no export: the DDBConfigure setting "artefactCacheMb".
      * ABI 2.7 (libddb 2.7.0, 0x00020007) adds no export: the renders, reads and operations of rasters through
      * ddb-tilers and the raster helper (protocol 1.3).
-     * libddb 2.8.0 adds no export: point clouds in any CRS (the raster helper of protocol 1.4, the "crsStatus"
-     * property of a point cloud entry, the "crs" of the pointcloud.copc artifact). */
+     * ABI 2.8 (libddb 2.8.0, 0x00020008) adds no export: point clouds in any CRS (the raster helper of
+     * protocol 1.4, the "crsStatus" property of a point cloud entry, the "crs" of the pointcloud.copc
+     * artifact). */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:

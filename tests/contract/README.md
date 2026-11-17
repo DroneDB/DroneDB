@@ -805,7 +805,7 @@ Registry has to adopt first.
   2.7.1: grey), and the COG of a palette raster beside an alpha band or with an internal mask keeps its table
   (2.6.0 to 2.7.1 dropped it). The 3D Tiles of models are built by Obj2Tiles v1.10.2 (the same binaries as v1.10.1;
   its notices list libktx and the code it is built from).
-* Next release (2.8.0, no export added or removed): point clouds in any CRS. The entry `properties` of a point
+* 2.8.0 (no export added or removed): point clouds in any CRS. The entry `properties` of a point
   cloud gain `crsStatus` (`projected`, `geographic`, `geocentric`, `local`, `none`, `implausible`; the `add`,
   `list`, `list-entries`, `info-pointcloud`, `info-pointcloud-no-footprint`, `stac-item-collection` and
   `stac-data-item-collection` fixtures have it), and the `pointcloud.copc` artifact gains `crs` (new fixture

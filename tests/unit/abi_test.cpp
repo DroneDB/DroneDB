@@ -76,14 +76,16 @@ namespace
     // tile in a chosen format) and DDBRenderRasterRegionEx2 and DDBRenderRasterIndexEx (a region and an
     // index render over a background, DDBRenderOptions, or as their RGBA pixels); 2.6 adds no export (the
     // tiles and builds of ddb-tilers, the artefactCacheMb setting of the configuration); 2.7 adds no export
-    // (the renders, reads and operations of rasters through ddb-tilers and the raster helper).
+    // (the renders, reads and operations of rasters through ddb-tilers and the raster helper); 2.8 adds no
+    // export (point clouds in any coordinate system: the crsStatus property, the crs of the pointcloud.copc
+    // artifact, the completeness of COPCs built before 2.8, bounded point-cloud tiles).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_7)
+    TEST(AbiVersion, is2_8)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 7);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x00020007u);
+        EXPECT_EQ(DDB_ABI_MINOR, 8);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x00020008u);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it
