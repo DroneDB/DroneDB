@@ -75,7 +75,7 @@ struct ManifestFixture : IndexFixture {
         insertEntry(db.get(), "orphan.dbf", std::string(64, '2'), EntryType::Generic);
         insertEntry(db.get(), "dir", "", EntryType::Directory);
 
-        writeFile(build / H_COG / "cog" / "cog.tif", "x");
+        writeBuiltCog(build / H_COG);
         writeFile(build / H_COPC / "copc" / "cloud.copc.laz", "x");
         writeFile(build / H_COPC / "ept" / "ept.json", "{}");
         writeFile(build / H_EPT / "ept" / "ept.json", "{}");
@@ -86,7 +86,7 @@ struct ManifestFixture : IndexFixture {
         writeFile(build / H_CAD / "vec" / "local.json", "{}");
         writeFile(build / pendingMarkerName(H_PENDING, "pending.shp"), "1700000000\nsub/pending.shx\nsub/pending.dbf\n");
         fs::create_directories(build / H_BUSY);
-        writeFile(build / H_STALE / "cog" / "cog.tif", "x");
+        writeBuiltCog(build / H_STALE);
         writeFile(build / H_STALE / "cog.building", "12345");  // no live holder
         writeFile(build / H_SPLAT / "gsplat" / "model.rad", "x");
         writeFile(build / H_SPLAT / "gsplat" / "bounds.json", "{}");

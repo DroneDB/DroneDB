@@ -307,11 +307,14 @@ TEST(entryHandler, CompletenessRules) {
 
     const auto complete = [&](EntryType t) { return entryHandler(t).isComplete(Entry(), base); };
 
-    // Folder types: an empty folder is incomplete, any non-empty file completes it
+    // Folder types: an empty folder is incomplete, any non-empty file completes it (for a raster whose
+    // COG does not depend on when it was built: a DEM with nodata)
+    Entry dem;
+    dem.properties = {{"bands", {{{"type", "Float32"}, {"colorInterp", "Gray"}, {"noData", -9999}}}}, {"hasMask", false}};
     fs::create_directories(base / "cog");
-    EXPECT_FALSE(complete(EntryType::GeoRaster));
+    EXPECT_FALSE(entryHandler(EntryType::GeoRaster).isComplete(dem, base));
     writeFile(base / "cog" / "whatever.tif", "x");
-    EXPECT_TRUE(complete(EntryType::GeoRaster));
+    EXPECT_TRUE(entryHandler(EntryType::GeoRaster).isComplete(dem, base));
 
     // Vector: source.gpkg and (metadata.json or local.json)
     writeFile(base / "vec" / "source.gpkg", "x");

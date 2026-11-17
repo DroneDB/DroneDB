@@ -10,8 +10,10 @@
 #include "build_layout.h"
 #include "json.h"
 #include "cog.h"
+#include "cog_build_policy.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
 #include "raster_helper.h"
@@ -46,13 +48,42 @@ class GeoRasterEntryHandler : public EntryHandler {
 
     std::string subfolder() const override { return CogBuildSubfolder; }
 
+    // isComplete() reads the bands of the raster and whether it has a mask
+    std::vector<std::string> buildPropertyKeys() const override { return {"bands", "hasMask"}; }
+
     std::vector<BuildArtifact> artifacts() const override {
         return {BuildArtifact::file("raster.cog", artifactPath(CogBuildSubfolder, CogFileName),
                                     "image/tiff; application=geotiff; profile=cloud-optimized", CogFileName)};
     }
 
+    // The COG folder has its output (the default rule). A COG built before the rules of
+    // CogBuildPolicy (no build record, or one of an older version) is incomplete when the COG built
+    // now differs from it, so that it is built again; the one it has is served meanwhile. The
+    // index decides for most entries; for one indexed before it held the nodata and the mask of the
+    // raster, the header of the COG does.
+    bool isComplete(const Entry& e, const fs::path& baseOutputPath, bool reportRecoverable) const override {
+        if (!EntryHandler::isComplete(e, baseOutputPath, reportRecoverable))
+            return false;
+        const auto indexed = CogBuildPolicy::indexed(e.properties);
+        if (indexed && !CogBuildPolicy::outdates(*indexed))
+            return true;
+        const fs::path folder = baseOutputPath / CogBuildSubfolder;
+        const auto record = readCogBuildRecord(folder / CogBuildRecordFileName);
+        if (record && record->version >= CogBuildPolicy::kVersion)
+            return true;
+        if (indexed)
+            return false;
+        try {
+            return !CogBuildPolicy::outdates(CogBuildPolicy::ofBuiltCog(folder / CogFileName));
+        } catch (const AppException& ex) {
+            LOGD << "The COG of " << e.path << " is built again: " << ex.what();
+            return false;
+        }
+    }
+
     void build(const BuildContext& ctx) const override {
         buildCog(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder / CogFileName), ctx.options);
+        writeCogBuildRecord(ctx.tempFolder / CogBuildRecordFileName, CogBuildRecord{});
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::File; }

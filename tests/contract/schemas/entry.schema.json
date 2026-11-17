@@ -258,9 +258,28 @@
               },
               "colorInterp": {
                 "type": "string"
+              },
+              "noData": {
+                "description": "GeoRaster: the nodata value of the band, when it has one; \"nan\", \"inf\" or \"-inf\" for a value JSON has no number for",
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "enum": [
+                      "nan",
+                      "inf",
+                      "-inf"
+                    ]
+                  }
+                ]
               }
             }
           }
+        },
+        "hasMask": {
+          "type": "boolean",
+          "description": "GeoRaster: the raster has a mask of its own (an internal or external mask), which is neither its alpha band nor its nodata. Entries indexed before 2.8.0 have no member."
         },
         "georeferenced": {
           "type": "boolean",

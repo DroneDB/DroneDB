@@ -846,3 +846,17 @@ Registry has to adopt first.
   no pixel of the raster is under is blank, whatever the formula asked. Point-cloud tiles have no gaps where the
   cloud has points. bm3d is 1.1.3 and the 3D Tiles of models are built by Obj2Tiles v1.10.3 (OBJ models whose
   parts differ are tiled whole; KTX2 textures are a multiple of 4 in size).
+  The entry `properties` of a GeoRaster gain `hasMask` (true when the raster has a mask of its own, an internal or
+  external mask that is neither its alpha band nor its nodata) and, in each band, `noData` when the band has one
+  (a number, or `"nan"`, `"inf"`, `"-inf"`; a GeoTIFF has one nodata for every band, its alpha band too); the
+  `add`, `list`, `list-entries`, `info-georaster`, `stac-item-georaster`, `stac-item-collection`,
+  `stac-data-item-georaster`, `stac-data-item-collection` and `gdal-util-probe` fixtures have `hasMask`
+  (`entry.schema.json` and `gdal-util-probe.schema.json` have both members). The COG of a GeoRaster has
+  `cog/build.json` beside it (`{"version": 1}`, the version of the COG build rules); a COG without it (built
+  before 2.8.0) is incomplete for `DDBIsBuildComplete` and the build objects of `DDBGetBuildArtifacts`,
+  `DDBListEntriesEx` and `DDBGetBuildStatus`, and is built again by the next `DDBBuild`, only when the COG built
+  now differs from it: a source without nodata, mask or alpha band, a source with the nodata of several bands and
+  no alpha band, a source with a colour table (a `Palette` band 1). An entry indexed by 2.8.0 is judged from its
+  `bands` and `hasMask`; one indexed before from the colour interpretations of its bands (a palette or an alpha
+  band) and otherwise from the header of the COG it has (its nodata, mask and alpha band, which the builds before
+  kept from the source). A COG that cannot be read is incomplete.

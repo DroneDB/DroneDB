@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -124,7 +125,18 @@ std::string gcpProjection(GDALDatasetH hDataset)
     return wkt != nullptr ? std::string(wkt) : std::string();
 }
 
-// The data type and color interpretation of every band
+// A nodata value as the entry properties write it: a number, or "nan", "inf", "-inf" (JSON has
+// none of them; the STAC raster extension writes them so)
+json noDataJson(double value)
+{
+    if (std::isnan(value))
+        return "nan";
+    if (std::isinf(value))
+        return value > 0 ? "inf" : "-inf";
+    return value;
+}
+
+// The data type, color interpretation and nodata value (when it has one) of every band
 json describeBands(GDALDatasetH hDataset)
 {
     int bandCount = GDALGetRasterCount(hDataset);
@@ -149,6 +161,22 @@ json describeBands(GDALDatasetH hDataset)
             const char* colorInterpName = GDALGetColorInterpretationName(colorInterp);
             LOGV << "Band " << (i + 1) << " color interpretation: " << colorInterpName;
             b["colorInterp"] = colorInterpName;
+
+            // 64-bit integers have a nodata of their type, which a double does not always hold
+            int hasNoData = FALSE;
+            if (dataType == GDT_Int64) {
+                const int64_t noData = GDALGetRasterNoDataValueAsInt64(hBand, &hasNoData);
+                if (hasNoData)
+                    b["noData"] = noData;
+            } else if (dataType == GDT_UInt64) {
+                const uint64_t noData = GDALGetRasterNoDataValueAsUInt64(hBand, &hasNoData);
+                if (hasNoData)
+                    b["noData"] = noData;
+            } else {
+                const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
+                if (hasNoData)
+                    b["noData"] = noDataJson(noData);
+            }
 
             bands.push_back(b);
         }
@@ -225,6 +253,9 @@ void describeGeoRaster(GDALDatasetH hDataset, const fs::path &path, ProbeResult 
     }
 
     result.properties["bands"] = describeBands(hDataset);
+    // A mask of its own (internal or external), neither its alpha band nor its nodata
+    result.properties["hasMask"] = GDALGetRasterCount(hDataset) > 0 &&
+                                   GDALGetMaskFlags(GDALGetRasterBand(hDataset, 1)) == GMF_PER_DATASET;
 }
 
 ProbeResult probeRaster(const fs::path &path)
