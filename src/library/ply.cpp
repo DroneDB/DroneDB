@@ -191,7 +191,9 @@ namespace ddb
             bool tooLong = false;
             std::string line;
 
-            if (!readHeaderLine(in, line, consumed, tooLong) || line != "ply")
+            // Some writers put a space after the magic word ("ply "), which PDAL and rply read
+            if (!readHeaderLine(in, line, consumed, tooLong) || line.compare(0, 3, "ply") != 0 ||
+                line.find_last_not_of(" \t") != 2)
             {
                 error = "not a PLY file (missing 'ply' magic line)";
                 return false;
@@ -514,6 +516,7 @@ namespace ddb
         info.splatProblem.clear();
         info.dimensions.clear();
         info.vertexCount = 0;
+        info.hasVertexElement = false;
         info.textureFilename.clear();
         info.textureFileCount = 0;
         info.unsupportedTextureReason.clear();
@@ -529,8 +532,12 @@ namespace ddb
         for (const auto &e : h.elements)
         {
             if (e.name == "vertex")
+            {
                 info.vertexCount = e.count;
-            else if (e.name == "face")
+                info.hasVertexElement = true;
+            }
+            // A face element of no faces (a point cloud written by a mesh library) is no mesh
+            else if (e.name == "face" && e.count > 0)
                 info.isMesh = true;
             for (const auto &p : e.properties)
                 info.dimensions.push_back(p.name);
@@ -552,7 +559,7 @@ namespace ddb
     EntryType identifyPly(const fs::path &plyFile)
     {
         PlyInfo info;
-        if (getPlyInfo(plyFile, info))
+        if (getPlyInfo(plyFile, info) && info.hasVertexElement)
         {
             if (info.isMesh)
             {

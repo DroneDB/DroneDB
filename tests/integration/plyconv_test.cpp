@@ -505,6 +505,37 @@ TEST(ply, crlfHeader) {
     EXPECT_EQ(identifyPly(cloud), EntryType::PointCloud);
 }
 
+// A magic word followed by spaces is a PLY (PDAL's simple_text.ply), a face element of no faces
+// leaves a point cloud a point cloud (PDAL's text_extradim.ply, written by VCGLIB), and a header
+// without a vertex element is no point cloud
+TEST(ply, magicWithTrailingSpaceAndEmptyFaceElement) {
+    TestArea ta(TEST_NAME);
+    const auto write = [&](const std::string& name, const std::string& body) {
+        const fs::path p = ta.getPath(name);
+        std::ofstream o(p.string(), std::ios::binary);
+        o << body;
+        return p;
+    };
+    const std::string vertices = "format ascii 1.0\r\nelement vertex 3\r\nproperty float x\r\nproperty float y\r\n"
+                                 "property float z \r\n";
+    const std::string points = "end_header\r\n-1 0 0\r\n 0 1 0\r\n 1 0 0 \r\n";
+    PlyInfo info;
+    ASSERT_TRUE(getPlyInfo(write("space.ply", "ply \r\n" + vertices + points), info));
+    EXPECT_EQ(info.vertexCount, 3u);
+    EXPECT_EQ(identifyPly(write("space2.ply", "ply \r\n" + vertices + points)), EntryType::PointCloud);
+    EXPECT_EQ(identifyPly(write("plyx.ply", "plyx\r\n" + vertices + points)), EntryType::Generic);
+    // A header without a vertex element (PDAL's no_vertex.ply) is no point cloud
+    EXPECT_EQ(identifyPly(write("novertex.ply", "ply \nformat ascii 1.0\nend_header\n")), EntryType::Generic);
+
+    const std::string noFaces = "element face 0\r\nproperty list uchar int vertex_indices\r\n";
+    ASSERT_TRUE(getPlyInfo(write("nofaces.ply", "ply\r\n" + vertices + noFaces + points), info));
+    EXPECT_FALSE(info.isMesh);
+    EXPECT_EQ(identifyPly(write("nofaces2.ply", "ply\r\n" + vertices + noFaces + points)), EntryType::PointCloud);
+    const std::string oneFace = "element face 1\r\nproperty list uchar int vertex_indices\r\n";
+    EXPECT_EQ(identifyPly(write("oneface.ply", "ply\r\n" + vertices + oneFace + points + "3 0 1 2\r\n")),
+              EntryType::Model);
+}
+
 // Keywords are matched as anchored tokens: text inside a comment never adds
 // properties, elements or textures.
 TEST(ply, commentTrap) {

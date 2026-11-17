@@ -164,6 +164,8 @@ namespace ddb
     struct PlyInfo
     {
         uint64_t vertexCount;
+        // False for a header without a vertex element: no point cloud, mesh or splat
+        bool hasVertexElement;
         bool isMesh;
         bool hasTextures;
         // True when the vertex element carries 3D Gaussian Splat attributes
