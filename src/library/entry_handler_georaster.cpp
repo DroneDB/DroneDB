@@ -62,7 +62,8 @@ class GeoRasterEntryHandler : public EntryHandler {
     // now differs from it, so that it is built again; the one it has is served meanwhile. The
     // index decides the transparency of most entries; for one indexed before it held the nodata
     // and the mask of the raster, the header of the COG does. A COG the facts find healthy is read
-    // (its header) to check that it lies where the raster is.
+    // (its header) to check that it lies where the raster is; one found in its place gets a record
+    // (recordVerifiedCog), so its header is read once.
     bool isComplete(const Entry& e, const fs::path& baseOutputPath, bool reportRecoverable) const override {
         if (!EntryHandler::isComplete(e, baseOutputPath, reportRecoverable))
             return false;
@@ -81,6 +82,10 @@ class GeoRasterEntryHandler : public EntryHandler {
                 LOGD << "The COG of " << e.path << " is built again: it lies elsewhere than the raster";
                 return false;
             }
+            // Paid once: the checks after this one read the record. Only in the entry's own build
+            // folder (a folder of another key is not this entry's to record)
+            if (baseOutputPath.filename() == io::fromUtf8(buildKey(e)))
+                recordVerifiedCog(folder);
             return true;
         } catch (const AppException& ex) {
             LOGD << "The COG of " << e.path << " is built again: " << ex.what();

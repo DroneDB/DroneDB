@@ -866,4 +866,7 @@ Registry has to adopt first.
   latitude past 85.0511 taken at 85.0511) is outside its grid by more than 4 of its pixels; the builds before put the
   COG of some GeoTIFFs tens to thousands of kilometres away (NTF Paris with its prime meridian in grads, an EPSG CRS
   whose linear unit the file changes to feet or US feet, an IMAGINE citation that names a unit) and cut the COG of
-  a raster around a pole at the latitude of its edges. A COG that cannot be read is incomplete.
+  a raster around a pole at the latitude of its edges. A COG found in its place gets a `cog/build.json` of its
+  check, `{"origin": "verified", "version": 1}`, written by the query that checked it (under the build lock of
+  the folder, atomically; not while a build holds the lock, nor in a folder that cannot be written, which is
+  checked again next time), so its header is read once. A COG that cannot be read is incomplete.

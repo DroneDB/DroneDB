@@ -88,15 +88,27 @@ class CogBuildPolicy {
 };
 
 // Beside the COG of a build (CogBuildRecordFileName, build_layout.h): {"version"}, the version of
-// CogBuildPolicy it was built under.
+// CogBuildPolicy it was built under, or that a COG built before was checked under and found the
+// same as the one built now ({"version", "origin": "verified"}, recordVerifiedCog()).
 struct CogBuildRecord {
+    enum class Origin { Build, Verified };
     int version = CogBuildPolicy::kVersion;
+    Origin origin = Origin::Build;
 };
 
 // @throws FSException when the file cannot be written
 void writeCogBuildRecord(const fs::path& file, const CogBuildRecord& record);
 // Nothing when the file does not exist or is not a build record
 std::optional<CogBuildRecord> readCogBuildRecord(const fs::path& file);
+
+// Records that the COG in `cogFolder`, built before CogBuildPolicy::kVersion, was checked and is
+// the same as the one built now (healthy and in its place), so that the checks after it read the
+// record alone instead of the header of the COG, which every listing and every render of the entry
+// checks. The record is written under the build lock of the folder, as a build writes it: a build
+// that runs (the lock is held) publishes its own; a folder replaced meanwhile (a record there) or
+// gone is left as it is. Best effort, never throws: a folder that cannot be locked or written
+// (a read-only dataset) keeps no record and is checked again next time.
+void recordVerifiedCog(const fs::path& cogFolder) noexcept;
 
 }  // namespace ddb
 

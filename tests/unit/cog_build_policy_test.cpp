@@ -20,12 +20,18 @@
 #include <string>
 #include <vector>
 
+#ifndef WIN32
+#include <unistd.h>
+#endif
+
 #include "build_layout.h"
+#include "buildlock.h"
 #include "cog_build_policy.h"
 #include "contract_fixtures.h"
 #include "cpl_conv.h"
 #include "ddb.h"
 #include "dbops.h"
+#include "entry_handler.h"
 #include "gdal_raii.h"
 #include "gdal_utils.h"
 #include "gtest/gtest.h"
@@ -381,7 +387,8 @@ TEST(CogBuildPolicy, aCogBuiltBeforeTheRulesIsIncompleteOnlyWhenItsSourceIsAffec
         EXPECT_EQ(reportedComplete(r, path), !s.outdated);
     }
 
-    // The next build builds the outdated COGs again, and only them
+    // The next build builds the outdated COGs again, and only them: the healthy ones have the record
+    // of their check
     std::vector<fs::file_time_type> before;
     for (size_t i = 0; i < kSources.size(); i++)
         before.push_back(fs::last_write_time(root / ".ddb" / "build" / added[i]["hash"].get<std::string>() /
@@ -392,7 +399,9 @@ TEST(CogBuildPolicy, aCogBuiltBeforeTheRulesIsIncompleteOnlyWhenItsSourceIsAffec
         const fs::path folder = root / ".ddb" / "build" / added[i]["hash"].get<std::string>() / CogBuildSubfolder;
         SCOPED_TRACE(s.name);
         EXPECT_TRUE(reportedComplete(r, std::string(s.name) + ".tif"));
-        EXPECT_EQ(fs::exists(folder / CogBuildRecordFileName), s.outdated);
+        const auto record = readCogBuildRecord(folder / CogBuildRecordFileName);
+        ASSERT_TRUE(record.has_value());
+        EXPECT_EQ(record->origin, s.outdated ? CogBuildRecord::Origin::Build : CogBuildRecord::Origin::Verified);
         EXPECT_EQ(fs::last_write_time(folder / CogFileName) != before[i], s.outdated);
     }
     DDBReleaseConnections(r.c_str(), nullptr);
@@ -463,14 +472,18 @@ TEST(CogBuildPolicy, aHealthyCogBuiltBeforeTheRulesIsIncompleteWhenItLiesElsewhe
         fs::remove(folder / CogBuildRecordFileName);
 
         // In place: on the tiles of EPSG:3857, as the builds before warped it, or in the CRS of the source
+        // (each check records it: the record is removed with each COG written here)
         writeOldGridCog(inputs[i], folder / CogFileName);
         EXPECT_TRUE(reportedComplete(r, path));
+        fs::remove(folder / CogBuildRecordFileName);
         writeOldCog(inputs[i], folder / CogFileName);
         EXPECT_TRUE(reportedComplete(r, path));
+        fs::remove(folder / CogBuildRecordFileName);
 
-        // Moved 34 km east
+        // Moved 34 km east: no record, checked again each time
         writeOldGridCog(inputs[i], folder / CogFileName, "", 34000);
         EXPECT_FALSE(reportedComplete(r, path));
+        EXPECT_FALSE(fs::exists(folder / CogBuildRecordFileName));
     }
 
     // The next build builds them again
@@ -530,6 +543,7 @@ TEST(CogBuildPolicy, theCogOfAGeoTiffWhoseCrsTheBuildsBeforeReadWronglyIsIncompl
         fs::remove(folder / CogBuildRecordFileName);
         writeOldGridCog(inputs[i], folder / CogFileName);
         EXPECT_TRUE(reportedComplete(r, c.file));
+        fs::remove(folder / CogBuildRecordFileName);
         writeOldGridCog(inputs[i], folder / CogFileName, c.wrongSrs, c.shiftX);
         EXPECT_FALSE(reportedComplete(r, c.file));
     }
@@ -568,7 +582,81 @@ TEST(CogBuildPolicy, theCogOfARasterAroundAPoleHoldsItWhenItReachesTheLimitOfWeb
         auto out = adoptDataset(GDALTranslate(io::toUtf8(half).c_str(), datasetHandle(cog), options.get(), nullptr));
         ASSERT_TRUE(out);
     }
+    fs::remove(folder / CogBuildRecordFileName);
     fs::copy_file(half, folder / CogFileName, fs::copy_options::overwrite_existing);
     EXPECT_FALSE(reportedComplete(r, "polar-rgba.tif"));
+    DDBReleaseConnections(r.c_str(), nullptr);
+}
+
+// A COG built before the rules that its check finds healthy and in its place gets a record of that
+// check ({"version", "origin": "verified"}), written under the build lock of its folder: the checks
+// after it read the record alone, not the header of the COG (here a file that is no TIFF any more,
+// which a read would refuse). No record is written while a build holds the lock, in a folder that
+// cannot be written, or in a folder that is not the entry's own build folder; the check gives its
+// answer all the same
+TEST(CogBuildPolicy, aCogFoundInItsPlaceIsRecordedSoItsHeaderIsReadOnce) {
+    TestArea ta(TEST_NAME, true);
+    EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+    const Source& rgba = *std::find_if(kSources.begin(), kSources.end(),
+                                       [](const Source& s) { return std::string(s.name) == "rgba"; });
+    const fs::path input = writeSource(ta.getPath("rgba.tif"), rgba);
+    const fs::path root = ta.getFolder("dataset");
+    const json added = contract::makeDataset(root, {input});
+    const std::string r = root.string();
+    ASSERT_EQ(DDBBuild(r.c_str(), "", nullptr, false, false), DDBERR_NONE) << DDBGetLastError();
+    const fs::path base = root / ".ddb" / "build" / added[0]["hash"].get<std::string>();
+    const fs::path folder = base / CogBuildSubfolder;
+    const fs::path record = folder / CogBuildRecordFileName;
+    const auto entry = getEntry(ddb::open(r, false).get(), "rgba.tif");
+    ASSERT_TRUE(entry.has_value());
+    const EntryHandler& handler = entryHandler(EntryType::GeoRaster);
+
+    // The COG of a build before the rules
+    writeOldGridCog(input, folder / CogFileName);
+    fs::remove(record);
+
+    // While a build holds the lock: complete, nothing written
+    {
+        const BuildLock building(io::toUtf8(folder));
+        EXPECT_TRUE(handler.isComplete(*entry, base));
+        EXPECT_FALSE(fs::exists(record));
+    }
+
+    // In a folder that is not the entry's own build folder: complete, nothing written
+    const fs::path other = ta.getFolder("other");
+    fs::create_directories(other / CogBuildSubfolder);
+    fs::copy_file(folder / CogFileName, other / CogBuildSubfolder / CogFileName);
+    EXPECT_TRUE(handler.isComplete(*entry, other));
+    EXPECT_FALSE(fs::exists(other / CogBuildSubfolder / CogBuildRecordFileName));
+
+#ifndef WIN32
+    // In a folder that cannot be written (a read-only dataset): complete, nothing written
+    if (geteuid() != 0) {
+        fs::permissions(base, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write,
+                        fs::perm_options::remove);
+        fs::permissions(folder, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write,
+                        fs::perm_options::remove);
+        EXPECT_TRUE(reportedComplete(r, "rgba.tif"));
+        EXPECT_FALSE(fs::exists(record));
+        fs::permissions(base, fs::perms::owner_write, fs::perm_options::add);
+        fs::permissions(folder, fs::perms::owner_write, fs::perm_options::add);
+    }
+#endif
+
+    // The first check reads the header and records it
+    EXPECT_TRUE(reportedComplete(r, "rgba.tif"));
+    const auto written = readCogBuildRecord(record);
+    ASSERT_TRUE(written.has_value());
+    EXPECT_EQ(written->version, CogBuildPolicy::kVersion);
+    EXPECT_EQ(written->origin, CogBuildRecord::Origin::Verified);
+    const auto bytes = io::readAllBytes(record);
+    EXPECT_EQ(json::parse(bytes.begin(), bytes.end()), (json{{"version", 1}, {"origin", "verified"}}));
+    EXPECT_FALSE(fs::exists(folder.string() + ".building"));
+
+    // The checks after it read the record alone: a header read would refuse this file
+    DDBReleaseConnections(r.c_str(), nullptr);
+    io::writeFileAtomic(folder / CogFileName, "no TIFF", "test COG");
+    EXPECT_TRUE(reportedComplete(r, "rgba.tif"));
+    EXPECT_TRUE(handler.isComplete(*entry, base));
     DDBReleaseConnections(r.c_str(), nullptr);
 }

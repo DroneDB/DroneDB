@@ -9,9 +9,12 @@
 #include <string>
 #include <vector>
 
+#include "build_layout.h"
+#include "buildlock.h"
 #include "coordstransformer.h"
 #include "exceptions.h"
 #include "json.h"
+#include "logger.h"
 #include "mio.h"
 #include "tilers_raster.h"
 
@@ -21,6 +24,8 @@ namespace {
 
 constexpr const char* kAlpha = "Alpha";
 constexpr const char* kPalette = "Palette";
+// The origin of the record of a COG built before the rules and found the same as the one built now
+constexpr const char* kVerifiedOrigin = "verified";
 // The latitude where the square of Web Mercator ends (EPSG:3857), in degrees
 constexpr double kWebMercatorMaxLatitude = 85.0511287798066;
 
@@ -120,7 +125,10 @@ bool CogBuildPolicy::misplaces(const BuiltCog& cog, const BasicPolygonGeometry& 
 }
 
 void writeCogBuildRecord(const fs::path& file, const CogBuildRecord& record) {
-    io::writeFileAtomic(file, json{{"version", record.version}}.dump(), "COG build record");
+    json j{{"version", record.version}};
+    if (record.origin == CogBuildRecord::Origin::Verified)
+        j["origin"] = kVerifiedOrigin;
+    io::writeFileAtomic(file, j.dump(), "COG build record");
 }
 
 std::optional<CogBuildRecord> readCogBuildRecord(const fs::path& file) {
@@ -131,7 +139,22 @@ std::optional<CogBuildRecord> readCogBuildRecord(const fs::path& file) {
     const auto version = j.is_object() ? j.find("version") : j.end();
     if (!j.is_object() || version == j.end() || !version->is_number_integer())
         return std::nullopt;
-    return CogBuildRecord{version->get<int>()};
+    const auto origin = j.find("origin");
+    const bool verified = origin != j.end() && origin->is_string() && origin->get<std::string>() == kVerifiedOrigin;
+    return CogBuildRecord{version->get<int>(), verified ? CogBuildRecord::Origin::Verified : CogBuildRecord::Origin::Build};
+}
+
+void recordVerifiedCog(const fs::path& cogFolder) noexcept {
+    try {
+        const BuildLock lock(io::toUtf8(cogFolder));
+        const fs::path file = cogFolder / CogBuildRecordFileName;
+        const auto record = readCogBuildRecord(file);
+        if ((record && record->version >= CogBuildPolicy::kVersion) || !fs::is_regular_file(cogFolder / CogFileName))
+            return;
+        writeCogBuildRecord(file, CogBuildRecord{CogBuildPolicy::kVersion, CogBuildRecord::Origin::Verified});
+    } catch (const std::exception& e) {
+        LOGD << "The COG in " << io::toUtf8(cogFolder) << " is checked again next time: " << e.what();
+    }
 }
 
 }  // namespace ddb
