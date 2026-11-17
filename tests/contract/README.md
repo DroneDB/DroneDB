@@ -835,3 +835,8 @@ Registry has to adopt first.
   a raster of 5 x 5000 pixels of 240 x 0.24 m has a thumbnail of 512 x 512, no longer 1 x 512.
   A `ddb` command whose input the library refuses (`DDBERR_INVALIDARGS` while it works) prints the message alone,
   without the usage of the command; an argument it cannot read (an option, a format, a filter) still prints both.
+  The `bounds.json` of a built Gaussian splat (`gsplat.bounds`) gains `framing` (additive): `{"kind": "object" |
+  "scene" | "site", "core": [minX, minY, minZ, maxX, maxY, maxZ]}`, the kind of capture (the cameras went round a
+  subject, were inside a room, or looked down on a piece of ground; a georeferenced splat is a `site`) and the box
+  of its core in the frame of `model.rad`, from a sample of every splat of the model. It is missing for fewer than
+  16 splats and in the `bounds.json` of earlier builds. No fixture changed.

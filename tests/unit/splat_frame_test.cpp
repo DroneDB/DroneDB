@@ -335,4 +335,161 @@ TEST(splatFrame, principalAxesAreTheWidestFirst) {
     EXPECT_NEAR(heavy.variances[0], 0.0, 1e-9);
 }
 
+// ---------------------------------------------------------------------------
+// How a viewer frames a scene
+// ---------------------------------------------------------------------------
+
+// `count` splats spread evenly through the ball of `radius` around `centre`
+void addBall(Scene& scene, std::mt19937& rng, const Vec3& centre, double radius, int count, float opacity = 0.9f) {
+    std::uniform_real_distribution<double> unit(-1.0, 1.0);
+    for (int added = 0; added < count;) {
+        const Vec3 d = {unit(rng), unit(rng), unit(rng)};
+        if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > 1.0) continue;
+        scene.add({centre[0] + radius * d[0], centre[1] + radius * d[1], centre[2] + radius * d[2]}, opacity);
+        ++added;
+    }
+}
+
+// `count` splats spread evenly through the box from `min` to `max`
+void addBox(Scene& scene, std::mt19937& rng, const Vec3& min, const Vec3& max, int count) {
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    for (int i = 0; i < count; ++i)
+        scene.add({min[0] + (max[0] - min[0]) * unit(rng), min[1] + (max[1] - min[1]) * unit(rng),
+                   min[2] + (max[2] - min[2]) * unit(rng)});
+}
+
+// An object capture (a train, a truck): the cameras went round the subject, a ball of 1 m here at
+// (5, -1, 2), and saw what is around it from afar, a sparse shell from 15 to 30 m out
+Scene objectCapture() {
+    std::mt19937 rng(11);
+    Scene scene;
+    const Vec3 subject = {5.0, -1.0, 2.0};
+    addBall(scene, rng, subject, 1.0, 12000);
+    std::normal_distribution<double> direction(0.0, 1.0);
+    std::uniform_real_distribution<double> distance(15.0, 30.0);
+    for (int i = 0; i < 6000; ++i) {
+        Vec3 d = {direction(rng), direction(rng), direction(rng)};
+        const double n = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        const double r = distance(rng);
+        scene.add({subject[0] + d[0] / n * r, subject[1] + d[1] / n * r, subject[2] + d[2] / n * r});
+    }
+    return scene;
+}
+
+void expectCoreWithin(const SplatFraming& framing, const Vec3& min, const Vec3& max, double tolerance) {
+    for (int k = 0; k < 3; ++k) {
+        EXPECT_NEAR(framing.coreMin[k], min[k], tolerance) << "axis " << k;
+        EXPECT_NEAR(framing.coreMax[k], max[k], tolerance) << "axis " << k;
+    }
+}
+
+// The cameras went round a subject: it is framed from outside, on the subject alone, not on the
+// shell of its surroundings that the box of all the splats would show it lost in
+TEST(splatFraming, aDenseSubjectInASparseShellIsAnObjectFramedOnTheSubject) {
+    const Scene scene = objectCapture();
+    const auto framing = estimateSplatFraming(scene.positions, scene.opacities);
+    ASSERT_TRUE(framing.has_value());
+    EXPECT_EQ(framing->kind, SplatCaptureKind::Object);
+    EXPECT_LT(framing->concentration, SplatObjectConcentration);
+    // The ball of 1 m and a little of what is around it
+    expectCoreWithin(*framing, {4.0, -2.0, 1.0}, {6.0, 0.0, 3.0}, 0.3);
+}
+
+// A room seen from inside is about as dense everywhere: it is framed from inside, on the middle 80%
+// of each axis
+TEST(splatFraming, aBoxFilledEvenlyIsASceneFramedOnItsMiddle) {
+    std::mt19937 rng(5);
+    Scene scene;
+    addBox(scene, rng, {-5.0, -2.0, -5.0}, {5.0, 2.0, 5.0}, 20000);
+    const auto framing = estimateSplatFraming(scene.positions, scene.opacities);
+    ASSERT_TRUE(framing.has_value());
+    EXPECT_EQ(framing->kind, SplatCaptureKind::Scene);
+    EXPECT_GE(framing->concentration, SplatObjectConcentration);
+    EXPECT_LT(framing->flatness, SplatSiteFlatness);
+    // The 10th to 90th percentiles of the box from which its outermost 1% are left out
+    expectCoreWithin(*framing, {-3.9, -1.56, -3.9}, {3.9, 1.56, 3.9}, 0.15);
+}
+
+// A room as a capture from inside it sees it: its walls, floor and ceiling, nothing in the middle
+TEST(splatFraming, theWallsOfARoomAreAScene) {
+    const Scene inside = room({0, -1, 0}, 8.0, 3.0, RoomSplats{3000, 1500, 2500, 1200, 1000});
+    const auto framing = estimateSplatFraming(inside.positions, inside.opacities);
+    ASSERT_TRUE(framing.has_value());
+    EXPECT_EQ(framing->kind, SplatCaptureKind::Scene);
+}
+
+// A piece of ground seen from the air is wide and flat: it is seen whole, from above
+TEST(splatFraming, aWideFlatGroundIsASiteFramedWhole) {
+    const Scene site = groundWithObjects({0, 0, 1}, 6000, 1500, 200.0, 6.0);
+    const auto framing = estimateSplatFraming(site.positions, site.opacities);
+    ASSERT_TRUE(framing.has_value());
+    EXPECT_EQ(framing->kind, SplatCaptureKind::Site);
+    EXPECT_GE(framing->flatness, SplatSiteFlatness);
+    // All of it but the outermost 1% of each axis
+    EXPECT_NEAR(framing->coreMin[0], -98.0, 2.0);
+    EXPECT_NEAR(framing->coreMax[0], 98.0, 2.0);
+    EXPECT_NEAR(framing->coreMin[1], -98.0, 2.0);
+    EXPECT_NEAR(framing->coreMax[1], 98.0, 2.0);
+}
+
+// A village seen from a drone that circled its centre is denser in the middle, but it is ground: it
+// is a site, not an object to be seen from beside it
+TEST(splatFraming, aFlatSiteDenserInTheMiddleIsStillASite) {
+    Scene site = groundWithObjects({0, 0, 1}, 6000, 1500, 200.0, 6.0);
+    std::mt19937 rng(9);
+    addBox(site, rng, {-15.0, -15.0, 0.0}, {15.0, 15.0, 3.0}, 12000);
+    const auto framing = estimateSplatFraming(site.positions, site.opacities);
+    ASSERT_TRUE(framing.has_value());
+    EXPECT_LT(framing->concentration, SplatObjectConcentration);
+    EXPECT_EQ(framing->kind, SplatCaptureKind::Site);
+}
+
+// A georeferenced scene is a piece of the Earth, whatever its splats look like
+TEST(splatFraming, aGeoreferencedSceneIsASite) {
+    const Scene scene = objectCapture();
+    const auto framing = estimateSplatFraming(scene.positions, scene.opacities, /*georeferenced=*/true);
+    ASSERT_TRUE(framing.has_value());
+    EXPECT_EQ(framing->kind, SplatCaptureKind::Site);
+}
+
+// The opacity is the weight: a haze of faint splats far from the subject does not make it a scene
+TEST(splatFraming, faintSplatsWeighLess) {
+    Scene scene = objectCapture();
+    std::mt19937 rng(13);
+    Scene haze;
+    addBox(haze, rng, {-60.0, -60.0, -60.0}, {60.0, 60.0, 60.0}, 20000);
+    for (size_t i = 0; i < haze.opacities.size(); ++i)
+        scene.add({haze.positions[i * 3], haze.positions[i * 3 + 1], haze.positions[i * 3 + 2]}, 0.06f);
+    const auto framing = estimateSplatFraming(scene.positions, scene.opacities);
+    ASSERT_TRUE(framing.has_value());
+    EXPECT_EQ(framing->kind, SplatCaptureKind::Object);
+}
+
+// Too few splats, or splats with no extent, are not a scene to frame: the viewer frames on its own
+TEST(splatFraming, tooFewSplatsOrNoExtentGiveNoFraming) {
+    EXPECT_FALSE(estimateSplatFraming(std::vector<float>{}, std::vector<float>{}).has_value());
+    Scene few;
+    for (int i = 0; i < 5; ++i) few.add({double(i), 0, 0});
+    EXPECT_FALSE(estimateSplatFraming(few.positions, few.opacities).has_value());
+    Scene point;
+    for (int i = 0; i < 100; ++i) point.add({1, 2, 3});
+    EXPECT_FALSE(estimateSplatFraming(point.positions, point.opacities).has_value());
+}
+
+// The member bounds.json gets, named as the viewers read it
+TEST(splatFraming, theSidecarMemberIsNamedAsTheViewersReadIt) {
+    SplatFraming framing;
+    framing.kind = SplatCaptureKind::Object;
+    framing.coreMin = {-1.23456789, 0.0, 2.0};
+    framing.coreMax = {1.0, 3.5, 4.0};
+    const json j = framing;
+    ASSERT_EQ(j.size(), 1u);
+    ASSERT_TRUE(j.contains("framing"));
+    EXPECT_EQ(j["framing"]["kind"], "object");
+    EXPECT_EQ(j["framing"]["core"], (json::array({-1.234568, 0.0, 2.0, 1.0, 3.5, 4.0})));
+
+    EXPECT_STREQ(splatCaptureKindName(SplatCaptureKind::Scene), "scene");
+    EXPECT_STREQ(splatCaptureKindName(SplatCaptureKind::Site), "site");
+}
+
 }  // namespace

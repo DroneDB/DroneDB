@@ -12,6 +12,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -1996,6 +1997,33 @@ TEST(gsplat, aRadOfADatasetIsAnEntryThatBuildsWithoutBuildLod) {
     EXPECT_EQ(namesIn(gsplatDir), (std::vector<std::string>{GsplatBoundsFileName, GsplatRadFileName}));
 }
 
+// The bytes of `values` as the file holds them
+template <typename T>
+std::string bytesOf(const std::vector<T>& values) {
+    return std::string(reinterpret_cast<const char*>(values.data()), values.size() * sizeof(T));
+}
+
+// A property of a chunk of a RAD: its name, its encoding and its bytes
+struct RadProperty {
+    std::string name, encoding, bytes;
+};
+
+// A RAD of one chunk of `count` splats with `properties`, as build-lod lays one out
+void writeRad(const fs::path& path, size_t count, const std::vector<RadProperty>& properties) {
+    const auto pad8 = [](std::string v) { v.resize((v.size() + 7u) & ~size_t(7), '\0'); return v; };
+    const auto le = [](uint64_t v, size_t n) { return std::string(reinterpret_cast<const char*>(&v), n); };
+    std::string payload;
+    json listed = json::array();
+    for (const auto& p : properties) {
+        listed.push_back({{"property", p.name}, {"encoding", p.encoding}, {"offset", payload.size()}, {"bytes", p.bytes.size()}});
+        payload += p.bytes;
+    }
+    const json meta = {{"count", count}, {"properties", listed}};
+    const std::string chunk = "RADC" + le(meta.dump().size(), 4) + pad8(meta.dump()) + le(payload.size(), 8) + payload;
+    const json header = {{"chunks", json::array({{{"offset", 0}, {"bytes", chunk.size()}}})}};
+    writeBytes(path, "RAD0" + le(header.dump().size(), 4) + pad8(header.dump()) + chunk);
+}
+
 // A RAD whose splats are readable but whose orientation cannot be decoded still publishes, with a
 // bounding box and no up vector: the estimate is optional like the rest of the sidecar
 TEST(gsplat, aRadWhoseUpCannotBeEstimatedStillPublishesItsBounds) {
@@ -2004,17 +2032,9 @@ TEST(gsplat, aRadWhoseUpCannotBeEstimatedStillPublishesItsBounds) {
     BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
 
     // Two splats at (1,2,5) and (3,4,7); the orientation uses an encoding nothing reads
-    const float centres[6] = {1, 3, 2, 4, 5, 7};
-    const std::string payload = std::string(reinterpret_cast<const char*>(centres), sizeof(centres)) + std::string(6, '\0');
-    json meta = {{"count", 2},
-                 {"properties", json::array({{{"property", "center"}, {"encoding", "f32"}, {"offset", 0}, {"bytes", 24}},
-                                             {{"property", "orientation"}, {"encoding", "s8"}, {"offset", 24}, {"bytes", 6}}})}};
-    const auto pad8 = [](std::string v) { v.resize((v.size() + 7u) & ~size_t(7), '\0'); return v; };
-    const auto le = [](uint64_t v, size_t n) { return std::string(reinterpret_cast<const char*>(&v), n); };
-    const std::string chunk = "RADC" + le(meta.dump().size(), 4) + pad8(meta.dump()) + le(payload.size(), 8) + payload;
-    const json header = {{"chunks", json::array({{{"offset", 0}, {"bytes", chunk.size()}}})}};
     const fs::path rad = ta.getPath("odd.rad");
-    writeBytes(rad, "RAD0" + le(header.dump().size(), 4) + pad8(header.dump()) + chunk);
+    writeRad(rad, 2, {{"center", "f32", bytesOf(std::vector<float>{1, 3, 2, 4, 5, 7})},
+                      {"orientation", "s8", std::string(6, '\0')}});
 
     const fs::path outdir = ta.getPath("out");
     ASSERT_NO_THROW(ddb::buildGsplat(rad.string(), outdir.string()));
@@ -2023,6 +2043,94 @@ TEST(gsplat, aRadWhoseUpCannotBeEstimatedStillPublishesItsBounds) {
     EXPECT_EQ(bounds["min"], (json::array({1.0, 2.0, 5.0})));
     EXPECT_EQ(bounds["max"], (json::array({3.0, 4.0, 7.0})));
     EXPECT_FALSE(bounds.contains("up"));
+}
+
+// The splats of a scene are its leaves: the splats a level-of-detail tree merges them into are left
+// out, every nth leaf is kept past the number asked for, and the opacity comes with each one
+TEST(gsplat, theSampleOfARadIsEveryNthLeaf) {
+    TestArea ta(TEST_NAME);
+    // Two merged splats far out, refined by four leaves at x = 0..3 (the centres are stored axis by axis)
+    const fs::path rad = ta.getPath("tree.rad");
+    writeRad(rad, 6, {{"center", "f32", bytesOf(std::vector<float>{100, 100, 0, 1, 2, 3, 100, 100, 0, 0, 0, 0, 100, 100, 0, 0, 0, 0})},
+                      {"alpha", "f32", bytesOf(std::vector<float>{1, 1, 0.5f, 0.6f, 0.7f, 0.8f})},
+                      {"child_count", "u32", bytesOf(std::vector<uint32_t>{2, 2, 0, 0, 0, 0})},
+                      {"child_start", "u32", bytesOf(std::vector<uint32_t>{2, 4, 0, 0, 0, 0})}});
+
+    const RadSplatSample all = sampleRadLeaves(rad, 100);
+    ASSERT_EQ(all.count, 4u);
+    EXPECT_EQ(all.positions, (std::vector<float>{0, 0, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0}));
+    EXPECT_EQ(all.opacities, (std::vector<float>{0.5f, 0.6f, 0.7f, 0.8f}));
+
+    // At most twice as many as asked for: every other leaf, then every fourth
+    const RadSplatSample half = sampleRadLeaves(rad, 2);
+    EXPECT_EQ(half.positions, (std::vector<float>{0, 0, 0, 2, 0, 0}));
+    const RadSplatSample quarter = sampleRadLeaves(rad, 1);
+    EXPECT_EQ(quarter.positions, (std::vector<float>{0, 0, 0}));
+
+    // A RAD without a tree is all leaves; without alphas they are opaque
+    const fs::path flat = ta.getPath("flat.rad");
+    writeRad(flat, 2, {{"center", "f32", bytesOf(std::vector<float>{1, 2, 3, 4, 5, 6})}});
+    const RadSplatSample leaves = sampleRadLeaves(flat, 100);
+    EXPECT_EQ(leaves.count, 2u);
+    EXPECT_EQ(leaves.opacities, (std::vector<float>{1.0f, 1.0f}));
+}
+
+// An object capture, deterministic: `subject` splats through a ball of 1 m about (2, -1, 3) and
+// `around` far from it, 15 to 30 m out in every direction
+std::vector<std::array<float, 3>> objectCapture(int subject, int around) {
+    std::mt19937 rng(17);
+    std::uniform_real_distribution<double> unit(-1.0, 1.0), distance(15.0, 30.0);
+    std::normal_distribution<double> direction(0.0, 1.0);
+    std::vector<std::array<float, 3>> splats;
+    while (static_cast<int>(splats.size()) < subject) {
+        const double x = unit(rng), y = unit(rng), z = unit(rng);
+        if (x * x + y * y + z * z <= 1.0)
+            splats.push_back({static_cast<float>(2 + x), static_cast<float>(-1 + y), static_cast<float>(3 + z)});
+    }
+    for (int i = 0; i < around; ++i) {
+        const double x = direction(rng), y = direction(rng), z = direction(rng);
+        const double r = distance(rng) / std::sqrt(x * x + y * y + z * z);
+        splats.push_back({static_cast<float>(2 + x * r), static_cast<float>(-1 + y * r), static_cast<float>(3 + z * r)});
+    }
+    return splats;
+}
+
+// bounds.json says how a viewer frames the scene: the kind of capture and its core, read from all the
+// splats of the model.rad, beside what it said before; a RAD upload gets the same
+TEST(gsplat, theSidecarSaysHowAViewerFramesTheScene) {
+    TestArea ta(TEST_NAME);
+    const auto splats = objectCapture(4000, 2000);
+    const fs::path object = ta.getPath("object.ply");
+    writeSplatPly(object, static_cast<int>(splats.size()), 0, [&](int i) { return splats[static_cast<size_t>(i)]; });
+    const fs::path site = ta.getPath("site.ply");
+    writeSplatPly(site, 400, 0); // a flat grid of 10 x 40 m, 0.2 m high
+    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping the framing of the sidecar");
+
+    const fs::path outdir = ta.getFolder("object_out");
+    ddb::buildGsplat(object.string(), outdir.string());
+    const json bounds = json::parse(readText(outdir / GsplatBoundsFileName));
+    EXPECT_TRUE(bounds.contains("min") && bounds.contains("max") && bounds.contains("up"));
+    ASSERT_TRUE(bounds.contains("framing")) << bounds.dump();
+    EXPECT_EQ(bounds["framing"]["kind"], "object");
+    const json& core = bounds["framing"]["core"];
+    ASSERT_EQ(core.size(), 6u);
+    // The ball, not the 60 m of everything
+    const std::array<double, 6> ball = {1, -2, 2, 3, 0, 4};
+    for (size_t k = 0; k < 6; ++k)
+        EXPECT_NEAR(core[k].get<double>(), ball[k], 0.3) << bounds.dump();
+
+    // A RAD upload is framed the same
+    const fs::path published = ta.getFolder("object_rad");
+    ddb::buildGsplat((outdir / GsplatRadFileName).string(), published.string());
+    EXPECT_EQ(json::parse(readText(published / GsplatBoundsFileName))["framing"], bounds["framing"]);
+
+    // Wide and flat: a site, framed whole
+    const fs::path siteOut = ta.getFolder("site_out");
+    ddb::buildGsplat(site.string(), siteOut.string());
+    const json flat = json::parse(readText(siteOut / GsplatBoundsFileName));
+    ASSERT_TRUE(flat.contains("framing")) << flat.dump();
+    EXPECT_EQ(flat["framing"]["kind"], "site");
+    EXPECT_GE(flat["framing"]["core"][4].get<double>() - flat["framing"]["core"][1].get<double>(), 35.0);
 }
 
 // ---------------------------------------------------------------------------
