@@ -232,7 +232,7 @@ namespace ddb
         const BuildPropertyColumns properties;
         auto q = db->query("SELECT path, mtime, hash, type, " + properties.sql() + " FROM entries");
         auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
-        const auto updateQ = db->query(kUpdateEntrySql);
+        const auto updateQ = db->query(updateEntrySql());
 
         // Deliberately one IMMEDIATE transaction for the whole re-index (design choice, kept):
         // the entries table is always left in a consistent, fully re-parsed state, even for
@@ -298,7 +298,7 @@ namespace ddb
         auto q = db->query("SELECT path FROM entries" + conditions.whereClause());
         conditions.bind(*q);
 
-        const auto updateQ = db->query(kUpdateEntrySql);
+        const auto updateQ = db->query(updateEntrySql());
         // What the index holds of an entry before it is re-read: the build key reads it (D-020)
         const BuildPropertyColumns buildProperties;
         const auto beforeQ = db->query("SELECT hash, type, " + buildProperties.sql() + " FROM entries WHERE path = ?");
@@ -703,6 +703,40 @@ namespace ddb
         // A file moved to a name a build waits for releases it, as an add does
         releasePendingBuildsAwaiting(db, sourceEntry.type != EntryType::Directory ? std::vector<std::string>{dest}
                                                                                    : listFilePaths(db, dest));
+    }
+
+    void recordBuildWarnings(Database *db, const Entry &e, const std::vector<BuildWarning> &warnings)
+    {
+        // The properties of the row, or nullopt when the path no longer has this content
+        const auto read = [&]() -> std::optional<json>
+        {
+            const auto q = db->query("SELECT properties FROM entries WHERE path = ? AND hash = ?");
+            q->bind(1, e.path);
+            q->bind(2, e.hash);
+            if (!q->fetch())
+                return std::nullopt;
+            json properties = json::parse(q->getText(0), nullptr, false);
+            if (properties.is_discarded())
+                properties = json::object();
+            return std::optional<json>(std::move(properties));
+        };
+
+        // Read first: most builds report no warning and the entry has none to remove, which
+        // takes no write lock
+        auto properties = read();
+        if (!properties || !applyBuildWarnings(*properties, warnings))
+            return;
+
+        Transaction tx(db);
+        properties = read();
+        if (!properties || !applyBuildWarnings(*properties, warnings))
+            return;
+        const auto update = db->query("UPDATE entries SET properties = ? WHERE path = ? AND hash = ?");
+        update->bind(1, properties->dump());
+        update->bind(2, e.path);
+        update->bind(3, e.hash);
+        update->execute();
+        tx.commit();
     }
 
 } // namespace ddb

@@ -870,3 +870,12 @@ Registry has to adopt first.
   check, `{"origin": "verified", "version": 1}`, written by the query that checked it (under the build lock of
   the folder, atomically; not while a build holds the lock, nor in a folder that cannot be written, which is
   checked again next time), so its header is read once. A COG that cannot be read is incomplete.
+  A build records warnings about the output it made in the `warning` and `warningCode` of its entry
+  (`entry.schema.json`): `3dtiles-not-generated` when the 3D Tiles of a model could not be made (the bm3d output
+  was; `warning` "3D Tiles not generated: <reason>", the reason the tiler gave), `textures-outside-dataset` when the
+  MTL files of an OBJ name textures that are absolute or outside the dataset (`warning` "Textures outside the dataset
+  left out: <references>"). Such an OBJ is built without them (its materials keep their colours); 2.7 failed its
+  build. One line of `warning` for each, the code of the first; they replace the warning of the entry, a later
+  build without them removes them, and a parse of the same content (a rescan) keeps them. A glTF material with
+  `alphaMode` MASK or BLEND reaches bm3d as a cutout (`map_d` naming its texture in the OBJ it is converted to).
+  The build warnings change no export, fixture or other schema.

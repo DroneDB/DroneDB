@@ -169,6 +169,11 @@ namespace ddb
                       const EntryJsonDecorator &decorate = nullptr);
     /// Removes the build folder "<build root>/<key>" (the build key of an entry, see build_layout.h)
     void checkDeleteBuild(Database *db, const std::string &key);
+
+    /// Records the warnings of a build of the entry `e` in the index (applyBuildWarnings), in the
+    /// row at its path while that row still has its hash: a file replaced while it was built keeps
+    /// the properties of its own parse. Nothing is written when they do not change the properties.
+    void recordBuildWarnings(Database *db, const Entry &e, const std::vector<BuildWarning> &warnings);
     void checkDeleteMeta(Database *db, const std::string &path);
 
     void doUpdate(Statement *updateQ, const Entry &e);

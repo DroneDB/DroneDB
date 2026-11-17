@@ -33,6 +33,7 @@ namespace ddb {
 class Database;
 class Tiler;
 struct Entry;
+struct BuildWarning;
 struct FingerprintContext;
 
 // ---- Artifact manifest -------------------------------------------------------------
@@ -177,6 +178,12 @@ struct BuildContext {
     // What the caller asked of this build (the thread cap): the handler passes it on to the
     // builders that use threads
     BuildOptions options{};
+    // Where the build reports the warnings about the output it made (warn()); the entry records
+    // them once the output is published. Null when nothing records them.
+    std::vector<BuildWarning>* warnings = nullptr;
+
+    // Reports a warning about the output (the one that matters most first)
+    void warn(const std::string& code, const std::string& message) const;
 };
 
 // ---- Completeness helpers ------------------------------------------------------------------

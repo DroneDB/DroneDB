@@ -477,6 +477,22 @@ TEST(Obj2TilesRunner, anExitCodeIsAFailureWithTheOutputTail) {
     EXPECT_EQ(f.error, "Obj2Tiles exited with code 3: Unhandled exception: bad mesh");
 }
 
+// Why Obj2Tiles failed, in its words: the message of the exception it reported (the last), without
+// the lines around it; nothing when it reported none
+TEST(Obj2TilesRunner, theReportedExceptionIsTheMessageOfItsLine) {
+    Obj2TilesFixture f("runner_obj2tiles_reported");
+    f.fake.effect = nullptr;
+    f.fake.result = FakeProcessRunner::exited(
+        1, " => Splitting stage with 0 divisions\r\n !> Exception: first\n"
+           " !> Exception: Vertex color count (40) does not match vertex count (48).\r\n"
+           "\n => Pipeline failed in 00:00:00.03\n => Cleaning up\n");
+    EXPECT_FALSE(f.run());
+    EXPECT_EQ(obj2tiles::reportedException(f.error), "Vertex color count (40) does not match vertex count (48).");
+
+    EXPECT_EQ(obj2tiles::reportedException("Obj2Tiles exited with code 3: Unhandled exception: bad mesh"), "");
+    EXPECT_EQ(obj2tiles::reportedException(" !> Exception: at the end"), "at the end");
+}
+
 TEST(Obj2TilesRunner, aTimeoutIsAFailure) {
     Obj2TilesFixture f("runner_obj2tiles_timeout");
     f.fake.effect = nullptr;
