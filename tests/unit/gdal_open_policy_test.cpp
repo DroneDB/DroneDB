@@ -333,6 +333,15 @@ namespace
             ASSERT_NE(created, nullptr);
         }
         rasters.emplace_back(plain, EntryType::Image);
+
+        // A GeoTIFF named for what it is (.cog) is a raster as a .tif is: it was a Generic file
+        const fs::path cog = s.dataset / "ortho.cog";
+        fs::copy_file(tif, cog);
+        rasters.emplace_back(cog, EntryType::GeoRaster);
+        const fs::path plainCog = s.dataset / "plain.COG";
+        fs::copy_file(plain, plainCog);
+        rasters.emplace_back(plainCog, EntryType::Image);
+
         rasters.emplace_back(writeAs("JPEG", s.dataset / "photo.jpg"), EntryType::Image);
         rasters.emplace_back(writeAs("PNG", s.dataset / "picture.PNG"), EntryType::Image);
 

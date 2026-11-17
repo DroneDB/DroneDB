@@ -562,8 +562,8 @@ TEST(entryHandler, ExtensionsArePinned) {
         {EntryType::Model, {"obj", "ply", "stl", "gltf", "glb"}},
         {EntryType::Tiles3D, {"3tz"}},
         {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx", "gml"}},
-        {EntryType::Image, {"jpg", "jpeg", "dng", "tif", "tiff", "jp2", "j2k", "png", "gif", "webp", "mp4", "mov", "webm",
-                 "m4v", "avi", "mkv"}}};
+        {EntryType::Image, {"jpg", "jpeg", "dng", "png", "gif", "webp", "tif", "tiff", "cog", "jp2", "j2k", "mp4", "mov",
+                 "webm", "m4v", "avi", "mkv"}}};
     for (const auto t : AllBuiltinTypes) {
         const auto it = expected.find(t);
         EXPECT_EQ(entryHandler(t).extensions(), it != expected.end() ? it->second : std::vector<std::string>{})
