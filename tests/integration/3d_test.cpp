@@ -21,6 +21,7 @@
 #include <map>
 #include <sstream>
 #include "exceptions.h"
+#include "gdal_inc.h"
 #include <tiny_obj_loader.h>
 
 namespace
@@ -1128,11 +1129,16 @@ namespace
         return bin;
     }
 
+    // The material of texturedQuadGltfJson by default: its base colour is the texture
+    const std::string kTexturedMaterial = "{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0}}}";
+
     // bufferField: the buffer object's extra fields (e.g. a uri). imageField: the image object.
     // extraBufferView: appended to bufferViews (for an embedded image), may be empty.
+    // material: the one material of the quad.
     std::string texturedQuadGltfJson(size_t bufferLength, const std::string& bufferUriField,
                                      const std::string& imageObject,
-                                     const std::string& extraBufferView) {
+                                     const std::string& extraBufferView,
+                                     const std::string& material = kTexturedMaterial) {
         std::ostringstream j;
         j << "{\"asset\":{\"version\":\"2.0\"},"
           << "\"buffers\":[{\"byteLength\":" << bufferLength << bufferUriField << "}],"
@@ -1148,10 +1154,120 @@ namespace
           << "\"images\":[" << imageObject << "],"
           << "\"samplers\":[{}],"
              "\"textures\":[{\"source\":0,\"sampler\":0}],"
-             "\"materials\":[{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0}}}],"
-             "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"TEXCOORD_0\":1},\"indices\":2,\"material\":0}]}],"
+          << "\"materials\":[" << material << "],"
+          << "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"TEXCOORD_0\":1},\"indices\":2,\"material\":0}]}],"
              "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
         return j.str();
+    }
+
+    // The values of the statements of an MTL with this keyword, in order
+    std::vector<std::string> mtlValues(const std::string& mtl, const std::string& keyword) {
+        std::vector<std::string> values;
+        std::ifstream in(mtl);
+        std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream words(line);
+            std::string word, value;
+            if (words >> word && word == keyword && std::getline(words >> std::ws, value))
+                values.push_back(value);
+        }
+        return values;
+    }
+
+    // A material that glTF draws with an alpha test (MASK), or blends (BLEND), cuts its texture out
+    // in bm3d: the MTL names an image for map_d, which bm3d cuts at an alpha of half. The texture
+    // itself when the alpha a texel of the texture needs is at most 1 (a masked texel is kept when
+    // its alpha times that of the factor reaches the cutoff), a black mask when the factor alone is
+    // below the cutoff; nothing when the cutoff keeps every texel, for an opaque material or one
+    // without a texture. A masked material is opaque (d 1); a blended one keeps the alpha of its
+    // factor.
+    TEST(file3d, aGltfMaterialWithAnAlphaTestCutsItsTextureOutInTheObj)
+    {
+        TestArea ta(TEST_NAME);
+        const auto bin = texturedQuadBin();
+        struct Case {
+            std::string name, material;
+            std::vector<std::string> mapD;
+            // The opacity of the material of the quad (Assimp adds a default material after it)
+            float d;
+        };
+        const std::string texture = "\"baseColorTexture\":{\"index\":0}";
+        const std::vector<Case> cases = {
+            {"opaque", kTexturedMaterial, {}, 1},
+            {"mask", "{\"alphaMode\":\"MASK\",\"pbrMetallicRoughness\":{" + texture + "}}", {"tex.png"}, 1},
+            {"mask-cutoff",
+             "{\"alphaMode\":\"MASK\",\"alphaCutoff\":0.4,\"pbrMetallicRoughness\":{"
+             "\"baseColorFactor\":[1,1,1,0.8]," + texture + "}}",
+             {"tex.png"}, 1},
+            {"mask-below-cutoff",
+             "{\"alphaMode\":\"MASK\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,0.3]," + texture + "}}",
+             {"ddb-full-cutout-mask.png"}, 1},
+            {"mask-keeps-all", "{\"alphaMode\":\"MASK\",\"alphaCutoff\":0,\"pbrMetallicRoughness\":{" + texture + "}}",
+             {}, 1},
+            {"blend",
+             "{\"alphaMode\":\"BLEND\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,0.6]," + texture + "}}",
+             {"tex.png"}, 0.6f},
+            {"mask-untextured", "{\"alphaMode\":\"MASK\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,0,0,1]}}",
+             {}, 1}};
+
+        for (const auto& c : cases) {
+            SCOPED_TRACE(c.name);
+            const fs::path gltf = ta.getPath(c.name + "/model.gltf");
+            fs::create_directories(gltf.parent_path());
+            writeFile(gltf.parent_path() / "tex.png", kTinyPng);
+            writeFile(gltf, texturedQuadGltfJson(bin.size(), ",\"uri\":\"" + dataUri(bin) + "\"",
+                                                 "{\"uri\":\"tex.png\"}", "", c.material));
+
+            std::string geom, mtl;
+            convertGltfTo3dModel(gltf.string(), ta.getPath(c.name + "/obj/model").string(), geom, mtl, false, false);
+            ASSERT_FALSE(mtl.empty());
+            EXPECT_EQ(mtlValues(mtl, "map_d"), c.mapD);
+            const auto d = mtlValues(mtl, "d");
+            ASSERT_FALSE(d.empty());
+            EXPECT_NEAR(std::stof(d.front()), c.d, 1e-6);
+            if (!c.mapD.empty() && c.mapD[0] == "tex.png") {
+                EXPECT_EQ(mtlValues(mtl, "map_Kd"), c.mapD) << "the cutout of a texture is its own alpha";
+            }
+        }
+
+        // The black mask: one texel of 0, which bm3d reads by its luminance
+        GDALDatasetH mask =
+            GDALOpen(ta.getPath("mask-below-cutoff/obj/ddb-full-cutout-mask.png").string().c_str(), GA_ReadOnly);
+        ASSERT_NE(mask, nullptr);
+        EXPECT_EQ(GDALGetRasterXSize(mask), 1);
+        EXPECT_EQ(GDALGetRasterYSize(mask), 1);
+        EXPECT_EQ(GDALGetRasterCount(mask), 1);
+        uint8_t texel = 255;
+        EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(mask, 1), GF_Read, 0, 0, 1, 1, &texel, 1, 1, GDT_Byte, 0, 0),
+                  CE_None);
+        EXPECT_EQ(texel, 0);
+        GDALClose(mask);
+    }
+
+    // The cutout of an embedded texture names the file it is extracted to, as its map_Kd does
+    TEST(file3d, theCutoutOfAnEmbeddedTextureNamesTheExtractedFile)
+    {
+        TestArea ta(TEST_NAME);
+        auto bin = texturedQuadBin();
+        const size_t imageOffset = bin.size();
+        bin.insert(bin.end(), kTinyPng.begin(), kTinyPng.end());
+        std::ostringstream view;
+        view << ",{\"buffer\":0,\"byteOffset\":" << imageOffset << ",\"byteLength\":" << kTinyPng.size() << "}";
+        const fs::path glb = ta.getPath("model.glb");
+        writeGlbWithBin(glb,
+                        texturedQuadGltfJson(bin.size(), "", "{\"bufferView\":3,\"mimeType\":\"image/png\"}",
+                                             view.str(),
+                                             "{\"alphaMode\":\"MASK\",\"pbrMetallicRoughness\":{"
+                                             "\"baseColorTexture\":{\"index\":0}}}"),
+                        bin);
+
+        std::string geom, mtl;
+        convertGltfTo3dModel(glb.string(), ta.getPath("obj/model").string(), geom, mtl, false, false);
+        const auto mapD = mtlValues(mtl, "map_d");
+        ASSERT_EQ(mapD.size(), 1u);
+        EXPECT_EQ(mapD, mtlValues(mtl, "map_Kd"));
+        EXPECT_NE(mapD[0].front(), '*') << "an embedded reference is the name of a file";
+        EXPECT_TRUE(fs::exists(ta.getPath("obj") / mapD[0]));
     }
 
     struct GltfDataset : IndexFixture {

@@ -5,10 +5,12 @@
 // nxconv.cpp - correct version for libktx 4.x
 
 #include <assimp/config.h>
+#include <assimp/GltfMaterial.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <map>
 #include <memory>
@@ -181,6 +183,92 @@ static void colourMeshesWithoutVertexColours(aiScene* s) {
     }
 }
 
+/** The mask that cuts out every texel of a texture: one black texel, read by its luminance (it is opaque) */
+static constexpr const char* FullCutoutMaskName = "ddb-full-cutout-mask.png";
+
+/** The alpha a texture of a material needs for a texel to be kept, which bm3d tests at half */
+static constexpr float CutoutThreshold = 0.5f;
+
+/**
+ * @brief Gives the textures that glTF draws with an alpha test or blends an opacity texture, which the OBJ
+ * exporter writes as `map_d`
+ *
+ * bm3d cuts a texture out where the image `map_d` names is transparent, at half: by the alpha of the
+ * texture itself when `map_d` names the texture of `map_Kd`, by the luminance of an opaque mask. It
+ * cannot blend. glTF keeps a texel of a material whose alphaMode is MASK when the alpha of its base colour
+ * (that of the texture times that of the factor) is at least alphaCutoff (0.5 by default), and blends
+ * one of a BLEND material. The exporter wrote no `map_d` for either, so the texels a mask cuts out (the
+ * background of a gold leaf decal) covered what lies behind them.
+ *
+ * - A textured MASK material: the texture needs an alpha of alphaCutoff / factor alpha. When that is at
+ *   most 1, `map_d` names the texture of the material: the cut is at half, which is the threshold of the
+ *   usual factor of 1 and cutoff of 0.5 (another threshold is drawn at half: the texture is not decoded
+ *   in this process). When it is more than 1 (the factor alone is below the cutoff), no texel is kept:
+ *   `map_d` names a black mask. A cutoff of 0 or less keeps every texel: no `map_d`. The opacity of the
+ *   material becomes 1, since what the mask keeps is drawn opaque.
+ * - A textured BLEND material: `map_d` names its texture, so blending is drawn as a cutout at half: the
+ *   texels that are mostly transparent are left out, the others drawn opaque. Its opacity (the alpha of
+ *   its factor, written as `d`) is kept.
+ * - An untextured material, or an OPAQUE one, is not changed: bm3d cuts out textures only.
+ *
+ * Obj2Tiles reads no `map_d`, so the 3D Tiles are the same as without it.
+ */
+static void cutOutAlphaTestedTextures(aiScene* s, const fs::path& outputDir) {
+    bool fullMaskWritten = false;
+    for (unsigned m = 0; m < s->mNumMaterials; ++m) {
+        aiMaterial* material = s->mMaterials[m];
+        aiString mode;
+        if (material->Get(AI_MATKEY_GLTF_ALPHAMODE, mode) != AI_SUCCESS)
+            continue;
+        const std::string alphaMode(mode.data, mode.length);
+        const bool masked = alphaMode == "MASK";
+        if (!masked && alphaMode != "BLEND")
+            continue;
+
+        aiString texture;
+        const bool textured = material->Get(AI_MATKEY_TEXTURE_DIFFUSE(0), texture) == AI_SUCCESS &&
+                              texture.length > 0;
+
+        float factorAlpha = 1.0f;
+        material->Get(AI_MATKEY_OPACITY, factorAlpha);
+
+        if (!masked) {
+            if (textured)
+                material->AddProperty(&texture, AI_MATKEY_TEXTURE_OPACITY(0));
+            continue;
+        }
+
+        const float opaque = 1.0f;
+        material->AddProperty(&opaque, 1, AI_MATKEY_OPACITY);
+
+        float cutoff = CutoutThreshold;
+        material->Get(AI_MATKEY_GLTF_ALPHACUTOFF, cutoff);
+        if (!textured || cutoff <= 0.0f)
+            continue;
+
+        // The alpha of the texture that keeps a texel: alpha * factorAlpha >= cutoff
+        if (factorAlpha > 0.0f && cutoff <= factorAlpha) {
+            const float threshold = cutoff / factorAlpha;
+            if (std::abs(threshold - CutoutThreshold) > 1e-3f) {
+                LOGD << "The texture of material " << materialName(s, m) << " is cut out at an alpha of "
+                     << CutoutThreshold << " instead of " << threshold;
+            }
+            material->AddProperty(&texture, AI_MATKEY_TEXTURE_OPACITY(0));
+            continue;
+        }
+
+        if (!fullMaskWritten) {
+            fs::create_directories(outputDir);
+            const unsigned char black = 0;
+            if (!writePng(outputDir / FullCutoutMaskName, 1, 1, 1, &black, 1))
+                throw AppException("Cannot write the cutout mask in " + io::toUtf8(outputDir));
+            fullMaskWritten = true;
+        }
+        const aiString mask(FullCutoutMaskName);
+        material->AddProperty(&mask, AI_MATKEY_TEXTURE_OPACITY(0));
+    }
+}
+
 /**
  * @brief Extract embedded textures from the scene and save them to disk
  *
@@ -350,6 +438,8 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
 
     const char* keys[] =
         {"map_Kd", "map_Ks", "map_Bump", "map_d", "map_Pr", "map_Pm", "map_Ps", "map_Ke", "map_Ka"};
+    // A texture named twice (map_Kd and the map_d of its cutout) is converted once
+    std::set<fs::path> converted;
 
     while (std::getline(lines, line)) {
         bool handled = false;
@@ -363,7 +453,10 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
                     fs::path pngPath = ktxPath;
                     pngPath.replace_extension(".png");
                     try {
-                        convertKtx2ToPng(ktxPath, pngPath);
+                        if (!converted.count(ktxPath)) {
+                            convertKtx2ToPng(ktxPath, pngPath);
+                            converted.insert(ktxPath);
+                        }
                         std::string newLine = std::string(key) + " " + io::toUtf8(pngPath.filename());
                         out << newLine << "\n";
                         LOGD << "MTL patch: " << key << " -> " << io::toUtf8(pngPath.filename());
@@ -638,14 +731,16 @@ void convertGltfTo3dModel(const std::string& inputGltf,
     const std::unique_ptr<aiScene> owned(importer.GetOrphanedScene());
     aiScene* scene = owned.get();
 
+    // Export geometry
+    fs::path outBase = io::fromUtf8(outputBasePath);
+
     bool hasUV = sceneHasUVs(scene);
     bool hasVC = sceneHasVertexColors(scene);
     colourMeshesWithoutVertexColours(scene);
+    // After the colouring, which may copy a material: the copy is cut out as the original
+    cutOutAlphaTestedTextures(scene, outBase.parent_path());
     LOGD << "[assimp] meshes=" << scene->mNumMeshes << " UV=" << (hasUV ? "Y" : "N")
          << " VCols=" << (hasVC ? "Y" : "N");
-
-    // Export geometry
-    fs::path outBase = io::fromUtf8(outputBasePath);
 
     const AssimpOutputs exported = exportWithAssimp(scene, outBase, {forcePLY, preferPLYIfNoUV, hasUV, hasVC});
     outGeomPath = exported.geomPath;
