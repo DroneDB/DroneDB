@@ -831,3 +831,5 @@ Registry has to adopt first.
   did the opposite. `DDBTile` and `DDBMemoryTile*` keep their flag (`tms` true: `ty` is an XYZ row).
   A `.cog` file is a raster as a `.tif` is (a `GeoRaster` with a CRS, else an `Image`; it was `Generic`), and its
   STAC media type is `image/tiff`.
+  The thumbnail of a raster has the shape of the raster on the ground (the size of a pixel in its geotransform):
+  a raster of 5 x 5000 pixels of 240 x 0.24 m has a thumbnail of 512 x 512, no longer 1 x 512.
