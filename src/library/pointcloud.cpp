@@ -30,6 +30,7 @@
 #include "mio.h"
 #include "parallel.h"
 #include "ply.h"
+#include "polar_footprint.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
 #include "raster_ops.h"
@@ -121,7 +122,8 @@ std::pair<double, double> geographicLongitudes(const std::string& utf8Path, cons
 // use here (a geoid grid that is not installed) does not matter
 Footprint horizontalFootprint(const std::string& utf8Path, const std::vector<double>& b,
                               const OGRSpatialReference& fileSrs, const OGRSpatialReference& target, int targetEpsg) {
-    const auto transform = transformTo(horizontalSrs(fileSrs), target, targetEpsg);
+    const OGRSpatialReference horizontal = horizontalSrs(fileSrs);
+    const auto transform = transformTo(horizontal, target, targetEpsg);
     double west = b[0], east = b[3];
     if (fileSrs.IsGeographic())
         std::tie(west, east) = geographicLongitudes(utf8Path, b, fileSrs);
@@ -129,8 +131,16 @@ Footprint horizontalFootprint(const std::string& utf8Path, const std::vector<dou
     if (!transform->tryTransform(1, &f.minX, &f.minY) || !transform->tryTransform(1, &f.maxX, &f.maxY) ||
         !transform->tryTransform(1, &f.centreX, &f.centreY))
         throw GDALException("Cannot transform the bounds " + boundsText(b) + " to EPSG:" + std::to_string(targetEpsg));
-    if (targetEpsg == 4326)
+    if (targetEpsg == 4326) {
         unwrapLongitudes(f);
+        // Two corners of bounds around a pole leave the pole out: the polar cap instead
+        if (const auto cap = polarEnvelope(GridBox{b[0], b[1], b[3], b[4], {}, {}}, horizontal, target)) {
+            f.minX = cap->minLon;
+            f.minY = cap->minLat;
+            f.maxX = cap->maxLon;
+            f.maxY = cap->maxLat;
+        }
+    }
     const double zToMeters = verticalUnitInMeters(fileSrs);
     f.minZ = b[2] * zToMeters;
     f.maxZ = b[5] * zToMeters;
