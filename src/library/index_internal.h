@@ -16,11 +16,10 @@ namespace ddb
 {
 
     // Rewrites every column of the entry stored at the path (the last parameter). The parameters
-    // follow doUpdate().
-    inline constexpr const char *kUpdateEntrySql =
-        "UPDATE entries SET hash=?, type=?, properties=?, mtime=?, size=?, depth=?, "
-        "point_geom=GeomFromText(?, 4326), polygon_geom=GeomFromText(?, 4326) "
-        "WHERE path=?";
+    // follow doUpdate(). The warning a build recorded (warning_code::buildCodes()) stays when the
+    // content of the file is the same (its hash) and the new properties have no warning: it
+    // describes the build output of that content, which stays (a file uploaded again, a rescan).
+    const std::string &updateEntrySql();
 
     // The entries below `folder` (an index range: '0' is the character after '/', so sibling
     // folders such as "folder2" are excluded)

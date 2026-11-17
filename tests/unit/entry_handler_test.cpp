@@ -902,4 +902,44 @@ TEST(entryHandler, AWarningWithoutCodeRemovesTheCodeOfTheOneItReplaces) {
     EXPECT_FALSE(entry.properties.contains("warningCode"));
 }
 
+// The warnings of a build replace the warning of the entry: one line each, with the code of the
+// first; a build without any removes the warning an earlier build recorded, never one of the index
+TEST(entryHandler, BuildWarningsReplaceTheWarningAndALaterBuildWithoutThemRemovesIt) {
+    json properties = {{"georeferenced", false}, {"warning", "model parse failed: no origin"}};
+    const std::vector<BuildWarning> warnings = {
+        {warning_code::TilesNotGenerated, "3D Tiles not generated: Obj2Tiles failed on this model"},
+        {warning_code::TexturesOutsideDataset, "Textures outside the dataset left out: ../t.png"}};
+
+    EXPECT_TRUE(applyBuildWarnings(properties, warnings));
+    EXPECT_EQ(properties.value("warning", ""),
+              "3D Tiles not generated: Obj2Tiles failed on this model\n"
+              "Textures outside the dataset left out: ../t.png");
+    EXPECT_EQ(properties.value("warningCode", ""), "3dtiles-not-generated");
+    EXPECT_EQ(properties.value("georeferenced", true), false);
+
+    // The same warnings again change nothing (nothing to write)
+    EXPECT_FALSE(applyBuildWarnings(properties, warnings));
+
+    EXPECT_TRUE(applyBuildWarnings(properties, {}));
+    EXPECT_FALSE(properties.contains("warning"));
+    EXPECT_FALSE(properties.contains("warningCode"));
+    EXPECT_EQ(properties, json({{"georeferenced", false}}));
+    EXPECT_FALSE(applyBuildWarnings(properties, {}));
+
+    // A warning of the index stays, with or without its code
+    json dwg = {{"warning", "vector parse failed"}, {"warningCode", warning_code::DwgConverterMissing}};
+    EXPECT_FALSE(applyBuildWarnings(dwg, {}));
+    EXPECT_EQ(dwg.value("warningCode", ""), "dwg-converter-missing");
+    json uncoded = {{"warning", "footprint unavailable: no CRS"}};
+    EXPECT_FALSE(applyBuildWarnings(uncoded, {}));
+    EXPECT_EQ(uncoded.value("warning", ""), "footprint unavailable: no CRS");
+
+    // Properties that are not an object take the warnings, and stay as they are without
+    json none;
+    EXPECT_FALSE(applyBuildWarnings(none, {}));
+    EXPECT_TRUE(none.is_null());
+    EXPECT_TRUE(applyBuildWarnings(none, {warnings.back()}));
+    EXPECT_EQ(none.value("warningCode", ""), "textures-outside-dataset");
+}
+
 }  // namespace

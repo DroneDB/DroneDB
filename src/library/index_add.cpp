@@ -69,6 +69,28 @@ namespace ddb
         return nullptr;
     }
 
+    const std::string &updateEntrySql()
+    {
+        static const std::string sql = []
+        {
+            std::string codes;
+            for (const auto &code : warning_code::buildCodes())
+                codes += (codes.empty() ? "'" : ", '") + code + "'";
+            // In the expressions of SET, the columns are the ones of the row before the update
+            return "UPDATE entries SET hash=?1, type=?2, properties=CASE "
+                   "WHEN hash IS ?1 AND json_valid(properties) "
+                   "AND json_extract(properties, '$.warningCode') IN (" + codes + ") "
+                   "AND json_valid(?3) AND json_type(?3, '$') = 'object' AND json_type(?3, '$.warning') IS NULL "
+                   "THEN json_set(?3, '$.warning', json_extract(properties, '$.warning'), "
+                   "'$.warningCode', json_extract(properties, '$.warningCode')) "
+                   "ELSE ?3 END, "
+                   "mtime=?4, size=?5, depth=?6, "
+                   "point_geom=GeomFromText(?7, 4326), polygon_geom=GeomFromText(?8, 4326) "
+                   "WHERE path=?9";
+        }();
+        return sql;
+    }
+
     void doUpdate(Statement *updateQ, const Entry &e)
     {
         doUpdate(updateQ, e, static_cast<double>(e.mtime));
@@ -379,7 +401,7 @@ namespace ddb
             "point_geom, polygon_geom) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, "
             "4326))");
-        const auto updateQ = db->query(kUpdateEntrySql);
+        const auto updateQ = db->query(updateEntrySql());
         const auto recheckQ = db->query("SELECT mtime,hash FROM entries WHERE path=?");
 
         Transaction tx(db);
@@ -474,7 +496,7 @@ namespace ddb
                 ignored.push_back(directory / io::Path(io::fromUtf8(prj)).get());
         cad::IgnoredSidecarScope ignore(ignored);
 
-        const auto updateQ = db->query(kUpdateEntrySql);
+        const auto updateQ = db->query(updateEntrySql());
         for (const auto &prj : prjPaths) {
             for (const auto &mainPath : findSidecarMains(db, prj)) {
                 const auto found = getEntry(db, mainPath);
@@ -602,7 +624,7 @@ namespace ddb
                 return;
 
             {
-                const auto updateQ = db->query(kUpdateEntrySql);
+                const auto updateQ = db->query(updateEntrySql());
                 Transaction tx(db);
                 for (const auto &r : retyped)
                     doUpdate(updateQ.get(), r.fresh, r.mtime);

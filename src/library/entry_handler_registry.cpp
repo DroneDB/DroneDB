@@ -40,6 +40,11 @@ bool fileExistsAndNonEmpty(const fs::path& p) {
     return sz > 0;
 }
 
+void BuildContext::warn(const std::string& code, const std::string& message) const {
+    if (warnings)
+        warnings->push_back({code, message});
+}
+
 bool directoryHasNonEmptyContent(const fs::path& dir) {
     std::error_code ec;
     if (!fs::exists(dir, ec) || ec)

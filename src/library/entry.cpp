@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include <algorithm>
 #include <cmath>
 #include "dbops.h"
 #include "json.h"
@@ -165,13 +166,61 @@ namespace ddb
         geom.addPoint(ul.longitude, ul.latitude, groundHeight);
     }
 
+    namespace
+    {
+        void setWarning(json &properties, const std::string &message, const std::string &code)
+        {
+            properties["warning"] = message;
+            if (code.empty())
+                properties.erase("warningCode");
+            else
+                properties["warningCode"] = code;
+        }
+    } // namespace
+
     void setEntryWarning(Entry &entry, const std::string &message, const std::string &code)
     {
-        entry.properties["warning"] = message;
-        if (code.empty())
-            entry.properties.erase("warningCode");
+        setWarning(entry.properties, message, code);
+    }
+
+    namespace warning_code
+    {
+        const std::vector<std::string> &buildCodes()
+        {
+            static const std::vector<std::string> codes = {TilesNotGenerated, TexturesOutsideDataset};
+            return codes;
+        }
+    } // namespace warning_code
+
+    bool applyBuildWarnings(json &properties, const std::vector<BuildWarning> &warnings)
+    {
+        if (!properties.is_object())
+        {
+            if (warnings.empty())
+                return false;
+            properties = json::object();
+        }
+
+        const json before = properties;
+        if (!warnings.empty())
+        {
+            std::vector<std::string> messages;
+            for (const auto &w : warnings)
+                messages.push_back(w.message);
+            setWarning(properties, str::join(messages, "\n"), warnings.front().code);
+        }
         else
-            entry.properties["warningCode"] = code;
+        {
+            const auto code = properties.find("warningCode");
+            const auto &codes = warning_code::buildCodes();
+            if (code != properties.end() && code->is_string() &&
+                std::find(codes.begin(), codes.end(), code->get<std::string>()) != codes.end())
+            {
+                properties.erase("warning");
+                properties.erase("warningCode");
+            }
+        }
+        return properties != before;
     }
 
     void to_json(json &j, const Entry &e)

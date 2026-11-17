@@ -835,3 +835,12 @@ Registry has to adopt first.
   a raster of 5 x 5000 pixels of 240 x 0.24 m has a thumbnail of 512 x 512, no longer 1 x 512.
   A `ddb` command whose input the library refuses (`DDBERR_INVALIDARGS` while it works) prints the message alone,
   without the usage of the command; an argument it cannot read (an option, a format, a filter) still prints both.
+  A build records warnings about the output it made in the `warning` and `warningCode` of its entry
+  (`entry.schema.json`): `3dtiles-not-generated` when the 3D Tiles of a model could not be made (the bm3d output
+  was; `warning` "3D Tiles not generated: <reason>", the reason the tiler gave), `textures-outside-dataset` when the
+  MTL files of an OBJ name textures that are absolute or outside the dataset (`warning` "Textures outside the dataset
+  left out: <references>"). Such an OBJ is built without them (its materials keep their colours); 2.7 failed its
+  build. One line of `warning` for each, the code of the first; they replace the warning of the entry, a later
+  build without them removes them, and a parse of the same content (a rescan) keeps them. A glTF material with
+  `alphaMode` MASK or BLEND reaches bm3d as a cutout (`map_d` naming its texture in the OBJ it is converted to).
+  No export, fixture or other schema changed.

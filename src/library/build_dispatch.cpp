@@ -154,7 +154,8 @@ class BuildAttempt {
                                        io::fromUtf8(outputFolder_),
                                        io::fromUtf8(tempFolder_),
                                        force_,
-                                       handlerOptions};
+                                       handlerOptions,
+                                       &warnings_};
             // A COG build reports its phases (cog.cpp); the other kinds are done when they are: -1 until then
             options_.reportProgress(-1.0, str::toLowerCopy(handler_.name()));
             handler_.build(context);
@@ -168,6 +169,7 @@ class BuildAttempt {
             publish();
             // Only now, with the new output in place: a failed build keeps the old one
             removeSupersededOutput();
+            recordWarnings();
 
             io::assureIsRemoved(io::fromUtf8(tempFolder_));
             io::assureIsRemoved(pendFile_);
@@ -255,6 +257,16 @@ class BuildAttempt {
         io::rename(io::fromUtf8(tempFolder_), io::fromUtf8(outputFolder_));
     }
 
+    // The warnings of the output now published replace the ones of the previous build on the
+    // entry; best effort, it never fails the build (the output is in place)
+    void recordWarnings() const {
+        try {
+            recordBuildWarnings(db_, target_, warnings_);
+        } catch (const std::exception& e) {
+            LOGW << "Cannot record the warnings of the build of " << target_.path << ": " << e.what();
+        }
+    }
+
     // The legacy output the published one replaces; best effort, it never fails the build
     void removeSupersededOutput() const {
         removeSupersededArtifacts(handler_, baseOutputPath_, filesystemBuildProbe());
@@ -297,6 +309,8 @@ class BuildAttempt {
     const std::string tempFolder_;
     bool wasPending_ = false;
     std::vector<std::string> pendingDependencies_;
+    // What the handler reported about its output
+    std::vector<BuildWarning> warnings_;
     // The largest known fraction the handler reported (-1: none), from any thread
     std::atomic<double> lastFraction_{-1.0};
     // What a build reports at most until its output is published

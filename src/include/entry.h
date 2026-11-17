@@ -5,6 +5,8 @@
 #define ENTRY_H
 
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "gdal_inc.h"
 #include "entry_types.h"
@@ -178,7 +180,30 @@ namespace ddb
     namespace warning_code {
     /// A DWG drawing on an installation without the dwg2dxf converter (LibreDWG)
     inline constexpr const char *DwgConverterMissing = "dwg-converter-missing";
+    /// New in 2.8, set by a build: the 3D Tiles of a model could not be generated (the build made
+    /// the bm3d output). `warning` says why: "3D Tiles not generated: <reason>"
+    inline constexpr const char *TilesNotGenerated = "3dtiles-not-generated";
+    /// New in 2.8, set by a build: the MTL files of an OBJ name textures that are outside the
+    /// dataset (or absolute), which the build left out. `warning` names them: "Textures outside
+    /// the dataset left out: <reference>, ..."
+    inline constexpr const char *TexturesOutsideDataset = "textures-outside-dataset";
+    /// The codes a build sets (recordBuildWarnings), as opposed to the ones of the index
+    const std::vector<std::string> &buildCodes();
     } // namespace warning_code
+
+    /// A warning a build reports about the output it made, with its `warningCode`
+    struct BuildWarning
+    {
+        std::string code;
+        std::string message;
+    };
+
+    /// Records the warnings of the latest build of an entry in its properties. They replace its
+    /// warning: `warning` holds their messages, one line each, and `warningCode` the code of the
+    /// first (a build reports the one that matters most first). A build without warnings removes
+    /// the warning an earlier build recorded (a code of warning_code::buildCodes()) and keeps any
+    /// other. Returns true when the properties changed.
+    bool applyBuildWarnings(json &properties, const std::vector<BuildWarning> &warnings);
 
     /// Records why a part of the metadata of an entry is missing, in its `warning` property (one
     /// string; a later warning replaces an earlier one). `code`, when given, is the stable tag of the

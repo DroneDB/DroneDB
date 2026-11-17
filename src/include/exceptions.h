@@ -136,7 +136,15 @@ namespace ddb
     };
     class Obj2TilesException : public AppException
     {
+    public:
         using AppException::AppException;
+        // `reason`: why, in words for the people who use the dataset (no path of the server)
+        Obj2TilesException(const std::string &message, std::string reason) :
+            AppException(message), reason_(std::move(reason)) {}
+        // Why the 3D Tiles were not made, for users; "" when not given
+        const std::string &reason() const noexcept { return reason_; }
+    private:
+        std::string reason_;
     };
     // A helper program (a process libddb talks to over a pipe: metadata-util, the raster helper)
     // cannot be used: it is missing, does not start or speaks another protocol version. Not a
