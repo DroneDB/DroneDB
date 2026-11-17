@@ -140,7 +140,9 @@
         "cpg",
         "dbf",
         "shx",
-        "prj"
+        "prj",
+        "xsd",
+        "gfs"
       ],
       "thumbnail": "none"
     },

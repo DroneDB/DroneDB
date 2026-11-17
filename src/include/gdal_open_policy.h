@@ -36,6 +36,11 @@ namespace ddb
         std::vector<std::string> rasterDrivers(const std::string &path);
         std::vector<std::string> vectorDrivers(const std::string &path);
 
+        // The open options ("NAME=VALUE") a vector file with this extension is opened with:
+        // they keep the driver from writing next to the file and from reading other files or
+        // URLs than it, whatever the configuration of the host. Empty for most extensions.
+        std::vector<std::string> vectorOpenOptions(const std::string &path);
+
         // Whether a raster with this extension is a VRT, whose sources are checked before it opens
         bool isVrtPath(const std::string &path);
 

@@ -23,7 +23,7 @@ namespace ddb
     namespace
     {
         GDALDatasetUniquePtr openWith(const std::string &path, const std::vector<std::string> &drivers,
-                                      unsigned int kind)
+                                      unsigned int kind, const std::vector<std::string> &openOptions = {})
         {
             if (drivers.empty())
             {
@@ -31,9 +31,10 @@ namespace ddb
                 return nullptr;
             }
             const CPLStringList allowed = cslFromStrings(drivers);
+            const CPLStringList options = cslFromStrings(openOptions);
             const gdalopen::NoNetworkWhileOpening noNetwork(path);
             return adoptDataset(GDALOpenEx(path.c_str(), kind | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR,
-                                           allowed.List(), nullptr, nullptr));
+                                           allowed.List(), options.List(), nullptr));
         }
     } // namespace
 
@@ -51,6 +52,9 @@ namespace ddb
                 std::string_view extension;
                 std::vector<std::string_view> drivers;
                 bool vrt = false;
+                // Open options given to the drivers, so that what they read and write stays the
+                // file whatever the configuration of the host
+                std::vector<std::string_view> openOptions = {};
             };
 
             const std::vector<ExtensionDrivers> &rasterTable()
@@ -89,8 +93,17 @@ namespace ddb
                     {"kmz", {"LIBKML"}},
                     {"gpkg", {"GPKG"}},
                     {"gpx", {"GPX"}},
-                    // Not indexed, but built and read through the tools
-                    {"gml", {"GML"}},
+                    // The GML driver writes a .gfs schema next to a file it read without one,
+                    // reads the files and URLs the xlinks of the features name and writes the
+                    // file with them resolved (.resolved.gml) when the host turns their
+                    // resolution on (GML_SKIP_RESOLVE_ELEMS), and downloads the schema of a WFS
+                    // response or of the imports of its .xsd when asked to: none of these, the
+                    // open options winning over the configuration. The HTTP requests it would
+                    // still make (an .xsd that includes a URL) fail (NoNetworkWhileOpening).
+                    {"gml",
+                     {"GML"},
+                     false,
+                     {"WRITE_GFS=NO", "SKIP_RESOLVE_ELEMS=ALL", "DOWNLOAD_SCHEMA=NO", "USE_SCHEMA_IMPORT=NO"}},
                 };
                 return table;
             }
@@ -539,6 +552,14 @@ namespace ddb
             return presentDrivers(find(vectorTable(), path));
         }
 
+        std::vector<std::string> vectorOpenOptions(const std::string &path)
+        {
+            const auto *entry = find(vectorTable(), path);
+            if (entry == nullptr)
+                return {};
+            return {entry->openOptions.begin(), entry->openOptions.end()};
+        }
+
         bool isVrtPath(const std::string &path)
         {
             const auto *entry = find(rasterTable(), path);
@@ -683,6 +704,6 @@ namespace ddb
     GDALDatasetUniquePtr openUserVector(const std::string &path)
     {
         gdalopen::requireUserFileOpens("openUserVector");
-        return openWith(path, gdalopen::vectorDrivers(path), GDAL_OF_VECTOR);
+        return openWith(path, gdalopen::vectorDrivers(path), GDAL_OF_VECTOR, gdalopen::vectorOpenOptions(path));
     }
 } // namespace ddb

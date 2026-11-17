@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Vector entries: GeoJSON, Shapefile, GeoPackage, KML, GPX, FlatGeobuf, CAD drawings (DXF/DWG), ...
+// Vector entries: GeoJSON, Shapefile, GeoPackage, KML, GPX, GML, FlatGeobuf, CAD drawings (DXF/DWG), ...
 // built into a GeoPackage copy plus an MVT pyramid (or the drawing-coordinate metadata of a CAD
 // drawing without CRS).
 
@@ -89,7 +89,7 @@ class VectorEntryHandler : public EntryHandler {
     VectorEntryHandler() : EntryHandler(EntryType::Vector, "Vector") {}
 
     std::vector<std::string> extensions() const override {
-        return {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx"};
+        return {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx", "gml"};
     }
 
     void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& ctx) const override {
@@ -128,10 +128,12 @@ class VectorEntryHandler : public EntryHandler {
         buildVector(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.baseOutputPath), ctx.force, ctx.options);
     }
 
-    // The .dbf/.shx/.cpg of a shapefile; a .prj also gives a CAD drawing its CRS
+    // The .dbf/.shx/.cpg of a shapefile; a .prj also gives a CAD drawing its CRS; the .xsd
+    // application schema or .gfs feature schema of a GML says what its fields and geometries are
     std::vector<SidecarRule> sidecarRules() const override {
         return {{{"shp"}, {"cpg", "dbf", "shx", "prj"}},
-                {{"dxf", "dwg"}, {"prj"}}};
+                {{"dxf", "dwg"}, {"prj"}},
+                {{"gml"}, {"xsd", "gfs"}}};
     }
 };
 
