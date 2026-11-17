@@ -31,7 +31,7 @@ param(
             if (Test-Path $versionFile) {
                 (Get-Content $versionFile -ErrorAction SilentlyContinue).Trim()
             } else {
-                "v1.10.2"
+                "v1.10.3"
             }
         }
     )

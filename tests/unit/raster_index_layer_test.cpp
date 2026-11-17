@@ -753,12 +753,32 @@ namespace
                       DDBERR_NONE);
             EXPECT_NE(std::string(DDBGetLastError()).find("reflectance"), std::string::npos) << DDBGetLastError();
         }
-        // A tile of the formula: a floating-point raster has one, an integer one is refused
+        // A tile of the formula: a floating-point raster has one, an integer one is refused. The tile is the one of
+        // the deepest zoom that shows most of the raster: the range of the zoom also has tiles that no pixel of the
+        // raster is under, which are blank whatever the formula
         for (const fs::path &raster : {f32, u16})
         {
             RasterTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
             const auto info = tiler.getMinMaxZ();
-            const auto bounds = tiler.getMinMaxCoordsForZ(info.max);
+            const auto range = tiler.getMinMaxCoordsForZ(info.max);
+            BoundingBox<Projected2Di> bounds = range;
+            size_t mostOpaque = 0;
+            for (int x = range.min.x; x <= range.max.x; x++)
+                for (int y = range.min.y; y <= range.max.y; y++)
+                {
+                    uint8_t *plain = nullptr;
+                    int plainSize = 0;
+                    tiler.tile(info.max, x, y, ImageFormat::Png, &plain, &plainSize);
+                    const auto image = testutils::decodeImage(testutils::takeBuffer(plain, plainSize));
+                    const size_t opaque = static_cast<size_t>(
+                        std::count_if(image.alpha().begin(), image.alpha().end(), [](uint8_t a) { return a > 0; }));
+                    if (opaque > mostOpaque)
+                    {
+                        mostOpaque = opaque;
+                        bounds.min = Projected2Di(x, y);
+                    }
+                }
+            ASSERT_GT(mostOpaque, 0u);
             ThumbVisParams visParams;
             visParams.formula = "EVI";
             visParams.bandFilter = "RGBReN";

@@ -31,7 +31,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Gray",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Float64"
    }
@@ -56,7 +56,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Gray",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Byte"
    }
@@ -81,7 +81,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Gray",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "UInt16"
    },
@@ -89,7 +89,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Undefined",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "UInt16"
    },
@@ -97,7 +97,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Undefined",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "UInt16"
    }
@@ -122,7 +122,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Red",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Byte"
    },
@@ -130,7 +130,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Green",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Byte"
    },
@@ -138,7 +138,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Blue",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Byte"
    }
@@ -165,7 +165,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Red",
-    "maskFlags": 8,
+    "maskFlags": 2,
     "nodata": 0.0,
     "overviews": 0,
     "type": "Byte"
@@ -174,7 +174,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Green",
-    "maskFlags": 8,
+    "maskFlags": 2,
     "nodata": 0.0,
     "overviews": 0,
     "type": "Byte"
@@ -183,7 +183,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Blue",
-    "maskFlags": 8,
+    "maskFlags": 2,
     "nodata": 0.0,
     "overviews": 0,
     "type": "Byte"
@@ -252,7 +252,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Gray",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Byte"
    },
@@ -260,7 +260,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Undefined",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Byte"
    },
@@ -268,7 +268,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Undefined",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Byte"
    },
@@ -276,7 +276,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Undefined",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "Byte"
    }
@@ -301,7 +301,7 @@
     "blockX": 512,
     "blockY": 512,
     "colorInterp": "Gray",
-    "maskFlags": 1,
+    "maskFlags": 2,
     "overviews": 0,
     "type": "UInt16"
    }

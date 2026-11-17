@@ -835,3 +835,14 @@ Registry has to adopt first.
   a raster of 5 x 5000 pixels of 240 x 0.24 m has a thumbnail of 512 x 512, no longer 1 x 512.
   A `ddb` command whose input the library refuses (`DDBERR_INVALIDARGS` while it works) prints the message alone,
   without the usage of the command; an argument it cannot read (an option, a format, a filter) still prints both.
+  ddb-tilers 0.13.1 changes what the COG of a GeoRaster holds and how tiles are drawn (no schema or fixture
+  changed): a source without nodata, mask or alpha band gets an internal mask of the pixels the warp writes (the
+  padding up to the tiles of the grid and the corners of a rotated raster were opaque 0, in the statistics too);
+  the nodata of several bands comes with an internal mask of the pixels where not every band is at nodata (a pixel
+  whose first band alone was at nodata was transparent); a palette is warped by nearest neighbour; a graded alpha
+  is kept in an 8-bit mask. Tiles show the pixel under the centre of each tile pixel (the corrected tiler mode,
+  now the default; `DDBT_TILER_MODE=compat` keeps the tiles of 2.4.1), a palette band in its colours, NaN
+  transparent, two bands as red and green, and keep drawing far above the resolution of the raster; a tile that
+  no pixel of the raster is under is blank, whatever the formula asked. Point-cloud tiles have no gaps where the
+  cloud has points. bm3d is 1.1.3 and the 3D Tiles of models are built by Obj2Tiles v1.10.3 (OBJ models whose
+  parts differ are tiled whole; KTX2 textures are a multiple of 4 in size).
