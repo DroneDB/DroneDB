@@ -833,3 +833,5 @@ Registry has to adopt first.
   STAC media type is `image/tiff`.
   The thumbnail of a raster has the shape of the raster on the ground (the size of a pixel in its geotransform):
   a raster of 5 x 5000 pixels of 240 x 0.24 m has a thumbnail of 512 x 512, no longer 1 x 512.
+  A `ddb` command whose input the library refuses (`DDBERR_INVALIDARGS` while it works) prints the message alone,
+  without the usage of the command; an argument it cannot read (an option, a format, a filter) still prints both.

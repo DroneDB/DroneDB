@@ -56,9 +56,11 @@ namespace cmd
         const auto extensionsStr = opts["ext"].as<std::string>();
         const bool stopOnError = opts.count("continue-on-error") == 0;
 
-        // Parse filters (an invalid one is a usage error: InvalidArgsException)
-        const std::vector<ddb::EntryType> types = ddb::filters::parseEntryTypeList(typesStr.c_str());
-        const std::vector<std::string> extensions = ddb::filters::parseExtensionList(extensionsStr.c_str());
+        // Parse filters (an invalid one is a usage error)
+        const std::vector<ddb::EntryType> types =
+            readArgument([&] { return ddb::filters::parseEntryTypeList(typesStr.c_str()); });
+        const std::vector<std::string> extensions =
+            readArgument([&] { return ddb::filters::parseExtensionList(extensionsStr.c_str()); });
 
         const auto db = ddb::open(ddbPath, true);
 

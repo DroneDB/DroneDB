@@ -14,9 +14,12 @@ namespace cmd
     // into a message on `err` and an exit code: the one place that does it, so no command
     // exits the process or prints its own error.
     //
-    //   UsageError, a cxxopts parse error, ddb::InvalidArgsException
+    //   UsageError, a cxxopts parse error
     //                           "error: <message>", a blank line and the usage of the command
-    //   any other ddb::AppException   the message
+    //   any other ddb::AppException   the message (an InvalidArgsException of the library too:
+    //                           the input a command works on was refused, which the usage does
+    //                           not explain; a command turns the refusal of an argument it reads
+    //                           into a UsageError, readArgument in command.h)
     //   any other std::exception      "error: <message>"
     //
     // all with EXIT_FAILURE; a command that returns normally gives its own exit code. Nothing

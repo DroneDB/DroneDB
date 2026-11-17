@@ -36,10 +36,6 @@ namespace cmd
         {
             return usageFailure(command, e.what(), err);
         }
-        catch (const ddb::InvalidArgsException &e)
-        {
-            return usageFailure(command, e.what(), err);
-        }
         catch (const ddb::OutputExistsException &e)
         {
             // One line that names the option of the CLI, not the setting of the library

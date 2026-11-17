@@ -9,6 +9,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include "exceptions.h"
 #include "json_fwd.h"
 #include "options.h"
 
@@ -26,6 +27,22 @@ namespace cmd
     public:
         explicit UsageError(const std::string &message = "") : std::runtime_error(message) {}
     };
+
+    // The value of an argument read with a rule of the library (an output format, a list of
+    // types): the InvalidArgsException of the rule is a UsageError, so the command line that
+    // cannot be run is printed with the usage of the command
+    template <typename Read>
+    auto readArgument(Read &&read) -> decltype(read())
+    {
+        try
+        {
+            return read();
+        }
+        catch (const ddb::InvalidArgsException &e)
+        {
+            throw UsageError(e.what());
+        }
+    }
 
     // A CLI command. Commands never exit the process: run() returns the exit code and
     // reports a failure by throwing (UsageError, ddb::AppException), which the handler of the

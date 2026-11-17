@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "include/options.h"
 
+#include "include/command.h"
+
 namespace cmd
 {
 
@@ -30,7 +32,8 @@ namespace cmd
     ddb::OutputFormat getFormatOption(const cxxopts::ParseResult &opts,
                                       std::initializer_list<ddb::OutputFormat> allowed)
     {
-        return ddb::parseOutputFormat(opts["format"].as<std::string>(), allowed);
+        const std::string name = opts["format"].as<std::string>();
+        return readArgument([&] { return ddb::parseOutputFormat(name, allowed); });
     }
 
     void addInsecureOption(cxxopts::Options &opts)
