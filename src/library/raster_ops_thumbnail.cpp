@@ -111,6 +111,28 @@ GDALDatasetUniquePtr complexMagnitudesOf(GDALDatasetH src) {
     return vrt;
 }
 
+// Refuses up front a raster whose thumbnail would decode blocks larger than a read may
+// (raster::requireDecodableBlocks), before a pixel is read: at the overview GDAL resamples the
+// thumbnail from (by average, or by the nearest pixel for a palette, which may take a smaller one).
+// A thumbnail that reads a sample of the raster too (the statistics of a stretch, the range of a
+// formula or of a colormap) may read it at any level, from an overview smaller than the thumbnail
+// to the full resolution, so all of them count. `ds` is the dataset GDAL decodes, not a VRT over it.
+void requireThumbnailBlocks(GDALDatasetH ds, int targetWidth, int targetHeight, bool sampled,
+                            const std::string& path) {
+    if (sampled) {
+        raster::requireDecodableLevels(ds, path);
+        return;
+    }
+    GDALRasterBandH first = GDALGetRasterBand(ds, 1);
+    if (!first)
+        return;
+    const int average = raster::overviewReadFor(first, targetWidth, targetHeight, GRIORA_Average);
+    const int nearest = raster::overviewReadFor(first, targetWidth, targetHeight, GRIORA_NearestNeighbour);
+    raster::requireDecodableBlocks(ds, average, path);
+    if (nearest != average)
+        raster::requireDecodableBlocks(ds, nearest, path);
+}
+
 // Compute thumbnail target dimensions preserving aspect ratio.
 // Guaranteed to return values >= 1 pixel.
 void computeThumbTargetSize(int srcWidth, int srcHeight, int thumbSize,
@@ -321,6 +343,8 @@ RasterImage renderPlainThumbnail(const fs::path& imagePath, int thumbSize) {
 
     int targetWidth = 0, targetHeight = 0;
     computeThumbTargetSize(frameWidth, frameHeight, thumbSize, targetWidth, targetHeight);
+    // Only non-Byte data reads the statistics of its stretch (below)
+    requireThumbnailBlocks(datasetHandle(src), targetWidth, targetHeight, !hasPalette && !isByte, openPath);
 
     // Grey (and grey + alpha) is replicated to RGB; otherwise the first three bands.
     // Only non-Byte data (DEM, thermal...) is stretched over the minimum to the maximum of each band,
@@ -491,6 +515,11 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
 
     int targetWidth, targetHeight;
     computeThumbTargetSize(width, height, thumbSize, targetWidth, targetHeight);
+    // A formula or a colormap reads the range of its values, non-Byte data without a rescale the
+    // statistics of its stretch (below)
+    const bool sampled = !visParams.formula.empty() || !visParams.colormap.empty() ||
+                         (srcType != GDT_Byte && visParams.rescale.empty());
+    requireThumbnailBlocks(datasetHandle(src), targetWidth, targetHeight, sampled, io::toUtf8(imagePath));
 
     // Formula mode: vegetation index rendered with its colormap
     if (!visParams.formula.empty()) {

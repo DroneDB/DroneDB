@@ -80,8 +80,33 @@ namespace ddb
         // and its warning
         void applyProbe(const ProbeResult &result, Entry &entry);
 
+        // The most bytes GDAL may decode at once for a block of a user's raster: a tile, a strip, or
+        // a row of a raster that is not tiled. GDAL decodes a block whole whatever part of it a read
+        // needs, and every band of a pixel-interleaved block with it, before any limit of the
+        // operation can stop it: a TIFF of a few hundred bytes that claims a row of two billion
+        // Float64 pixels made a thumbnail allocate 16 GiB. The blocks of real rasters are far below
+        // it (a row of a raster 200 000 pixels wide of 16 Float64 bands is 24 MiB); the largest ones
+        // are the single compressed strip of a whole image, which GDAL splits into rows only for
+        // 8-bit samples: 512 MiB still reads such a 16-bit RGB image of 89 million pixels.
+        constexpr uint64_t kMaxDecodedBlockBytes = uint64_t{512} * 1024 * 1024;
+
+        // The overview GDAL reads the whole of `band` from into a buffer of bufWidth x bufHeight
+        // pixels with the resampling `resampling` (GDALBandGetBestOverviewLevel2, as RasterIO picks
+        // it), -1 for the full resolution
+        int overviewReadFor(GDALRasterBandH band, int bufWidth, int bufHeight, GDALRIOResampleAlg resampling);
+
+        // Refuses a raster that a read at `overview` (-1: the full resolution) decodes in blocks of
+        // more than kMaxDecodedBlockBytes: every band, and the mask of the first one when it has
+        // one, at that overview (at the full resolution for a band without it). Nothing is read.
+        // @throws RasterOpException (code Limit) naming `path`
+        void requireDecodableBlocks(GDALDatasetH ds, int overview, const std::string &path);
+
+        // requireDecodableBlocks at every level of the raster: the full resolution and each overview
+        void requireDecodableLevels(GDALDatasetH ds, const std::string &path);
+
         // The thumbnail of a photo or a raster, in memory
-        // @throws RasterOpException when the file cannot be opened; GDALException,
+        // @throws RasterOpException when the file cannot be opened, or (code Limit) when a read of
+        // it would decode a block larger than kMaxDecodedBlockBytes; GDALException,
         // InvalidArgsException for a size that is not positive
         RasterImage renderThumbnail(const fs::path &path, const ThumbnailParams &params);
 
@@ -102,8 +127,9 @@ namespace ddb
         // every domain, except the ones that name other files (isFileNamingDomain), so reading the
         // copy never leads to a file of the user. The compression loses nothing: a value of the
         // copy is the value of the raster. The sidecar files of the raster are not copied. Nothing is written for a raster of more than kMaxNormalizePixels.
-        // @throws RasterOpException when the file cannot be opened (code Unreadable) or has more
-        // pixels than allowed (code Limit); GDALException when GDAL fails; RetryableBuildException
+        // @throws RasterOpException when the file cannot be opened (code Unreadable), has more
+        // pixels than allowed or blocks larger than kMaxDecodedBlockBytes at a level (code Limit);
+        // GDALException when GDAL fails; RetryableBuildException
         // when the device is full
         void normalizeRaster(const fs::path &path, const fs::path &outFile);
 
