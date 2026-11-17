@@ -715,13 +715,15 @@ Registry has to adopt first.
   COPC of 2.5: another octree (the same file whatever the threads and the memory), LAS 1.4 point format 6, 7 with
   colours or 8 with near infrared (a cloud without colours no longer has zero colours, so its `dimensions` have no
   `Red`, `Green`, `Blue`), the scale and offset of a single LAS source (else finer ones than the 0.01 of 2.5), and
-  the 8-bit colours and intensities of PLY, PTS and XYZ sources scaled to 16 bits. A cloud of fewer than 2 points
-  or of no extent in X or Y is refused as before (`DDBERR_INVALIDARGS`), from the count and bounds of the COPC it
-  made; a cloud without any point is a cloud that cannot be read (`DDBERR_EXCEPTION`, "the input holds no
-  points"). A full disk during the build is a retryable failure. `DDBBuildEx2` reports the phases of a point cloud
-  build: "planning" from 0, "reading" from 0.05, "building" from 0.4 and "writing" when the file is done (2.5:
-  fraction -1 until it was done). `DDB_UNTWINE_PATH`, `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose
-  between Untwine and PDAL's writers.copc in 2.5, are no longer read, and the packages have no Untwine.
+  the 8-bit colours and intensities of PLY, PTS and XYZ sources scaled to 16 bits. A cloud of one point, or of no
+  extent in one or two axes (a vertical line, a wall), has a COPC whose octree cube is its largest extent plus one
+  scale step on each side, a thumbnail with its points at the centre and map tiles (2.5 refused fewer than 2 points
+  or no extent in X or Y with `DDBERR_INVALIDARGS`); a cloud without any point is a cloud that cannot be read
+  (`DDBERR_EXCEPTION`, "the input holds no points"). A full disk during the build is a retryable failure.
+  `DDBBuildEx2` reports the phases of a point cloud build: "planning" from 0, "reading" from 0.05, "building" from
+  0.4 and "writing" when the file is done (2.5: fraction -1 until it was done). `DDB_UNTWINE_PATH`,
+  `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose between Untwine and PDAL's writers.copc in 2.5, are no
+  longer read, and the packages have no Untwine.
 
 * 2026-11-16: 2.7.0 (ABI 2.7: `capabilities` has `abi.minor` 7; no export is added or removed, no schema or
   other fixture changes).
