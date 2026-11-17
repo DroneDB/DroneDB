@@ -505,42 +505,42 @@ fs::path downloadTestDataFile(TestArea& ta, const std::string& relativePath) {
     return ta.downloadTestAsset(url, filename);
 }
 
-// Test for point cloud with single point (edge case)
-// buildCopc should throw InvalidArgsException for single-point clouds
+// The COPC of a cloud of one point has a thumbnail, the point at its centre, written to a file and
+// in memory
 TEST(thumbnail, pointCloudSinglePoint) {
     TestArea ta(TEST_NAME);
     fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_single_point.laz");
 
-    // buildCopc should throw InvalidArgsException for single-point clouds
-    EXPECT_THROW(ddb::buildCopc({pc.string()}, ta.getFolder("copc").string()),
-                 ddb::InvalidArgsException)
-        << "buildCopc should reject single-point clouds with InvalidArgsException";
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    const fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+    ddb::PointCloudInfo info;
+    ASSERT_TRUE(ddb::getCopcInfo(copcPath.string(), info));
+    EXPECT_EQ(info.pointCount, 1);
+
+    // One disc on a transparent square: a WebP below the floor of a real thumbnail
+    const fs::path outFile = ta.getPath("single-point-thumb.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, outFile, true));
+    EXPECT_TRUE(isValidWebP(outFile));
+
+    uint8_t* buffer = nullptr;
+    int bufSize = 0;
+    EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, "", true, &buffer, &bufSize));
+    EXPECT_GT(bufSize, 0);
+    if (buffer) DDBVSIFree(buffer);
 }
 
-// Test for point cloud with flat surface (all Z values identical)
-// This should work if the point cloud has sufficient X/Y extent
-// Note: If the flat surface also has zero X/Y extent, it will throw InvalidArgsException
+// A cloud whose points all have the same Z has a COPC and a thumbnail (one grey)
 TEST(thumbnail, pointCloudFlatSurface) {
     TestArea ta(TEST_NAME);
     fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_flat_surface.laz");
 
-    // Build COPC from LAZ file
-    // This may throw InvalidArgsException if the flat surface also has zero X/Y extent
-    try {
-        ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    const fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+    ASSERT_TRUE(fs::exists(copcPath));
 
-        fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
-        EXPECT_TRUE(fs::exists(copcPath)) << "COPC file should exist after buildCopc";
-
-        fs::path outFile = ta.getPath("flat-surface-thumb.webp");
-        EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, outFile, true))
-            << "Flat surface point cloud should generate thumbnail (all points same Z -> gray)";
-        EXPECT_TRUE(fs::exists(outFile)) << "Flat surface thumbnail should exist";
-        EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "Flat surface thumbnail should have content";
-    } catch (const ddb::InvalidArgsException& e) {
-        // Expected if the point cloud also has zero X/Y extent
-        SUCCEED() << "Flat surface point cloud rejected due to insufficient extent: " << e.what();
-    }
+    const fs::path outFile = ta.getPath("flat-surface-thumb.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, outFile, true));
+    EXPECT_TRUE(isWebPImageNonEmpty(outFile));
 }
 
 // --- Batch regression tests for georaster thumbnail generation ---

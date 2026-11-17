@@ -82,10 +82,10 @@ namespace ddb
     // is read: a cloud.copc.laz that is one of the inputs is refused (InvalidArgsException), and
     // one that exists unless overwrite (OutputExistsException; true for the build handler).
     // @throws FSException for an input that does not exist; InvalidArgsException for one that is
-    // not a point cloud, and for a cloud of fewer than 2 points or of no extent in X or Y;
-    // PDALException for a cloud that cannot be read; AppException for a COPC that is not in the
-    // CRS asked for or whose octree is still degenerate; RetryableBuildException when the device is
-    // full; the other exceptions of IRasterHelper
+    // not a point cloud; PDALException for a cloud that cannot be read or has no point (a cloud of
+    // one point, or of no extent in one or two axes, has a COPC); AppException for a COPC that is
+    // not in the CRS asked for or whose octree is still degenerate; RetryableBuildException when
+    // the device is full; the other exceptions of IRasterHelper
     // `known` (in the order of filenames, nothing for a cloud the helper reads) is what the caller
     // already knows of the CRS of a cloud: its crsStatus, wktProjection and targetCrs
     // (chooseCopcTarget), as the index of a dataset has them.

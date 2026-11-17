@@ -18,10 +18,12 @@
 #include "dbops.h"
 #include "exceptions.h"
 #include "gtest/gtest.h"
+#include "las_test_writer.h"
 #include "mio.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "thumbs.h"
 #include "utils.h"
 
 
@@ -424,20 +426,52 @@ TEST(pointcloud, copcOfSeveralCloudsHasThePointsOfAll) {
     expectPointsOf(source, buildAndRead({first.string(), second.string()}, ta.getFolder("copc")), 2);
 }
 
-// A cloud of fewer than 2 points, or of no extent in X or Y, has no COPC: the count and the bounds are
-// those of the points the builder read, whatever the format of the file
-TEST(pointcloud, aCloudOfFewerThanTwoPointsOrNoExtentHasNoCopc) {
+// A cloud of one point, or of no extent in one or two axes (a vertical line, a vertical wall), has a
+// COPC of all its points: PDAL writes and reads such LAS and PLY files, and the octree cube of the
+// builder is the largest extent of the cloud plus one scale step on each side, so it never has a size
+// of 0. The COPC reads back and renders a thumbnail. The count and the bounds are those of the points
+// the builder read, whatever the format of the file. A cloud of no point has no COPC.
+TEST(pointcloud, aCloudOfOnePointOrNoExtentInAnAxisHasACopcAndAnEmptyCloudHasNone) {
     TestArea ta(TEST_NAME);
+    const auto expectThumbnailOf = [&ta](const fs::path& folder) {
+        const fs::path thumb = ta.getPath(folder.filename().string() + ".webp");
+        ddb::generateThumb(folder / "cloud.copc.laz", 256, thumb, true);
+        EXPECT_GT(fs::exists(thumb) ? fs::file_size(thumb) : 0, 0u);
+    };
     const std::vector<std::pair<std::string, std::string>> clouds = {
-        {"one.xyz", "1 2 3\n"}, {"vertical.xyz", "1 2 3\n1 2 5\n1 2 7\n"}, {"line.pts", "2\n1 2 3\n1 5 3\n"}};
+        {"one.xyz", "1 2 3\n"},
+        {"vertical.xyz", "1 2 3\n1 2 5\n1 2 7\n"},
+        {"line.pts", "2\n1 2 3\n1 5 3\n"},
+        {"wall.xyz", "0 0 0\n0 1 0\n0 0 1\n0 1 1\n"}};
     for (const auto& [name, text] : clouds) {
         SCOPED_TRACE(name);
         const fs::path file = ta.getPath(name);
         std::ofstream(file) << text;
         const fs::path out = ta.getFolder("copc-" + fs::path(name).stem().string());
-        EXPECT_THROW(ddb::buildCopc({file.string()}, out.string()), ddb::InvalidArgsException);
-        expectNothingIn(out);
+        expectPointsOf(readTextCloud(file), buildAndRead({file.string()}, out), 1e-3);
+        expectThumbnailOf(out);
     }
+
+    // The single return of a LAS file
+    const fs::path one = ta.getPath("one.las");
+    testutils::writeLas14(one, "", {{500000.5, 4100000.25, 120.0}});
+    ddb::PointCloudInfo source;
+    ASSERT_TRUE(ddb::getPointCloudInfo(one.string(), source));
+    ASSERT_EQ(source.pointCount, 1);
+    const fs::path oneOut = ta.getFolder("copc-one-las");
+    expectPointsOf(source, buildAndRead({one.string()}, oneOut));
+    expectThumbnailOf(oneOut);
+
+    const fs::path empty = ta.getPath("empty.las");
+    testutils::writeLas14(empty, "", {});
+    const fs::path emptyOut = ta.getFolder("copc-empty");
+    try {
+        ddb::buildCopc({empty.string()}, emptyOut.string());
+        ADD_FAILURE() << "a cloud of no point has no COPC";
+    } catch (const ddb::AppException& e) {
+        EXPECT_NE(std::string(e.what()).find("no points"), std::string::npos) << e.what();
+    }
+    expectNothingIn(emptyOut);
 }
 
 // A file the builder cannot read is a point cloud that cannot be read, as PDAL's build reported it,

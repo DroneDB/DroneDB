@@ -496,29 +496,21 @@ void planCopcCrs(const std::vector<PointCloudInfo>& inputs, raster::CopcParams& 
 
 // The COPC the helper wrote is published as the point cloud of the build and then trusted by its
 // place: it has to read here as a COPC first. Its header has the exact count and bounds of the
-// points of every source, whatever their format: a cloud of fewer than 2 points, or of no extent in
-// X or Y, has no COPC. When the points were to be transformed, the COPC is in that CRS and its
-// octree splits the cloud: a COPC that does not would serve tiles at the cost the transform avoids.
-// When the CRS was to be dropped, the COPC states none. Returns what the COPC reads as.
+// points of every source, whatever their format. A cloud of no point has no COPC (the builder
+// refuses it first, as a cloud that cannot be read). A cloud of one point, or of no extent in one or
+// two axes (a vertical line, a wall), has one, as PDAL writes and reads it: the octree cube of the
+// builder is the largest extent plus one scale step on each side, never of no size. When the points
+// were to be transformed, the COPC is in that CRS and its octree splits the cloud: a COPC that does
+// not would serve tiles at the cost the transform avoids. When the CRS was to be dropped, the COPC
+// states none. Returns what the COPC reads as.
 PointCloudInfo checkBuiltCopc(const fs::path& produced, const raster::CopcParams& params, const raster::CopcResult& result) {
     const std::string& targetCrs = params.targetCrs;
-    constexpr size_t MinPointCount = 2;
-    // In the point cloud's native units
-    constexpr double MinExtent = 1e-10;
 
     PointCloudInfo info;
     if (!getCopcInfo(io::toUtf8(produced), info) || info.bounds.size() < 6)
         throw PDALException(std::string(raster::kGdalUtilName) + " wrote a COPC that cannot be read");
-    if (info.pointCount < MinPointCount)
-        throw InvalidArgsException("Point cloud has insufficient points (" + std::to_string(info.pointCount) +
-                                   "). At least " + std::to_string(MinPointCount) +
-                                   " points are required for COPC generation.");
-    const double extentX = info.bounds[3] - info.bounds[0];
-    const double extentY = info.bounds[4] - info.bounds[1];
-    if (extentX < MinExtent || extentY < MinExtent)
-        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " + std::to_string(extentX) +
-                                   ", Y: " + std::to_string(extentY) +
-                                   "). Point cloud must have spatial extent for COPC generation.");
+    if (info.pointCount == 0)
+        throw PDALException(std::string(raster::kGdalUtilName) + " wrote a COPC of no points");
     if (params.dropCrs && !info.wktProjection.empty())
         throw AppException(std::string(raster::kGdalUtilName) + " wrote a COPC in " + info.wktProjection +
                            " where no coordinate system was asked for");
