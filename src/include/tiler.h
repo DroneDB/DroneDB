@@ -6,6 +6,7 @@
 
 #include "gdal_inc.h"
 
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -32,6 +33,11 @@ namespace ddb
 
         // Tile for given mercator coordinates
         Projected2Di metersToTile(double mx, double my, int zoom) const;
+
+        // The tiles of zoom level `zoom` (TMS rows) whose area overlaps the EPSG:3857 box `meters`: a
+        // tile that only touches it along an edge is not one of them (metersToTile gives the tile below
+        // and to the left of a point on a corner of tiles)
+        BoundingBox<Projected2Di> tilesIntersecting(const BoundingBox<Projected2D> &meters, int zoom) const;
 
         // Converts pixel coordinates in given zoom level of pyramid to EPSG:3857"
         Projected2D pixelsToMeters(double px, double py, int zoom) const;
@@ -107,7 +113,10 @@ namespace ddb
                                  uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
         std::string tile(const TileInfo &tile);
 
+        // The tiles of zoom level tz that show something of the input: those that overlap contentBounds()
         std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
+        // The EPSG:3857 box of what the tiles show, none when they show nothing: the bounds of the input
+        virtual std::optional<BoundingBox<Projected2D>> contentBounds() const;
         BoundingBox<int> getMinMaxZ() const;
 
         // Min max tile coordinates for specified zoom level

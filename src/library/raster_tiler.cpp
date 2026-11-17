@@ -4,12 +4,14 @@
 
 #include "raster_tiler.h"
 
+#include <array>
 #include <cstdint>
 
 #include "exceptions.h"
 #include "raster_artefacts.h"
 #include "thumbs.h"
 #include "tilers_call.h"
+#include "tilers_raster.h"
 
 namespace ddb
 {
@@ -44,6 +46,27 @@ namespace ddb
     RasterTiler::RasterTiler(const std::string &cogPath, const std::string &tilesFolder, int size, bool tmsRows)
         : TilersTiler(artefact(cogPath), tilesFolder, size, tmsRows)
     {
+    }
+
+    std::optional<BoundingBox<Projected2D>> RasterTiler::contentBounds() const
+    {
+        std::call_once(contentOnce, [this] {
+            const auto raster = tilers::Raster::open(io::fromUtf8(inputPath));
+            if (!raster->geoTransform())
+            {
+                content = TilersTiler::contentBounds();
+                return;
+            }
+            const std::optional<BoundingBox<Projected2Di>> window = raster->opaqueWindow();
+            if (!window)
+                return;
+            // An artefact is in EPSG:3857, north up: its pixel (x, y) starts at gt[0] + x * gt[1], gt[3] + y * gt[5]
+            const std::array<double, 6> &gt = *raster->geoTransform();
+            content = BoundingBox<Projected2D>(
+                Projected2D(gt[0] + window->min.x * gt[1], gt[3] + (window->max.y + 1) * gt[5]),
+                Projected2D(gt[0] + (window->max.x + 1) * gt[1], gt[3] + window->min.y * gt[5]));
+        });
+        return content;
     }
 
     std::string RasterTiler::tile(int tz, int tx, int ty, ImageFormat format, uint8_t **outBuffer, int *outBufferSize)

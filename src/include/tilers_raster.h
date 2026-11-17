@@ -16,6 +16,7 @@
 #include "copied_metadata.h"
 #include "fs.h"
 #include "gdal_metadata.h"
+#include "geo.h"
 
 struct ddbtRaster;
 
@@ -107,6 +108,14 @@ namespace ddb::tilers
         // pixel for pixel, with their mask as readMasked() gives it. @throws InvalidArgsException, GDALException
         void readLevel(int level, int x, int y, int width, int height, std::span<const int> bands, double *out,
                        uint8_t *mask) const;
+
+        // The pixels (first and last column and row, inclusive) of the smallest window that holds every
+        // pixel that may be visible: band 1 not masked (readMasked) and not its NoData value. None when
+        // every pixel is transparent. The COG of a raster is padded with transparent pixels up to the
+        // tiles of its zoom level, so its data is found in its outer blocks: the blocks are read one
+        // row (column) of blocks at a time, inwards from each side, until one holds such a pixel.
+        // @throws InvalidArgsException, GDALException
+        std::optional<BoundingBox<Projected2Di>> opaqueWindow() const;
 
       private:
         // What GDALGetMaskFlags says of band 1
