@@ -91,6 +91,9 @@ class PointCloudEntryHandler : public EntryHandler {
 
     std::string subfolder() const override { return CopcBuildSubfolder; }
 
+    // isComplete() and describeArtifacts() read the status and the CRS of the cloud
+    std::vector<std::string> buildPropertyKeys() const override { return {"crsStatus", "projection"}; }
+
     // A leaf inside a built EPT dataset is not built: the guard skips residual ept-data
     // folders from older builds.
     bool isBuildable(const Entry& e) const override {

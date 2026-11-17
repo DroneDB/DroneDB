@@ -36,8 +36,8 @@ using PrefixLookup = std::function<std::vector<std::string>(const std::string&)>
 struct BuildTarget {
     // The entry whose artifacts are built: the entry itself, or the main file a
     // sidecar belongs to (the .shp of a .dbf). Type dispatch, the input path and
-    // the build key all come from it. Its properties hold the georeference when the type's build
-    // depends on it (EntryHandler::buildDependsOnGeoref).
+    // the build key all come from it. Its properties hold at least the ones the build rules of its
+    // type read (EntryHandler::buildPropertyKeys).
     Entry entry;
     // The build key of entry (handler->buildKey()): the name of its folder "<build root>/<key>/", and
     // the stem of its pending marker (build_layout.h)
@@ -65,12 +65,27 @@ std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e);
 // The indexed paths of db that start with prefix (one range scan of the path index)
 std::vector<std::string> indexedPathsWithPrefix(Database* db, const std::string& prefix);
 
-// The properties of an entry that the build key reads: {"georef": ...} from the text of the georef
-// property as the index holds it (json_extract(properties, '$.georef')), {} when there is none
-json keyProperties(const std::string& georefText);
+// The columns of the entry properties the build rules of every type read
+// (EntryHandler::buildPropertyKeys), for a query of the index that reads entries for their builds,
+// and what an entry has of them in a row. The keys are those of the handlers registered when it is
+// made: a query prepared with sql() is read with read() of the same object.
+class BuildPropertyColumns {
+  public:
+    BuildPropertyColumns();
+    // "properties -> '$.<key>', ...": the JSON text of each property (NULL when it is absent)
+    const std::string& sql() const { return sql_; }
+    // The properties of the entry of a row (an object, also when it has none) whose columns from
+    // `first` are sql(): the ones the build rules of `type` read
+    json read(const Statement& row, int first, EntryType type) const;
 
-// The build key of an entry from the index columns `hash`, `type` and json_extract(properties, '$.georef')
-std::string buildKeyOfRow(const std::string& hash, EntryType type, const std::string& georefText);
+  private:
+    std::vector<std::string> keys_;
+    std::string sql_;
+};
+
+// The build key of an entry from the index columns `hash` and `type`, and its properties as
+// BuildPropertyColumns::read gives them
+std::string buildKeyOfRow(const std::string& hash, EntryType type, const json& properties);
 
 // Called with the path, the content hash and the build key of an indexed entry
 using IndexedBuildVisitor =
@@ -80,17 +95,19 @@ using IndexedBuildVisitor =
 void forEachIndexedBuild(Database* db, const IndexedBuildVisitor& visit);
 
 // The build targets of many entries of one index, with two prepared statements reused for
-// every lookup (getBuildStatus, the build manifest): only path, hash and type are read.
+// every lookup (getBuildStatus, the build manifest): only path, hash, type and the properties the
+// build rules read are read.
 class IndexBuildTargets {
   public:
     explicit IndexBuildTargets(Database* db);
-    // Reads path, hash and type of the entry at path, and the georeference of its properties (the
-    // build key reads it); nothing when there is none
+    // Reads path, hash and type of the entry at path, and the properties its build rules read
+    // (BuildPropertyColumns); nothing when there is none
     std::optional<Entry> lookup(const std::string& path);
     // resolveBuildTarget() over this index
     std::optional<BuildTarget> resolve(const Entry& e);
 
   private:
+    BuildPropertyColumns properties_;
     std::unique_ptr<Statement> byPath_;
     std::unique_ptr<Statement> byPrefix_;
 };

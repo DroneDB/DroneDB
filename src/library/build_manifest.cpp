@@ -376,14 +376,14 @@ void requireBuildKey(const std::string& key) {
 
 // The handlers of the types of the entries whose build has this key (usually one), by type value
 std::vector<const EntryHandler*> handlersOfKey(Database* db, const std::string& key) {
-    const auto q = db->query(
-        "SELECT type, json_extract(properties, '$.georef') FROM entries WHERE hash = ? ORDER BY type");
+    const BuildPropertyColumns properties;
+    const auto q = db->query("SELECT type, " + properties.sql() + " FROM entries WHERE hash = ? ORDER BY type");
     q->bind(1, std::string(buildKeyHash(key)));
     std::vector<const EntryHandler*> handlers;
     const std::string hash(buildKeyHash(key));
     while (q->fetch()) {
         const auto type = static_cast<EntryType>(q->getInt(0));
-        if (buildKeyOfRow(hash, type, q->getText(1)) != key)
+        if (buildKeyOfRow(hash, type, properties.read(*q, 1, type)) != key)
             continue;
         const EntryHandler& handler = entryHandler(type);
         if (std::find(handlers.begin(), handlers.end(), &handler) == handlers.end())

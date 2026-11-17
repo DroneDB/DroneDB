@@ -48,9 +48,9 @@ namespace ddb
     // deferred or keeps failing) there is nothing to move: the key of the row is the key before, so the entry
     // is not reported again at every rescan.
     std::string buildKeyBeforeRescan(const fs::path &buildDirectory, const std::string &hash, EntryType type,
-                                     const std::string &georefText)
+                                     const json &properties)
     {
-        const std::string key = buildKeyOfRow(hash, type, georefText);
+        const std::string key = buildKeyOfRow(hash, type, properties);
         if (key == hash)
             return key;
         const auto isFolder = [&](const std::string &name)
@@ -66,12 +66,13 @@ namespace ddb
     // for each run, so removing many paths does not prepare three statements per path.
     class RowDeleter
     {
+        BuildPropertyColumns properties_;
         std::unique_ptr<Statement> metaDelete_, select_, delete_;
 
     public:
         RowDeleter(Database *db, const std::string &predicateSql)
             : metaDelete_(db->query("DELETE FROM entries_meta WHERE " + predicateSql)),
-              select_(db->query("SELECT path, hash, type, json_extract(properties, '$.georef') FROM entries WHERE " +
+              select_(db->query("SELECT path, hash, type, " + properties_.sql() + " FROM entries WHERE " +
                                 predicateSql)),
               delete_(db->query("DELETE FROM entries WHERE " + predicateSql))
         {
@@ -92,8 +93,10 @@ namespace ddb
                 deletedPaths.push_back(select_->getText(0));
                 const auto hash = select_->getText(1);
                 if (!hash.empty())
-                    deletedHashes.push_back(buildKeyOfRow(hash, static_cast<EntryType>(select_->getInt(2)),
-                                                          select_->getText(3)));
+                {
+                    const auto type = static_cast<EntryType>(select_->getInt(2));
+                    deletedHashes.push_back(buildKeyOfRow(hash, type, properties_.read(*select_, 3, type)));
+                }
                 count++;
             }
             select_->reset();
@@ -226,7 +229,8 @@ namespace ddb
     {
         const fs::path directory = db->rootDirectory();
 
-        auto q = db->query("SELECT path,mtime,hash,type,json_extract(properties, '$.georef') FROM entries");
+        const BuildPropertyColumns properties;
+        auto q = db->query("SELECT path, mtime, hash, type, " + properties.sql() + " FROM entries");
         auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
         const auto updateQ = db->query(kUpdateEntrySql);
 
@@ -245,7 +249,7 @@ namespace ddb
             const auto mtime = q->getDouble(1);
             const auto hash = q->getText(2);
             const auto type = static_cast<EntryType>(q->getInt(3));
-            const auto georef = q->getText(4);
+            const json buildProperties = properties.read(*q, 4, type);
             double fileMtime = 0;
             const auto status = checkUpdate(e, p, mtime, hash, &fileMtime);
 
@@ -257,7 +261,7 @@ namespace ddb
                 deleteQ->bind(1, relPath.generic());
                 deleteQ->execute();
                 if (!hash.empty())
-                    checkDeleteBuild(db, buildKeyOfRow(hash, type, georef));
+                    checkDeleteBuild(db, buildKeyOfRow(hash, type, buildProperties));
                 checkDeleteMeta(db, relPath.generic());
                 if (callback)
                     callback(true, relPath.generic());
@@ -296,7 +300,8 @@ namespace ddb
 
         const auto updateQ = db->query(kUpdateEntrySql);
         // What the index holds of an entry before it is re-read: the build key reads it (D-020)
-        const auto beforeQ = db->query("SELECT hash, type, json_extract(properties, '$.georef') FROM entries WHERE path = ?");
+        const BuildPropertyColumns buildProperties;
+        const auto beforeQ = db->query("SELECT hash, type, " + buildProperties.sql() + " FROM entries WHERE path = ?");
         const fs::path buildDirectory = db->buildDirectory();
 
         // Deliberately one IMMEDIATE transaction for the whole rescan (design choice, kept):
@@ -346,9 +351,11 @@ namespace ddb
                 {
                     beforeQ->bind(1, path);
                     if (beforeQ->fetch())
-                        keyBefore = buildKeyBeforeRescan(buildDirectory, beforeQ->getText(0),
-                                                         static_cast<EntryType>(beforeQ->getInt(1)),
-                                                         beforeQ->getText(2));
+                    {
+                        const auto type = static_cast<EntryType>(beforeQ->getInt(1));
+                        keyBefore = buildKeyBeforeRescan(buildDirectory, beforeQ->getText(0), type,
+                                                         buildProperties.read(*beforeQ, 2, type));
+                    }
                     beforeQ->reset();
                 }
 
@@ -500,11 +507,13 @@ namespace ddb
         // The build key the index row at path names (build_layout.h), nothing for a folder or a path not indexed
         std::optional<std::string> buildKeyAt(Database *db, const std::string &path)
         {
-            auto q = db->query("SELECT hash, type, json_extract(properties, '$.georef') FROM entries WHERE path = ?");
+            const BuildPropertyColumns properties;
+            auto q = db->query("SELECT hash, type, " + properties.sql() + " FROM entries WHERE path = ?");
             q->bind(1, path);
             if (!q->fetch() || q->getText(0).empty())
                 return std::nullopt;
-            return buildKeyOfRow(q->getText(0), static_cast<EntryType>(q->getInt(1)), q->getText(2));
+            const auto type = static_cast<EntryType>(q->getInt(1));
+            return buildKeyOfRow(q->getText(0), type, properties.read(*q, 2, type));
         }
 
         // A file moved from oldPath (whose build key was oldKey) to newPath: its pending marker is named by its

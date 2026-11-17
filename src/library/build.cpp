@@ -11,7 +11,9 @@
 #include "stringutil.h"
 
 #include <algorithm>
+#include <cctype>
 #include <optional>
+#include <stdexcept>
 #include <tuple>
 
 #include "build_internal.h"
@@ -99,29 +101,53 @@ static const EntryHandler* buildingHandler(const Entry& e) {
     return handler.isBuildable(e) ? &handler : nullptr;
 }
 
-json keyProperties(const std::string& georefText) {
+BuildPropertyColumns::BuildPropertyColumns() {
+    for (const EntryHandler* handler : entryHandlers())
+        for (const std::string& key : handler->buildPropertyKeys()) {
+            // A key is a name in the code, never data: it goes into the SQL as it is
+            if (key.empty() || !std::all_of(key.begin(), key.end(), [](char c) {
+                    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+                }))
+                throw std::logic_error("Invalid build property key '" + key + "' of " + handler->name());
+            if (std::find(keys_.begin(), keys_.end(), key) == keys_.end())
+                keys_.push_back(key);
+        }
+    for (const std::string& key : keys_)
+        sql_ += (sql_.empty() ? "" : ", ") + std::string("properties -> '$.") + key + "'";
+    // A query with no property column still has one column there
+    if (sql_.empty())
+        sql_ = "NULL";
+}
+
+json BuildPropertyColumns::read(const Statement& row, int first, EntryType type) const {
     json properties = json::object();
-    if (!georefText.empty()) {
-        auto georef = json::parse(georefText, nullptr, false);
-        if (!georef.is_discarded() && georef.is_object())
-            properties["georef"] = std::move(georef);
+    for (const std::string& key : entryHandler(type).buildPropertyKeys()) {
+        const auto column = std::find(keys_.begin(), keys_.end(), key);
+        if (column == keys_.end())
+            continue;
+        const std::string text = row.getText(first + static_cast<int>(column - keys_.begin()));
+        if (text.empty())
+            continue;
+        auto value = json::parse(text, nullptr, false);
+        if (!value.is_discarded())
+            properties[key] = std::move(value);
     }
     return properties;
 }
 
-std::string buildKeyOfRow(const std::string& hash, EntryType type, const std::string& georefText) {
+std::string buildKeyOfRow(const std::string& hash, EntryType type, const json& properties) {
     Entry e;
     e.hash = hash;
     e.type = type;
-    e.properties = keyProperties(georefText);
+    e.properties = properties;
     return entryHandler(type).buildKey(e);
 }
 
-// The target of a build of entry by handler. The key reads the georeference of the index when the
-// type's build depends on it and entry does not carry its properties (a summary).
+// The target of a build of entry by handler. Its build rules read properties of the entry: an entry
+// that does not carry them (a summary) gets them from the index.
 static BuildTarget makeBuildTarget(Entry entry, const EntryHandler& handler, bool viaDependency,
                                    const EntryLookup& lookup) {
-    if (handler.buildDependsOnGeoref() && !entry.properties.is_object())
+    if (!handler.buildPropertyKeys().empty() && !entry.properties.is_object())
         if (const auto indexed = lookup(entry.path))
             entry.properties = indexed->properties;
     std::string key = handler.buildKey(entry);
@@ -194,8 +220,8 @@ bool isBuildComplete(Database* db, const std::string& path) {
 }
 
 IndexBuildTargets::IndexBuildTargets(Database* db)
-    // Only the columns the build rules read: the georeference is the one property of the build key
-    : byPath_(db->query("SELECT path, hash, type, json_extract(properties, '$.georef') FROM entries WHERE path = ?")),
+    // Only the columns the build rules read
+    : byPath_(db->query("SELECT path, hash, type, " + properties_.sql() + " FROM entries WHERE path = ?")),
       byPrefix_(db->query(PathsWithPrefixQuery)) {}
 
 std::optional<Entry> IndexBuildTargets::lookup(const std::string& path) {
@@ -206,8 +232,7 @@ std::optional<Entry> IndexBuildTargets::lookup(const std::string& path) {
         found->path = byPath_->getText(0);
         found->hash = byPath_->getText(1);
         found->type = static_cast<EntryType>(byPath_->getInt(2));
-        // The properties the build key reads (an object, also when there is no georeference)
-        found->properties = keyProperties(byPath_->getText(3));
+        found->properties = properties_.read(*byPath_, 3, found->type);
     }
     byPath_->reset();
     return found;
@@ -220,13 +245,13 @@ std::optional<BuildTarget> IndexBuildTargets::resolve(const Entry& e) {
 }
 
 void forEachIndexedBuild(Database* db, const IndexedBuildVisitor& visit) {
-    const auto q = db->query(
-        "SELECT path, hash, type, json_extract(properties, '$.georef') FROM entries "
-        "WHERE hash IS NOT NULL AND hash <> ''");
+    const BuildPropertyColumns properties;
+    const auto q = db->query("SELECT path, hash, type, " + properties.sql() +
+                             " FROM entries WHERE hash IS NOT NULL AND hash <> ''");
     while (q->fetch()) {
         const std::string hash = q->getText(1);
-        visit(q->getText(0), hash,
-              buildKeyOfRow(hash, static_cast<EntryType>(q->getInt(2)), q->getText(3)));
+        const auto type = static_cast<EntryType>(q->getInt(2));
+        visit(q->getText(0), hash, buildKeyOfRow(hash, type, properties.read(*q, 3, type)));
     }
 }
 

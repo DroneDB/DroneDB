@@ -236,6 +236,14 @@ class EntryHandler {
     // "<hash>-<georef digest>", so the same file in two places builds once for each (buildKey()).
     // The default: it does not.
     virtual bool buildDependsOnGeoref() const { return false; }
+    // The keys of the entry properties the build rules of this type read (buildKey(),
+    // isComplete(), describeArtifacts()). Where libddb reads the entries of many builds from the
+    // index (the build manifest, the build status, the build keys of a cleanup), it reads these
+    // properties of each entry and no other, so a rule that reads another one does not see it.
+    // The default: the georeference when buildDependsOnGeoref().
+    virtual std::vector<std::string> buildPropertyKeys() const {
+        return buildDependsOnGeoref() ? std::vector<std::string>{"georef"} : std::vector<std::string>{};
+    }
     // The key of the build folder of e, an entry of this type: its hash, with the digest of its
     // georeference when buildDependsOnGeoref() (build_layout.h buildKey()). e holds its properties.
     std::string buildKey(const Entry& e) const;

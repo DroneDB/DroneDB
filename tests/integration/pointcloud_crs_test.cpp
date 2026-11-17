@@ -20,6 +20,7 @@
 #include "contract_fixtures.h"
 #include "coordstransformer.h"
 #include "ddb.h"
+#include "dbops.h"
 #include "entry.h"
 #include "gdal_raii.h"
 #include "gtest/gtest.h"
@@ -747,6 +748,60 @@ namespace
         ASSERT_EQ(DDBIsBuildComplete(r.c_str(), "lonlat.las", &complete), DDBERR_NONE);
         EXPECT_TRUE(complete);
         EXPECT_TRUE(fs::exists(folder / CopcBuildRecordFileName));
+        DDBReleaseConnections(r.c_str(), nullptr);
+    }
+
+    // A dataset upgraded in place from 2.7: its index has the properties 2.7 wrote (a projection, no
+    // crsStatus) and its build the COPC 2.7 built in degrees, without a build record. Every API that
+    // reports the state of a build (the manifest, which Registry's completeness sweep reads, the
+    // listing with builds, the status) says it is not complete, so that it is built again, and the
+    // manifest names the CRS of the COPC it has
+    TEST(PointCloudCrs, AGeographicCopcOfAnIndexOf27IsNotCompleteForEveryApi)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path las = ta.getPath("meadows-geo.las");
+        writeLonLatLas(las, "EPSG:4326", 13.84, 46.68, 0.014, 60);
+        const fs::path root = ta.getFolder("dataset");
+        const json added = contract::makeDataset(root, {las});
+        const std::string r = root.string();
+        const std::string hash = added[0]["hash"].get<std::string>();
+
+        {
+            const auto db = ddb::open(r, false);
+            auto q = db->query("UPDATE entries SET properties = json_remove(properties, '$.crsStatus') WHERE path = ?");
+            q->bind(1, "meadows-geo.las");
+            q->execute();
+        }
+        const fs::path folder = root / ".ddb" / "build" / hash / CopcBuildSubfolder;
+        fs::create_directories(folder);
+        raster::CopcParams params;
+        params.threads = 2;
+        raster::buildCopcFile(las, folder / CopcFileName, params, {});
+        ASSERT_FALSE(fs::exists(folder / CopcBuildRecordFileName));
+
+        const char *paths[] = {"meadows-geo.las"};
+        char *out = nullptr;
+        ASSERT_EQ(DDBGetBuildArtifacts(r.c_str(), paths, 1, &out), DDBERR_NONE) << DDBGetLastError();
+        const json artifacts = contract::takeJson(out);
+        const json &build = artifacts[0]["build"];
+        EXPECT_EQ(build["state"], "none") << build.dump();
+        ASSERT_EQ(build["artifacts"].size(), 1u) << build.dump();
+        EXPECT_EQ(build["artifacts"][0]["crs"], (json{{"name", "WGS 84"}, {"epsg", 4326}, {"transformed", false}}))
+            << build.dump();
+
+        DDBListEntriesOptions options{sizeof(DDBListEntriesOptions), true, false, true, 0};
+        ASSERT_EQ(DDBListEntriesEx(r.c_str(), "", "", "", &options, &out), DDBERR_NONE) << DDBGetLastError();
+        const json listed = contract::takeJson(out);
+        ASSERT_EQ(listed.size(), 1u);
+        EXPECT_EQ(listed[0]["build"]["state"], "none") << listed.dump();
+        EXPECT_EQ(listed[0]["build"]["artifacts"][0].value("crs", json()), build["artifacts"][0]["crs"]) << listed.dump();
+
+        bool complete = true;
+        ASSERT_EQ(DDBIsBuildComplete(r.c_str(), "meadows-geo.las", &complete), DDBERR_NONE);
+        EXPECT_FALSE(complete);
+        ASSERT_EQ(DDBGetBuildStatus(r.c_str(), paths, 1, &out), DDBERR_NONE) << DDBGetLastError();
+        const json status = contract::takeJson(out);
+        EXPECT_EQ(status[0]["complete"], false) << status.dump();
         DDBReleaseConnections(r.c_str(), nullptr);
     }
 
