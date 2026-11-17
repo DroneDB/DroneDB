@@ -456,6 +456,7 @@ namespace ddb
             bool appearance = false; // rgb and alpha
             bool shape = false;      // scales and orientation
             bool tree = false;       // the child counts and starts of a level-of-detail tree
+            bool alpha = false;      // alpha alone
         };
 
         struct DecodedChunk
@@ -533,7 +534,7 @@ namespace ddb
                     const bool isOrientation = name == "orientation";
                     const bool isChildCount = name == "child_count";
                     const bool isChildStart = name == "child_start";
-                    if (!isCenter && !(wanted.appearance && (isRgb || isAlpha)) &&
+                    if (!isCenter && !(wanted.appearance && (isRgb || isAlpha)) && !(wanted.alpha && isAlpha) &&
                         !(wanted.shape && (isScales || isOrientation)) &&
                         !(wanted.tree && (isChildCount || isChildStart)))
                         continue;
@@ -731,6 +732,53 @@ namespace ddb
                 any = true;
         }
         return any;
+    }
+
+    RadSplatSample sampleRadLeaves(const fs::path &radPath, size_t maxSplats)
+    {
+        std::ifstream in(radPath, std::ios::binary);
+        if (!in.good())
+            throw AppException("RAD: cannot open " + io::toUtf8(radPath));
+
+        const RadHeader header = readHeader(in, io::toUtf8(radPath));
+        const size_t most = std::max<size_t>(1, maxSplats);
+
+        // Every `stride`th leaf; when twice `most` of them are kept, every other one of those is
+        // dropped and the stride doubles, so the sample is every nth leaf whatever the count of the file
+        RadSplatSample sample;
+        size_t leaf = 0, stride = 1;
+        RadAttributes wanted;
+        wanted.tree = true;
+        wanted.alpha = true;
+        for (const auto &ref : header.chunks)
+        {
+            const DecodedChunk chunk = decodeChunk(in, header, ref, io::toUtf8(radPath), wanted);
+            const bool tree = chunk.childCounts.size() == chunk.count;
+            const bool alphas = chunk.opacities.size() == chunk.count;
+            for (size_t i = 0; i < chunk.count; ++i)
+            {
+                if (tree && chunk.childCounts[i] > 0)
+                    continue;
+                if (leaf++ % stride != 0)
+                    continue;
+                sample.positions.insert(sample.positions.end(), chunk.centers.begin() + static_cast<std::ptrdiff_t>(i * 3),
+                                        chunk.centers.begin() + static_cast<std::ptrdiff_t>(i * 3 + 3));
+                sample.opacities.push_back(alphas ? chunk.opacities[i] : 1.0f);
+                if (++sample.count < 2 * most)
+                    continue;
+                for (size_t k = 0; 2 * k < sample.count; ++k)
+                {
+                    std::copy_n(sample.positions.begin() + static_cast<std::ptrdiff_t>(2 * k * 3), 3,
+                                sample.positions.begin() + static_cast<std::ptrdiff_t>(k * 3));
+                    sample.opacities[k] = sample.opacities[2 * k];
+                }
+                sample.count = (sample.count + 1) / 2;
+                sample.positions.resize(sample.count * 3);
+                sample.opacities.resize(sample.count);
+                stride *= 2;
+            }
+        }
+        return sample;
     }
 
 } // namespace ddb

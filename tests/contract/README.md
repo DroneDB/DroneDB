@@ -879,3 +879,8 @@ Registry has to adopt first.
   build without them removes them, and a parse of the same content (a rescan) keeps them. A glTF material with
   `alphaMode` MASK or BLEND reaches bm3d as a cutout (`map_d` naming its texture in the OBJ it is converted to).
   The build warnings change no export, fixture or other schema.
+  The `bounds.json` of a built Gaussian splat (`gsplat.bounds`) gains `framing` (additive): `{"kind": "object" |
+  "scene" | "site", "core": [minX, minY, minZ, maxX, maxY, maxZ]}`, the kind of capture (the cameras went round a
+  subject, were inside a room, or looked down on a piece of ground; a georeferenced splat is a `site`) and the box
+  of its core in the frame of `model.rad`, from a sample of every splat of the model. It is missing for fewer than
+  16 splats and in the `bounds.json` of earlier builds. No fixture changed for it.

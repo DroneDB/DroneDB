@@ -65,6 +65,25 @@ namespace ddb
             }
         }
 
+        // The kind of capture and its core, for the sidecar: where a viewer opens the scene. A framing
+        // that cannot be made is logged and leaves the viewer to frame the scene on its own.
+        void addFraming(const fs::path &rad, json &sidecar, bool georeferenced)
+        {
+            try
+            {
+                const auto framing = estimateSplatFraming(sampleRadLeaves(rad, SplatEstimateSamples), georeferenced);
+                if (!framing)
+                    return;
+                LOGD << "Framing of " << io::toUtf8(rad) << ": " << splatCaptureKindName(framing->kind)
+                     << " (concentration " << framing->concentration << ", flatness " << framing->flatness << ")";
+                sidecar.update(json(*framing));
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "No framing for " << io::toUtf8(rad) << ": " << e.what();
+            }
+        }
+
         // The footprint of the bounding box on the Earth; one that cannot be made is logged and leaves
         // the sidecar without it
         void addFootprint(const LocalFrameGeoref &georef, const std::array<double, 3> &boundsMin,
@@ -82,10 +101,10 @@ namespace ddb
         }
 
         // Local-space sidecar for deterministic camera framing in the viewer (the streamed .rad has
-        // no resident splats at init time): the bounding box, which way is up and, for a georeferenced
-        // splat, where the bounding box is on the Earth. The sidecar is optional (the viewer frames the
-        // scene without it): one that cannot be written is logged and the build still delivers its
-        // model.rad.
+        // no resident splats at init time): the bounding box, which way is up, the kind of capture
+        // and its core and, for a georeferenced splat, where the bounding box is on the Earth. The
+        // sidecar is optional (the viewer frames the scene without it): one that cannot be written is
+        // logged and the build still delivers its model.rad.
         void writeSidecar(const fs::path &rad, const fs::path &boundsFile, const std::array<double, 3> &boundsMin,
                           const std::array<double, 3> &boundsMax, const std::optional<LocalFrameGeoref> &georef)
         {
@@ -95,6 +114,7 @@ namespace ddb
                 j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
                 j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
                 addUpEstimate(rad, j, georef.has_value());
+                addFraming(rad, j, georef.has_value());
                 if (georef.has_value())
                     addFootprint(*georef, boundsMin, boundsMax, j);
                 io::writeFileAtomic(boundsFile, j.dump(), "bounds file");

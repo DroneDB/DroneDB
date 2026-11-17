@@ -5,6 +5,7 @@
 #define SPLAT_FRAME_H
 
 #include <array>
+#include <optional>
 #include <vector>
 
 #include "json_fwd.h"
@@ -25,6 +26,9 @@ namespace ddb
         Pca          // the flattest axis of all the splats
     };
     const char *splatUpSourceName(SplatUpSource source);
+
+    // The estimates look at this many splats at most: every nth of more
+    constexpr size_t SplatEstimateSamples = 40000;
 
     // The viewer stands a scene up by its estimate when upConfidence is at least this much.
     constexpr double SplatUpConfident = 0.6;
@@ -86,6 +90,59 @@ namespace ddb
         std::array<std::array<double, 3>, 3> axes{};
     };
     SplatAxes principalAxes(const std::vector<std::array<double, 3>> &points, const std::vector<double> &weights);
+
+    // How a scene was captured, which says where a viewer opens it from; the names are the
+    // `framing.kind` values of bounds.json.
+    enum class SplatCaptureKind
+    {
+        Object, // the cameras went round a subject: dense in the middle, sparse around. Seen from outside, orbiting it
+        Scene,  // the cameras were inside it (a room): about as dense all over. Seen from inside, level
+        Site    // a piece of ground, seen from the air or georeferenced: wide and flat. Seen from above, at an angle
+    };
+    const char *splatCaptureKindName(SplatCaptureKind kind);
+
+    // Where a viewer opens a scene: the kind of capture and the box of its core, the part to frame (a
+    // scene is full of floaters and far background splats: its full bounds put the subject in a corner).
+    struct SplatFraming
+    {
+        SplatCaptureKind kind = SplatCaptureKind::Scene;
+        std::array<double, 3> coreMin{}; // in the frame of the splats
+        std::array<double, 3> coreMax{};
+        // What the kind was told by: r50 / r90 of the distances to the middle of the scene, and
+        // 1 - sqrt(l3 / l2) of its three spreads l1 >= l2 >= l3
+        double concentration = 0.0;
+        double flatness = 0.0;
+    };
+
+    // A scene at least this flat is a site (a room is about as high as it is wide) ...
+    constexpr double SplatSiteFlatness = 0.8;
+    // ... and one that is not, an object when the nearer half of its opacity is within this share of the
+    // distance that holds 90% of it (0.82 for splats spread evenly through a ball, 0.75 over a disc)
+    constexpr double SplatObjectConcentration = 0.5;
+
+    /// {"framing": {"kind": "object" | "scene" | "site", "core": [minX, minY, minZ, maxX, maxY, maxZ]}}:
+    /// the member bounds.json adds to its bounding box
+    void to_json(json &j, const SplatFraming &framing);
+
+    // The framing of a scene from the centres of its splats (`positions`, 3 floats each) weighted by
+    // their activated `opacities` (one each; an empty array weighs all as 1), deterministically.
+    // Everything is measured within the box of the 1st to 99th percentile of each axis (the outliers a
+    // scene always has left out), around its middle (the weighted median of each axis):
+    //
+    //  1. A georeferenced scene, and one whose flatness is at least SplatSiteFlatness, is a Site; its
+    //     core is that box.
+    //  2. One whose concentration is below SplatObjectConcentration is an Object: the cameras saw its
+    //     subject from all sides and its surroundings from afar. Its core is the 2nd to 98th
+    //     percentile box of the splats within three times the distance to the middle that holds the
+    //     nearest fifth of the opacity: the subject, and a little of what it stands on.
+    //  3. Any other is a Scene; its core is the 10th to 90th percentile box, where its subject is.
+    //
+    // nullopt for fewer than 16 splats, or splats with no extent.
+    std::optional<SplatFraming> estimateSplatFraming(const std::vector<float> &positions,
+                                                     const std::vector<float> &opacities, bool georeferenced = false);
+    // The framing reads the leaves of a RAD (sampleRadLeaves): its coarse splats are spread over space,
+    // so a dense subject is no denser among them than its surroundings
+    std::optional<SplatFraming> estimateSplatFraming(const RadSplatSample &splats, bool georeferenced = false);
 
 } // namespace ddb
 
