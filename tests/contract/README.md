@@ -835,7 +835,7 @@ Registry has to adopt first.
   a raster of 5 x 5000 pixels of 240 x 0.24 m has a thumbnail of 512 x 512, no longer 1 x 512.
   A `ddb` command whose input the library refuses (`DDBERR_INVALIDARGS` while it works) prints the message alone,
   without the usage of the command; an argument it cannot read (an option, a format, a filter) still prints both.
-  ddb-tilers 0.13.2 changes what the COG of a GeoRaster holds and how tiles are drawn (no schema or fixture
+  ddb-tilers 0.13.3 changes what the COG of a GeoRaster holds and how tiles are drawn (no schema or fixture
   changed): a source without nodata, mask or alpha band gets an internal mask of the pixels the warp writes (the
   padding up to the tiles of the grid and the corners of a rotated raster were opaque 0, in the statistics too);
   the nodata of several bands comes with an internal mask of the pixels where not every band is at nodata (a pixel
@@ -846,8 +846,9 @@ Registry has to adopt first.
   no pixel of the raster is under is blank, whatever the formula asked. Point-cloud tiles have no gaps where the
   cloud has points. A nodata override (`DDB_RASTER_OPT_NODATA`) makes the pixels where every band is at that
   value transparent in the band tiles of a COG with an internal mask too (with ddb-tilers 0.13.1 it had no effect
-  on the COGs that now get one). bm3d is 1.1.3 and the 3D Tiles of models are built by Obj2Tiles v1.10.3 (OBJ models whose
-  parts differ are tiled whole; KTX2 textures are a multiple of 4 in size).
+  on the COGs that now get one). A floating-point band whose values differ only by the rounding of the warp (a
+  constant raster, within 2^-42 of its value) is drawn as a constant band, black, not as grey noise. bm3d is
+  1.1.3 and the 3D Tiles of models are built by Obj2Tiles v1.10.3 (OBJ models whose parts differ are tiled whole; KTX2 textures are a multiple of 4 in size).
   The entry `properties` of a GeoRaster gain `hasMask` (true when the raster has a mask of its own, an internal or
   external mask that is neither its alpha band nor its nodata) and, in each band, `noData` when the band has one
   (a number, or `"nan"`, `"inf"`, `"-inf"`; a GeoTIFF has one nodata for every band, its alpha band too); the
