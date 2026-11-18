@@ -88,6 +88,11 @@ struct IndexFixture
 std::filesystem::path makeIndex(const std::string &testArea, const std::filesystem::path &folder = "ds",
                                 bool recreateArea = true);
 
+// Writes the COG output of a GeoRaster build in the build folder `buildRoot` ("<build root>/<key>") as this
+// release builds it: a stand-in cog/cog.tif ("x") and the record of the COG build rules beside it, so that
+// it is complete for any entry, whatever the index holds of its raster (CogBuildPolicy)
+void writeBuiltCog(const std::filesystem::path &buildRoot);
+
 // Inserts an index row directly (no file needed): `path` with `hash` and `type`, properties
 // "{}", mtime 0, size 1 and the depth of the path. For tests of the build rules, which read
 // path, hash and type only.

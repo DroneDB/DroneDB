@@ -503,9 +503,10 @@ namespace
             lastCogParams = params;
             fs::copy_file(cog_, out, fs::copy_options::overwrite_existing);
         }
-        void buildCopc(const fs::path &, const fs::path &, const json &, const raster::ProgressCallback &) override
+        json buildCopc(const fs::path &, const fs::path &, const json &, const raster::ProgressCallback &) override
         {
             ADD_FAILURE() << "no point cloud is built";
+            return json::object();
         }
         void buildVector(const fs::path &, const fs::path &, const json &, const raster::ProgressCallback &) override
         {

@@ -225,7 +225,9 @@ USER_OPEN_TEST(DDBBuildEx, theCapReachesTheThreadsOfARasterBuildThroughTheEntryH
     }
 }
 
-TEST(DDBBuildEx, theCapReachesTheThreadsOfACopcBuildThroughTheEntryHandler) {
+// The build reads the CRS of the cloud (pointCloudInfo) before it builds: the in-process helper opens
+// the file of a user, so the test runs in a child that plays the helper
+USER_OPEN_TEST(DDBBuildEx, theCapReachesTheThreadsOfACopcBuildThroughTheEntryHandler) {
     PointCloudDataset ds("DDBBuildEx.copc");
     // The test reads the threads of the COPC build from the log of the process that builds
     testutils::InProcessRasterHelper helper;

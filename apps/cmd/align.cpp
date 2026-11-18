@@ -56,7 +56,7 @@ namespace cmd
         if (modeStr == "translation")
             aopts.mode = ddb::AlignMode::Translation;
         else if (modeStr != "similarity")
-            throw ddb::InvalidArgsException("Unknown mode '" + modeStr + "'. Use: similarity | translation");
+            usageError("Unknown mode '" + modeStr + "'. Use: similarity | translation");
 
         if (opts.count("no-seed"))
             aopts.usePhaseCorrelationSeed = false;

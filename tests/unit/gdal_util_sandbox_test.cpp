@@ -1070,8 +1070,10 @@ namespace
     // ------------------------------------------------------------------ the limits end in `limit`
 
     // A raster whose blocks are large and cost a lot of cpu time: three bands of 12288 x 12288
-    // floats, each band one compressed block of 576 MiB (zeros, so the file is a few hundred KiB).
-    // Reading it needs more than 512 MiB at once, and copying it takes seconds of cpu time.
+    // floats in compressed strips of 3584 rows, 504 MiB each for the three bands (zeros, so the file
+    // is a few hundred KiB): just within the blocks a read may decode (kMaxDecodedBlockBytes), so the
+    // helper reads it. Reading it needs more than 512 MiB at once, and copying it takes seconds of
+    // cpu time.
     class GdalUtilSandboxLimits : public ::testing::Test
     {
       protected:
@@ -1079,7 +1081,7 @@ namespace
         {
             area_ = new TestArea("GdalUtilSandbox.heavy", true);
             heavy_ = new fs::path(area_->getFolder() / "heavy.tif");
-            createHeavy(*heavy_, {"COMPRESS=DEFLATE", "TILED=NO", "BLOCKYSIZE=12288", "BIGTIFF=IF_SAFER"});
+            createHeavy(*heavy_, {"COMPRESS=DEFLATE", "TILED=NO", "BLOCKYSIZE=3584", "BIGTIFF=IF_SAFER"});
         }
 
         // A 12288 x 12288 Float32 raster of 3 bands, all 0, georeferenced in EPSG:32632
@@ -1126,7 +1128,7 @@ namespace
         if (sandbox::sanitizerAllowances().unlimitedAddressSpace)
             GTEST_SKIP() << "A " << sandbox::sanitizerAllowances().runtime
                          << " build cannot start under an address space limit: its shadow memory takes terabytes of it";
-        // The server and its workers have 512 MiB of address space; a block of the file is 576 MiB
+        // The server and its workers have 512 MiB of address space; a block of the file is 504 MiB
         Server server({{kSandboxEnv, "best-effort"}}, 512 * kMiB);
         const auto response = server.ask(request(1, raster::op::kNormalize, *heavy_, outputFolder("memory") / "n.tif"));
         EXPECT_FALSE(response.ok);
@@ -1185,8 +1187,8 @@ namespace
         options.runner = &runner;
         raster::GdalUtilHelper helper(options);
 
-        // The same raster in tiles: the build reads it block by block (the single strip of heavy_ is a
-        // block larger than the COG builder decodes) and runs past its cpu time
+        // The same raster in tiles of 512 x 512: the build reads it block by block and runs past its
+        // cpu time
         const fs::path folder = outputFolder("build");
         const fs::path tiled = folder / "heavy-tiled.tif";
         createHeavy(tiled, {"COMPRESS=DEFLATE", "TILED=YES", "BLOCKXSIZE=512", "BLOCKYSIZE=512"});

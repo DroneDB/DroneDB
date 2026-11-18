@@ -24,7 +24,7 @@ namespace ddb
         constexpr size_t kMinSplats = 16;
         // The fit looks at this many splats at most (every nth of the others): the RANSAC scores
         // every one of them for each plane it tries
-        constexpr size_t kMaxSplats = 40000;
+        constexpr size_t kMaxSplats = SplatEstimateSamples;
         constexpr int kRansacIterations = 300;
         constexpr uint32_t kSeed = 0x5eed5eedu;
         // A splat this transparent is not part of the scene
@@ -459,6 +459,75 @@ namespace ddb
             up.confidence = kPcaConfidenceCeiling * ramp(flatness, 0.3, 0.8) * ramp(std::abs(skew), 0.2, 1.0);
             return up;
         }
+
+        // 1 - sqrt(l3 / l2) of the spreads of a scene: 0 for a ball, 1 for a sheet
+        double flatnessOf(const Spread &spread)
+        {
+            return spread.values[1] > 0.0 ? 1.0 - std::sqrt(spread.values[2] / spread.values[1]) : 0.0;
+        }
+
+        // The weighted quantiles of a set of values: sorted once, read at any share of the weight
+        class WeightedQuantiles
+        {
+        public:
+            explicit WeightedQuantiles(std::vector<std::pair<double, double>> values) : values_(std::move(values))
+            {
+                std::sort(values_.begin(), values_.end());
+                cumulative_.reserve(values_.size());
+                double sum = 0.0;
+                for (const auto &value : values_)
+                    cumulative_.push_back(sum += value.second);
+            }
+
+            // The least value with at least `share` (0..1) of the weight at or below it
+            double at(double share) const
+            {
+                const auto it = std::lower_bound(cumulative_.begin(), cumulative_.end(), share * cumulative_.back());
+                return values_[std::min(static_cast<size_t>(it - cumulative_.begin()), values_.size() - 1)].first;
+            }
+
+        private:
+            std::vector<std::pair<double, double>> values_; // value, weight
+            std::vector<double> cumulative_;
+        };
+
+        struct Box
+        {
+            Vec3 min{}, max{};
+            bool contains(const Vec3 &p) const
+            {
+                return p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1] && p[2] >= min[2] &&
+                       p[2] <= max[2];
+            }
+        };
+
+        // The box from the `low` to the `high` weighted quantile of each axis of the points `selected` names
+        Box quantileBox(const Points &points, const std::vector<size_t> &selected, double low, double high)
+        {
+            Box box;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                std::vector<std::pair<double, double>> values;
+                values.reserve(selected.size());
+                for (const size_t i : selected)
+                    values.emplace_back(points.p[i][axis], points.w[i]);
+                const WeightedQuantiles quantiles(std::move(values));
+                box.min[axis] = quantiles.at(low);
+                box.max[axis] = quantiles.at(high);
+            }
+            return box;
+        }
+
+        // A scene is framed without its outliers: the splats outside this share at each end of an axis
+        constexpr double kSceneOutliers = 0.01;
+        // The core of a scene seen from inside: its middle 80% along each axis
+        constexpr double kSceneCore = 0.1;
+        // The core of an object: its splats within this many times the distance to the middle that holds
+        // the nearest fifth of the opacity (the subject of a capture can hold less than half of it: a
+        // truck in a square lined with trees), less the outermost of them
+        constexpr double kObjectReach = 3.0;
+        constexpr double kObjectShare = 0.2;
+        constexpr double kObjectCore = 0.02;
     } // namespace
 
     const char *splatUpSourceName(SplatUpSource source)
@@ -529,6 +598,86 @@ namespace ddb
         for (int c = 0; c < 3; ++c)
             result.axes[c] = axisOf(spread, c);
         return result;
+    }
+
+    const char *splatCaptureKindName(SplatCaptureKind kind)
+    {
+        switch (kind)
+        {
+            case SplatCaptureKind::Object: return "object";
+            case SplatCaptureKind::Scene: return "scene";
+            case SplatCaptureKind::Site: return "site";
+        }
+        return "scene";
+    }
+
+    void to_json(json &j, const SplatFraming &framing)
+    {
+        // Rounded as the up vector is: the file is read by people
+        const auto round6 = [](double v) { return std::round(v * 1e6) / 1e6; };
+        j = json::object();
+        j["framing"] = {{"kind", splatCaptureKindName(framing.kind)},
+                        {"core",
+                         {round6(framing.coreMin[0]), round6(framing.coreMin[1]), round6(framing.coreMin[2]),
+                          round6(framing.coreMax[0]), round6(framing.coreMax[1]), round6(framing.coreMax[2])}}};
+    }
+
+    std::optional<SplatFraming> estimateSplatFraming(const std::vector<float> &positions,
+                                                     const std::vector<float> &opacities, bool georeferenced)
+    {
+        const Points points = gather(positions, opacities);
+        if (points.p.size() < kMinSplats || !(points.extent > 0.0) || !(points.totalWeight > 0.0))
+            return std::nullopt;
+
+        std::vector<size_t> all(points.p.size());
+        std::iota(all.begin(), all.end(), size_t{0});
+        const Box scene = quantileBox(points, all, kSceneOutliers, 1.0 - kSceneOutliers);
+        std::vector<size_t> inside;
+        for (const size_t i : all)
+            if (scene.contains(points.p[i]))
+                inside.push_back(i);
+        if (inside.size() < kMinSplats)
+            return std::nullopt;
+
+        // The middle of the scene, and how far its splats are from it
+        const Box middle = quantileBox(points, inside, 0.5, 0.5);
+        std::vector<std::pair<double, double>> distances;
+        distances.reserve(inside.size());
+        for (const size_t i : inside)
+            distances.emplace_back(length(sub(points.p[i], middle.min)), points.w[i]);
+        const WeightedQuantiles reach(distances);
+        const double r50 = reach.at(0.5), r90 = reach.at(0.9);
+
+        SplatFraming framing;
+        framing.concentration = r90 > 0.0 ? r50 / r90 : 1.0;
+        framing.flatness = flatnessOf(spreadOf(points, &inside));
+
+        Box core = scene;
+        if (georeferenced || framing.flatness >= SplatSiteFlatness)
+            framing.kind = SplatCaptureKind::Site;
+        else if (framing.concentration < SplatObjectConcentration)
+        {
+            framing.kind = SplatCaptureKind::Object;
+            std::vector<size_t> subject;
+            const double reachOfCore = kObjectReach * reach.at(kObjectShare);
+            for (size_t j = 0; j < inside.size(); ++j)
+                if (distances[j].first <= reachOfCore)
+                    subject.push_back(inside[j]);
+            core = quantileBox(points, subject, kObjectCore, 1.0 - kObjectCore);
+        }
+        else
+        {
+            framing.kind = SplatCaptureKind::Scene;
+            core = quantileBox(points, inside, kSceneCore, 1.0 - kSceneCore);
+        }
+        framing.coreMin = core.min;
+        framing.coreMax = core.max;
+        return framing;
+    }
+
+    std::optional<SplatFraming> estimateSplatFraming(const RadSplatSample &splats, bool georeferenced)
+    {
+        return estimateSplatFraming(splats.positions, splats.opacities, georeferenced);
     }
 
 } // namespace ddb

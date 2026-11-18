@@ -216,6 +216,20 @@ namespace
         return request;
     }
 
+    // A sparse GeoTIFF of a few hundred bytes in blocks of blockWidth x blockHeight pixels (a strip
+    // of whole rows for a raster that is not tiled), each of which GDAL decodes whole
+    fs::path createSparseRaster(const fs::path &file, int width, int height, int bands, GDALDataType type,
+                                const std::vector<std::string> &layout)
+    {
+        std::vector<std::string> options = {"SPARSE_OK=TRUE"};
+        options.insert(options.end(), layout.begin(), layout.end());
+        const CPLStringList creation(cslFromStrings(options));
+        const auto ds = adoptDataset(
+            GDALCreate(GDALGetDriverByName("GTiff"), io::toUtf8(file).c_str(), width, height, bands, type, creation.List()));
+        EXPECT_TRUE(ds) << io::toUtf8(file);
+        return file;
+    }
+
     raster::ProbeParams vectorParams()
     {
         raster::ProbeParams params;
@@ -327,6 +341,40 @@ namespace
         // Between 8 and 10 degrees east, near 45 degrees north
         EXPECT_NEAR(result.pointGeom.points[0].y, 45.1, 0.2);
         EXPECT_NEAR(result.pointGeom.points[0].x, 9.0, 1.5);
+    }
+
+    // GeoTIFFs compressed with ZSTD, WebP or LERC (GDAL and rasterio write them, and so do the
+    // COGs of public data) are rasters to the helper, as DEFLATE ones are: its libtiff has their
+    // codecs. Without them the probe found no raster, the file was indexed as an Image and its
+    // thumbnail failed.
+    TEST_F(GdalUtilToolTest, probeAndThumbnailReadTheCodecsGdalWritesInAGeoTiff)
+    {
+        Server server;
+        int64_t id = 300;
+        const auto source = adoptDataset(GDALOpen(io::toUtf8(geotiff_).c_str(), GA_ReadOnly));
+        ASSERT_TRUE(source);
+        for (const char *codec : {"DEFLATE", "ZSTD", "WEBP", "LERC", "LERC_ZSTD"})
+        {
+            SCOPED_TRACE(codec);
+            const fs::path copy = area_->getFolder() / (std::string("codec_") + codec + ".tif");
+            const CPLStringList options(cslFromStrings({"TILED=YES", std::string("COMPRESS=") + codec}));
+            ASSERT_TRUE(adoptDataset(GDALCreateCopy(GDALGetDriverByName("GTiff"), io::toUtf8(copy).c_str(),
+                                                    datasetHandle(source), FALSE, options.List(), nullptr, nullptr)));
+
+            const auto probe = server.ask(probeRequest(++id, copy));
+            ASSERT_TRUE(probe.ok) << probe.message;
+            const raster::ProbeResult result = raster::probeResultFromJson(probe.result);
+            EXPECT_EQ(result.type, "GeoRaster");
+            EXPECT_EQ(result.properties.at("width"), 200);
+            EXPECT_NE(result.wkt.find("32632"), std::string::npos) << result.wkt;
+
+            const fs::path out = area_->getFolder() / (std::string("codec_") + codec + ".webp");
+            raster::ThumbnailParams params;
+            params.size = 32;
+            const auto thumb = server.ask(thumbnailRequest(++id, copy, out, params));
+            ASSERT_TRUE(thumb.ok) << thumb.message;
+            EXPECT_EQ(testutils::decodeImageFile(out).width, 32);
+        }
     }
 
     TEST_F(GdalUtilToolTest, probeOfARasterWithoutProjectionSaysSo)
@@ -748,6 +796,59 @@ namespace
         EXPECT_FALSE(fs::exists(out));
     }
 
+    // A TIFF of a few hundred bytes can claim a row of hundreds of millions of pixels that is one
+    // strip: GDAL decodes it whole for any read, the bands of a pixel-interleaved one together, so the
+    // thumbnail used gigabytes (16 GiB for a row of two billion Float64 pixels) before the memory
+    // limit of the worker stopped it. Such a raster is refused before a pixel is read: a row of one
+    // band of 572 MiB, a row of 3 interleaved bands of 191 MiB each, and a Float64 row of 610 MiB whose
+    // stretch would have read it for its statistics first.
+    TEST_F(GdalUtilToolTest, aThumbnailOfARasterWhoseBlocksAreTooLargeToDecodeIsALimitBeforeAnyRead)
+    {
+        const fs::path folder = area_->getFolder();
+        const std::vector<std::string> strips = {"TILED=NO", "BLOCKYSIZE=1"};
+        raster::ThumbnailParams stretched{32, ThumbVisParams()};
+        const std::vector<std::pair<fs::path, raster::ThumbnailParams>> cases = {
+            {createSparseRaster(folder / "long-row.tif", 600000000, 1, 1, GDT_Byte, strips), {32, std::nullopt}},
+            {createSparseRaster(folder / "long-interleaved-row.tif", 200000000, 1, 3, GDT_Byte,
+                                {"TILED=NO", "BLOCKYSIZE=1", "INTERLEAVE=PIXEL"}),
+             {32, std::nullopt}},
+            {createSparseRaster(folder / "long-float-row.tif", 80000000, 1, 1, GDT_Float64, strips), stretched},
+        };
+
+        Server server;
+        int64_t id = 0;
+        for (const auto &[file, params] : cases)
+        {
+            const fs::path out = folder / (file.stem().string() + ".webp");
+            const auto response = server.ask(thumbnailRequest(++id, file, out, params));
+            EXPECT_FALSE(response.ok) << file;
+            EXPECT_EQ(response.error, raster::ErrorCode::Limit) << response.message;
+            EXPECT_NE(response.message.find("MiB a read of a raster may decode at once"), std::string::npos)
+                << response.message;
+            EXPECT_FALSE(fs::exists(out)) << out;
+        }
+    }
+
+    // The blocks that count are those of the level the thumbnail reads: tiles of 768 MiB at the full
+    // resolution do not refuse a raster whose thumbnail GDAL resamples from an overview of small ones
+    TEST_F(GdalUtilToolTest, aThumbnailReadFromAnOverviewIgnoresTheBlocksOfTheFullResolution)
+    {
+        const fs::path file = createSparseRaster(area_->getFolder() / "big-tiles.tif", 16384, 16384, 3, GDT_Byte,
+                                                   {"TILED=YES", "BLOCKXSIZE=16384", "BLOCKYSIZE=16384", "INTERLEAVE=PIXEL"});
+        createSparseRaster(io::fromUtf8(io::toUtf8(file) + ".ovr"), 64, 64, 3, GDT_Byte, {"TILED=NO"});
+        {
+            const auto ds = adoptDataset(GDALOpen(io::toUtf8(file).c_str(), GA_ReadOnly));
+            ASSERT_TRUE(ds);
+            ASSERT_EQ(GDALGetOverviewCount(GDALGetRasterBand(datasetHandle(ds), 1)), 1);
+        }
+
+        const fs::path out = area_->getFolder() / "big-tiles.webp";
+        Server server;
+        const auto response = server.ask(thumbnailRequest(1, file, out, raster::ThumbnailParams{32, std::nullopt}));
+        ASSERT_TRUE(response.ok) << response.message;
+        EXPECT_TRUE(fs::exists(out));
+    }
+
     // The cpu time limit of a thumbnail (and of a probe, a normalize, a geoproject) is a little
     // below the time the host waits for it, and counts every thread of the worker: GDAL reads such
     // a request on one thread, or the limit would end it after a fraction of that time. A JPEG
@@ -863,6 +964,22 @@ namespace
         EXPECT_FALSE(response.ok);
         EXPECT_EQ(response.error, raster::ErrorCode::Limit);
         EXPECT_NE(response.message.find("build the dataset first"), std::string::npos) << response.message;
+        EXPECT_FALSE(fs::exists(out));
+    }
+
+    // The copy decodes every block of the raster: a row of 610 MiB in a file of a few hundred bytes
+    // is refused before anything is read or written, as it is for a thumbnail
+    TEST_F(GdalUtilToolTest, aRasterWhoseBlocksAreTooLargeToDecodeIsALimitToNormalizeAndWritesNothing)
+    {
+        const fs::path file =
+            createSparseRaster(area_->getFolder() / "long-row.tif", 80000000, 1, 1, GDT_Float64, {"TILED=NO", "BLOCKYSIZE=1"});
+        const fs::path out = area_->getFolder() / "long-row-normalized.tif";
+        Server server;
+        const auto response = server.ask(normalizeRequest(34, file, out));
+        EXPECT_FALSE(response.ok);
+        EXPECT_EQ(response.error, raster::ErrorCode::Limit) << response.message;
+        EXPECT_NE(response.message.find("MiB a read of a raster may decode at once"), std::string::npos)
+            << response.message;
         EXPECT_FALSE(fs::exists(out));
     }
 

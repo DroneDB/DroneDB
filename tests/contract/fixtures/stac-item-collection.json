@@ -91,6 +91,7 @@
           }
         ],
         "properties": {
+          "crsStatus": "projected",
           "datetime": "2023-11-14T22:13:20Z",
           "dimensions": [
             "X",
@@ -310,6 +311,7 @@
             }
           ],
           "datetime": "2023-11-14T22:13:20Z",
+          "hasMask": false,
           "proj:code": "EPSG:32632",
           "proj:shape": [
             32,

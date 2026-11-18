@@ -36,6 +36,7 @@
 #include "buildlock.h"
 #include "dbops.h"
 #include "ddb.h"
+#include "entry.h"
 #include "exceptions.h"
 #include "fake_model_tools.h"
 #include "fs.h"
@@ -451,8 +452,8 @@ TEST(tiles3dBuild, plyIsConvertedToObjForTiles) {
     expectNoLeftovers(out);
 }
 
-// A glTF without texture coordinates becomes an OBJ (not a PLY) for the
-// tiles path, and the OBJ exporter keeps its vertex colours.
+// A glTF with vertex colours and without texture coordinates becomes an OBJ (not a PLY)
+// for the tiles path and for bm3d, and the OBJ exporter keeps its vertex colours.
 TEST(tiles3dBuild, noUvGltfConvertsToColouredObj) {
     TestArea ta(TEST_NAME);
     const fs::path gltf = ta.getPath("quad.gltf");
@@ -482,10 +483,11 @@ TEST(tiles3dBuild, noUvGltfConvertsToColouredObj) {
     EXPECT_EQ(f, 2u);
     EXPECT_GT(colourSum, 0.0);
 
-    // The bm3d path keeps the previous PLY output for a no-UV glTF.
-    std::string geomPly, mtlPly;
-    convertGltfTo3dModel(gltf.string(), ta.getPath("out2/quad").string(), geomPly, mtlPly, false, true);
-    EXPECT_EQ(fs::path(geomPly).extension(), ".ply");
+    // The bm3d path too: Assimp's PLY of a scene with vertex colours and no UVs does not
+    // declare the colours its rows hold, so that a reader cannot read it.
+    std::string geomBm3d, mtlBm3d;
+    convertGltfTo3dModel(gltf.string(), ta.getPath("out2/quad").string(), geomBm3d, mtlBm3d, false, true);
+    EXPECT_EQ(fs::path(geomBm3d).extension(), ".obj");
 }
 
 TEST(tiles3dBuild, noUvGltfReachesObj2TilesAsObj) {
@@ -686,6 +688,86 @@ TEST(tiles3dBuild, modelBuildProducesBm3dAndTiles) {
     EXPECT_TRUE(fs::exists(ds.out("model.obj") / "bm3d" / "model.bm3d"));
     EXPECT_EQ(readText(ds.out("model.obj") / "3dtiles" / "marker.txt"), "previous");
     expectNoLeftovers(ds.out("model.obj") / "3dtiles");
+}
+
+// The warning the index has for an entry, and its code ("" without)
+std::pair<std::string, std::string> entryWarning(Database* db, const std::string& rel) {
+    const auto e = getEntry(db, rel);
+    if (!e)
+        return {};
+    return {e->properties.value("warning", ""), e->properties.value("warningCode", "")};
+}
+
+// A fake Obj2Tiles that fails as the real one does on a model it cannot tile: it reports the
+// exception among the lines of its pipeline
+fs::path writeObj2TilesReportingAnException(const fs::path& dir) {
+    const fs::path script = dir / "fake_obj2tiles_exception.sh";
+    writeFile(script,
+              "#!/bin/sh\n"
+              "echo ' => Splitting stage with 0 divisions'\n"
+              "echo ' !> Exception: Vertex color count (40) does not match vertex count (48).'\n"
+              "echo ' => Pipeline failed in 00:00:00.0376772'\n"
+              "exit 1\n");
+    fs::permissions(script, fs::perms::owner_all, fs::perm_options::add);
+    return script;
+}
+
+// A model whose 3D Tiles the tiler cannot make is built (bm3d), and its entry says why the 3D Tiles
+// are missing, in the words of the tiler: a rebuild fails the same way, so the viewers tell the
+// people who use the dataset instead of offering it. The warning stays while the file is the same
+// (a rescan parses it again: its build is the same), and a build that makes the tiles removes it.
+TEST(tiles3dBuild, aModelWhoseTilesCannotBeMadeSaysWhyOnItsEntry) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    Obj2TilesEnvReset reset;
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", gridObj());
+
+    usePath(writeObj2TilesReportingAnException(ds.ta.getFolder()));
+    EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", false));
+    EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "model.obj"));
+    EXPECT_FALSE(fs::exists(ds.out("model.obj") / "3dtiles"));
+    const auto notGenerated = std::make_pair(
+        std::string("3D Tiles not generated: Vertex color count (40) does not match vertex count (48)."),
+        std::string(warning_code::TilesNotGenerated));
+    EXPECT_EQ(entryWarning(ds.db.get(), "model.obj"), notGenerated);
+
+    // A rescan parses the file again: its content is the same, so is its build, and the warning stays
+    ddb::rescanIndex(ds.db.get(), {EntryType::Model}, {});
+    EXPECT_EQ(entryWarning(ds.db.get(), "model.obj"), notGenerated);
+
+    // A tiler that fails without saying why
+    usePath(writeFakeObj2Tiles(ds.ta.getFolder(), false));
+    EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", true));
+    EXPECT_EQ(entryWarning(ds.db.get(), "model.obj"),
+              std::make_pair(std::string("3D Tiles not generated: Obj2Tiles failed on this model"),
+                             std::string(warning_code::TilesNotGenerated)));
+
+    usePath(writeFakeObj2Tiles(ds.ta.getFolder(), true));
+    EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", true));
+    EXPECT_TRUE(fs::exists(ds.out("model.obj") / "3dtiles" / "tileset.json"));
+    EXPECT_EQ(entryWarning(ds.db.get(), "model.obj"), std::make_pair(std::string(), std::string()));
+
+    // A rebuild whose tiles fail keeps the tiles of the earlier build, which still show the
+    // model: no warning
+    usePath(writeObj2TilesReportingAnException(ds.ta.getFolder()));
+    EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", true));
+    EXPECT_TRUE(fs::exists(ds.out("model.obj") / "3dtiles" / "tileset.json"));
+    EXPECT_EQ(entryWarning(ds.db.get(), "model.obj"), std::make_pair(std::string(), std::string()));
+}
+
+// A file whose content changed is indexed with the warnings of its own parse: the warning of the
+// build of the earlier content is not carried over
+TEST(tiles3dBuild, aChangedFileDropsTheWarningOfTheBuildOfItsEarlierContent) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    Obj2TilesEnvReset reset;
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", gridObj());
+    usePath(writeObj2TilesReportingAnException(ds.ta.getFolder()));
+    ddb::build(ds.db.get(), "model.obj", "", false);
+    ASSERT_EQ(entryWarning(ds.db.get(), "model.obj").second, warning_code::TilesNotGenerated);
+
+    ds.add("model.obj", gridObj(5));
+    EXPECT_EQ(entryWarning(ds.db.get(), "model.obj"), std::make_pair(std::string(), std::string()));
 }
 
 // The roles an entry lists, in order

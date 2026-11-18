@@ -40,6 +40,14 @@ namespace ddb
         BuildOptions build{};
     };
 
+    /** What a model build left out of its input (see @ref buildBm3d). */
+    struct ModelInputNotes
+    {
+        /** The texture references of the MTL files of an OBJ (as they write them) that are
+         *  absolute or resolve outside the dataset: the model is built without them. */
+        std::vector<std::string> texturesLeftOut;
+    };
+
     /**
      * @brief Build a bm3d (.bm3d) file from an OBJ/GLTF/GLB/PLY/STL model.
      *
@@ -56,13 +64,16 @@ namespace ddb
      *                  rename once the new file is complete, and a failed build leaves it.
      * @param datasetRoot Root folder of the dataset that contains @p inputObj, or empty
      *                    when unknown. When set, OBJ/MTL/PLY texture references that
-     *                    resolve outside it are rejected. It never applies to the
+     *                    resolve outside it can never be satisfied. It never applies to the
      *                    temporary files produced from a GLTF/GLB or PLY input.
      * @param options What the caller asks of the build: the threads bm3d may use.
+     * @param notes When given, receives what the build left out of the input: an OBJ whose MTL
+     *              names a texture that is absolute or outside @p datasetRoot is built without
+     *              it (its material keeps its colour), from a copy in a temporary folder.
      * @throws BuildDepMissingException if a dependency (MTL, texture, buffer) is missing
      *         and could still be added to the dataset.
-     * @throws AppException if a reference is absolute or escapes @p datasetRoot (it can
-     *         never be satisfied), if a GLTF/GLB buffer or image URI is absolute or
+     * @throws AppException if an OBJ's MTL file or a PLY's texture is absolute or escapes
+     *         @p datasetRoot (it can never be satisfied), if a GLTF/GLB buffer or image URI is absolute or
      *         leaves the glTF's folder (only files in that folder or below are
      *         staged for the converted model), if the converted model still
      *         references a file that cannot be resolved, or on any other failure.
@@ -71,7 +82,8 @@ namespace ddb
                           const std::string& outputBm3d,
                           bool overwrite = false,
                           const std::string& datasetRoot = "",
-                          const BuildOptions& options = {});
+                          const BuildOptions& options = {},
+                          ModelInputNotes* notes = nullptr);
 
     /**
      * @brief Generate an OGC 3D Tiles tileset from an OBJ/GLTF/GLB/PLY/STL model using Obj2Tiles.
@@ -115,7 +127,8 @@ namespace ddb
      * @throws BuildInProgressException if another tiles build holds the lock on @p outputDir.
      * @throws BuildDepMissingException if model dependencies (textures/buffers) are missing.
      * @throws AppException if a dependency reference is unsatisfiable (same cases as
-     *         @ref buildBm3d).
+     *         @ref buildBm3d; the textures an OBJ's MTL names outside the dataset are left out
+     *         as there).
      */
     std::string buildModel3DTiles(const std::string &inputObj, const std::string &outputDir,
                                   const Tiles3DOptions &options = {});
@@ -195,8 +208,10 @@ namespace ddb
      * @param obj Path to the OBJ file.
      * @param datasetRoot Root folder of the dataset that contains @p obj, or empty when
      *                    unknown. When set, references resolving outside it are rejected.
+     *                    A texture that is absolute or outside it is not a dependency: the
+     *                    build leaves it out (see @ref buildBm3d).
      * @throws FSException if @p obj does not exist.
-     * @throws AppException if a reference is absolute, or escapes @p datasetRoot.
+     * @throws AppException if an MTL reference is absolute, or escapes @p datasetRoot.
      */
     // Tests read the dependencies of an OBJ through it to check the path contract above.
     std::vector<std::string> getObjDependencies(const std::string &obj, const std::string &datasetRoot = "");
@@ -229,8 +244,9 @@ namespace ddb
      * @param outGeomPath Output parameter for the generated geometry file path
      * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
      * @param forcePLY Force PLY format output even if UVs are present
-     * @param preferPLYIfNoUV Write PLY instead of OBJ when the scene has no UVs (the OBJ
-     *                        output keeps vertex colours as `v x y z r g b` either way)
+     * @param preferPLYIfNoUV Write PLY instead of OBJ when the scene has no UVs and no vertex
+     *                        colours (a scene with vertex colours is an OBJ, which keeps them as
+     *                        `v x y z r g b`)
      * @throws AppException if conversion fails
      */
     void convertGltfTo3dModel(const std::string &inputGltf,

@@ -205,6 +205,34 @@
         "version": {
           "type": "string",
           "description": "Identifies the bytes of the file a client opens (the file, the index of a directory) as they are now: lowercase hex that changes whenever a build rewrites or replaces that file, also under the same hash; opaque. Empty only when the file went away while it was read"
+        },
+        "crs": {
+          "type": "object",
+          "description": "pointcloud.copc only, when the COPC has a CRS (none for a cloud whose CRS does not fit its coordinates): the CRS of the file (which is not the CRS of the source when the build transformed the points)",
+          "required": [
+            "name",
+            "epsg",
+            "transformed"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The name of the CRS (\"WGS 84 / UTM zone 33N\")"
+            },
+            "epsg": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Its EPSG code; null for a CRS without one (a compound CRS, a centred transverse Mercator, a 3-D UTM)"
+            },
+            "transformed": {
+              "type": "boolean",
+              "description": "Whether the build transformed the points of the source to this CRS"
+            }
+          }
         }
       }
     }

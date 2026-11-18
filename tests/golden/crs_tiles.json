@@ -11,8 +11,8 @@
    "1080_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "f0ead866321b34c2",
-    "transparent": 32512,
+    "pixels": "09681b30c6c4ff1e",
+    "transparent": 63129,
     "width": 256
    },
    "1081_1310": {
@@ -25,8 +25,8 @@
    "1081_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "07b18e4248637223",
-    "transparent": 32768,
+    "pixels": "0f2126e044dc75d8",
+    "transparent": 63046,
     "width": 256
    }
   },
@@ -41,15 +41,15 @@
    "2160_2622": {
     "bands": 4,
     "height": 256,
-    "pixels": "cd13b6e69c5336b6",
-    "transparent": 65280,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "2160_2623": {
     "bands": 4,
     "height": 256,
-    "pixels": "cd13b6e69c5336b6",
-    "transparent": 65280,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "2161_2621": {
@@ -60,15 +60,17 @@
     "width": 256
    },
    "2161_2622": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "359954465aa9d309",
+    "pixels": "3c30cf78c274f233",
+    "transparent": 61546,
     "width": 256
    },
    "2161_2623": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "04405a0da67eb49d",
+    "pixels": "49264eab18a1445f",
+    "transparent": 60121,
     "width": 256
    },
    "2162_2621": {
@@ -79,15 +81,17 @@
     "width": 256
    },
    "2162_2622": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "1031569056913c9e",
+    "pixels": "6df59aae726c0489",
+    "transparent": 61336,
     "width": 256
    },
    "2162_2623": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "a3a4fbe297e48141",
+    "pixels": "c15ac905ca5c856b",
+    "transparent": 59836,
     "width": 256
    }
   },
@@ -101,15 +105,15 @@
    "1078_1316": {
     "bands": 4,
     "height": 256,
-    "pixels": "111539791c085042",
-    "transparent": 65408,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "1079_1316": {
     "bands": 4,
     "height": 256,
-    "pixels": "c8c07a84e866cd43",
-    "transparent": 32768,
+    "pixels": "7fab7db999a42abb",
+    "transparent": 62344,
     "width": 256
    }
   },
@@ -124,8 +128,8 @@
    "2157_2633": {
     "bands": 4,
     "height": 256,
-    "pixels": "cd13b6e69c5336b6",
-    "transparent": 65280,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "2158_2632": {
@@ -136,9 +140,10 @@
     "width": 256
    },
    "2158_2633": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "7576091200036809",
+    "pixels": "62b940448167cae4",
+    "transparent": 57287,
     "width": 256
    },
    "2159_2632": {
@@ -149,9 +154,10 @@
     "width": 256
    },
    "2159_2633": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "6d36e1b052499664",
+    "pixels": "d1c362d8b004c567",
+    "transparent": 61129,
     "width": 256
    }
   },
@@ -165,15 +171,15 @@
    "1080_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "32086ec33a3533a2",
-    "transparent": 49024,
+    "pixels": "3e253ace4947a757",
+    "transparent": 63211,
     "width": 256
    },
    "1081_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "dccf0a369f278b62",
-    "transparent": 49152,
+    "pixels": "331f22a297aca360",
+    "transparent": 64791,
     "width": 256
    }
   },
@@ -188,8 +194,8 @@
    "2160_2623": {
     "bands": 4,
     "height": 256,
-    "pixels": "cd13b6e69c5336b6",
-    "transparent": 65280,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "2161_2622": {
@@ -200,9 +206,10 @@
     "width": 256
    },
    "2161_2623": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "01d40525637fa0a4",
+    "pixels": "7148f1ff46eef832",
+    "transparent": 56107,
     "width": 256
    },
    "2162_2622": {
@@ -213,9 +220,10 @@
     "width": 256
    },
    "2162_2623": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "c0e3db04534a7027",
+    "pixels": "086d99f2225b80f0",
+    "transparent": 62598,
     "width": 256
    }
   },
@@ -236,8 +244,8 @@
    "1080_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "4ce6f868f89512d6",
-    "transparent": 32512,
+    "pixels": "c09fac824f36a646",
+    "transparent": 63924,
     "width": 256
    },
    "1081_1310": {
@@ -250,8 +258,8 @@
    "1081_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "6837c0f856f620b5",
-    "transparent": 32768,
+    "pixels": "2764f084cdaf5e58",
+    "transparent": 64392,
     "width": 256
    }
   },
@@ -266,15 +274,15 @@
    "2160_2622": {
     "bands": 4,
     "height": 256,
-    "pixels": "cd13b6e69c5336b6",
-    "transparent": 65280,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "2160_2623": {
     "bands": 4,
     "height": 256,
-    "pixels": "cd13b6e69c5336b6",
-    "transparent": 65280,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "2161_2621": {
@@ -285,15 +293,17 @@
     "width": 256
    },
    "2161_2622": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "01939a4b7d1d6cef",
+    "pixels": "aa05c834f22fcff7",
+    "transparent": 61072,
     "width": 256
    },
    "2161_2623": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "eaa08971fd6c74d2",
+    "pixels": "7f38efa91bfe2ecc",
+    "transparent": 63552,
     "width": 256
    },
    "2162_2621": {
@@ -304,15 +314,17 @@
     "width": 256
    },
    "2162_2622": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "5834440810d8b8ac",
+    "pixels": "8ebb2c4a39a7c505",
+    "transparent": 62440,
     "width": 256
    },
    "2162_2623": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "830b2803dae3fb3e",
+    "pixels": "1b87473567858368",
+    "transparent": 64160,
     "width": 256
    }
   },
@@ -333,8 +345,8 @@
    "1080_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "f0ead866321b34c2",
-    "transparent": 32512,
+    "pixels": "09681b30c6c4ff1e",
+    "transparent": 63129,
     "width": 256
    },
    "1081_1310": {
@@ -347,8 +359,8 @@
    "1081_1311": {
     "bands": 4,
     "height": 256,
-    "pixels": "07b18e4248637223",
-    "transparent": 32768,
+    "pixels": "0f2126e044dc75d8",
+    "transparent": 63046,
     "width": 256
    }
   },
@@ -363,15 +375,15 @@
    "2160_2622": {
     "bands": 4,
     "height": 256,
-    "pixels": "cd13b6e69c5336b6",
-    "transparent": 65280,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "2160_2623": {
     "bands": 4,
     "height": 256,
-    "pixels": "cd13b6e69c5336b6",
-    "transparent": 65280,
+    "pixels": "cc1d385dc7531abb",
+    "transparent": 65536,
     "width": 256
    },
    "2161_2621": {
@@ -382,15 +394,17 @@
     "width": 256
    },
    "2161_2622": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "359954465aa9d309",
+    "pixels": "3c30cf78c274f233",
+    "transparent": 61546,
     "width": 256
    },
    "2161_2623": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "04405a0da67eb49d",
+    "pixels": "49264eab18a1445f",
+    "transparent": 60121,
     "width": 256
    },
    "2162_2621": {
@@ -401,15 +415,17 @@
     "width": 256
    },
    "2162_2622": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "1031569056913c9e",
+    "pixels": "6df59aae726c0489",
+    "transparent": 61336,
     "width": 256
    },
    "2162_2623": {
-    "bands": 3,
+    "bands": 4,
     "height": 256,
-    "pixels": "a3a4fbe297e48141",
+    "pixels": "c15ac905ca5c856b",
+    "transparent": 59836,
     "width": 256
    }
   },

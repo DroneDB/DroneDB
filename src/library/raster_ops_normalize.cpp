@@ -105,6 +105,8 @@ void normalizeRaster(const fs::path &path, const fs::path &outFile) {
         throw RasterOpException(ErrorCode::Limit, pixelsMessage(path, width, height));
     if (source->GetRasterCount() < 1)
         throw RasterOpException(ErrorCode::Unreadable, io::toUtf8(path) + " has no bands");
+    // The copy decodes every block of every level, the overviews it copies included
+    requireDecodableLevels(GDALDataset::ToHandle(source.get()), io::toUtf8(path));
 
     GDALDriver *driver = GetGDALDriverManager()->GetDriverByName("GTiff");
     if (driver == nullptr)

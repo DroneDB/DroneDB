@@ -14,11 +14,16 @@
 
 #include "build.h"
 #include "build_layout.h"
+#include "build_manifest.h"
+#include "cog_build_policy.h"
 #include "dbops.h"
 #include "entry.h"
 #include "entry_handler.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "gtest/gtest.h"
+#include "json.h"
+#include "pointcloud.h"
 #include "test.h"
 #include "testarea.h"
 #include "thumbs.h"
@@ -280,7 +285,7 @@ TEST(entryHandler, ModelTilesAreDownloadableAsAnArchive) {
 
 TEST(entryHandler, SidecarRulesArePinned) {
     EXPECT_EQ(entryHandler(EntryType::Vector).sidecarExtensions(),
-              (std::vector<std::string>{"cpg", "dbf", "shx", "prj"}));
+              (std::vector<std::string>{"cpg", "dbf", "shx", "prj", "xsd", "gfs"}));
     for (const auto t : AllBuiltinTypes) {
         if (t != EntryType::Vector) {
             EXPECT_TRUE(entryHandler(t).sidecarRules().empty()) << typeToHuman(t);
@@ -290,6 +295,8 @@ TEST(entryHandler, SidecarRulesArePinned) {
     EXPECT_EQ(sidecarMainExtensions("a/roads.dbf"), (std::vector<std::string>{"shp"}));
     EXPECT_EQ(sidecarMainExtensions("a/roads.CPG"), (std::vector<std::string>{"shp"}));
     EXPECT_EQ(sidecarMainExtensions("a/plan.prj"), (std::vector<std::string>{"shp", "dxf", "dwg"}));
+    EXPECT_EQ(sidecarMainExtensions("a/parcels.xsd"), (std::vector<std::string>{"gml"}));
+    EXPECT_EQ(sidecarMainExtensions("a/parcels.gfs"), (std::vector<std::string>{"gml"}));
     EXPECT_TRUE(sidecarMainExtensions("a/roads.shp").empty());
     EXPECT_TRUE(sidecarMainExtensions("a/noext").empty());
 }
@@ -299,13 +306,17 @@ TEST(entryHandler, CompletenessRules) {
     TestArea ta(TEST_NAME, true);
     const fs::path base = ta.getFolder("hash");
 
-    const auto complete = [&](EntryType t) { return entryHandler(t).isComplete(base); };
+    const auto complete = [&](EntryType t) { return entryHandler(t).isComplete(Entry(), base); };
 
-    // Folder types: an empty folder is incomplete, any non-empty file completes it
+    // Folder types: an empty folder is incomplete, any non-empty file completes it (for a raster, with
+    // the record of a build of this release: a COG built before is checked, CogBuildPolicy)
+    Entry dem;
+    dem.properties = {{"bands", {{{"type", "Float32"}, {"colorInterp", "Gray"}, {"noData", -9999}}}}, {"hasMask", false}};
     fs::create_directories(base / "cog");
-    EXPECT_FALSE(complete(EntryType::GeoRaster));
+    EXPECT_FALSE(entryHandler(EntryType::GeoRaster).isComplete(dem, base));
     writeFile(base / "cog" / "whatever.tif", "x");
-    EXPECT_TRUE(complete(EntryType::GeoRaster));
+    writeCogBuildRecord(base / "cog" / CogBuildRecordFileName, CogBuildRecord{});
+    EXPECT_TRUE(entryHandler(EntryType::GeoRaster).isComplete(dem, base));
 
     // Vector: source.gpkg and (metadata.json or local.json)
     writeFile(base / "vec" / "source.gpkg", "x");
@@ -328,6 +339,122 @@ TEST(entryHandler, CompletenessRules) {
 
     // Not built: never complete
     EXPECT_FALSE(complete(EntryType::Image));
+}
+
+namespace {
+
+std::string wktOfEpsg(int code) {
+    const SrsPtr srs = srsFromEpsg(code);
+    EXPECT_TRUE(srs) << code;
+    char* wkt = nullptr;
+    srsOf(srs).exportToWkt(&wkt);
+    return takeGdalString(wkt);
+}
+
+Entry pointCloudEntry(json properties) {
+    Entry e;
+    e.type = EntryType::PointCloud;
+    e.properties = std::move(properties);
+    return e;
+}
+
+}  // namespace
+
+// The COPC of a point cloud completes its build, unless the cloud is geographic or geocentric, or
+// states a CRS its coordinates do not fit: then its COPC has to be built under the current CRS
+// policy (the build record beside it says so), and a COPC built before (in degrees, or with that
+// CRS) is built again. The status comes from the index; an entry indexed
+// before it was recorded has the kind of its CRS.
+TEST(entryHandler, TheCopcOfAGeographicCloudIsCompleteOnlyWhenBuiltUnderTheCrsPolicy) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path base = ta.getFolder("hash");
+    const EntryHandler& handler = entryHandler(EntryType::PointCloud);
+
+    const std::string utm = wktOfEpsg(32633);
+    const std::string wgs84 = wktOfEpsg(4326);
+    const std::string geocentric = wktOfEpsg(4978);
+    const Entry projected = pointCloudEntry({{"projection", utm}, {"crsStatus", "projected"}});
+    const Entry geographic = pointCloudEntry({{"projection", wgs84}, {"crsStatus", "geographic"}});
+    const Entry indexedBefore = pointCloudEntry({{"projection", wgs84}, {"pointCount", 3}});
+    const Entry ecef = pointCloudEntry({{"projection", geocentric}, {"crsStatus", "geocentric"}});
+    const Entry implausible = pointCloudEntry({{"projection", geocentric}, {"crsStatus", "implausible"}});
+    const Entry projectedBefore = pointCloudEntry({{"projection", utm}});
+    const Entry local = pointCloudEntry({{"projection", ""}, {"crsStatus", "none"}});
+    const std::vector<const Entry*> all = {&projected, &geographic, &indexedBefore, &ecef,
+                                           &implausible, &projectedBefore, &local};
+
+    for (const Entry* e : all)
+        EXPECT_FALSE(handler.isComplete(*e, base)) << "no COPC";
+
+    // A COPC of an older build: no record
+    writeFile(base / "copc" / "cloud.copc.laz", "x");
+    EXPECT_TRUE(handler.isComplete(projected, base));
+    EXPECT_TRUE(handler.isComplete(projectedBefore, base));
+    EXPECT_TRUE(handler.isComplete(local, base));
+    EXPECT_FALSE(handler.isComplete(implausible, base)) << "its COPC has to be built without the CRS it states";
+    EXPECT_FALSE(handler.isComplete(geographic, base));
+    EXPECT_FALSE(handler.isComplete(indexedBefore, base));
+    EXPECT_FALSE(handler.isComplete(ecef, base));
+
+    // A record of an older policy, or one that is not a record
+    const fs::path record = base / "copc" / CopcBuildRecordFileName;
+    writeFile(record, R"({"crsPolicy": 0, "sourceCrs": "", "copcCrs": "", "transformed": false})");
+    EXPECT_FALSE(handler.isComplete(geographic, base));
+    writeFile(record, "not json");
+    EXPECT_FALSE(handler.isComplete(geographic, base));
+
+    // The record of a build under the current policy
+    CopcBuildRecord current;
+    current.sourceCrs = wgs84;
+    current.copcCrs = utm;
+    current.transformed = true;
+    writeCopcBuildRecord(record, current);
+    for (const Entry* e : all)
+        EXPECT_TRUE(handler.isComplete(*e, base));
+    const auto back = readCopcBuildRecord(record);
+    ASSERT_TRUE(back.has_value());
+    EXPECT_EQ(back->crsPolicy, 1);
+    EXPECT_EQ(back->copcCrs, utm);
+    EXPECT_TRUE(back->transformed);
+}
+
+// The manifest names the CRS of a COPC: the one its build recorded, else the CRS of the cloud
+TEST(entryHandler, TheCopcArtifactNamesItsCrs) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path base = ta.getFolder("hash");
+    const EntryHandler& handler = entryHandler(EntryType::PointCloud);
+    writeFile(base / "copc" / "cloud.copc.laz", "x");
+    const auto describe = [&](const Entry& e) {
+        std::vector<BuildArtifact> artifacts = {handler.artifacts().front()};
+        handler.describeArtifacts(e, base, artifacts);
+        return json(artifacts.front());
+    };
+
+    // Built before the record: the CRS of the cloud, not transformed
+    json copc = describe(pointCloudEntry({{"projection", wktOfEpsg(32632)}, {"crsStatus", "projected"}}));
+    EXPECT_EQ(copc["role"], "pointcloud.copc");
+    EXPECT_EQ(copc["crs"], (json{{"name", "WGS 84 / UTM zone 32N"}, {"epsg", 32632}, {"transformed", false}}));
+    // A cloud without a CRS: no member
+    EXPECT_FALSE(describe(pointCloudEntry({{"projection", ""}})).contains("crs"));
+
+    // The record of a build that transformed the points
+    CopcBuildRecord record;
+    record.sourceCrs = wktOfEpsg(4326);
+    record.copcCrs = wktOfEpsg(32633);
+    record.transformed = true;
+    writeCopcBuildRecord(base / "copc" / CopcBuildRecordFileName, record);
+    copc = describe(pointCloudEntry({{"projection", record.sourceCrs}, {"crsStatus", "geographic"}}));
+    EXPECT_EQ(copc["crs"], (json{{"name", "WGS 84 / UTM zone 33N"}, {"epsg", 32633}, {"transformed", true}}));
+
+    // The COPC of a cloud whose CRS does not fit its coordinates states none: no member
+    CopcBuildRecord dropped;
+    dropped.sourceCrs = wktOfEpsg(4978);
+    writeCopcBuildRecord(base / "copc" / CopcBuildRecordFileName, dropped);
+    EXPECT_FALSE(describe(pointCloudEntry({{"projection", dropped.sourceCrs}, {"crsStatus", "implausible"}}))
+                     .contains("crs"));
+
+    // Other artifacts are not described
+    EXPECT_FALSE(json(entryHandler(EntryType::GeoRaster).artifacts().front()).contains("crs"));
 }
 
 TEST(entryHandler, ExtensionsBelongToOneType) {
@@ -371,7 +498,7 @@ class FakeEntryHandler : public EntryHandler {
         return {BuildArtifact::file("fake.out", "fake/out.txt", "text/plain", "out.txt")};
     }
 
-    bool isComplete(const fs::path& baseOutputPath, bool) const override {
+    bool isComplete(const Entry&, const fs::path& baseOutputPath, bool) const override {
         return fileExistsAndNonEmpty(baseOutputPath / "fake" / "out.txt");
     }
 
@@ -439,9 +566,9 @@ TEST(entryHandler, ExtensionsArePinned) {
         {EntryType::GaussianSplat, {"splat", "spz", "ksplat", "sog", "rad"}},
         {EntryType::Model, {"obj", "ply", "stl", "gltf", "glb"}},
         {EntryType::Tiles3D, {"3tz"}},
-        {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx"}},
-        {EntryType::Image, {"jpg", "jpeg", "dng", "tif", "tiff", "jp2", "j2k", "png", "gif", "webp", "mp4", "mov", "webm",
-                 "m4v", "avi", "mkv"}}};
+        {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg", "gpx", "gml"}},
+        {EntryType::Image, {"jpg", "jpeg", "dng", "png", "gif", "webp", "tif", "tiff", "cog", "jp2", "j2k", "mp4", "mov",
+                 "webm", "m4v", "avi", "mkv"}}};
     for (const auto t : AllBuiltinTypes) {
         const auto it = expected.find(t);
         EXPECT_EQ(entryHandler(t).extensions(), it != expected.end() ? it->second : std::vector<std::string>{})
@@ -778,6 +905,46 @@ TEST(entryHandler, AWarningWithoutCodeRemovesTheCodeOfTheOneItReplaces) {
     setEntryWarning(entry, "footprint unavailable: no CRS");
     EXPECT_EQ(entry.properties.value("warning", ""), "footprint unavailable: no CRS");
     EXPECT_FALSE(entry.properties.contains("warningCode"));
+}
+
+// The warnings of a build replace the warning of the entry: one line each, with the code of the
+// first; a build without any removes the warning an earlier build recorded, never one of the index
+TEST(entryHandler, BuildWarningsReplaceTheWarningAndALaterBuildWithoutThemRemovesIt) {
+    json properties = {{"georeferenced", false}, {"warning", "model parse failed: no origin"}};
+    const std::vector<BuildWarning> warnings = {
+        {warning_code::TilesNotGenerated, "3D Tiles not generated: Obj2Tiles failed on this model"},
+        {warning_code::TexturesOutsideDataset, "Textures outside the dataset left out: ../t.png"}};
+
+    EXPECT_TRUE(applyBuildWarnings(properties, warnings));
+    EXPECT_EQ(properties.value("warning", ""),
+              "3D Tiles not generated: Obj2Tiles failed on this model\n"
+              "Textures outside the dataset left out: ../t.png");
+    EXPECT_EQ(properties.value("warningCode", ""), "3dtiles-not-generated");
+    EXPECT_EQ(properties.value("georeferenced", true), false);
+
+    // The same warnings again change nothing (nothing to write)
+    EXPECT_FALSE(applyBuildWarnings(properties, warnings));
+
+    EXPECT_TRUE(applyBuildWarnings(properties, {}));
+    EXPECT_FALSE(properties.contains("warning"));
+    EXPECT_FALSE(properties.contains("warningCode"));
+    EXPECT_EQ(properties, json({{"georeferenced", false}}));
+    EXPECT_FALSE(applyBuildWarnings(properties, {}));
+
+    // A warning of the index stays, with or without its code
+    json dwg = {{"warning", "vector parse failed"}, {"warningCode", warning_code::DwgConverterMissing}};
+    EXPECT_FALSE(applyBuildWarnings(dwg, {}));
+    EXPECT_EQ(dwg.value("warningCode", ""), "dwg-converter-missing");
+    json uncoded = {{"warning", "footprint unavailable: no CRS"}};
+    EXPECT_FALSE(applyBuildWarnings(uncoded, {}));
+    EXPECT_EQ(uncoded.value("warning", ""), "footprint unavailable: no CRS");
+
+    // Properties that are not an object take the warnings, and stay as they are without
+    json none;
+    EXPECT_FALSE(applyBuildWarnings(none, {}));
+    EXPECT_TRUE(none.is_null());
+    EXPECT_TRUE(applyBuildWarnings(none, {warnings.back()}));
+    EXPECT_EQ(none.value("warningCode", ""), "textures-outside-dataset");
 }
 
 }  // namespace

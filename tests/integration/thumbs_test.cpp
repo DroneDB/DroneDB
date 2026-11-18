@@ -12,6 +12,9 @@
 #include <vector>
 
 #include "ddb.h"
+#include "gdal_inc.h"
+#include "gdal_priv.h"
+#include "ogr_spatialref.h"
 #include "exceptions.h"
 #include "gtest/gtest.h"
 #include "hash.h"
@@ -505,42 +508,97 @@ fs::path downloadTestDataFile(TestArea& ta, const std::string& relativePath) {
     return ta.downloadTestAsset(url, filename);
 }
 
-// Test for point cloud with single point (edge case)
-// buildCopc should throw InvalidArgsException for single-point clouds
+// The COPC of a cloud of one point has a thumbnail, the point at its centre, written to a file and
+// in memory
 TEST(thumbnail, pointCloudSinglePoint) {
     TestArea ta(TEST_NAME);
     fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_single_point.laz");
 
-    // buildCopc should throw InvalidArgsException for single-point clouds
-    EXPECT_THROW(ddb::buildCopc({pc.string()}, ta.getFolder("copc").string()),
-                 ddb::InvalidArgsException)
-        << "buildCopc should reject single-point clouds with InvalidArgsException";
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    const fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+    ddb::PointCloudInfo info;
+    ASSERT_TRUE(ddb::getCopcInfo(copcPath.string(), info));
+    EXPECT_EQ(info.pointCount, 1);
+
+    // One disc on a transparent square: a WebP below the floor of a real thumbnail
+    const fs::path outFile = ta.getPath("single-point-thumb.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, outFile, true));
+    EXPECT_TRUE(isValidWebP(outFile));
+
+    uint8_t* buffer = nullptr;
+    int bufSize = 0;
+    EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, "", true, &buffer, &bufSize));
+    EXPECT_GT(bufSize, 0);
+    if (buffer) DDBVSIFree(buffer);
 }
 
-// Test for point cloud with flat surface (all Z values identical)
-// This should work if the point cloud has sufficient X/Y extent
-// Note: If the flat surface also has zero X/Y extent, it will throw InvalidArgsException
+// A cloud whose points all have the same Z has a COPC and a thumbnail (one grey)
 TEST(thumbnail, pointCloudFlatSurface) {
     TestArea ta(TEST_NAME);
     fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_flat_surface.laz");
 
-    // Build COPC from LAZ file
-    // This may throw InvalidArgsException if the flat surface also has zero X/Y extent
-    try {
-        ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    const fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+    ASSERT_TRUE(fs::exists(copcPath));
 
-        fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
-        EXPECT_TRUE(fs::exists(copcPath)) << "COPC file should exist after buildCopc";
+    const fs::path outFile = ta.getPath("flat-surface-thumb.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, outFile, true));
+    EXPECT_TRUE(isWebPImageNonEmpty(outFile));
+}
 
-        fs::path outFile = ta.getPath("flat-surface-thumb.webp");
-        EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, outFile, true))
-            << "Flat surface point cloud should generate thumbnail (all points same Z -> gray)";
-        EXPECT_TRUE(fs::exists(outFile)) << "Flat surface thumbnail should exist";
-        EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "Flat surface thumbnail should have content";
-    } catch (const ddb::InvalidArgsException& e) {
-        // Expected if the point cloud also has zero X/Y extent
-        SUCCEED() << "Flat surface point cloud rejected due to insufficient extent: " << e.what();
+// The width and height of an image file
+std::pair<int, int> imageSize(const fs::path& path) {
+    auto ds = GDALDatasetUniquePtr(GDALDataset::Open(path.string().c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY));
+    if (!ds) {
+        ADD_FAILURE() << "cannot open " << path;
+        return {0, 0};
     }
+    return {ds->GetRasterXSize(), ds->GetRasterYSize()};
+}
+
+// A GeoTIFF of w x h pixels of pixelWidth x pixelHeight metres (EPSG:32611), one grey band
+fs::path writeRasterOfPixels(TestArea& ta, const std::string& name, int w, int h, double pixelWidth,
+                             double pixelHeight) {
+    const fs::path tif = ta.getPath(name);
+    auto ds = GDALDatasetUniquePtr(GetGDALDriverManager()->GetDriverByName("GTiff")->Create(
+        tif.string().c_str(), w, h, 1, GDT_Byte, nullptr));
+    EXPECT_TRUE(ds != nullptr);
+    double gt[6] = {440720.0, pixelWidth, 0.0, 3751320.0, 0.0, -pixelHeight};
+    ds->SetGeoTransform(gt);
+    OGRSpatialReference srs;
+    srs.importFromEPSG(32611);
+    ds->SetSpatialRef(&srs);
+    EXPECT_EQ(ds->GetRasterBand(1)->Fill(128.0), CE_None);
+    ds.reset();
+    return tif;
+}
+
+// A thumbnail shows a raster with the shape it has on the ground: 5 x 5000 pixels of 240 x 0.24 m cover a
+// square (the tiny_image.tif of the test data), whose thumbnail was 1 x 512, the shape of its pixel grid; with
+// a visualisation too. A raster of square pixels keeps the shape of its grid
+TEST(thumbnail, aRasterOfPixelsHigherThanWideKeepsItsShapeOnTheGround) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path square = writeRasterOfPixels(ta, "square-on-the-ground.tif", 5, 5000, 240.0, 0.24);
+    const fs::path plain = ta.getPath("plain.webp");
+    ddb::generateThumb(square, 512, plain, true);
+    EXPECT_EQ(imageSize(plain), (std::pair<int, int>{512, 512}));
+
+    ThumbVisParams vis;
+    vis.bands = "1";
+    const fs::path visualised = ta.getPath("visualised.webp");
+    ddb::generateImageThumbEx(square, 512, visualised, nullptr, nullptr, vis);
+    EXPECT_EQ(imageSize(visualised), (std::pair<int, int>{512, 512}));
+
+    // 100 x 10 pixels of 1 x 5 m: 100 x 50 m
+    const fs::path wide = writeRasterOfPixels(ta, "wide.tif", 100, 10, 1.0, 5.0);
+    const fs::path wideThumb = ta.getPath("wide.webp");
+    ddb::generateThumb(wide, 512, wideThumb, true);
+    EXPECT_EQ(imageSize(wideThumb), (std::pair<int, int>{512, 256}));
+
+    const fs::path grid = writeRasterOfPixels(ta, "grid.tif", 400, 100, 2.0, 2.0);
+    const fs::path gridThumb = ta.getPath("grid.webp");
+    ddb::generateThumb(grid, 512, gridThumb, true);
+    EXPECT_EQ(imageSize(gridThumb), (std::pair<int, int>{512, 128}));
 }
 
 // --- Batch regression tests for georaster thumbnail generation ---

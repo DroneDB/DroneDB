@@ -17,6 +17,7 @@
 #include "mio.h"
 #include "ply.h"
 #include "stl.h"
+#include "stringutil.h"
 
 namespace ddb {
 
@@ -114,7 +115,7 @@ class ModelEntryHandler : public EntryHandler {
     // an identifiable interrupted tiles swap (usable backup and missing/incomplete final):
     // it is reported incomplete so the normal completeness sweep can enqueue recovery
     // without rebuilding bm3d/. A model with only the legacy nxs/ is incomplete: it is rebuilt.
-    bool isComplete(const fs::path& baseOutputPath, bool reportRecoverable) const override {
+    bool isComplete(const Entry& /*e*/, const fs::path& baseOutputPath, bool reportRecoverable) const override {
         if (reportRecoverable && hasRecoverableModel3DTilesSwap(baseOutputPath / Tiles3DBuildSubfolder))
             return false;
         return directoryHasNonEmptyContent(baseOutputPath / Bm3dBuildSubfolder);
@@ -123,18 +124,21 @@ class ModelEntryHandler : public EntryHandler {
     void build(const BuildContext& ctx) const override {
         const std::string inputPath = io::toUtf8(ctx.inputPath);
         const std::string datasetRoot = io::toUtf8(ctx.datasetRoot);
+        ModelInputNotes notes;
         buildBm3d(inputPath,
                   io::toUtf8(ctx.tempFolder / Bm3dFileName),
                   false,
                   datasetRoot,
-                  ctx.options);
+                  ctx.options,
+                  &notes);
 
         // Additive, best-effort OGC 3D Tiles output for the unified Giro3D viewer.
         // Written directly to a sibling 3dtiles/ folder (buildModel3DTiles performs
         // its own atomic temp+rename), exactly as buildVector co-produces vec/+mvt/.
         // Non-blocking by design: if Obj2Tiles is unavailable or fails on a given
         // mesh, the bm3d output above is still published and build completeness
-        // stays keyed on bm3d/ (see isComplete), so the build never loops.
+        // stays keyed on bm3d/ (see isComplete), so the build never loops; the entry
+        // records why (warning_code::TilesNotGenerated), since a rebuild fails the same way.
         // Nothing is rethrown from here, BuildDepMissingException included: it cannot
         // occur (buildBm3d validated the same input above), and rethrowing it would
         // discard tempFolder before model.bm3d reaches bm3d/.
@@ -143,6 +147,12 @@ class ModelEntryHandler : public EntryHandler {
         // tiles lock is a tiles build started outside a Model build (the
         // "ddb tiles3d" command on this output folder).
         const fs::path tilesFolder = ctx.baseOutputPath / Tiles3DBuildSubfolder;
+        // The tiles were not made: the entry says why, unless the tileset of an earlier build
+        // of the same content is still there (a failed rebuild keeps it)
+        const auto notGenerated = [&](const std::string& reason) {
+            if (!isModel3DTilesComplete(tilesFolder))
+                ctx.warn(warning_code::TilesNotGenerated, "3D Tiles not generated: " + reason);
+        };
         try {
             Tiles3DOptions tilesOptions;
             tilesOptions.overwrite = true;
@@ -156,11 +166,20 @@ class ModelEntryHandler : public EntryHandler {
                  << " (for example 'ddb tiles3d'): " << tilesEx.what()
                  << ". The bm3d output is published; rebuild with force to "
                  << "produce the tiles";
+        } catch (const Obj2TilesException& tilesEx) {
+            LOGW << "3D Tiles generation skipped for " << ctx.entry.path << ": " << tilesEx.what();
+            notGenerated(tilesEx.reason().empty() ? "Obj2Tiles failed on this model" : tilesEx.reason());
         } catch (const std::exception& tilesEx) {
             LOGW << "3D Tiles generation skipped for " << ctx.entry.path << ": " << tilesEx.what();
+            notGenerated("an error occurred while making them (the build log has the details)");
         } catch (...) {
             LOGW << "3D Tiles generation skipped for " << ctx.entry.path << " (unknown error)";
+            notGenerated("an error occurred while making them");
         }
+
+        if (!notes.texturesLeftOut.empty())
+            ctx.warn(warning_code::TexturesOutsideDataset,
+                     "Textures outside the dataset left out: " + str::join(notes.texturesLeftOut, ", "));
     }
 };
 

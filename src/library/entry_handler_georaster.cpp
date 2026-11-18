@@ -10,8 +10,10 @@
 #include "build_layout.h"
 #include "json.h"
 #include "cog.h"
+#include "cog_build_policy.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
 #include "raster_helper.h"
@@ -46,13 +48,54 @@ class GeoRasterEntryHandler : public EntryHandler {
 
     std::string subfolder() const override { return CogBuildSubfolder; }
 
+    // isComplete() reads the bands of the raster and whether it has a mask, and its footprint
+    std::vector<std::string> buildPropertyKeys() const override { return {"bands", "hasMask"}; }
+    bool buildReadsFootprint() const override { return true; }
+
     std::vector<BuildArtifact> artifacts() const override {
         return {BuildArtifact::file("raster.cog", artifactPath(CogBuildSubfolder, CogFileName),
                                     "image/tiff; application=geotiff; profile=cloud-optimized", CogFileName)};
     }
 
+    // The COG folder has its output (the default rule). A COG built before the rules of
+    // CogBuildPolicy (no build record, or one of an older version) is incomplete when the COG built
+    // now differs from it, so that it is built again; the one it has is served meanwhile. The
+    // index decides the transparency of most entries; for one indexed before it held the nodata
+    // and the mask of the raster, the header of the COG does. A COG the facts find healthy is read
+    // (its header) to check that it lies where the raster is; one found in its place gets a record
+    // (recordVerifiedCog), so its header is read once.
+    bool isComplete(const Entry& e, const fs::path& baseOutputPath, bool reportRecoverable) const override {
+        if (!EntryHandler::isComplete(e, baseOutputPath, reportRecoverable))
+            return false;
+        const fs::path folder = baseOutputPath / CogBuildSubfolder;
+        const auto record = readCogBuildRecord(folder / CogBuildRecordFileName);
+        if (record && record->version >= CogBuildPolicy::kVersion)
+            return true;
+        const auto indexed = CogBuildPolicy::indexed(e.properties);
+        if (indexed && CogBuildPolicy::outdates(*indexed))
+            return false;
+        try {
+            const BuiltCog cog = CogBuildPolicy::ofBuiltCog(folder / CogFileName);
+            if (!indexed && CogBuildPolicy::outdates(cog.transparency))
+                return false;
+            if (CogBuildPolicy::misplaces(cog, e.polygon_geom)) {
+                LOGD << "The COG of " << e.path << " is built again: it lies elsewhere than the raster";
+                return false;
+            }
+            // Paid once: the checks after this one read the record. Only in the entry's own build
+            // folder (a folder of another key is not this entry's to record)
+            if (baseOutputPath.filename() == io::fromUtf8(buildKey(e)))
+                recordVerifiedCog(folder);
+            return true;
+        } catch (const AppException& ex) {
+            LOGD << "The COG of " << e.path << " is built again: " << ex.what();
+            return false;
+        }
+    }
+
     void build(const BuildContext& ctx) const override {
         buildCog(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder / CogFileName), ctx.options);
+        writeCogBuildRecord(ctx.tempFolder / CogBuildRecordFileName, CogBuildRecord{});
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::File; }

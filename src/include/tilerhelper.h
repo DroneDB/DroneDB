@@ -25,7 +25,9 @@ namespace ddb
     {
         fs::path path{};           // a georaster, a geoimage, a COPC point cloud or a URL
         int tileSize = 256;
-        bool tms = false;          // tile rows count from the bottom (TMS) instead of the top (XYZ)
+        // DDBTile's flag, inverted with respect to its name: true when ty is an XYZ row (row 0 in the
+        // north), false when it is a TMS row (row 0 in the south)
+        bool tms = false;
         bool forceRecreate = false;
         fs::path outputFolder{};   // tile files go here (empty: only a requested buffer is filled)
         std::string pathHash{};    // known hash of a remote file: names its local copy ("" when unknown)
@@ -46,6 +48,8 @@ namespace ddb
     struct TilerRun
     {
         int tileSize = 256;
+        // The rows of x/y and of the tiles written (<z>/<x>/<y>.png) count from the south (TMS)
+        // instead of the north (XYZ)
         bool tms = false;
         OutputFormat format = OutputFormat::Text;
         std::string zRange = "auto";   // "N" or "min-max"

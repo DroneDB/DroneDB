@@ -67,7 +67,7 @@ namespace
 
         ~Dataset() { DDBReleaseConnections(root.c_str(), nullptr); }
 
-        void buildCog() const { writeFile(build / H_COG / "cog" / "cog.tif", "x"); }
+        void buildCog() const { writeBuiltCog(build / H_COG); }
     };
 
     TEST(CAbiBuildManifest, GetEntryTypes)

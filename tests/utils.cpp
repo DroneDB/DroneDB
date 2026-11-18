@@ -14,6 +14,8 @@
 
 #include <boolinq/boolinq.h>
 
+#include "build_layout.h"
+#include "cog_build_policy.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "ddb.h"
@@ -409,6 +411,12 @@ std::string gridStl(int n, bool binary, bool solidHeader) {
     }
     o << "endsolid grid\n";
     return o.str();
+}
+
+void writeBuiltCog(const std::filesystem::path &buildRoot)
+{
+    writeFile(buildRoot / ddb::CogBuildSubfolder / ddb::CogFileName, "x");
+    ddb::writeCogBuildRecord(buildRoot / ddb::CogBuildSubfolder / ddb::CogBuildRecordFileName, ddb::CogBuildRecord{});
 }
 
 void insertEntry(ddb::Database *db, const std::string &path, const std::string &hash, ddb::EntryType type)

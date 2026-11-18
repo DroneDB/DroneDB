@@ -40,7 +40,7 @@ namespace
             insert("orphan.dbf", std::string(64, '2'), EntryType::Generic); // dependency without main file
             insert("dir", "", EntryType::Directory);
 
-            writeFile(db->buildDirectory() / H_ORTHO / "cog" / "cog.tif", "x");
+            writeBuiltCog(db->buildDirectory() / H_ORTHO);
             fs::create_directories(db->buildDirectory() / H_CLOUD / "copc");
             writeFile(db->buildDirectory() / H_ROADS / "vec" / "source.gpkg", "x");
             writeFile(db->buildDirectory() / H_ROADS / "mvt" / "metadata.json", "x");

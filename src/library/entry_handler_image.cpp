@@ -5,7 +5,10 @@
 // Image, GeoImage, Panorama, GeoPanorama, Video and GeoVideo entries: photos and videos read
 // through their EXIF/XMP tags. The Image handler also detects GeoRasters (TIFF, JPEG 2000).
 
+#include <algorithm>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "entry.h"
 #include "entry_handlers_builtin.h"
@@ -20,20 +23,29 @@ namespace ddb {
 namespace {
 
 // The extensions of the family, by what detection does with them. The rasters GDAL opens
-// first: one with a projection is a GeoRaster.
+// first: one with a projection is a GeoRaster (a .cog is a GeoTIFF named for what it is).
+const std::vector<std::string> kGdalRasterExtensions = {"tif", "tiff", "cog", "jp2", "j2k"};
+const std::vector<std::string> kOtherImageExtensions = {"jpg", "jpeg", "dng", "png", "gif", "webp"};
+const std::vector<std::string> kVideoExtensions = {"mp4", "mov", "webm", "m4v", "avi", "mkv"};
+
+bool hasExtensionIn(const io::Path &p, const std::vector<std::string> &extensions)
+{
+    return std::find(extensions.begin(), extensions.end(), io::lowerExtension(p.get())) != extensions.end();
+}
+
 bool isGdalRaster(const io::Path &p)
 {
-    return p.checkExtension({"tif", "tiff", "jp2", "j2k"});
+    return hasExtensionIn(p, kGdalRasterExtensions);
 }
 
 bool isOtherImage(const io::Path &p)
 {
-    return p.checkExtension({"jpg", "jpeg", "dng", "png", "gif", "webp"});
+    return hasExtensionIn(p, kOtherImageExtensions);
 }
 
 bool isVideo(const io::Path &p)
 {
-    return p.checkExtension({"mp4", "mov", "webm", "m4v", "avi", "mkv"});
+    return hasExtensionIn(p, kVideoExtensions);
 }
 
 // Detection reads the metadata of every such file, whatever it holds. Not of every TIFF or
@@ -350,8 +362,10 @@ class ImageEntryHandler : public EntryHandler {
     std::vector<std::string> extensions() const override {
         if (type() != EntryType::Image)
             return {};
-        return {"jpg", "jpeg", "dng", "tif", "tiff", "jp2", "j2k", "png", "gif", "webp",
-                "mp4", "mov", "webm", "m4v", "avi", "mkv"};
+        std::vector<std::string> all = kOtherImageExtensions;
+        all.insert(all.end(), kGdalRasterExtensions.begin(), kGdalRasterExtensions.end());
+        all.insert(all.end(), kVideoExtensions.begin(), kVideoExtensions.end());
+        return all;
     }
 
     EntryType detect(const fs::path& path, FingerprintContext& ctx) const override {

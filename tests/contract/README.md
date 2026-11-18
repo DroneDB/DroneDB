@@ -90,6 +90,7 @@ with ddb).
 | `raster-metadata` | `DDBGetRasterMetadata(<root>/ortho.tif, NULL, NULL)`: per-band statistics | `raster-metadata` | - |
 | `raster-metadata-formula` | `DDBGetRasterMetadata(<root>/ortho.tif, "VARI", "RGB")`: formula statistics and histogram | `raster-metadata` | - |
 | `build-artifacts` | `DDBBuild(<root>, "ortho.tif")`, then `DDBGetBuildArtifacts` of a built (COG), two buildable and not built, a non-buildable file, a folder and a missing path (see [Build manifest](#build-manifest)) | `build-artifacts` | - |
+| `build-artifacts-pointcloud` | `DDBBuild(<root>, "cloud.las")`, then `DDBGetBuildArtifacts(<root>, ["cloud.las"])`: the `crs` of the `pointcloud.copc` artifact (see [Build manifest](#build-manifest)) | `build-artifacts` | `version` |
 | `build-artifacts-pending` | The `pending-build-info` dataset (`roads.shp` deferred), then `DDBGetBuildArtifacts(<root>, ["roads.shp"])` | `build-artifacts` | `lastAttempt`, `retryAfter` |
 | `list-entries-ex` | `DDBBuild(<root>, "ortho.tif")`, then `DDBListEntriesEx(<root>, "", "", "", {recursive=true, withDetails=false, withBuild=true})` | `list-entries-ex` | - |
 | `resolve-build-file` | `DDBResolveBuildFile(<root>, <hash of ortho.tif>, "cog/cog.tif")` after its build: an object with the absolute `path` and the artifact's `mediaType` | `build-file` | - |
@@ -168,6 +169,13 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   not empty): no timer retries that build, adding one of the files releases it. It is the
   `awaitingFiles` of `DDBGetPendingBuildInfo`, and false without a marker, so a host reads the
   flag and does not derive it from `state` and `missingDependencies`.
+* `crs` (2.8.0) is on the `pointcloud.copc` artifact when the COPC has a CRS (the COPC of a cloud whose CRS does not
+  fit its coordinates has none):
+  `{"name": "WGS 84 / UTM zone 33N", "epsg": 32633, "transformed": true}`, the CRS of the COPC file
+  (`epsg` null for a CRS without a code: a compound CRS, a centred transverse Mercator, a 3-D UTM),
+  and whether the build transformed the points of the source to it (the COPC of a geographic or
+  geocentric cloud is built in a projected CRS). A host shows it ("built in ...") when
+  `transformed`, and reads the CRS itself from the COPC header as before.
 * `version` identifies the bytes of the file a client opens (the file, or the index of a
   directory) as they are now: lowercase hex, from the file's modification time, size and, on
   POSIX, device and inode, so it changes whenever a build rewrites or replaces that file under
@@ -707,13 +715,15 @@ Registry has to adopt first.
   COPC of 2.5: another octree (the same file whatever the threads and the memory), LAS 1.4 point format 6, 7 with
   colours or 8 with near infrared (a cloud without colours no longer has zero colours, so its `dimensions` have no
   `Red`, `Green`, `Blue`), the scale and offset of a single LAS source (else finer ones than the 0.01 of 2.5), and
-  the 8-bit colours and intensities of PLY, PTS and XYZ sources scaled to 16 bits. A cloud of fewer than 2 points
-  or of no extent in X or Y is refused as before (`DDBERR_INVALIDARGS`), from the count and bounds of the COPC it
-  made; a cloud without any point is a cloud that cannot be read (`DDBERR_EXCEPTION`, "the input holds no
-  points"). A full disk during the build is a retryable failure. `DDBBuildEx2` reports the phases of a point cloud
-  build: "planning" from 0, "reading" from 0.05, "building" from 0.4 and "writing" when the file is done (2.5:
-  fraction -1 until it was done). `DDB_UNTWINE_PATH`, `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose
-  between Untwine and PDAL's writers.copc in 2.5, are no longer read, and the packages have no Untwine.
+  the 8-bit colours and intensities of PLY, PTS and XYZ sources scaled to 16 bits. A cloud of one point, or of no
+  extent in one or two axes (a vertical line, a wall), has a COPC whose octree cube is its largest extent plus one
+  scale step on each side, a thumbnail with its points at the centre and map tiles (2.5 refused fewer than 2 points
+  or no extent in X or Y with `DDBERR_INVALIDARGS`); a cloud without any point is a cloud that cannot be read
+  (`DDBERR_EXCEPTION`, "the input holds no points"). A full disk during the build is a retryable failure.
+  `DDBBuildEx2` reports the phases of a point cloud build: "planning" from 0, "reading" from 0.05, "building" from
+  0.4 and "writing" when the file is done (2.5: fraction -1 until it was done). `DDB_UNTWINE_PATH`,
+  `DDB_USE_PDAL_COPC` and `DDB_COPC_BACKEND`, which chose between Untwine and PDAL's writers.copc in 2.5, are no
+  longer read, and the packages have no Untwine.
 
 * 2026-11-16: 2.7.0 (ABI 2.7: `capabilities` has `abi.minor` 7; no export is added or removed, no schema or
   other fixture changes).
@@ -797,3 +807,81 @@ Registry has to adopt first.
   2.7.1: grey), and the COG of a palette raster beside an alpha band or with an internal mask keeps its table
   (2.6.0 to 2.7.1 dropped it). The 3D Tiles of models are built by Obj2Tiles v1.10.2 (the same binaries as v1.10.1;
   its notices list libktx and the code it is built from).
+* 2.8.0 (no export added or removed): point clouds in any CRS. The entry `properties` of a point
+  cloud gain `crsStatus` (`projected`, `geographic`, `geocentric`, `local`, `none`, `implausible`; the `add`,
+  `list`, `list-entries`, `info-pointcloud`, `info-pointcloud-no-footprint`, `stac-item-collection` and
+  `stac-data-item-collection` fixtures have it), and the `pointcloud.copc` artifact gains `crs` (new fixture
+  `build-artifacts-pointcloud`; `build-artifacts.schema.json` has the member). A CRS the coordinates do not fit is
+  ignored: no footprint, `warning` "coordinate system ignored: the coordinates do not fit <name>", and a COPC that
+  states no CRS (no `crs` in the manifest). The COPC of a
+  geographic or geocentric cloud is built in a metric projected CRS (UTM of the centre of its footprint, on its
+  datum when EPSG has one; UPS near the poles; a centred transverse Mercator for a cloud that reaches more than 4.5
+  degrees from the central meridian of that zone; a
+  compound source keeps its vertical CRS in metres; a geocentric or 3-D geographic one the ellipsoidal height), with
+  `copc/build.json` beside it; such a COPC built before (and one of an implausible CRS) is incomplete for `DDBIsBuildComplete` and the build
+  objects, and is built again by the next `DDBBuild`. The footprint of a geocentric cloud is the envelope of its
+  points, transformed in 3-D; the polygon of a cloud across the antimeridian has its east past 180 (never a ring
+  around the globe). A projected CRS is implausible only when PROJ cannot take its corners to WGS 84 or they land 30
+  degrees or more outside its area of use. The raster helper speaks protocol 1.4 (`pointCloudInfo` gains `crsStatus` and
+  `targetCrs`, `copc` takes `targetCrs` or `dropCrs` and answers the octree its builder reports); a helper of 1.3 is refused.
+  `entry-types`: the `Vector` type gains the sidecars `xsd` and `gfs` (the schemas of a GML, now indexed as a
+  `Vector`); no other fixture changed.
+  `ddb tile` writes and reads XYZ rows (row 0 in the north), as its help says, and TMS rows with `--tms`, for
+  the rows of `-x`/`-y` and for the folders it writes (`<z>/<x>/<y>.png`), for rasters and point clouds; 2.0 to 2.7
+  did the opposite. `DDBTile` and `DDBMemoryTile*` keep their flag (`tms` true: `ty` is an XYZ row).
+  A `.cog` file is a raster as a `.tif` is (a `GeoRaster` with a CRS, else an `Image`; it was `Generic`), and its
+  STAC media type is `image/tiff`.
+  The thumbnail of a raster has the shape of the raster on the ground (the size of a pixel in its geotransform):
+  a raster of 5 x 5000 pixels of 240 x 0.24 m has a thumbnail of 512 x 512, no longer 1 x 512.
+  A `ddb` command whose input the library refuses (`DDBERR_INVALIDARGS` while it works) prints the message alone,
+  without the usage of the command; an argument it cannot read (an option, a format, a filter) still prints both.
+  ddb-tilers 0.13.3 changes what the COG of a GeoRaster holds and how tiles are drawn (no schema or fixture
+  changed): a source without nodata, mask or alpha band gets an internal mask of the pixels the warp writes (the
+  padding up to the tiles of the grid and the corners of a rotated raster were opaque 0, in the statistics too);
+  the nodata of several bands comes with an internal mask of the pixels where not every band is at nodata (a pixel
+  whose first band alone was at nodata was transparent); a palette is warped by nearest neighbour; a graded alpha
+  is kept in an 8-bit mask. Tiles show the pixel under the centre of each tile pixel (the corrected tiler mode,
+  now the default; `DDBT_TILER_MODE=compat` keeps the tiles of 2.4.1), a palette band in its colours, NaN
+  transparent, two bands as red and green, and keep drawing far above the resolution of the raster; a tile that
+  no pixel of the raster is under is blank, whatever the formula asked. Point-cloud tiles have no gaps where the
+  cloud has points. A nodata override (`DDB_RASTER_OPT_NODATA`) makes the pixels where every band is at that
+  value transparent in the band tiles of a COG with an internal mask too (with ddb-tilers 0.13.1 it had no effect
+  on the COGs that now get one). A floating-point band whose values differ only by the rounding of the warp (a
+  constant raster, within 2^-42 of its value) is drawn as a constant band, black, not as grey noise. bm3d is
+  1.1.3 and the 3D Tiles of models are built by Obj2Tiles v1.10.3 (OBJ models whose parts differ are tiled whole; KTX2 textures are a multiple of 4 in size).
+  The entry `properties` of a GeoRaster gain `hasMask` (true when the raster has a mask of its own, an internal or
+  external mask that is neither its alpha band nor its nodata) and, in each band, `noData` when the band has one
+  (a number, or `"nan"`, `"inf"`, `"-inf"`; a GeoTIFF has one nodata for every band, its alpha band too); the
+  `add`, `list`, `list-entries`, `info-georaster`, `stac-item-georaster`, `stac-item-collection`,
+  `stac-data-item-georaster`, `stac-data-item-collection` and `gdal-util-probe` fixtures have `hasMask`
+  (`entry.schema.json` and `gdal-util-probe.schema.json` have both members). The COG of a GeoRaster has
+  `cog/build.json` beside it (`{"version": 1}`, the version of the COG build rules); a COG without it (built
+  before 2.8.0) is incomplete for `DDBIsBuildComplete` and the build objects of `DDBGetBuildArtifacts`,
+  `DDBListEntriesEx` and `DDBGetBuildStatus`, and is built again by the next `DDBBuild`, only when the COG built
+  now differs from it: a source without nodata, mask or alpha band, a source with the nodata of several bands and
+  no alpha band, a source with a colour table (a `Palette` band 1), and a COG that lies elsewhere than its raster.
+  An entry indexed by 2.8.0 is judged from its `bands` and `hasMask`; one indexed before from the colour
+  interpretations of its bands (a palette or an alpha band) and otherwise from the header of the COG it has (its
+  nodata, mask and alpha band, which the builds before kept from the source). A COG these facts find healthy is
+  read (its header) to check its place: it is outdated when a corner of the entry's footprint (`polygon_geom`, a
+  latitude past 85.0511 taken at 85.0511) is outside its grid by more than 4 of its pixels; the builds before put the
+  COG of some GeoTIFFs tens to thousands of kilometres away (NTF Paris with its prime meridian in grads, an EPSG CRS
+  whose linear unit the file changes to feet or US feet, an IMAGINE citation that names a unit) and cut the COG of
+  a raster around a pole at the latitude of its edges. A COG found in its place gets a `cog/build.json` of its
+  check, `{"origin": "verified", "version": 1}`, written by the query that checked it (under the build lock of
+  the folder, atomically; not while a build holds the lock, nor in a folder that cannot be written, which is
+  checked again next time), so its header is read once. A COG that cannot be read is incomplete.
+  A build records warnings about the output it made in the `warning` and `warningCode` of its entry
+  (`entry.schema.json`): `3dtiles-not-generated` when the 3D Tiles of a model could not be made (the bm3d output
+  was; `warning` "3D Tiles not generated: <reason>", the reason the tiler gave), `textures-outside-dataset` when the
+  MTL files of an OBJ name textures that are absolute or outside the dataset (`warning` "Textures outside the dataset
+  left out: <references>"). Such an OBJ is built without them (its materials keep their colours); 2.7 failed its
+  build. One line of `warning` for each, the code of the first; they replace the warning of the entry, a later
+  build without them removes them, and a parse of the same content (a rescan) keeps them. A glTF material with
+  `alphaMode` MASK or BLEND reaches bm3d as a cutout (`map_d` naming its texture in the OBJ it is converted to).
+  The build warnings change no export, fixture or other schema.
+  The `bounds.json` of a built Gaussian splat (`gsplat.bounds`) gains `framing` (additive): `{"kind": "object" |
+  "scene" | "site", "core": [minX, minY, minZ, maxX, maxY, maxZ]}`, the kind of capture (the cameras went round a
+  subject, were inside a room, or looked down on a piece of ground; a georeferenced splat is a `site`) and the box
+  of its core in the frame of `model.rad`, from a sample of every splat of the model. It is missing for fewer than
+  16 splats and in the `bounds.json` of earlier builds. No fixture changed for it.

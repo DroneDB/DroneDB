@@ -86,6 +86,12 @@ constexpr const char* Tiles3DBuildSubfolder = "3dtiles";
 
 constexpr const char* CogFileName = "cog.tif";
 constexpr const char* CopcFileName = "cloud.copc.laz";
+// Beside an artifact: what its build did, so that a build of older rules is told apart
+constexpr const char* BuildRecordFileName = "build.json";
+// Beside the COPC: the coordinate systems of its build (CopcBuildRecord, pointcloud.h)
+constexpr const char* CopcBuildRecordFileName = BuildRecordFileName;
+// Beside the COG: the rules of its build (CogBuildRecord, cog_build_policy.h)
+constexpr const char* CogBuildRecordFileName = BuildRecordFileName;
 constexpr const char* Bm3dFileName = "model.bm3d";
 // Vector: the GeoPackage copy, the MVT pyramid descriptor, and the drawing-coordinate
 // metadata of a CAD vector without CRS (written instead of an MVT pyramid).

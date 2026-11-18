@@ -1,6 +1,6 @@
 {
   "name": "ddb",
-  "version": "2.7.2",
+  "version": "2.8.0",
   "dependencies": [
     "boolinq",
     "cctz",
@@ -59,7 +59,14 @@
       ]
     },
     "sqlite3",
-    "tiff",
+    {
+      "name": "tiff",
+      "features": [
+        "lerc",
+        "webp",
+        "zstd"
+      ]
+    },
     "zlib",
     "zstd",
     "assimp",

@@ -78,6 +78,10 @@ void to_json(json& j, const BuildArtifact& artifact) {
     if (!artifact.fallbackFor.empty())
         j["fallbackFor"] = artifact.fallbackFor;
     j["version"] = artifact.version;
+    if (artifact.crs)
+        j["crs"] = {{"name", artifact.crs->name},
+                    {"epsg", artifact.crs->epsg ? json(*artifact.crs->epsg) : json(nullptr)},
+                    {"transformed", artifact.crs->transformed}};
 }
 
 void to_json(json& j, const EntryBuild& build) {
@@ -147,8 +151,8 @@ bool BuildProbe::isLockHeld(const fs::path& outputFolder) const {
     return BuildLock::isHeld(io::toUtf8(outputFolder));
 }
 
-bool BuildProbe::isComplete(const EntryHandler& handler, const fs::path& root) const {
-    return handler.isComplete(root);
+bool BuildProbe::isComplete(const EntryHandler& handler, const Entry& e, const fs::path& root) const {
+    return handler.isComplete(e, root);
 }
 
 std::string BuildProbe::version(const fs::path& file) const {
@@ -314,14 +318,16 @@ EntryBuild BuildStateReader::read(const Entry& e) {
     // file exists while a build runs; a file without a live holder is a crashed build's leftover.
     const bool building = rootNames && hasName(*rootNames, buildLockPath(target->subfolder), false) &&
                           probe_.isLockHeld(build.root / target->subfolder);
-    if (rootNames)
+    if (rootNames) {
         build.artifacts = existingArtifacts(handler, build.root, *rootNames, probe_);
+        handler.describeArtifacts(target->entry, build.root, build.artifacts);
+    }
 
     if (building)
         build.state = BuildState::Building;
     else if (marker)
         build.state = BuildState::Pending;
-    else if (rootNames && probe_.isComplete(handler, build.root))
+    else if (rootNames && probe_.isComplete(handler, target->entry, build.root))
         build.state = BuildState::Complete;
     return build;
 }
@@ -370,14 +376,14 @@ void requireBuildKey(const std::string& key) {
 
 // The handlers of the types of the entries whose build has this key (usually one), by type value
 std::vector<const EntryHandler*> handlersOfKey(Database* db, const std::string& key) {
-    const auto q = db->query(
-        "SELECT type, json_extract(properties, '$.georef') FROM entries WHERE hash = ? ORDER BY type");
+    const BuildPropertyColumns properties;
+    const auto q = db->query("SELECT type, " + properties.sql() + " FROM entries WHERE hash = ? ORDER BY type");
     q->bind(1, std::string(buildKeyHash(key)));
     std::vector<const EntryHandler*> handlers;
     const std::string hash(buildKeyHash(key));
     while (q->fetch()) {
         const auto type = static_cast<EntryType>(q->getInt(0));
-        if (buildKeyOfRow(hash, type, q->getText(1)) != key)
+        if (buildKeyOfRow(hash, type, properties.read(*q, 1, type)) != key)
             continue;
         const EntryHandler& handler = entryHandler(type);
         if (std::find(handlers.begin(), handlers.end(), &handler) == handlers.end())

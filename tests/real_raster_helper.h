@@ -36,10 +36,10 @@ namespace testutils
         {
             real_.buildCog(path, out, params, progress);
         }
-        void buildCopc(const fs::path &path, const fs::path &out, const json &params,
+        json buildCopc(const fs::path &path, const fs::path &out, const json &params,
                        const ddb::raster::ProgressCallback &progress) override
         {
-            real_.buildCopc(path, out, params, progress);
+            return real_.buildCopc(path, out, params, progress);
         }
         void buildVector(const fs::path &path, const fs::path &out, const json &params,
                          const ddb::raster::ProgressCallback &progress) override

@@ -333,6 +333,15 @@ namespace
             ASSERT_NE(created, nullptr);
         }
         rasters.emplace_back(plain, EntryType::Image);
+
+        // A GeoTIFF named for what it is (.cog) is a raster as a .tif is: it was a Generic file
+        const fs::path cog = s.dataset / "ortho.cog";
+        fs::copy_file(tif, cog);
+        rasters.emplace_back(cog, EntryType::GeoRaster);
+        const fs::path plainCog = s.dataset / "plain.COG";
+        fs::copy_file(plain, plainCog);
+        rasters.emplace_back(plainCog, EntryType::Image);
+
         rasters.emplace_back(writeAs("JPEG", s.dataset / "photo.jpg"), EntryType::Image);
         rasters.emplace_back(writeAs("PNG", s.dataset / "picture.PNG"), EntryType::Image);
 
@@ -377,6 +386,82 @@ namespace
         EXPECT_EQ(typeOf(gpkg, s.dataset), EntryType::Vector);
         EXPECT_NE(openUserVector(io::toUtf8(shp)), nullptr);
         EXPECT_EQ(typeOf(shp, s.dataset), EntryType::Vector);
+    }
+
+    // A GML as ogr2ogr writes it (with its .xsd) is a vector, read with the GML driver
+    USER_OPEN_TEST(gdalOpenPolicy, gmlIsAVector)
+    {
+        if (!hasDriver("GML"))
+            GTEST_SKIP() << "No GML driver";
+        Scene s(TEST_NAME);
+        const fs::path gml = s.dataset / "points.gml";
+        {
+            const auto source = openUserVector(io::toUtf8(s.outsideGeoJson));
+            ASSERT_NE(source, nullptr);
+            const auto copy = adoptDataset(GDALCreateCopy(GDALGetDriverByName("GML"), io::toUtf8(gml).c_str(),
+                                                          datasetHandle(source), FALSE, nullptr, nullptr, nullptr));
+            ASSERT_NE(copy, nullptr);
+        }
+        ASSERT_TRUE(fs::exists(s.dataset / "points.xsd"));
+
+        const auto dataset = openUserVector(io::toUtf8(gml));
+        ASSERT_NE(dataset, nullptr);
+        EXPECT_STREQ(GDALGetDriverShortName(GDALGetDatasetDriver(datasetHandle(dataset))), "GML");
+        ASSERT_EQ(dataset->GetLayerCount(), 1);
+        EXPECT_EQ(dataset->GetLayer(0)->GetFeatureCount(), 1);
+
+        Entry e;
+        EXPECT_EQ(typeOf(gml, s.dataset, &e), EntryType::Vector);
+        EXPECT_EQ(e.properties["vector"]["driver"], "GML");
+    }
+
+    // The GML driver writes a .gfs next to a GML it reads without a schema, and when the host
+    // turns the resolution of xlinks on (GML_SKIP_RESOLVE_ELEMS), it reads the files the links
+    // name, wherever they are, and writes the GML with them resolved next to it. A GML of a
+    // user is read as it is: nothing is written in its folder and no link is followed.
+    USER_OPEN_TEST(gdalOpenPolicy, gmlIsReadWithoutWritingNextToItNorFollowingItsLinks)
+    {
+        if (!hasDriver("GML"))
+            GTEST_SKIP() << "No GML driver";
+        Scene s(TEST_NAME);
+        const std::string ns = "xmlns:ns=\"http://example.com/ns\" xmlns:gml=\"http://www.opengis.net/gml\"";
+        write(s.area.getFolder("outside") / "linked.gml",
+              "<?xml version=\"1.0\"?>\n<ns:FeatureCollection " + ns + ">\n  <gml:featureMember><ns:t gml:id=\"t9\">"
+              "<ns:geom><gml:Point gml:id=\"p9\" srsName=\"EPSG:4326\"><gml:coordinates>11,46</gml:coordinates>"
+              "</gml:Point></ns:geom></ns:t></gml:featureMember>\n</ns:FeatureCollection>\n");
+        const fs::path gml = s.dataset / "linking.gml";
+        write(gml, "<?xml version=\"1.0\"?>\n<ns:FeatureCollection " + ns +
+                       " xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n"
+                       "  <gml:featureMember><ns:t gml:id=\"t1\"><ns:name>a</ns:name><ns:geom><gml:Point gml:id=\"p1\" "
+                       "srsName=\"EPSG:4326\"><gml:coordinates>10,45</gml:coordinates></gml:Point></ns:geom></ns:t>"
+                       "</gml:featureMember>\n"
+                       "  <gml:featureMember><ns:t gml:id=\"t2\"><ns:name>b</ns:name>"
+                       "<ns:geom xlink:href=\"../outside/linked.gml#p9\"/></ns:t></gml:featureMember>\n"
+                       "</ns:FeatureCollection>\n");
+
+        const ScopedThreadConfigOption resolve("GML_SKIP_RESOLVE_ELEMS", "NONE");
+        {
+            const auto dataset = openUserVector(io::toUtf8(gml));
+            ASSERT_NE(dataset, nullptr);
+            ASSERT_EQ(dataset->GetLayerCount(), 1);
+            OGRLayer *layer = dataset->GetLayer(0);
+            EXPECT_EQ(layer->GetFeatureCount(), 2);
+            layer->ResetReading();
+            for (const auto &feature : *layer)
+            {
+                const OGRGeometry *geometry = feature->GetGeometryRef();
+                if (geometry != nullptr && wkbFlatten(geometry->getGeometryType()) == wkbPoint)
+                {
+                    EXPECT_DOUBLE_EQ(geometry->toPoint()->getX(), 10.0) << "a point read from the linked file";
+                }
+            }
+        }
+
+        std::vector<std::string> written;
+        for (const auto &f : fs::directory_iterator(s.dataset))
+            if (f.path() != gml)
+                written.push_back(io::toUtf8(f.path().filename()));
+        EXPECT_TRUE(written.empty()) << joined(written);
     }
 
     USER_OPEN_TEST(gdalOpenPolicy, anExtensionThatIsNotReadIsNotOpened)

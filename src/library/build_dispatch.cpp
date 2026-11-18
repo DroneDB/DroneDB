@@ -115,7 +115,7 @@ class BuildAttempt {
 
             // Recheck primary artifacts after serialized recovery. Success consumes
             // pending work even when the output was already complete before this attempt.
-            if (handler_.isComplete(baseOutputPath_, false) && !force_) {
+            if (handler_.isComplete(target_, baseOutputPath_, false) && !force_) {
                 LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder_;
                 // A process that died after the publish, or a removal that failed then, left
                 // the superseded output behind: it is removed here, under the same lock
@@ -154,7 +154,8 @@ class BuildAttempt {
                                        io::fromUtf8(outputFolder_),
                                        io::fromUtf8(tempFolder_),
                                        force_,
-                                       handlerOptions};
+                                       handlerOptions,
+                                       &warnings_};
             // A COG build reports its phases (cog.cpp); the other kinds are done when they are: -1 until then
             options_.reportProgress(-1.0, str::toLowerCopy(handler_.name()));
             handler_.build(context);
@@ -168,6 +169,7 @@ class BuildAttempt {
             publish();
             // Only now, with the new output in place: a failed build keeps the old one
             removeSupersededOutput();
+            recordWarnings();
 
             io::assureIsRemoved(io::fromUtf8(tempFolder_));
             io::assureIsRemoved(pendFile_);
@@ -255,6 +257,16 @@ class BuildAttempt {
         io::rename(io::fromUtf8(tempFolder_), io::fromUtf8(outputFolder_));
     }
 
+    // The warnings of the output now published replace the ones of the previous build on the
+    // entry; best effort, it never fails the build (the output is in place)
+    void recordWarnings() const {
+        try {
+            recordBuildWarnings(db_, target_, warnings_);
+        } catch (const std::exception& e) {
+            LOGW << "Cannot record the warnings of the build of " << target_.path << ": " << e.what();
+        }
+    }
+
     // The legacy output the published one replaces; best effort, it never fails the build
     void removeSupersededOutput() const {
         removeSupersededArtifacts(handler_, baseOutputPath_, filesystemBuildProbe());
@@ -297,6 +309,8 @@ class BuildAttempt {
     const std::string tempFolder_;
     bool wasPending_ = false;
     std::vector<std::string> pendingDependencies_;
+    // What the handler reported about its output
+    std::vector<BuildWarning> warnings_;
     // The largest known fraction the handler reported (-1: none), from any thread
     std::atomic<double> lastFraction_{-1.0};
     // What a build reports at most until its output is published
@@ -390,13 +404,15 @@ void buildAll(Database* db, const std::string& outputPath, bool force, const Bui
             total = static_cast<size_t>(countQ->getInt64(0));
     }
 
-    auto q = db->query(selectEntries(EntryColumns::Properties) + " WHERE e.type IN " + inListSql(types.size()));
+    // The entries as a build of one reads them (getEntry): with their footprints, which the build of
+    // a point cloud reads
+    auto q = db->query(selectEntries(EntryColumns::Geometries) + " WHERE e.type IN " + inListSql(types.size()));
     bindEntryTypes(*q, 1, types);
 
     size_t done = 0;
     while (q->fetch()) {
         Entry e;
-        readEntry(*q, EntryColumns::Properties, e);
+        readEntry(*q, EntryColumns::Geometries, e);
 
         // Call build on each of them; a canceled call stops before the next one
         cancel::throwIfCanceled();

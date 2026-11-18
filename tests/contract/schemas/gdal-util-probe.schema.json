@@ -54,10 +54,12 @@
                 "additionalProperties": false,
                 "properties": {
                   "type": { "type": "string" },
-                  "colorInterp": { "type": "string" }
+                  "colorInterp": { "type": "string" },
+                  "noData": { "oneOf": [{ "type": "number" }, { "enum": ["nan", "inf", "-inf"] }] }
                 }
               }
             },
+            "hasMask": { "type": "boolean" },
             "georeferenced": { "type": "boolean" },
             "vector": {
               "type": "object",

@@ -86,6 +86,13 @@ namespace ddb
                           const fs::path &binary = fs::path(),
                           const process::IProcessRunner &runner = process::systemProcessRunner());
 
+        /**
+         * The message of the exception Obj2Tiles reported in its output (its line
+         * " !> Exception: <message>", the last one), or "" when the output has none. It says why
+         * the tool failed on the model, without a path of the server.
+         */
+        std::string reportedException(const std::string &output);
+
     } // namespace obj2tiles
 
 } // namespace ddb

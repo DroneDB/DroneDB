@@ -13,12 +13,15 @@
 #include "testarea.h"
 #include "utils.h"
 #include <cpr/cpr.h>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <filesystem>
+#include <map>
 #include <sstream>
 #include "exceptions.h"
+#include "gdal_inc.h"
 #include <tiny_obj_loader.h>
 
 namespace
@@ -216,6 +219,91 @@ namespace
              "\"scene\":0"
              "}";
         return j.str();
+    }
+
+    // Three triangles side by side, a primitive each: the first (x 0..1) has red vertex colours
+    // and the grey material "painted"; the second (x 2..3) has no vertex colours and the blue
+    // material "glass"; the third (x 4..5) has no vertex colours and the material "painted" of
+    // the first. A glTF multiplies the vertex colour by the base colour of the material.
+    std::string partlyVertexColouredGltfJson() {
+        std::vector<float> positions;
+        for (float x : {0.0f, 2.0f, 4.0f}) {
+            const std::vector<float> triangle = {x, 0, 0, x + 1, 0, 0, x, 1, 0};
+            positions.insert(positions.end(), triangle.begin(), triangle.end());
+        }
+        const std::vector<float> red = {1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1};
+        std::vector<uint8_t> bin = toBytes(positions);
+        const auto colours = toBytes(red);
+        bin.insert(bin.end(), colours.begin(), colours.end());
+
+        std::ostringstream j;
+        j << "{\"asset\":{\"version\":\"2.0\"},"
+             "\"buffers\":[{\"uri\":\"" << dataUri(bin) << "\",\"byteLength\":" << bin.size() << "}],"
+             "\"bufferViews\":["
+             "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+             "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36},"
+             "{\"buffer\":0,\"byteOffset\":72,\"byteLength\":36},"
+             "{\"buffer\":0,\"byteOffset\":108,\"byteLength\":48}],"
+             "\"accessors\":["
+             "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"max\":[1,1,0],\"min\":[0,0,0]},"
+             "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"max\":[3,1,0],\"min\":[2,0,0]},"
+             "{\"bufferView\":2,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"max\":[5,1,0],\"min\":[4,0,0]},"
+             "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC4\"}],"
+             "\"materials\":["
+             "{\"name\":\"painted\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.5,0.5,0.5,1]}},"
+             "{\"name\":\"glass\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[0.2,0.4,0.8,1]}}],"
+             "\"meshes\":[{\"primitives\":["
+             "{\"attributes\":{\"POSITION\":0,\"COLOR_0\":3},\"material\":0},"
+             "{\"attributes\":{\"POSITION\":1},\"material\":1},"
+             "{\"attributes\":{\"POSITION\":2},\"material\":0}]}],"
+             "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+        return j.str();
+    }
+
+    // The colour a vertex shows: its own (bm3d draws it instead of that of the material) and
+    // the diffuse colour of its material (3D Tiles multiply the two)
+    struct ShownColour {
+        std::array<float, 3> vertex;
+        std::array<float, 3> diffuse;
+        std::string material;
+    };
+
+    // The colours of the vertices of an OBJ by the triangle they belong to: 0 for x below 2,
+    // 1 for x below 4, 2 beyond
+    std::map<int, std::vector<ShownColour>> shownColoursByTriangle(const std::string& obj) {
+        tinyobj::ObjReader reader;
+        tinyobj::ObjReaderConfig config;
+        config.triangulate = true;
+        EXPECT_TRUE(reader.ParseFromFile(obj, config)) << reader.Error();
+        const auto& attrib = reader.GetAttrib();
+        const auto& materials = reader.GetMaterials();
+
+        std::map<int, std::vector<ShownColour>> byTriangle;
+        for (const auto& shape : reader.GetShapes()) {
+            for (size_t f = 0; f < shape.mesh.material_ids.size(); ++f) {
+                const int materialId = shape.mesh.material_ids[f];
+                EXPECT_GE(materialId, 0);
+                if (materialId < 0)
+                    continue;
+                const auto& m = materials[static_cast<size_t>(materialId)];
+                for (size_t k = 0; k < 3; ++k) {
+                    const auto v = static_cast<size_t>(shape.mesh.indices[f * 3 + k].vertex_index);
+                    const float x = attrib.vertices[v * 3];
+                    const int triangle = x < 1.5f ? 0 : x < 3.5f ? 1 : 2;
+                    byTriangle[triangle].push_back(
+                        {{attrib.colors[v * 3], attrib.colors[v * 3 + 1], attrib.colors[v * 3 + 2]},
+                         {m.diffuse[0], m.diffuse[1], m.diffuse[2]},
+                         m.name});
+                }
+            }
+        }
+        return byTriangle;
+    }
+
+    void expectColour(const std::array<float, 3>& actual, const std::array<float, 3>& expected,
+                      const std::string& what) {
+        for (size_t c = 0; c < 3; ++c)
+            EXPECT_NEAR(actual[c], expected[c], 1e-3) << what << ", channel " << c;
     }
 
     // Helper function to verify OBJ file content and MTL texture references using tinyobj
@@ -953,6 +1041,65 @@ namespace
         EXPECT_GT(fs::file_size(outBm3d), 0);
     }
 
+    // A part of a glTF without vertex colours, next to parts with them (the glass cover of a
+    // dish of coloured olives), keeps the colour of its material in the OBJ: its vertices get
+    // that colour and its material a white one, so that it shows the same where the vertex
+    // colour replaces the material's (bm3d) and where the two are multiplied (3D Tiles). It was
+    // black: the exporter gives such vertices (0, 0, 0). The parts with vertex colours keep
+    // them and their material.
+    TEST(file3d, partWithoutVertexColoursKeepsTheColourOfItsMaterialInTheObj) {
+        TestArea ta(TEST_NAME);
+        const fs::path gltf = ta.getPath("partly-coloured.gltf");
+        writeFile(gltf, partlyVertexColouredGltfJson());
+
+        std::string geom, mtl;
+        convertGltfTo3dModel(gltf.string(), ta.getPath("obj/partly-coloured").string(), geom, mtl, false, false);
+        ASSERT_EQ(fs::path(geom).extension(), ".obj");
+
+        auto shown = shownColoursByTriangle(geom);
+        ASSERT_EQ(shown[0].size(), 3u);
+        ASSERT_EQ(shown[1].size(), 3u);
+        ASSERT_EQ(shown[2].size(), 3u);
+
+        // The coloured part: its red vertices and its grey material
+        for (const auto& c : shown[0]) {
+            expectColour(c.vertex, {1, 0, 0}, "vertex colour of the coloured part");
+            expectColour(c.diffuse, {0.5f, 0.5f, 0.5f}, "material of the coloured part");
+            EXPECT_EQ(c.material, "painted");
+        }
+        // The blue part: blue vertices, white material
+        for (const auto& c : shown[1]) {
+            expectColour(c.vertex, {0.2f, 0.4f, 0.8f}, "vertex colour of the part without");
+            expectColour(c.diffuse, {1, 1, 1}, "material of the part without");
+            EXPECT_EQ(c.material, "glass");
+        }
+        // The part that shares its material with the coloured part: a white copy of it
+        for (const auto& c : shown[2]) {
+            expectColour(c.vertex, {0.5f, 0.5f, 0.5f}, "vertex colour of the part sharing a material");
+            expectColour(c.diffuse, {1, 1, 1}, "material of the part sharing a material");
+            EXPECT_NE(c.material, "painted");
+        }
+    }
+
+    // A glTF with vertex colours and no texture coordinates becomes an OBJ for bm3d, not a PLY:
+    // Assimp's PLY exporter does not declare the colours it writes in the rows of the vertices
+    // of such a scene, and bm3d refused the PLY ("face 0 ... has 0 vertex indices")
+    TEST(file3d, buildBm3dGltfWithVertexColoursAndNoUvs) {
+        TestArea ta(TEST_NAME);
+        const fs::path gltf = ta.getPath("partly-coloured.gltf");
+        writeFile(gltf, partlyVertexColouredGltfJson());
+
+        std::string geom, mtl;
+        convertGltfTo3dModel(gltf.string(), ta.getPath("bm3d-input/partly-coloured").string(), geom, mtl, false, true);
+        EXPECT_EQ(fs::path(geom).extension(), ".obj");
+
+        const fs::path bm3dFile = ta.getPath("partly-coloured.bm3d");
+        std::string outBm3d;
+        ASSERT_NO_THROW(outBm3d = buildBm3d(gltf.string(), bm3dFile.string(), true));
+        ASSERT_TRUE(fs::exists(outBm3d));
+        EXPECT_GT(fs::file_size(outBm3d), 0u);
+    }
+
     // ---------------------------------------------------------------------------
     // glTF inside a dataset: the original glTF is validated against the dataset
     // root, the OBJ converted into a temp folder is not, and its textures must
@@ -982,11 +1129,16 @@ namespace
         return bin;
     }
 
+    // The material of texturedQuadGltfJson by default: its base colour is the texture
+    const std::string kTexturedMaterial = "{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0}}}";
+
     // bufferField: the buffer object's extra fields (e.g. a uri). imageField: the image object.
     // extraBufferView: appended to bufferViews (for an embedded image), may be empty.
+    // material: the one material of the quad.
     std::string texturedQuadGltfJson(size_t bufferLength, const std::string& bufferUriField,
                                      const std::string& imageObject,
-                                     const std::string& extraBufferView) {
+                                     const std::string& extraBufferView,
+                                     const std::string& material = kTexturedMaterial) {
         std::ostringstream j;
         j << "{\"asset\":{\"version\":\"2.0\"},"
           << "\"buffers\":[{\"byteLength\":" << bufferLength << bufferUriField << "}],"
@@ -1002,10 +1154,120 @@ namespace
           << "\"images\":[" << imageObject << "],"
           << "\"samplers\":[{}],"
              "\"textures\":[{\"source\":0,\"sampler\":0}],"
-             "\"materials\":[{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0}}}],"
-             "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"TEXCOORD_0\":1},\"indices\":2,\"material\":0}]}],"
+          << "\"materials\":[" << material << "],"
+          << "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"TEXCOORD_0\":1},\"indices\":2,\"material\":0}]}],"
              "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
         return j.str();
+    }
+
+    // The values of the statements of an MTL with this keyword, in order
+    std::vector<std::string> mtlValues(const std::string& mtl, const std::string& keyword) {
+        std::vector<std::string> values;
+        std::ifstream in(mtl);
+        std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream words(line);
+            std::string word, value;
+            if (words >> word && word == keyword && std::getline(words >> std::ws, value))
+                values.push_back(value);
+        }
+        return values;
+    }
+
+    // A material that glTF draws with an alpha test (MASK), or blends (BLEND), cuts its texture out
+    // in bm3d: the MTL names an image for map_d, which bm3d cuts at an alpha of half. The texture
+    // itself when the alpha a texel of the texture needs is at most 1 (a masked texel is kept when
+    // its alpha times that of the factor reaches the cutoff), a black mask when the factor alone is
+    // below the cutoff; nothing when the cutoff keeps every texel, for an opaque material or one
+    // without a texture. A masked material is opaque (d 1); a blended one keeps the alpha of its
+    // factor.
+    TEST(file3d, aGltfMaterialWithAnAlphaTestCutsItsTextureOutInTheObj)
+    {
+        TestArea ta(TEST_NAME);
+        const auto bin = texturedQuadBin();
+        struct Case {
+            std::string name, material;
+            std::vector<std::string> mapD;
+            // The opacity of the material of the quad (Assimp adds a default material after it)
+            float d;
+        };
+        const std::string texture = "\"baseColorTexture\":{\"index\":0}";
+        const std::vector<Case> cases = {
+            {"opaque", kTexturedMaterial, {}, 1},
+            {"mask", "{\"alphaMode\":\"MASK\",\"pbrMetallicRoughness\":{" + texture + "}}", {"tex.png"}, 1},
+            {"mask-cutoff",
+             "{\"alphaMode\":\"MASK\",\"alphaCutoff\":0.4,\"pbrMetallicRoughness\":{"
+             "\"baseColorFactor\":[1,1,1,0.8]," + texture + "}}",
+             {"tex.png"}, 1},
+            {"mask-below-cutoff",
+             "{\"alphaMode\":\"MASK\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,0.3]," + texture + "}}",
+             {"ddb-full-cutout-mask.png"}, 1},
+            {"mask-keeps-all", "{\"alphaMode\":\"MASK\",\"alphaCutoff\":0,\"pbrMetallicRoughness\":{" + texture + "}}",
+             {}, 1},
+            {"blend",
+             "{\"alphaMode\":\"BLEND\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,0.6]," + texture + "}}",
+             {"tex.png"}, 0.6f},
+            {"mask-untextured", "{\"alphaMode\":\"MASK\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,0,0,1]}}",
+             {}, 1}};
+
+        for (const auto& c : cases) {
+            SCOPED_TRACE(c.name);
+            const fs::path gltf = ta.getPath(c.name + "/model.gltf");
+            fs::create_directories(gltf.parent_path());
+            writeFile(gltf.parent_path() / "tex.png", kTinyPng);
+            writeFile(gltf, texturedQuadGltfJson(bin.size(), ",\"uri\":\"" + dataUri(bin) + "\"",
+                                                 "{\"uri\":\"tex.png\"}", "", c.material));
+
+            std::string geom, mtl;
+            convertGltfTo3dModel(gltf.string(), ta.getPath(c.name + "/obj/model").string(), geom, mtl, false, false);
+            ASSERT_FALSE(mtl.empty());
+            EXPECT_EQ(mtlValues(mtl, "map_d"), c.mapD);
+            const auto d = mtlValues(mtl, "d");
+            ASSERT_FALSE(d.empty());
+            EXPECT_NEAR(std::stof(d.front()), c.d, 1e-6);
+            if (!c.mapD.empty() && c.mapD[0] == "tex.png") {
+                EXPECT_EQ(mtlValues(mtl, "map_Kd"), c.mapD) << "the cutout of a texture is its own alpha";
+            }
+        }
+
+        // The black mask: one texel of 0, which bm3d reads by its luminance
+        GDALDatasetH mask =
+            GDALOpen(ta.getPath("mask-below-cutoff/obj/ddb-full-cutout-mask.png").string().c_str(), GA_ReadOnly);
+        ASSERT_NE(mask, nullptr);
+        EXPECT_EQ(GDALGetRasterXSize(mask), 1);
+        EXPECT_EQ(GDALGetRasterYSize(mask), 1);
+        EXPECT_EQ(GDALGetRasterCount(mask), 1);
+        uint8_t texel = 255;
+        EXPECT_EQ(GDALRasterIO(GDALGetRasterBand(mask, 1), GF_Read, 0, 0, 1, 1, &texel, 1, 1, GDT_Byte, 0, 0),
+                  CE_None);
+        EXPECT_EQ(texel, 0);
+        GDALClose(mask);
+    }
+
+    // The cutout of an embedded texture names the file it is extracted to, as its map_Kd does
+    TEST(file3d, theCutoutOfAnEmbeddedTextureNamesTheExtractedFile)
+    {
+        TestArea ta(TEST_NAME);
+        auto bin = texturedQuadBin();
+        const size_t imageOffset = bin.size();
+        bin.insert(bin.end(), kTinyPng.begin(), kTinyPng.end());
+        std::ostringstream view;
+        view << ",{\"buffer\":0,\"byteOffset\":" << imageOffset << ",\"byteLength\":" << kTinyPng.size() << "}";
+        const fs::path glb = ta.getPath("model.glb");
+        writeGlbWithBin(glb,
+                        texturedQuadGltfJson(bin.size(), "", "{\"bufferView\":3,\"mimeType\":\"image/png\"}",
+                                             view.str(),
+                                             "{\"alphaMode\":\"MASK\",\"pbrMetallicRoughness\":{"
+                                             "\"baseColorTexture\":{\"index\":0}}}"),
+                        bin);
+
+        std::string geom, mtl;
+        convertGltfTo3dModel(glb.string(), ta.getPath("obj/model").string(), geom, mtl, false, false);
+        const auto mapD = mtlValues(mtl, "map_d");
+        ASSERT_EQ(mapD.size(), 1u);
+        EXPECT_EQ(mapD, mtlValues(mtl, "map_Kd"));
+        EXPECT_NE(mapD[0].front(), '*') << "an embedded reference is the name of a file";
+        EXPECT_TRUE(fs::exists(ta.getPath("obj") / mapD[0]));
     }
 
     struct GltfDataset : IndexFixture {

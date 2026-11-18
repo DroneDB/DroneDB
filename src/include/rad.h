@@ -67,6 +67,22 @@ namespace ddb
                           std::array<double, 3> &outMin,
                           std::array<double, 3> &outMax);
 
+    // Splats of a RAD as the source spread them: its leaves (in a level-of-detail tree the other
+    // splats are merged images of them, and the coarse levels are spread over space, not over the
+    // splats: a dense subject is as many coarse splats as its sparse surroundings).
+    struct RadSplatSample
+    {
+        size_t count = 0;
+        std::vector<float> positions; // count * 3, in the RAD's local coordinate space
+        std::vector<float> opacities; // count, activated opacity
+    };
+
+    // Every nth leaf of the RAD in file order, n the least power of two that leaves fewer than twice
+    // `maxSplats` of them (all of them up to that), by streaming each chunk's centres, alphas and child
+    // counts: bounded memory, whatever the size of the file. A chunk without a tree is all leaves, one
+    // without alphas fully opaque. Throws AppException on a malformed or unreadable file.
+    RadSplatSample sampleRadLeaves(const fs::path &radPath, size_t maxSplats);
+
 } // namespace ddb
 
 #endif // RAD_H

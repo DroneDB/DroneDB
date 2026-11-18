@@ -111,26 +111,59 @@ GDALDatasetUniquePtr complexMagnitudesOf(GDALDatasetH src) {
     return vrt;
 }
 
-// Compute thumbnail target dimensions preserving aspect ratio.
+// Refuses up front a raster whose thumbnail would decode blocks larger than a read may
+// (raster::requireDecodableBlocks), before a pixel is read: at the overview GDAL resamples the
+// thumbnail from (by average, or by the nearest pixel for a palette, which may take a smaller one).
+// A thumbnail that reads a sample of the raster too (the statistics of a stretch, the range of a
+// formula or of a colormap) may read it at any level, from an overview smaller than the thumbnail
+// to the full resolution, so all of them count. `ds` is the dataset GDAL decodes, not a VRT over it.
+void requireThumbnailBlocks(GDALDatasetH ds, int targetWidth, int targetHeight, bool sampled,
+                            const std::string& path) {
+    if (sampled) {
+        raster::requireDecodableLevels(ds, path);
+        return;
+    }
+    GDALRasterBandH first = GDALGetRasterBand(ds, 1);
+    if (!first)
+        return;
+    const int average = raster::overviewReadFor(first, targetWidth, targetHeight, GRIORA_Average);
+    const int nearest = raster::overviewReadFor(first, targetWidth, targetHeight, GRIORA_NearestNeighbour);
+    raster::requireDecodableBlocks(ds, average, path);
+    if (nearest != average)
+        raster::requireDecodableBlocks(ds, nearest, path);
+}
+
+// The size of a pixel of `ds` on the ground, its height over its width, from the geotransform: 1
+// without one (a photo), or with a degenerate one. A raster of 5 x 5000 pixels of 240 x 0.24 m
+// covers a square, as its thumbnail must show it
+double pixelAspectOf(GDALDatasetH ds) {
+    double gt[6];
+    if (GDALGetGeoTransform(ds, gt) != CE_None)
+        return 1.0;
+    const double width = std::hypot(gt[1], gt[4]);
+    const double height = std::hypot(gt[2], gt[5]);
+    if (!std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0)
+        return 1.0;
+    return height / width;
+}
+
+// Compute thumbnail target dimensions preserving the aspect ratio of an image of
+// srcWidth x srcHeight pixels whose pixels are pixelAspect times as high as wide.
 // Guaranteed to return values >= 1 pixel.
 void computeThumbTargetSize(int srcWidth, int srcHeight, int thumbSize,
-                            int& outWidth, int& outHeight) {
-    if (srcWidth <= 0 || srcHeight <= 0 || thumbSize <= 0)
+                            int& outWidth, int& outHeight, double pixelAspect = 1.0) {
+    if (srcWidth <= 0 || srcHeight <= 0 || thumbSize <= 0 || !(pixelAspect > 0))
         throw InvalidArgsException("Invalid thumbnail size parameters");
 
-    if (srcWidth > srcHeight) {
-        outWidth = thumbSize;
-        outHeight = static_cast<int>((static_cast<float>(thumbSize) /
-                                      static_cast<float>(srcWidth)) *
-                                     static_cast<float>(srcHeight));
-    } else {
-        outHeight = thumbSize;
-        outWidth = static_cast<int>((static_cast<float>(thumbSize) /
-                                     static_cast<float>(srcHeight)) *
-                                    static_cast<float>(srcWidth));
-    }
-    if (outWidth < 1) outWidth = 1;
-    if (outHeight < 1) outHeight = 1;
+    const double width = static_cast<double>(srcWidth);
+    const double height = static_cast<double>(srcHeight) * pixelAspect;
+    const double longest = std::max(width, height);
+    const auto side = [&](double length) {
+        return static_cast<int>(std::clamp(static_cast<double>(thumbSize) * length / longest, 1.0,
+                                           static_cast<double>(thumbSize)));
+    };
+    outWidth = width >= height ? thumbSize : side(width);
+    outHeight = width >= height ? side(height) : thumbSize;
 }
 
 // The band the alpha of a thumbnail comes from: a band of the source, or the mask of one
@@ -320,7 +353,10 @@ RasterImage renderPlainThumbnail(const fs::path& imagePath, int thumbSize) {
     const bool isByte = GDALGetRasterDataType(hBand1) == GDT_Byte;
 
     int targetWidth = 0, targetHeight = 0;
-    computeThumbTargetSize(frameWidth, frameHeight, thumbSize, targetWidth, targetHeight);
+    computeThumbTargetSize(frameWidth, frameHeight, thumbSize, targetWidth, targetHeight,
+                           pixelAspectOf(datasetHandle(src)));
+    // Only non-Byte data reads the statistics of its stretch (below)
+    requireThumbnailBlocks(datasetHandle(src), targetWidth, targetHeight, !hasPalette && !isByte, openPath);
 
     // Grey (and grey + alpha) is replicated to RGB; otherwise the first three bands.
     // Only non-Byte data (DEM, thermal...) is stretched over the minimum to the maximum of each band,
@@ -490,7 +526,12 @@ RasterImage renderVisualisedThumbnail(const fs::path& imagePath, int thumbSize, 
     const GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrc, 1));
 
     int targetWidth, targetHeight;
-    computeThumbTargetSize(width, height, thumbSize, targetWidth, targetHeight);
+    computeThumbTargetSize(width, height, thumbSize, targetWidth, targetHeight, pixelAspectOf(hSrc));
+    // A formula or a colormap reads the range of its values, non-Byte data without a rescale the
+    // statistics of its stretch (below)
+    const bool sampled = !visParams.formula.empty() || !visParams.colormap.empty() ||
+                         (srcType != GDT_Byte && visParams.rescale.empty());
+    requireThumbnailBlocks(datasetHandle(src), targetWidth, targetHeight, sampled, io::toUtf8(imagePath));
 
     // Formula mode: vegetation index rendered with its colormap
     if (!visParams.formula.empty()) {

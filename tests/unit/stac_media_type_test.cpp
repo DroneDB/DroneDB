@@ -28,6 +28,8 @@ namespace
         EXPECT_EQ(stacMediaType("x/copc/cloud.copc.laz"), "application/vnd.laszip");
         EXPECT_EQ(stacMediaType("copc/cloud.copc.laz"), "application/vnd.laszip");
         EXPECT_EQ(stacMediaType("cog/cog.tif"), "image/tiff");
+        // A GeoTIFF of a user named .cog is a TIFF as a .tif is
+        EXPECT_EQ(stacMediaType("ortho.COG"), "image/tiff");
         // The same paths in a build folder are the artifacts
         EXPECT_EQ(stacArtifactMediaType("ortho/cog/cog.tif"), "image/tiff; application=geotiff; profile=cloud-optimized");
         EXPECT_EQ(stacArtifactMediaType("x/copc/cloud.copc.laz"), "application/vnd.laszip+copc");

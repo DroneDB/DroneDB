@@ -6,6 +6,8 @@
 #include "randomutil.h"
 #include "mathutil.h"
 
+#include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <memory>
 #include <vector>
@@ -119,7 +121,10 @@ namespace ddb
     std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const
     {
         std::vector<TileInfo> result;
-        const BoundingBox<Projected2Di> bounds = getMinMaxCoordsForZ(tz);
+        const std::optional<BoundingBox<Projected2D>> content = contentBounds();
+        if (!content)
+            return result;
+        const BoundingBox<Projected2Di> bounds = mercator.tilesIntersecting(*content, tz);
 
         for (int ty = bounds.min.y; ty < bounds.max.y + 1; ty++)
         {
@@ -131,6 +136,11 @@ namespace ddb
         }
 
         return result;
+    }
+
+    std::optional<BoundingBox<Projected2D>> Tiler::contentBounds() const
+    {
+        return BoundingBox<Projected2D>(Projected2D(oMinX, oMinY), Projected2D(oMaxX, oMaxY));
     }
 
     BoundingBox<int> Tiler::getMinMaxZ() const { return BoundingBox(tMinZ, tMaxZ); }
@@ -186,6 +196,28 @@ namespace ddb
     {
         const Projected2D p = metersToPixels(mx, my, zoom);
         return pixelsToTile(p.x, p.y);
+    }
+
+    BoundingBox<Projected2Di> GlobalMercator::tilesIntersecting(const BoundingBox<Projected2D> &meters,
+                                                                int zoom) const
+    {
+        // A side within a millionth of a tile of an edge of tiles is on it: the conversion rounds
+        constexpr double tolerance = 1e-6;
+        const double size = static_cast<double>(tileSize);
+        const double last = std::pow(2.0, zoom) - 1.0;
+        const auto first = [&](double px) {
+            return static_cast<int>(std::clamp(std::floor(px / size + tolerance), 0.0, last));
+        };
+        const auto end = [&](double px) {
+            return static_cast<int>(std::clamp(std::ceil(px / size - tolerance) - 1.0, 0.0, last));
+        };
+        const Projected2D lo = metersToPixels(meters.min.x, meters.min.y, zoom);
+        const Projected2D hi = metersToPixels(meters.max.x, meters.max.y, zoom);
+        BoundingBox<Projected2Di> b(Projected2Di(first(lo.x), first(lo.y)), Projected2Di(end(hi.x), end(hi.y)));
+        // A box thinner than the tolerance (a point, a line) is in the tile that holds it
+        b.max.x = std::max(b.max.x, b.min.x);
+        b.max.y = std::max(b.max.y, b.min.y);
+        return b;
     }
 
     Projected2D GlobalMercator::pixelsToMeters(double px, double py, int zoom) const

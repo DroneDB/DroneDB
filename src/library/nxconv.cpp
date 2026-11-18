@@ -5,11 +5,16 @@
 // nxconv.cpp - correct version for libktx 4.x
 
 #include <assimp/config.h>
+#include <assimp/GltfMaterial.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
+#include <map>
+#include <memory>
+#include <set>
 #include <assimp/Exporter.hpp>
 #include <assimp/Importer.hpp>
 #include <cctype>
@@ -77,6 +82,191 @@ static bool sceneHasVertexColors(const aiScene* s) {
             return true;
     }
     return false;
+}
+
+/** @brief The name the OBJ exporter gives a material: its own, or "$Material_<index>" without one */
+static std::string materialName(const aiScene* s, unsigned index) {
+    aiString name;
+    if (s->mMaterials[index]->Get(AI_MATKEY_NAME, name) == AI_SUCCESS)
+        return std::string(name.data, name.length);
+    return "$Material_" + std::to_string(index);
+}
+
+/**
+ * @brief Adds to the scene a copy of a material, under its name followed by "_white" (and a
+ * number when another material has that name)
+ * @return The index of the copy
+ */
+static unsigned addMaterialCopy(aiScene* s, unsigned index) {
+    std::set<std::string> names;
+    for (unsigned m = 0; m < s->mNumMaterials; ++m)
+        names.insert(materialName(s, m));
+    const std::string base = materialName(s, index) + "_white";
+    std::string name = base;
+    for (unsigned n = 2; names.count(name); ++n)
+        name = base + "_" + std::to_string(n);
+
+    auto* copy = new aiMaterial();
+    aiMaterial::CopyPropertyList(copy, s->mMaterials[index]);
+    const aiString copyName(name);
+    copy->AddProperty(&copyName, AI_MATKEY_NAME);
+
+    auto** materials = new aiMaterial*[s->mNumMaterials + 1];
+    std::copy(s->mMaterials, s->mMaterials + s->mNumMaterials, materials);
+    materials[s->mNumMaterials] = copy;
+    delete[] s->mMaterials;
+    s->mMaterials = materials;
+    return s->mNumMaterials++;
+}
+
+/**
+ * @brief Gives vertex colours to the meshes without any, when other meshes of the scene have some
+ *
+ * The exporters write a colour for every vertex of the file once one mesh has colours: the OBJ
+ * exporter writes black ("v x y z 0 0 0") for the vertices of a mesh without, the PLY exporter
+ * nothing or garbage. A part with no vertex colours of a glTF next to parts with (a glass cover
+ * among coloured dishes) was black in every viewer of the build.
+ *
+ * Such a mesh gets the diffuse colour of its material as the colour of each vertex, and its
+ * material a white diffuse colour (a copy of the material when a mesh with vertex colours uses it
+ * too). The part looks the same to the viewers that multiply the vertex colour by the colour of
+ * the material (glTF, the 3D Tiles that Obj2Tiles writes), to those in which the vertex colour
+ * replaces that of the material (bm3d) and in a PLY, which has no material. Opacity and textures
+ * stay in the material; meshes with their own vertex colours are not changed.
+ */
+static void colourMeshesWithoutVertexColours(aiScene* s) {
+    if (!sceneHasVertexColors(s))
+        return;
+
+    // Materials used by meshes with vertex colours keep their diffuse colour
+    std::set<unsigned> materialsOfColouredMeshes;
+    for (unsigned m = 0; m < s->mNumMeshes; ++m)
+        if (s->mMeshes[m]->mColors[0])
+            materialsOfColouredMeshes.insert(s->mMeshes[m]->mMaterialIndex);
+
+    // A material of meshes without vertex colours: its diffuse colour, read before it is made white,
+    // and the material (itself or its copy) with the white diffuse colour these meshes now use
+    struct Whitened {
+        aiColor4D diffuse;
+        unsigned material;
+    };
+    std::map<unsigned, Whitened> whitened;
+
+    for (unsigned m = 0; m < s->mNumMeshes; ++m) {
+        aiMesh* mesh = s->mMeshes[m];
+        if (mesh->mColors[0])
+            continue;
+
+        aiColor4D colour(1, 1, 1, 1);
+        if (mesh->mMaterialIndex < s->mNumMaterials) {
+            const unsigned source = mesh->mMaterialIndex;
+            auto it = whitened.find(source);
+            if (it == whitened.end()) {
+                aiColor4D diffuse(1, 1, 1, 1);
+                const bool hasDiffuse =
+                    s->mMaterials[source]->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS;
+                unsigned target = source;
+                if (hasDiffuse) {
+                    if (materialsOfColouredMeshes.count(source))
+                        target = addMaterialCopy(s, source);
+                    const aiColor4D whiteDiffuse(1, 1, 1, diffuse.a);
+                    s->mMaterials[target]->AddProperty(&whiteDiffuse, 1, AI_MATKEY_COLOR_DIFFUSE);
+                }
+                it = whitened.emplace(source, Whitened{diffuse, target}).first;
+            }
+            colour = it->second.diffuse;
+            mesh->mMaterialIndex = it->second.material;
+        }
+
+        mesh->mColors[0] = new aiColor4D[mesh->mNumVertices];
+        std::fill_n(mesh->mColors[0], mesh->mNumVertices, aiColor4D(colour.r, colour.g, colour.b, 1));
+    }
+}
+
+/** The mask that cuts out every texel of a texture: one black texel, read by its luminance (it is opaque) */
+static constexpr const char* FullCutoutMaskName = "ddb-full-cutout-mask.png";
+
+/** The alpha a texture of a material needs for a texel to be kept, which bm3d tests at half */
+static constexpr float CutoutThreshold = 0.5f;
+
+/**
+ * @brief Gives the textures that glTF draws with an alpha test or blends an opacity texture, which the OBJ
+ * exporter writes as `map_d`
+ *
+ * bm3d cuts a texture out where the image `map_d` names is transparent, at half: by the alpha of the
+ * texture itself when `map_d` names the texture of `map_Kd`, by the luminance of an opaque mask. It
+ * cannot blend. glTF keeps a texel of a material whose alphaMode is MASK when the alpha of its base colour
+ * (that of the texture times that of the factor) is at least alphaCutoff (0.5 by default), and blends
+ * one of a BLEND material. The exporter wrote no `map_d` for either, so the texels a mask cuts out (the
+ * background of a gold leaf decal) covered what lies behind them.
+ *
+ * - A textured MASK material: the texture needs an alpha of alphaCutoff / factor alpha. When that is at
+ *   most 1, `map_d` names the texture of the material: the cut is at half, which is the threshold of the
+ *   usual factor of 1 and cutoff of 0.5 (another threshold is drawn at half: the texture is not decoded
+ *   in this process). When it is more than 1 (the factor alone is below the cutoff), no texel is kept:
+ *   `map_d` names a black mask. A cutoff of 0 or less keeps every texel: no `map_d`. The opacity of the
+ *   material becomes 1, since what the mask keeps is drawn opaque.
+ * - A textured BLEND material: `map_d` names its texture, so blending is drawn as a cutout at half: the
+ *   texels that are mostly transparent are left out, the others drawn opaque. Its opacity (the alpha of
+ *   its factor, written as `d`) is kept.
+ * - An untextured material, or an OPAQUE one, is not changed: bm3d cuts out textures only.
+ *
+ * Obj2Tiles reads no `map_d`, so the 3D Tiles are the same as without it.
+ */
+static void cutOutAlphaTestedTextures(aiScene* s, const fs::path& outputDir) {
+    bool fullMaskWritten = false;
+    for (unsigned m = 0; m < s->mNumMaterials; ++m) {
+        aiMaterial* material = s->mMaterials[m];
+        aiString mode;
+        if (material->Get(AI_MATKEY_GLTF_ALPHAMODE, mode) != AI_SUCCESS)
+            continue;
+        const std::string alphaMode(mode.data, mode.length);
+        const bool masked = alphaMode == "MASK";
+        if (!masked && alphaMode != "BLEND")
+            continue;
+
+        aiString texture;
+        const bool textured = material->Get(AI_MATKEY_TEXTURE_DIFFUSE(0), texture) == AI_SUCCESS &&
+                              texture.length > 0;
+
+        float factorAlpha = 1.0f;
+        material->Get(AI_MATKEY_OPACITY, factorAlpha);
+
+        if (!masked) {
+            if (textured)
+                material->AddProperty(&texture, AI_MATKEY_TEXTURE_OPACITY(0));
+            continue;
+        }
+
+        const float opaque = 1.0f;
+        material->AddProperty(&opaque, 1, AI_MATKEY_OPACITY);
+
+        float cutoff = CutoutThreshold;
+        material->Get(AI_MATKEY_GLTF_ALPHACUTOFF, cutoff);
+        if (!textured || cutoff <= 0.0f)
+            continue;
+
+        // The alpha of the texture that keeps a texel: alpha * factorAlpha >= cutoff
+        if (factorAlpha > 0.0f && cutoff <= factorAlpha) {
+            const float threshold = cutoff / factorAlpha;
+            if (std::abs(threshold - CutoutThreshold) > 1e-3f) {
+                LOGD << "The texture of material " << materialName(s, m) << " is cut out at an alpha of "
+                     << CutoutThreshold << " instead of " << threshold;
+            }
+            material->AddProperty(&texture, AI_MATKEY_TEXTURE_OPACITY(0));
+            continue;
+        }
+
+        if (!fullMaskWritten) {
+            fs::create_directories(outputDir);
+            const unsigned char black = 0;
+            if (!writePng(outputDir / FullCutoutMaskName, 1, 1, 1, &black, 1))
+                throw AppException("Cannot write the cutout mask in " + io::toUtf8(outputDir));
+            fullMaskWritten = true;
+        }
+        const aiString mask(FullCutoutMaskName);
+        material->AddProperty(&mask, AI_MATKEY_TEXTURE_OPACITY(0));
+    }
 }
 
 /**
@@ -248,6 +438,8 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
 
     const char* keys[] =
         {"map_Kd", "map_Ks", "map_Bump", "map_d", "map_Pr", "map_Pm", "map_Ps", "map_Ke", "map_Ka"};
+    // A texture named twice (map_Kd and the map_d of its cutout) is converted once
+    std::set<fs::path> converted;
 
     while (std::getline(lines, line)) {
         bool handled = false;
@@ -261,7 +453,10 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
                     fs::path pngPath = ktxPath;
                     pngPath.replace_extension(".png");
                     try {
-                        convertKtx2ToPng(ktxPath, pngPath);
+                        if (!converted.count(ktxPath)) {
+                            convertKtx2ToPng(ktxPath, pngPath);
+                            converted.insert(ktxPath);
+                        }
                         std::string newLine = std::string(key) + " " + io::toUtf8(pngPath.filename());
                         out << newLine << "\n";
                         LOGD << "MTL patch: " << key << " -> " << io::toUtf8(pngPath.filename());
@@ -367,9 +562,10 @@ static void fixEmbeddedTextureReferences(const fs::path& mtl, const std::map<int
 
 /** How a scene is exported by @ref exportWithAssimp */
 struct AssimpExportOptions {
-    bool forcePLY;         ///< Force PLY format even if UVs are present
-    bool preferPLYIfNoUV;  ///< Prefer PLY if no UVs and vertex colors are present
-    bool hasUVs;           ///< Whether the scene has UV coordinates
+    bool forcePLY;          ///< Force PLY format even if UVs are present
+    bool preferPLYIfNoUV;   ///< Prefer PLY if the scene has no UVs and no vertex colours
+    bool hasUVs;            ///< Whether the scene has UV coordinates
+    bool hasVertexColors;   ///< Whether the scene has vertex colours
 };
 
 /** The files @ref exportWithAssimp wrote */
@@ -393,6 +589,7 @@ static AssimpOutputs exportWithAssimp(const aiScene* scene,
     const bool forcePLY = options.forcePLY;
     const bool preferPLYIfNoUV = options.preferPLYIfNoUV;
     const bool hasUVs = options.hasUVs;
+    const bool hasVertexColors = options.hasVertexColors;
     Assimp::Exporter exporter;
     fs::create_directories(outBaseNoExt.parent_path());
 
@@ -402,7 +599,11 @@ static AssimpOutputs exportWithAssimp(const aiScene* scene,
         extractEmbeddedTextures(scene, outBaseNoExt.parent_path(), textureMap);
     }
 
-    bool usePLY = forcePLY || (!hasUVs && preferPLYIfNoUV);
+    // Assimp's PLY exporter declares the colour properties of the vertices only when the mesh has
+    // texture coordinates, yet writes the colours in every row: a PLY of a scene with vertex
+    // colours and no UVs cannot be read (bm3d: "face 0 ... has 0 vertex indices"). The OBJ
+    // keeps the colours ("v x y z r g b") and the materials.
+    bool usePLY = forcePLY || (!hasUVs && !hasVertexColors && preferPLYIfNoUV);
     const char* fmt = usePLY ? "ply" : "obj";
 
     fs::path geomPath = outBaseNoExt;
@@ -500,7 +701,7 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
  * @param outGeomPath Output parameter for the generated geometry file path
  * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
  * @param forcePLY Force PLY format output even if UVs are present
- * @param preferPLYIfNoUV Prefer PLY format if no UVs and vertex colors are present
+ * @param preferPLYIfNoUV Prefer PLY format if the scene has no UVs and no vertex colours
  * @throws AppException if conversion fails
  */
 void convertGltfTo3dModel(const std::string& inputGltf,
@@ -522,20 +723,26 @@ void convertGltfTo3dModel(const std::string& inputGltf,
     // PLY/OBJ exporter and desyncs bm3d's triangle-soup reader.
     importer.SetPropertyInteger(AI_CONFIG_PP_SBP_REMOVE,
                                 aiPrimitiveType_POINT | aiPrimitiveType_LINE);
-    const aiScene* scene = importer.ReadFile(inputGltf, pp);
-    if (!scene) {
+    if (!importer.ReadFile(inputGltf, pp)) {
         throw AppException("Assimp import failed: " + std::string(importer.GetErrorString()));
     }
-
-    bool hasUV = sceneHasUVs(scene);
-    bool hasVC = sceneHasVertexColors(scene);
-    LOGD << "[assimp] meshes=" << scene->mNumMeshes << " UV=" << (hasUV ? "Y" : "N")
-         << " VCols=" << (hasVC ? "Y" : "N");
+    // Owned here (Assimp is linked statically, or with the same runtime): the vertex colours
+    // are changed before the export
+    const std::unique_ptr<aiScene> owned(importer.GetOrphanedScene());
+    aiScene* scene = owned.get();
 
     // Export geometry
     fs::path outBase = io::fromUtf8(outputBasePath);
 
-    const AssimpOutputs exported = exportWithAssimp(scene, outBase, {forcePLY, preferPLYIfNoUV, hasUV});
+    bool hasUV = sceneHasUVs(scene);
+    bool hasVC = sceneHasVertexColors(scene);
+    colourMeshesWithoutVertexColours(scene);
+    // After the colouring, which may copy a material: the copy is cut out as the original
+    cutOutAlphaTestedTextures(scene, outBase.parent_path());
+    LOGD << "[assimp] meshes=" << scene->mNumMeshes << " UV=" << (hasUV ? "Y" : "N")
+         << " VCols=" << (hasVC ? "Y" : "N");
+
+    const AssimpOutputs exported = exportWithAssimp(scene, outBase, {forcePLY, preferPLYIfNoUV, hasUV, hasVC});
     outGeomPath = exported.geomPath;
     outMtlPath = exported.mtlPath;
 

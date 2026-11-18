@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,11 +33,20 @@ namespace ddb {
 class Database;
 class Tiler;
 struct Entry;
+struct BuildWarning;
 struct FingerprintContext;
 
 // ---- Artifact manifest -------------------------------------------------------------
 
 enum class ArtifactKind { File, Directory };
+
+// The coordinate system of an artifact a client places on the map itself (a COPC): its name, its
+// EPSG code when it has one, and whether the build transformed the data of the entry to it
+struct ArtifactCrs {
+    std::string name;
+    std::optional<int> epsg;
+    bool transformed = false;
+};
 
 // The artifacts of a type are listed in the order of artifacts(), its primary output first:
 // the file thumbnails and tiles are made from.
@@ -63,6 +73,9 @@ struct BuildArtifact {
     // opens (openedPath()) as they are now, so it changes whenever a build rewrites it, also under
     // the same entry hash. Opaque; empty in the manifest of a type
     std::string version;
+    // Of an artifact that exists, when its handler describes it (EntryHandler::describeArtifacts):
+    // the CRS of the file. Nothing in the manifest of a type.
+    std::optional<ArtifactCrs> crs;
 
     // Not an aggregate on purpose: an artifact is made by file(), directory() and legacyFor(), so a
     // member added later has its default in one place instead of in every list of artifacts, and a
@@ -165,6 +178,12 @@ struct BuildContext {
     // What the caller asked of this build (the thread cap): the handler passes it on to the
     // builders that use threads
     BuildOptions options{};
+    // Where the build reports the warnings about the output it made (warn()); the entry records
+    // them once the output is published. Null when nothing records them.
+    std::vector<BuildWarning>* warnings = nullptr;
+
+    // Reports a warning about the output (the one that matters most first)
+    void warn(const std::string& code, const std::string& message) const;
 };
 
 // ---- Completeness helpers ------------------------------------------------------------------
@@ -224,6 +243,20 @@ class EntryHandler {
     // "<hash>-<georef digest>", so the same file in two places builds once for each (buildKey()).
     // The default: it does not.
     virtual bool buildDependsOnGeoref() const { return false; }
+    // The keys of the entry properties the build rules of this type read (buildKey(),
+    // isComplete(), describeArtifacts()). Where libddb reads the entries of many builds from the
+    // index (the build manifest, the build status, the build keys of a cleanup), it reads these
+    // properties of each entry and no other, so a rule that reads another one does not see it.
+    // The default: the georeference when buildDependsOnGeoref().
+    virtual std::vector<std::string> buildPropertyKeys() const {
+        return buildDependsOnGeoref() ? std::vector<std::string>{"georef"} : std::vector<std::string>{};
+    }
+    // The build rules of this type read the footprint of the entry (polygon_geom) too; where
+    // libddb reads entries from the index for their builds, it reads the footprint of these types
+    // only. The default: they do not.
+    virtual bool buildReadsFootprint() const { return false; }
+    // The rules read something of the index beyond path, hash and type
+    bool buildReadsIndex() const { return !buildPropertyKeys().empty() || buildReadsFootprint(); }
     // The key of the build folder of e, an entry of this type: its hash, with the digest of its
     // georeference when buildDependsOnGeoref() (build_layout.h buildKey()). e holds its properties.
     std::string buildKey(const Entry& e) const;
@@ -251,12 +284,19 @@ class EntryHandler {
     virtual bool usesTempFolder() const { return true; }
     // Repairs an interrupted publish under the build lock, before completeness is checked
     virtual void recoverOutput(const fs::path& /*baseOutputPath*/) const {}
-    // The artifacts in baseOutputPath ("<build root>/<key>") exist and are not empty.
+    // The artifacts of e (an entry of this type, with its properties) in baseOutputPath
+    // ("<build root>/<key>") exist, are not empty and are of the current layout: a handler may
+    // consider an older build of some entries incomplete, so that they are built again.
     // reportRecoverable: an output recoverOutput() would repair counts as incomplete.
     // The default: the output subfolder holds a non-empty file (the file names may vary by input).
-    virtual bool isComplete(const fs::path& baseOutputPath, bool /*reportRecoverable*/ = true) const {
+    virtual bool isComplete(const Entry& /*e*/, const fs::path& baseOutputPath, bool /*reportRecoverable*/ = true) const {
         return buildable() && directoryHasNonEmptyContent(baseOutputPath / subfolder());
     }
+    // What the manifest says of the artifacts of e that exist in baseOutputPath, besides where they
+    // are (the CRS of a COPC): `artifacts` are the ones existingArtifacts() found. The default adds
+    // nothing.
+    virtual void describeArtifacts(const Entry& /*e*/, const fs::path& /*baseOutputPath*/,
+                                   std::vector<BuildArtifact>& /*artifacts*/) const {}
     virtual void build(const BuildContext& /*ctx*/) const {
         throw AppException(name_ + " entries are not built");
     }

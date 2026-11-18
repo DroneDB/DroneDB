@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "build.h"
+#include "build_layout.h"
+#include "cog_build_policy.h"
 #include "dbops.h"
 #include "ddb.h"
 #include "exceptions.h"
@@ -111,6 +113,8 @@ TEST_F(IsBuildCompleteTest, RasterFolderWithContentReturnsTrue) {
     const auto hash = indexedHash(orthoPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "cog";
     writeFile(out / "cog.tif", "some COG bytes");
+    // A COG of this release: its record beside it (one built before is read to check it, CogBuildPolicy)
+    writeCogBuildRecord(out / CogBuildRecordFileName, CogBuildRecord{});
 
     const auto rel = fs::relative(orthoPath, dbPath).string();
     EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
@@ -286,6 +290,7 @@ TEST_F(IsBuildCompleteTest, DDBIsBuildCompleteCAPI) {
     const auto hash = indexedHash(orthoPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "cog";
     writeFile(out / "cog.tif", "content");
+    writeCogBuildRecord(out / CogBuildRecordFileName, CogBuildRecord{});
 
     const auto rel = fs::relative(orthoPath, dbPath).string();
 

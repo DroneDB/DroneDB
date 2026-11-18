@@ -23,14 +23,17 @@
 #include "build_layout.h"
 #include "build_manifest.h"
 #include "buildlock.h"
+#include "bm3d_runner.h"
 #include "buildlod_runner.h"
 #include "dbops.h"
 #include "ddb.h"
+#include "entry.h"
 #include "exceptions.h"
 #include "gdal_priv.h"
 #include "gdal_write_failure.h"
 #include "gtest/gtest.h"
 #include "helpers/process_test_utils.h"
+#include "obj2tiles_runner.h"
 #include "in_process_raster_helper.h"
 #include "ogr_api.h"
 #include "ogr_srs_api.h"
@@ -311,9 +314,10 @@ TEST(PendingBuild, NonDependencyFailureConsumesMarker) {
     ds.add({"m.obj"});
     expectDeferred(ds, "m.obj");
 
-    // The MTL now references an absolute texture: unsatisfiable.
-    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd /nonexistent/tex.png"));
-    ds.add({"m.mtl"});
+    // The MTL now arrives, with a texture that is not an image: bm3d refuses it
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("tex.png"), "not an image");
+    ds.add({"m.mtl", "tex.png"});
     ds.backdatePending("m.obj");
 
     EXPECT_EQ(DDBBuild(ds.root.string().c_str(), nullptr, nullptr, false, true), DDBERR_NONE);
@@ -435,12 +439,56 @@ TEST(PendingBuild, AbsoluteMtllibFailsWithoutPending) {
     expectFailedWithoutPending(ds, "m.obj", "/nonexistent/m.mtl");
 }
 
-TEST(PendingBuild, WindowsAbsoluteTextureFailsWithoutPending) {
+// The warning the index has for an entry, and its code ("" without)
+std::pair<std::string, std::string> entryWarning(Dataset& ds, const std::string& rel) {
+    const auto e = getEntry(ds.db.get(), rel);
+    if (!e)
+        return {};
+    return {e->properties.value("warning", ""), e->properties.value("warningCode", "")};
+}
+
+// The 3D Tiles step of a model build fails the same way on every system: there is no Obj2Tiles
+struct NoTiler {
+#ifdef _WIN32
+    EnvVarGuard path{"DDB_OBJ2TILES_PATH", "Z:\\nonexistent\\Obj2Tiles_missing.exe"};
+#else
+    EnvVarGuard path{"DDB_OBJ2TILES_PATH", "/nonexistent/Obj2Tiles_missing"};
+#endif
+    NoTiler() { obj2tiles::findObj2TilesBinary(true); }
+    ~NoTiler() {
+        path.restore();
+        obj2tiles::findObj2TilesBinary(true);
+    }
+};
+
+// The warning of a model built without 3D Tiles (NoTiler) and without the textures leftOut
+const std::string kNoTilerWarning = "3D Tiles not generated: Obj2Tiles is not installed on this server";
+
+// Builds rel, which names textures the dataset can never hold: it is built without them, at
+// once (nothing to wait for), and its entry names them after the warning of its 3D Tiles (the
+// one that matters most comes first, with its code)
+void expectBuiltWithoutTextures(Dataset& ds, const std::string& rel, const std::string& leftOut) {
+    ASSERT_NO_THROW(ddb::build(ds.db.get(), rel, "", false));
+    EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), rel));
+    EXPECT_FALSE(fs::exists(ds.pendingFile(rel)));
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+    EXPECT_EQ(entryWarning(ds, rel),
+              std::make_pair(kNoTilerWarning + "\nTextures outside the dataset left out: " + leftOut,
+                             std::string(warning_code::TilesNotGenerated)));
+}
+
+// A texture that is an absolute path can never be part of the dataset: the model is built
+// without it, as one outside the dataset
+TEST(PendingBuild, WindowsAbsoluteTextureIsLeftOutWithAWarning) {
+    NoTiler noTiler;
     Dataset ds(TEST_NAME);
     writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
     writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd C:\\textures\\tex.png"));
     ds.add({"m.obj", "m.mtl"});
-    expectFailedWithoutPending(ds, "m.obj", "C:\\textures\\tex.png");
+
+    EXPECT_EQ(getObjDependencies(ds.path("m.obj").string(), ds.root.string()),
+              std::vector<std::string>{"m.mtl"});
+    expectBuiltWithoutTextures(ds, "m.obj", "C:\\textures\\tex.png");
 }
 
 TEST(PendingBuild, RootEscapingReferenceFailsWithoutPending) {
@@ -456,13 +504,103 @@ TEST(PendingBuild, RootEscapingReferenceFailsWithoutPending) {
     expectFailedWithoutPending(ds, "sub/m.obj", "../../m.mtl");
 }
 
-TEST(PendingBuild, RootEscapingTextureFailsWithoutPending) {
+// A texture outside the dataset is left out of the build, even when the file exists there: the
+// model is built at once without it (its material keeps its colour) and its entry names it. A
+// later build without such a texture removes the warning.
+TEST(PendingBuild, RootEscapingTextureIsLeftOutWithAWarning) {
+    NoTiler noTiler;
     Dataset ds(TEST_NAME);
     writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
-    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd ../outside/tex.png"));
-    ds.add({"m.obj", "m.mtl"});
-    expectFailedWithoutPending(ds, "m.obj", "../outside/tex.png");
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd ../outside/tex.png\nmap_Ks spec.png"));
+    writePng(ds.path("spec.png"));
+    writePng(ds.root.parent_path() / "outside" / "tex.png");
+    ds.add({"m.obj", "m.mtl", "spec.png"});
+
+    EXPECT_EQ(getObjDependencies(ds.path("m.obj").string(), ds.root.string()),
+              (std::vector<std::string>{"m.mtl", "spec.png"}));
+    expectBuiltWithoutTextures(ds, "m.obj", "../outside/tex.png");
+
+    // The texture is put in the dataset and the MTL names it there
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png\nmap_Ks spec.png"));
+    writePng(ds.path("tex.png"));
+    ds.add({"m.mtl", "tex.png"});
+    ASSERT_NO_THROW(ddb::build(ds.db.get(), "m.obj", "", true));
+    EXPECT_EQ(entryWarning(ds, "m.obj"),
+              std::make_pair(kNoTilerWarning, std::string(warning_code::TilesNotGenerated)));
 }
+
+// A texture missing inside the dataset is still waited for when another is outside it: the
+// build is deferred for the first only, then built without the second
+TEST(PendingBuild, MissingTextureIsAwaitedBesideOneOutsideTheDataset) {
+    NoTiler noTiler;
+    Dataset ds(TEST_NAME);
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd ../../outside/tex.png\nmap_Ks spec.png"));
+    ds.add({"m.obj", "m.mtl"});
+
+    expectDeferred(ds, "m.obj");
+    EXPECT_EQ(ds.pendingDeps("m.obj"), std::vector<std::string>{"spec.png"});
+    EXPECT_EQ(entryWarning(ds, "m.obj"), std::make_pair(std::string(), std::string()));
+
+    writePng(ds.path("spec.png"));
+    ds.add({"spec.png"});
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+    EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
+    EXPECT_EQ(entryWarning(ds, "m.obj").first,
+              kNoTilerWarning + "\nTextures outside the dataset left out: ../../outside/tex.png");
+}
+
+#ifndef _WIN32
+// What bm3d is given for an OBJ built without a texture outside the dataset: a copy of the OBJ
+// that names a copy of its MTL, where the statements of that texture are left out (whatever the
+// case of their keyword), the other textures are named by their absolute path and every other
+// line is kept
+TEST(PendingBuild, TheMtlGivenToBm3dLeavesOutTheTexturesOutsideTheDataset) {
+    Dataset ds(TEST_NAME);
+    const fs::path seen = ds.root.parent_path() / "seen";
+    EnvVarGuard bm3dPath(bm3d::kBm3dEnv), tilerPath("DDB_OBJ2TILES_PATH");
+    const fs::path fake = ds.root.parent_path() / "bin" / "bm3d";
+    const fs::path tiler = ds.root.parent_path() / "bin" / "Obj2Tiles";
+    writeFile(tiler, "#!/bin/sh\nprintf '{}' > \"$2/tileset.json\"\n");
+    fs::permissions(tiler, fs::perms::owner_all, fs::perm_options::add);
+    setEnv("DDB_OBJ2TILES_PATH", tiler.string());
+    obj2tiles::findObj2TilesBinary(true);
+    writeFile(fake, "#!/bin/sh\n"
+                    "for last; do :; done\n"
+                    "input=$3\n"
+                    "mkdir -p '" + seen.string() + "'\n"
+                    "cp \"$input\" \"$(dirname \"$input\")\"/*.mtl '" + seen.string() + "'/\n"
+                    "printf bm3d > \"$last\"\n");
+    fs::permissions(fake, fs::perms::owner_all, fs::perm_options::add);
+    setEnv(bm3d::kBm3dEnv, fake.string());
+    bm3d::findBm3dBinary(true);
+
+    writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib \"my mats/m.mtl\""));
+    writeFile(ds.path("sub/my mats/m.mtl"), "newmtl mat\nKd 0.5 0.25 1\n"
+                                            "map_Kd ../../../outside/tex.png\n"
+                                            "map_Ks -s 1 1 1 spec.png\n"
+                                            "MAP_BUMP C:/far/n.png\n"
+                                            "illum 2\n");
+    writePng(ds.path("sub/my mats/spec.png"));
+    ds.add({"sub/m.obj", "sub/my mats/m.mtl", "sub/my mats/spec.png"});
+
+    ddb::build(ds.db.get(), "sub/m.obj", "", false);
+    bm3dPath.restore();
+    tilerPath.restore();
+    bm3d::findBm3dBinary(true);
+    obj2tiles::findObj2TilesBinary(true);
+
+    const std::string obj = markerContents(seen / "m.obj");
+    EXPECT_EQ(obj, objWithMtllib("mtllib material_0.mtl"));
+    const std::string spec = io::toGenericUtf8(fs::absolute(ds.path("sub/my mats/spec.png")).lexically_normal());
+    EXPECT_EQ(markerContents(seen / "material_0.mtl"),
+              "newmtl mat\nKd 0.5 0.25 1\nmap_Ks " + spec + "\nillum 2\n");
+    EXPECT_EQ(entryWarning(ds, "sub/m.obj"),
+              std::make_pair(std::string("Textures outside the dataset left out: ../../../outside/tex.png, C:/far/n.png"),
+                             std::string(warning_code::TexturesOutsideDataset)));
+}
+#endif
 
 TEST(PendingBuild, QuotedNamesWithSpaces) {
     Dataset ds(TEST_NAME);

@@ -23,6 +23,7 @@
 #include "parallel.h"
 #include "process_runner.h"
 #include "tool_locator.h"
+#include "stringutil.h"
 #include "tool_runner_result.h"
 
 namespace ddb
@@ -344,6 +345,19 @@ namespace ddb
             }
 
             return checkTileset(outDir, res, errorOut);
+        }
+
+        std::string reportedException(const std::string &output)
+        {
+            static const std::string mark = "!> Exception:";
+            const auto at = output.rfind(mark);
+            if (at == std::string::npos)
+                return "";
+            const auto end = output.find_first_of("\r\n", at);
+            std::string message = output.substr(at + mark.size(),
+                                                end == std::string::npos ? std::string::npos : end - at - mark.size());
+            str::trim(message);
+            return message;
         }
 
     } // namespace obj2tiles

@@ -75,7 +75,7 @@ struct ManifestFixture : IndexFixture {
         insertEntry(db.get(), "orphan.dbf", std::string(64, '2'), EntryType::Generic);
         insertEntry(db.get(), "dir", "", EntryType::Directory);
 
-        writeFile(build / H_COG / "cog" / "cog.tif", "x");
+        writeBuiltCog(build / H_COG);
         writeFile(build / H_COPC / "copc" / "cloud.copc.laz", "x");
         writeFile(build / H_COPC / "ept" / "ept.json", "{}");
         writeFile(build / H_EPT / "ept" / "ept.json", "{}");
@@ -86,7 +86,7 @@ struct ManifestFixture : IndexFixture {
         writeFile(build / H_CAD / "vec" / "local.json", "{}");
         writeFile(build / pendingMarkerName(H_PENDING, "pending.shp"), "1700000000\nsub/pending.shx\nsub/pending.dbf\n");
         fs::create_directories(build / H_BUSY);
-        writeFile(build / H_STALE / "cog" / "cog.tif", "x");
+        writeBuiltCog(build / H_STALE);
         writeFile(build / H_STALE / "cog.building", "12345");  // no live holder
         writeFile(build / H_SPLAT / "gsplat" / "model.rad", "x");
         writeFile(build / H_SPLAT / "gsplat" / "bounds.json", "{}");
@@ -141,9 +141,9 @@ class CountingProbe : public BuildProbe {
         calls["isLockHeld"]++;
         return BuildProbe::isLockHeld(outputFolder);
     }
-    bool isComplete(const EntryHandler& handler, const fs::path& root) const override {
+    bool isComplete(const EntryHandler& handler, const Entry& e, const fs::path& root) const override {
         calls["isComplete"]++;
-        return BuildProbe::isComplete(handler, root);
+        return BuildProbe::isComplete(handler, e, root);
     }
     std::string version(const fs::path& file) const override {
         calls["version"]++;
@@ -429,7 +429,7 @@ TEST(BuildManifest, EntryTypes) {
     EXPECT_EQ(byName["PointCloud"]["thumbnail"], "build");
     EXPECT_EQ(byName["Model"]["roles"],
               json::parse(R"(["model.bm3d", "model.nexus", "model.3dtiles"])"));
-    EXPECT_EQ(byName["Vector"]["sidecarExtensions"], json::parse(R"(["cpg", "dbf", "shx", "prj"])"));
+    EXPECT_EQ(byName["Vector"]["sidecarExtensions"], json::parse(R"(["cpg", "dbf", "shx", "prj", "xsd", "gfs"])"));
     EXPECT_EQ(byName["Panorama"]["thumbnail"], "file");
     EXPECT_EQ(byName["GeoPanorama"]["thumbnail"], "file");
     EXPECT_EQ(byName["Video"]["thumbnail"], "none");
@@ -877,7 +877,7 @@ TEST(BuildManifest, AnExportedSplatIsListedWhileItExistsAndCleanupLeavesIt) {
     // An export is no model: without model.rad the build is not complete, and the export does not
     // stand in for it
     fs::remove(root / "gsplat" / "model.rad");
-    EXPECT_FALSE(handler.isComplete(root));
+    EXPECT_FALSE(handler.isComplete(Entry(), root));
     EXPECT_EQ(listed(), (Roles{"gsplat.export"}));
 }
 

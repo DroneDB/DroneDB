@@ -396,10 +396,21 @@ namespace ddb
         }
     }
 
+    namespace
+    {
+        // The flag a Tiler takes for the rows of a run: the Tiler keeps DDBTile's flag, true when
+        // its rows are XYZ rows (TileSource::tms)
+        bool tilerRowsAreXyz(const TilerRun &run)
+        {
+            return !run.tms;
+        }
+    } // namespace
+
     void TilerHelper::runTiler(const fs::path &input, const fs::path &output, std::ostream &os,
                                const TilerRun &run)
     {
         requireOutputFormat(run.format, {OutputFormat::Text, OutputFormat::Json});
+        const bool xyzRows = tilerRowsAreXyz(run);
 
         // Owned: parseZRange, std::stoi and tile() throw on bad input or failed tiles
         std::unique_ptr<Tiler> tiler;
@@ -407,13 +418,13 @@ namespace ddb
         if (const TilerFactory *factory = findTilerFactory(input))
         {
             // Tiled by its entry handler (COPC point cloud)
-            tiler = factory->create(input, output, run.tileSize, run.tms);
+            tiler = factory->create(input, output, run.tileSize, xyzRows);
         }
         else
         {
             // A raster or a photo: the COG toGeoTIFF makes of it
             const fs::path cog = ddb::TilerHelper::toGeoTIFF(input);
-            tiler = std::make_unique<RasterTiler>(io::toUtf8(cog), io::toUtf8(output), run.tileSize, run.tms);
+            tiler = std::make_unique<RasterTiler>(io::toUtf8(cog), io::toUtf8(output), run.tileSize, xyzRows);
         }
 
         BoundingBox<int> zb;

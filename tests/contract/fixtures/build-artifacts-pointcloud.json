@@ -1,0 +1,48 @@
+{
+  "call": "DDBBuild(<root>, \"cloud.las\"), then DDBGetBuildArtifacts(<root>, [\"cloud.las\"])",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "version"
+    ]
+  },
+  "output": [
+    {
+      "build": {
+        "artifacts": [
+          {
+            "crs": {
+              "epsg": 32632,
+              "name": "WGS 84 / UTM zone 32N",
+              "transformed": false
+            },
+            "downloadName": "cloud.copc.laz",
+            "kind": "file",
+            "mediaType": "application/vnd.laszip+copc",
+            "path": "copc/cloud.copc.laz",
+            "role": "pointcloud.copc",
+            "version": "<volatile>"
+          }
+        ],
+        "awaitingFiles": false,
+        "buildable": true,
+        "hash": "76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+        "key": "76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+        "lastAttempt": null,
+        "missingDependencies": [],
+        "retryAfter": null,
+        "root": "<root>/.ddb/build/76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+        "source": "cloud.las",
+        "state": "complete"
+      },
+      "exists": true,
+      "hash": "76d471dfd1b2dc1c5183969ba624e582422d900da9572b7873e450147123edfc",
+      "path": "cloud.las",
+      "type": 5
+    }
+  ],
+  "schema": "build-artifacts.schema.json"
+}

@@ -239,9 +239,9 @@ TEST(CliOptions, theFormatIsParsedOnceAtTheBoundaryOfTheCommand) {
     EXPECT_EQ(cmd::getFormatOption(parse({"-f", "geojson"}), {ddb::OutputFormat::GeoJson}), ddb::OutputFormat::GeoJson);
 
     // what the command does not write is refused, with the same message whatever the reason
-    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "geojson"})), ddb::InvalidArgsException);
-    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "xml"})), ddb::InvalidArgsException);
-    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "JSON"})), ddb::InvalidArgsException);
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "geojson"})), cmd::UsageError);
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "xml"})), cmd::UsageError);
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "JSON"})), cmd::UsageError);
 }
 
 // ------------------------------------------------------------------------ the handler
@@ -313,13 +313,28 @@ TEST(CliHandler, optionsThatDoNotParseAreUsageErrors) {
     }
 }
 
-TEST(CliHandler, invalidArgumentsOfTheLibraryAreUsageErrors) {
-    FakeCommand command([](cxxopts::ParseResult &) -> int { throw ddb::InvalidArgsException("Invalid format xml"); });
+// An argument the command reads with a rule of the library is a usage error when the rule refuses it
+TEST(CliHandler, anArgumentTheLibraryRefusesIsAUsageError) {
+    FakeCommand command([](cxxopts::ParseResult &) -> int {
+        return cmd::readArgument([]() -> int { throw ddb::InvalidArgsException("Invalid format xml"); });
+    });
     const auto outcome = execute(command, {});
     EXPECT_EQ(outcome.code, EXIT_FAILURE);
     EXPECT_TRUE(outcome.out.empty());
     EXPECT_EQ(outcome.err.find("error: Invalid format xml\n\n"), 0u) << outcome.err;
     EXPECT_NE(outcome.err.find("Usage:"), std::string::npos);
+}
+
+// The library refusing what a command works on (a file that is not a point cloud, a cloud it cannot
+// build) is an error of the run: its message, without the usage of the command, which printed after it
+TEST(CliHandler, anInputTheLibraryRefusesIsAnErrorWithoutTheUsage) {
+    FakeCommand command([](cxxopts::ParseResult &) -> int {
+        throw ddb::InvalidArgsException("cloud.txt is not a supported point cloud file");
+    });
+    const auto outcome = execute(command, {});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_TRUE(outcome.out.empty());
+    EXPECT_EQ(outcome.err, "cloud.txt is not a supported point cloud file\n");
 }
 
 TEST(CliHandler, aFailedCommandPrintsItsMessageOnStderr) {
@@ -368,6 +383,20 @@ TEST(CliCommands, aRealCommandWithoutItsArgumentsIsAUsageError) {
         EXPECT_TRUE(outcome.out.empty()) << name << ": " << outcome.out;
         EXPECT_NE(outcome.err.find("Usage:"), std::string::npos) << name;
     }
+}
+
+// A file the command cannot work on is reported in one line: the usage of ddb copc followed the message
+TEST(CliCommands, aFileTheCommandCannotWorkOnIsAnErrorWithoutTheUsage) {
+    TestArea ta("cli_copc_not_a_cloud", true);
+    const auto text = ta.getPath("notes.txt");
+    std::ofstream(text) << "not a point cloud";
+    auto command = CommandRegistry::builtin().create("copc");
+    const auto outcome = execute(*command, {"-i", text.string(), "-o", ta.getPath("copc").string()});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_TRUE(outcome.out.empty()) << outcome.out;
+    EXPECT_NE(outcome.err.find("is not a supported point cloud file"), std::string::npos) << outcome.err;
+    EXPECT_EQ(outcome.err.find("Usage:"), std::string::npos) << outcome.err;
+    EXPECT_EQ(std::count(outcome.err.begin(), outcome.err.end(), '\n'), 1) << outcome.err;
 }
 
 // ddb build --threads N: the same rule as DDBBuildEx, refused as a usage error before the dataset

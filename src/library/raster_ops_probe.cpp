@@ -8,6 +8,8 @@
 // coordinate system.
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -31,6 +33,7 @@
 #include "mio.h"
 #include "ogr_api.h"
 #include "ogr_spatialref.h"
+#include "polar_footprint.h"
 #include "raster_ops.h"
 
 namespace ddb {
@@ -45,14 +48,23 @@ RasterOpException cannotOpen(const fs::path &path)
 
 // ---- rasters
 
-// Raster pixel / line -> the coordinates of its CRS: its geotransform, or (a raster georeferenced
-// by ground control points alone) the GCP transform gdalwarp would use. False when a point fails.
-using PixelToCrs = std::function<bool(double &x, double &y)>;
+// A point mapped in place through the affine transform gt (a geotransform or its inverse)
+GridMapping affineMapping(const double *gt)
+{
+    return [gt = std::array<double, 6>{gt[0], gt[1], gt[2], gt[3], gt[4], gt[5]}](double &x, double &y) {
+        const double gx = gt[0] + gt[1] * x + gt[2] * y;
+        y = gt[3] + gt[4] * x + gt[5] * y;
+        x = gx;
+        return true;
+    };
+}
 
 // The WGS84 footprint (polygon) and center (point) of the raster, from its projection (WKT, not
-// empty) and its pixel-to-CRS mapping. The footprint is left out when GDAL cannot transform the CRS.
-void addFootprint(ProbeResult &result, const std::string &wkt, const PixelToCrs &pixelToCrs, int width, int height,
-                  const fs::path &path)
+// empty) and its pixels placed in that CRS: [0, width] x [0, height] mapped by its geotransform, or
+// (a raster georeferenced by ground control points alone) by the GCP transform gdalwarp would use.
+// The footprint is the ring of the corners, or the polar cap of a raster that holds a pole
+// (polarEnvelope). It is left out when GDAL cannot transform the CRS.
+void addFootprint(ProbeResult &result, const std::string &wkt, const GridBox &pixels, const fs::path &path)
 {
     LOGV << "Setting projection property";
     result.wkt = wkt;
@@ -75,11 +87,23 @@ void addFootprint(ProbeResult &result, const std::string &wkt, const PixelToCrs 
     OGRCoordinateTransformationH hTransform = OGRCoordinateTransformation::ToHandle(transform->get());
 
     const auto corner = [&](double x, double y) {
-        if (!pixelToCrs(x, y) || !OCTTransform(hTransform, 1, &x, &y, nullptr))
+        if (!pixels.toCrs(x, y) || !OCTTransform(hTransform, 1, &x, &y, nullptr))
             throw GDALException("Cannot get raster coordinates of corner " + std::to_string(x) + "," + std::to_string(y));
         return Geographic2D(x, y);
     };
-    const auto ul = corner(0.0, 0.0), ur = corner(width, 0.0), lr = corner(width, height), ll = corner(0.0, height);
+    const double width = pixels.maxX, height = pixels.maxY;
+    Geographic2D ul = corner(0.0, 0.0), ur = corner(width, 0.0), lr = corner(width, height), ll = corner(0.0, height);
+    if (const auto cap = polarEnvelope(pixels, srsOf(srs), srsOf(wgs84)))
+    {
+        // The corners of a raster around a pole leave the pole out: the ring of the cap, in the order
+        // of the corners of a north-up raster
+        LOGD << "The raster holds a pole: its footprint is every longitude from latitude " << cap->minLat << " to "
+             << cap->maxLat;
+        ul = Geographic2D(cap->minLon, cap->maxLat);
+        ur = Geographic2D(cap->maxLon, cap->maxLat);
+        lr = Geographic2D(cap->maxLon, cap->minLat);
+        ll = Geographic2D(cap->minLon, cap->minLat);
+    }
     result.polygonGeom.addPoint(ul.longitude, ul.latitude, 0.0);
     result.polygonGeom.addPoint(ur.longitude, ur.latitude, 0.0);
     result.polygonGeom.addPoint(lr.longitude, lr.latitude, 0.0);
@@ -101,7 +125,18 @@ std::string gcpProjection(GDALDatasetH hDataset)
     return wkt != nullptr ? std::string(wkt) : std::string();
 }
 
-// The data type and color interpretation of every band
+// A nodata value as the entry properties write it: a number, or "nan", "inf", "-inf" (JSON has
+// none of them; the STAC raster extension writes them so)
+json noDataJson(double value)
+{
+    if (std::isnan(value))
+        return "nan";
+    if (std::isinf(value))
+        return value > 0 ? "inf" : "-inf";
+    return value;
+}
+
+// The data type, color interpretation and nodata value (when it has one) of every band
 json describeBands(GDALDatasetH hDataset)
 {
     int bandCount = GDALGetRasterCount(hDataset);
@@ -126,6 +161,22 @@ json describeBands(GDALDatasetH hDataset)
             const char* colorInterpName = GDALGetColorInterpretationName(colorInterp);
             LOGV << "Band " << (i + 1) << " color interpretation: " << colorInterpName;
             b["colorInterp"] = colorInterpName;
+
+            // 64-bit integers have a nodata of their type, which a double does not always hold
+            int hasNoData = FALSE;
+            if (dataType == GDT_Int64) {
+                const int64_t noData = GDALGetRasterNoDataValueAsInt64(hBand, &hasNoData);
+                if (hasNoData)
+                    b["noData"] = noData;
+            } else if (dataType == GDT_UInt64) {
+                const uint64_t noData = GDALGetRasterNoDataValueAsUInt64(hBand, &hasNoData);
+                if (hasNoData)
+                    b["noData"] = noData;
+            } else {
+                const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
+                if (hasNoData)
+                    b["noData"] = noDataJson(noData);
+            }
 
             bands.push_back(b);
         }
@@ -163,14 +214,15 @@ void describeGeoRaster(GDALDatasetH hDataset, const fs::path &path, ProbeResult 
             result.properties["geotransform"].push_back(geotransform[i]);
 
         const char *projectionRef = GDALGetProjectionRef(hDataset);
-        const auto applyGeotransform = [&geotransform](double &x, double &y) {
-            const double gx = geotransform[0] + geotransform[1] * x + geotransform[2] * y;
-            y = geotransform[3] + geotransform[4] * x + geotransform[5] * y;
-            x = gx;
-            return true;
-        };
+        // Pixels to the CRS and back; a geotransform that cannot be inverted (a pixel of size 0)
+        // places no point of the CRS in the raster
+        double inverse[6];
+        const bool invertible = GDALInvGeoTransform(geotransform, inverse) != FALSE;
+        const GridBox pixels{0.0, 0.0, static_cast<double>(width), static_cast<double>(height),
+                             affineMapping(geotransform),
+                             invertible ? affineMapping(inverse) : [](double &, double &) { return false; }};
         if (projectionRef != nullptr && projectionRef[0] != '\0')
-            addFootprint(result, projectionRef, applyGeotransform, width, height, path);
+            addFootprint(result, projectionRef, pixels, path);
         else
             LOGD << "Projection is empty";
     }
@@ -184,12 +236,16 @@ void describeGeoRaster(GDALDatasetH hDataset, const fs::path &path, ProbeResult 
         if (!gcpTransform)
             throw GDALException("Cannot build the transform of the GCPs of " + io::toUtf8(path) + ": " +
                                 CPLGetLastErrorMsg());
-        const auto applyGcps = [transform = gcpTransform.get()](double &x, double &y) {
-            double z = 0;
-            int ok = FALSE;
-            return GDALGenImgProjTransform(transform, FALSE, 1, &x, &y, &z, &ok) && ok;
+        const auto applyGcps = [transform = gcpTransform.get()](int toPixels) {
+            return [transform, toPixels](double &x, double &y) {
+                double z = 0;
+                int ok = FALSE;
+                return GDALGenImgProjTransform(transform, toPixels, 1, &x, &y, &z, &ok) && ok;
+            };
         };
-        addFootprint(result, gcpWkt, applyGcps, width, height, path);
+        const GridBox pixels{0.0, 0.0, static_cast<double>(width), static_cast<double>(height), applyGcps(FALSE),
+                             applyGcps(TRUE)};
+        addFootprint(result, gcpWkt, pixels, path);
     }
     else
     {
@@ -197,6 +253,9 @@ void describeGeoRaster(GDALDatasetH hDataset, const fs::path &path, ProbeResult 
     }
 
     result.properties["bands"] = describeBands(hDataset);
+    // A mask of its own (internal or external), neither its alpha band nor its nodata
+    result.properties["hasMask"] = GDALGetRasterCount(hDataset) > 0 &&
+                                   GDALGetMaskFlags(GDALGetRasterBand(hDataset, 1)) == GMF_PER_DATASET;
 }
 
 ProbeResult probeRaster(const fs::path &path)
@@ -345,6 +404,16 @@ std::optional<OGREnvelope> layerEnvelopeWgs84(OGRLayerH hLayer, int i, const OGR
     envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
     envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
     envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
+    // The corners of an extent around a pole leave the pole out: the polar cap instead
+    if (const auto cap = polarEnvelope(GridBox{env.MinX, env.MinY, env.MaxX, env.MaxY, {}, {}},
+                                       *OGRSpatialReference::FromHandle(hSrs), srsOf(wgs84)))
+    {
+        LOGD << "Vector parse: layer " << i << " holds a pole";
+        envWgs84.MinX = cap->minLon;
+        envWgs84.MaxX = cap->maxLon;
+        envWgs84.MinY = cap->minLat;
+        envWgs84.MaxY = cap->maxLat;
+    }
     const auto result = asWgs84(envWgs84);
     if (!result)
     {

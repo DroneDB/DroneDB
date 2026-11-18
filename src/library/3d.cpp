@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <system_error>
@@ -342,122 +343,173 @@ std::optional<std::string> parseTextureArgument(const std::string& args) {
                        " and can never be provided by adding files to the dataset");
 }
 
+// True for a texture keyword of an MTL, in any case (exporters write map_Bump and map_bump, and
+// the readers take both)
+bool isMtlTextureKeyword(const std::string& keyword) {
+    static const std::vector<std::string> keys = {"map_Ka", "map_Kd", "map_Ks", "map_Ns",
+                                                  "map_d", "disp", "decal", "bump",
+                                                  "map_bump", "refl", "map_Pr", "map_Pm",
+                                                  "map_Ps", "map_Ke"};
+    return std::any_of(keys.begin(), keys.end(),
+                       [&keyword](const std::string& key) { return str::iequals(key, keyword); });
+}
+
+// The MTL file an `mtllib` line of an OBJ names
+struct MtlLibrary {
+    std::string name;  // normalised, relative to the OBJ's folder
+    fs::path path;
+};
+
+// The MTL file a line of `obj` names, or nullopt when the line is not an `mtllib` naming one.
+// Throws AppException when it is absolute or leaves datasetRoot (when known).
+std::optional<MtlLibrary> mtlLibraryOf(const std::string& line, const std::string& obj,
+                                       const fs::path& objDir, const fs::path& datasetRoot) {
+    std::string mtlRef;
+    if (splitKeyword(line, mtlRef) != "mtllib" || mtlRef.empty())
+        return std::nullopt;
+
+    // Remove double quotes if present
+    if (mtlRef.size() >= 2 && mtlRef.front() == '"' && mtlRef.back() == '"')
+        mtlRef = mtlRef.substr(1, mtlRef.size() - 2);
+
+    const std::string mtlName = deppath::normalize(mtlRef);
+    if (mtlName.empty() || mtlName == ".")
+        return std::nullopt;
+    if (deppath::isAbsolute(mtlName))
+        throwUnsatisfiable(obj, mtlRef, "is an absolute path");
+
+    const fs::path mtlPath = objDir / io::fromUtf8(mtlName);
+    if (!datasetRoot.empty() && !deppath::isInside(mtlPath, datasetRoot))
+        throwUnsatisfiable(obj, mtlRef, "points outside the dataset");
+    return MtlLibrary{mtlName, mtlPath};
+}
+
+// The texture a line of an MTL names
+struct MtlTexture {
+    std::string keyword;
+    // As the MTL writes it
+    std::string reference;
+    // Its name and the candidates inside the dataset. No candidate: the reference is absolute, or
+    // resolves outside datasetRoot, and the dataset can never hold it.
+    ObjDependency dependency;
+};
+
+// The texture a line of the MTL file `mtl` of an OBJ in objDir names, or nullopt when it
+// names none
+std::optional<MtlTexture> mtlTextureOf(const std::string& line, const MtlLibrary& mtl,
+                                       const fs::path& objDir, const fs::path& datasetRoot) {
+    std::string rest;
+    const std::string key = splitKeyword(line, rest);
+    if (!isMtlTextureKeyword(key))
+        return std::nullopt;
+
+    const auto textureRef = parseTextureArgument(rest);
+    if (!textureRef.has_value())
+        return std::nullopt;
+
+    const std::string tex = deppath::normalize(textureRef.value());
+    if (tex.empty() || tex == ".")
+        return std::nullopt;
+
+    MtlTexture texture;
+    texture.keyword = key;
+    texture.reference = textureRef.value();
+    const fs::path mtlRelDir = io::fromUtf8(mtl.name).parent_path();
+    texture.dependency.name =
+        mtlRelDir.empty() ? tex : deppath::normalize(io::toGenericUtf8(mtlRelDir / io::fromUtf8(tex)));
+    if (deppath::isAbsolute(tex))
+        return texture;
+
+    for (const auto& c : {mtl.path.parent_path() / io::fromUtf8(tex), objDir / io::fromUtf8(tex)}) {
+        if (!datasetRoot.empty() && !deppath::isInside(c, datasetRoot))
+            continue;
+        auto& candidates = texture.dependency.candidates;
+        if (std::find(candidates.begin(), candidates.end(), c) == candidates.end())
+            candidates.push_back(c);
+    }
+    return texture;
+}
+
+// The first candidate of a dependency that exists, or nullopt
+std::optional<fs::path> existingCandidate(const ObjDependency& d) {
+    for (const auto& c : d.candidates) {
+        std::error_code ec;
+        if (fs::exists(c, ec) && !ec)
+            return c;
+    }
+    return std::nullopt;
+}
+
+// The file dependencies of an OBJ, and the textures its MTL files name that the dataset can
+// never hold
+struct ObjDependencies {
+    std::vector<ObjDependency> files;
+    // The references (as the MTL writes them) that are absolute or resolve outside the dataset:
+    // the build leaves these textures out
+    std::vector<std::string> texturesOutside;
+};
+
 // Path contract for OBJ dependencies (see deppath.h):
 //   - mtllib resolves against the OBJ's folder;
 //   - an MTL texture is present if it exists relative to the MTL's folder,
 //     otherwise relative to the OBJ's folder; it is reported as
 //     "<MTL folder relative to the OBJ folder>/<texture>";
-//   - absolute references, and references escaping datasetRoot (when known),
-//     throw AppException.
-std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
-                                                  const fs::path& datasetRoot) {
+//   - an absolute MTL, or one escaping datasetRoot (when known), throws AppException;
+//   - an absolute texture, or one escaping datasetRoot, is not a dependency: it is listed in
+//     texturesOutside, and the build leaves it out.
+ObjDependencies collectObjDependencies(const std::string& obj, const fs::path& datasetRoot) {
     if (!fs::exists(io::fromUtf8(obj)))
         throw FSException(obj + " does not exist");
 
     const fs::path objDir = io::fromUtf8(obj).parent_path();
-    const bool checkRoot = !datasetRoot.empty();
 
-    std::vector<ObjDependency> deps;
+    ObjDependencies deps;
     const auto add = [&deps](ObjDependency d) {
-        for (const auto& existing : deps)
+        for (const auto& existing : deps.files)
             if (existing.name == d.name)
                 return;
-        deps.push_back(std::move(d));
+        deps.files.push_back(std::move(d));
     };
-
-    static const std::vector<std::string> textureKeys = {"map_Ka", "map_Kd", "map_Ks", "map_Ns",
-                                                         "map_d", "disp", "decal", "bump",
-                                                         "map_bump", "refl", "map_Pr", "map_Pm",
-                                                         "map_Ps", "map_Ke"};
 
     std::ifstream fin(io::fromUtf8(obj));
     std::string line;
     while (std::getline(fin, line)) {
-        std::string mtlRef;
-        if (splitKeyword(line, mtlRef) != "mtllib" || mtlRef.empty())
+        const auto mtl = mtlLibraryOf(line, obj, objDir, datasetRoot);
+        if (!mtl)
             continue;
 
-        // Remove double quotes if present
-        if (mtlRef.size() >= 2 && mtlRef.front() == '"' && mtlRef.back() == '"')
-            mtlRef = mtlRef.substr(1, mtlRef.size() - 2);
+        add({mtl->name, {mtl->path}});
 
-        const std::string mtlName = deppath::normalize(mtlRef);
-        if (mtlName.empty() || mtlName == ".")
+        if (!fs::exists(mtl->path))
             continue;
-        if (deppath::isAbsolute(mtlName))
-            throwUnsatisfiable(obj, mtlRef, "is an absolute path");
-
-        const fs::path mtlPath = objDir / io::fromUtf8(mtlName);
-        if (checkRoot && !deppath::isInside(mtlPath, datasetRoot))
-            throwUnsatisfiable(obj, mtlRef, "points outside the dataset");
-
-        add({mtlName, {mtlPath}});
-
-        if (!fs::exists(mtlPath))
-            continue;
-
-        const fs::path mtlRelDir = io::fromUtf8(mtlName).parent_path();
-        const fs::path mtlDir = mtlPath.parent_path();
 
         // Parse MTL
         std::string mtlLine;
-        std::ifstream mtlFin(mtlPath);
+        std::ifstream mtlFin(mtl->path);
         while (std::getline(mtlFin, mtlLine)) {
-            std::string rest;
-            const std::string key = splitKeyword(mtlLine, rest);
-            if (std::find(textureKeys.begin(), textureKeys.end(), key) == textureKeys.end())
+            auto texture = mtlTextureOf(mtlLine, *mtl, objDir, datasetRoot);
+            if (!texture)
                 continue;
-
-            const auto textureRef = parseTextureArgument(rest);
-            if (!textureRef.has_value())
-                continue;
-
-            const std::string tex = deppath::normalize(textureRef.value());
-            if (tex.empty() || tex == ".")
-                continue;
-            if (deppath::isAbsolute(tex))
-                throwUnsatisfiable(io::toUtf8(mtlPath), textureRef.value(), "is an absolute path");
-
-            ObjDependency d;
-            d.name = mtlRelDir.empty()
-                         ? tex
-                         : deppath::normalize(io::toGenericUtf8(mtlRelDir / io::fromUtf8(tex)));
-            for (const auto& c : {mtlDir / io::fromUtf8(tex), objDir / io::fromUtf8(tex)}) {
-                if (checkRoot && !deppath::isInside(c, datasetRoot))
-                    continue;
-                if (std::find(d.candidates.begin(), d.candidates.end(), c) == d.candidates.end())
-                    d.candidates.push_back(c);
-            }
-            if (d.candidates.empty())
-                throwUnsatisfiable(
-                    io::toUtf8(mtlPath), textureRef.value(), "points outside the dataset");
-
-            add(std::move(d));
+            if (!texture->dependency.candidates.empty())
+                add(std::move(texture->dependency));
+            else if (std::find(deps.texturesOutside.begin(), deps.texturesOutside.end(),
+                               texture->reference) == deps.texturesOutside.end())
+                deps.texturesOutside.push_back(texture->reference);
         }
     }
 
     return deps;
 }
 
-// Validate that all file dependencies of an OBJ exist. Missing names are
+// Requires every file dependency of an OBJ to exist. Missing names are
 // reported relative to the OBJ's folder (BuildDepMissingException); see
-// collectObjDependencies for the path contract. datasetRoot is empty for
-// files produced by a converter in a temp folder.
-void validateDependencies(const std::string& objFile, const fs::path& datasetRoot) {
-    const auto deps = collectObjDependencies(objFile, datasetRoot);
+// collectObjDependencies for the path contract.
+void requireDependencies(const std::string& objFile, const std::vector<ObjDependency>& deps) {
     std::vector<std::string> missingDeps;
     std::vector<std::string> lookupPaths;
 
     for (const auto& d : deps) {
-        bool found = false;
-        for (const auto& c : d.candidates) {
-            std::error_code ec;
-            if (fs::exists(c, ec) && !ec) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
+        if (!existingCandidate(d)) {
             missingDeps.push_back(d.name);
             for (const auto& c : d.candidates)
                 lookupPaths.push_back(io::toUtf8(c));
@@ -475,6 +527,69 @@ void validateDependencies(const std::string& objFile, const fs::path& datasetRoo
     }
 }
 
+// An OBJ whose MTL files name textures the dataset can never hold is built without them: a
+// copy of the OBJ in a temp folder names copies of its MTL files, which leave those texture
+// statements out (the material keeps its colour) and name every other texture by its absolute
+// path, since the copies are not next to the textures (bm3d and Obj2Tiles take a name that is
+// absolute as it is). Every dependency is present (requireDependencies). tempGuard owns the
+// folder. Returns the copy of the OBJ.
+std::string stageObjWithoutOutsideTextures(const std::string& obj, const fs::path& datasetRoot,
+                                           io::ScopedTempDir& tempGuard) {
+    const fs::path objPath = io::fromUtf8(obj);
+    const fs::path objDir = objPath.parent_path();
+    const fs::path tempDir = fs::temp_directory_path() / ("ddb_obj_stage_" + randomString(16));
+    fs::create_directories(tempDir);
+    tempGuard.reset(tempDir);
+
+    const auto stageMtl = [&](const MtlLibrary& mtl, const fs::path& staged) {
+        std::ifstream in(mtl.path);
+        std::ofstream out(staged, std::ios::binary | std::ios::trunc);
+        if (!in || !out)
+            throw FSException("Cannot copy " + io::toUtf8(mtl.path) + " to " + io::toUtf8(staged));
+        std::string line;
+        while (std::getline(in, line)) {
+            const auto texture = mtlTextureOf(line, mtl, objDir, datasetRoot);
+            if (!texture) {
+                out << line << "\n";
+                continue;
+            }
+            const auto found = existingCandidate(texture->dependency);
+            if (found)
+                out << texture->keyword << " "
+                    << io::toGenericUtf8(deppath::absoluteNormal(*found)) << "\n";
+        }
+        if (!out)
+            throw FSException("Cannot write " + io::toUtf8(staged));
+    };
+
+    const fs::path stagedObj = tempDir / objPath.filename();
+    std::ifstream in(objPath, std::ios::binary);
+    std::ofstream out(stagedObj, std::ios::binary | std::ios::trunc);
+    if (!in || !out)
+        throw FSException("Cannot copy " + obj + " to " + io::toUtf8(stagedObj));
+
+    // One copy of each MTL file, whatever the number of lines that name it
+    std::map<fs::path, std::string> stagedMtls;
+    std::string line;
+    while (std::getline(in, line)) {
+        const auto mtl = mtlLibraryOf(line, obj, objDir, datasetRoot);
+        if (!mtl) {
+            out << line << "\n";
+            continue;
+        }
+        auto it = stagedMtls.find(mtl->path);
+        if (it == stagedMtls.end()) {
+            const std::string name = "material_" + std::to_string(stagedMtls.size()) + ".mtl";
+            stageMtl(*mtl, tempDir / name);
+            it = stagedMtls.emplace(mtl->path, name).first;
+        }
+        out << "mtllib " << it->second << "\n";
+    }
+    if (!out)
+        throw FSException("Cannot write " + io::toUtf8(stagedObj));
+    return io::toUtf8(stagedObj);
+}
+
 // The OBJ converted from a glTF lives in a temp folder, but its MTL keeps the
 // glTF's relative image URIs (embedded images are extracted next to it by the
 // converter). Stage external images there too, so that dependency validation,
@@ -484,16 +599,8 @@ void validateDependencies(const std::string& objFile, const fs::path& datasetRoo
 void stageGltfTextures(const fs::path& gltfDir, const std::string& convertedObj) {
     const fs::path tempDir = io::fromUtf8(convertedObj).parent_path();
 
-    for (const auto& d : collectObjDependencies(convertedObj, fs::path())) {
-        bool present = false;
-        for (const auto& c : d.candidates) {
-            std::error_code ec;
-            if (fs::exists(c, ec) && !ec) {
-                present = true;
-                break;
-            }
-        }
-        if (present || !isSafePath(d.name, gltfDir))
+    for (const auto& d : collectObjDependencies(convertedObj, fs::path()).files) {
+        if (existingCandidate(d) || !isSafePath(d.name, gltfDir))
             continue;
 
         const fs::path src = gltfDir / io::fromUtf8(d.name);
@@ -523,9 +630,9 @@ struct AssimpConversion {
 };
 
 // Convert a model Assimp reads (glTF/GLB, STL) to OBJ in a temporary directory. With
-// preferPLYIfNoUV a model without texture coordinates is written as PLY instead (keeps
-// vertex colours as properties of the mesh); Obj2Tiles reads OBJ only, and
-// the OBJ exporter writes vertex colours as `v x y z r g b`.
+// preferPLYIfNoUV a model without texture coordinates nor vertex colours is written as PLY
+// instead; Obj2Tiles reads OBJ only, and the OBJ exporter writes vertex colours as
+// `v x y z r g b`.
 AssimpConversion convertWithAssimp(const std::string& input,
                                    io::ScopedTempDir& tempGuard,
                                    bool preferPLYIfNoUV) {
@@ -570,22 +677,28 @@ enum class ModelConsumer { Bm3d, Tiles };
 struct PreparedModel {
     std::string path;               // file to hand to the consumer
     std::optional<ModelInfo> info;  // face count + bounds when a converter supplied them
+    // The textures the MTL files of an OBJ name outside the dataset, left out of `path`
+    std::vector<std::string> texturesLeftOut;
 };
 
 // Validates a model written by a converter into a temp folder. Every
 // satisfiable dependency of the original input was checked and staged before the
 // conversion, so a name still missing here can never be satisfied by uploading a
 // file: its temp-folder-relative name must not reach ".pending" (it would retry
-// forever). It is reported as a plain AppException naming the original input.
+// forever). It is reported as a plain AppException naming the original input, as is
+// an absolute texture name (the converters never write one).
 void validateConvertedDependencies(const std::string& convertedObj, const std::string& originalInput) {
+    const auto unresolved = [&originalInput](const std::vector<std::string>& names) {
+        return AppException("The model converted from " + originalInput +
+                            " references files that cannot be resolved: " + str::join(names, ", "));
+    };
+    const ObjDependencies deps = collectObjDependencies(convertedObj, fs::path());
+    if (!deps.texturesOutside.empty())
+        throw unresolved(deps.texturesOutside);
     try {
-        validateDependencies(convertedObj, fs::path());
+        requireDependencies(convertedObj, deps.files);
     } catch (const BuildDepMissingException& e) {
-        std::string names;
-        for (const auto& d : e.getMissingDependencies())
-            names += (names.empty() ? "" : ", ") + d;
-        throw AppException("The model converted from " + originalInput +
-                           " references files that cannot be resolved: " + names);
+        throw unresolved(e.getMissingDependencies());
     }
 }
 
@@ -593,14 +706,16 @@ void validateConvertedDependencies(const std::string& convertedObj, const std::s
 // Validates the dependencies of the input and converts it when the consumer
 // cannot read it as is:
 //   - glTF/GLB: validated, then converted to OBJ in a temp folder. For bm3d a
-//     glTF without UVs becomes a PLY; for Obj2Tiles it is always an OBJ.
+//     glTF without UVs nor vertex colours becomes a PLY; for Obj2Tiles it is always an OBJ.
 //   - STL: bm3d reads it natively; Obj2Tiles reads OBJ only, so it becomes an OBJ in a temp
 //     folder (an STL has no texture: the OBJ has no dependency).
 //   - PLY: never text-scanned as an OBJ. Its TextureFile (if any) is checked from
 //     the header against the dataset root. bm3d reads an untextured PLY natively;
 //     otherwise the streaming converter writes OBJ (+ MTL + texture) in a temp
 //     folder and reports face count and bounds.
-//   - anything else (OBJ): validated in place.
+//   - anything else (OBJ): validated in place. When its MTL files name textures outside the
+//     dataset, a copy without them is made in a temp folder (stageObjWithoutOutsideTextures),
+//     and they are listed in texturesLeftOut.
 // The dataset root applies to the original input only; converted outputs in a
 // temp folder are validated without it. tempGuard owns that temp folder.
 PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer,
@@ -620,7 +735,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
     if (isStlFile(inputPath)) {
         if (consumer == ModelConsumer::Bm3d) {
             LOGD << "STL, handing it to bm3d as is: " << input;
-            return {input, std::nullopt};
+            return {input, std::nullopt, {}};
         }
 
         PreparedModel m;
@@ -636,7 +751,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
 
         if (consumer == ModelConsumer::Bm3d && texture.empty()) {
             LOGD << "Untextured PLY, handing it to bm3d as is: " << input;
-            return {input, std::nullopt};
+            return {input, std::nullopt, {}};
         }
 
         const fs::path tempDir =
@@ -661,8 +776,17 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         return m;
     }
 
-    validateDependencies(input, io::fromUtf8(datasetRoot));
-    return {input, std::nullopt};
+    const ObjDependencies deps = collectObjDependencies(input, io::fromUtf8(datasetRoot));
+    requireDependencies(input, deps.files);
+    if (deps.texturesOutside.empty())
+        return {input, std::nullopt, {}};
+
+    LOGW << "Building " << input << " without the textures outside the dataset its materials name: "
+         << str::join(deps.texturesOutside, ", ");
+    PreparedModel m;
+    m.path = stageObjWithoutOutsideTextures(input, io::fromUtf8(datasetRoot), tempGuard);
+    m.texturesLeftOut = deps.texturesOutside;
+    return m;
 }
 
 // "out/3dtiles/" and "out/3dtiles//" -> "out/3dtiles", so the lock, the temp and
@@ -740,7 +864,8 @@ std::string buildBm3d(const std::string& inputObj,
                       const std::string& outputBm3d,
                       bool overwrite,
                       const std::string& datasetRoot,
-                      const BuildOptions& options) {
+                      const BuildOptions& options,
+                      ModelInputNotes* notes) {
     // Default output: next to the original input (never inside a conversion temp folder).
     const auto outFile = outputBm3d.empty()
                              ? io::toUtf8(io::fromUtf8(inputObj).replace_extension(".bm3d"))
@@ -764,6 +889,8 @@ std::string buildBm3d(const std::string& inputObj,
                                                                 raster::PrivateFolderWriter::Host);
     const fs::path produced = staging.path() / target.filename();
     performBm3dBuild(model.path, io::toUtf8(produced), options);
+    if (notes)
+        notes->texturesLeftOut = model.texturesLeftOut;
 
     // The output may have appeared while bm3d ran: it is replaced only when asked
     io::assureReplaceable(io::fromUtf8(outFile), overwrite);
@@ -906,7 +1033,8 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     if (obj2tiles::findObj2TilesBinary().empty())
         throw Obj2TilesException(
             "Obj2Tiles binary not found; cannot generate 3D Tiles. Set DDB_OBJ2TILES_PATH "
-            "or place Obj2Tiles next to the DroneDB executable.");
+            "or place Obj2Tiles next to the DroneDB executable.",
+            "Obj2Tiles is not installed on this server");
 
     fs::path outDir = stripTrailingSeparators(outputDir);
     {
@@ -957,8 +1085,11 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     opts.maxCores = options.build.threads;
 
     std::string err;
-    if (!obj2tiles::runObj2Tiles(io::fromUtf8(model.path), tempOut, opts, err))
-        throw Obj2TilesException("Could not build 3D Tiles for " + inputObj + ": " + err);
+    if (!obj2tiles::runObj2Tiles(io::fromUtf8(model.path), tempOut, opts, err)) {
+        const std::string reported = obj2tiles::reportedException(err);
+        throw Obj2TilesException("Could not build 3D Tiles for " + inputObj + ": " + err,
+                                 reported.empty() ? "Obj2Tiles failed on this model" : reported);
+    }
 
     publishTiles(tempOut, outDir, oldDir, outGuard);
 
@@ -968,7 +1099,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
 std::vector<std::string> getObjDependencies(const std::string& obj,
                                             const std::string& datasetRoot) {
     std::vector<std::string> deps;
-    for (const auto& d : collectObjDependencies(obj, io::fromUtf8(datasetRoot)))
+    for (const auto& d : collectObjDependencies(obj, io::fromUtf8(datasetRoot)).files)
         deps.push_back(d.name);
     return deps;
 }

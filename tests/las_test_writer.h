@@ -5,10 +5,12 @@
 #define LAS_TEST_WRITER_H
 
 // A LAS file for the tests, written by hand: LAS 1.4, point format 6, uncompressed, the coordinates
-// at a scale of 0.001 from an offset at their minimum, and the CRS as a WKT record (the WKT bit of
-// the global encoding set), as a producer of point clouds writes them.
+// at a scale of 0.001 (or the scale given for each axis) from an offset at their minimum, and the
+// CRS as a WKT record (the WKT bit of the global encoding set), as a producer of point clouds writes
+// them.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -41,11 +43,16 @@ namespace testutils
         }
     }
 
-    // Writes `points` to `path` with `wkt` as the CRS (none when it is empty)
-    inline void writeLas14(const fs::path &path, const std::string &wkt, const std::vector<LasPoint> &points)
+    // The scale of a cloud in metres, and of longitudes and latitudes in degrees as Metashape writes
+    // them (with heights in millimetres)
+    constexpr std::array<double, 3> MetreScale = {0.001, 0.001, 0.001};
+    constexpr std::array<double, 3> DegreeScale = {1e-7, 1e-7, 0.001};
+
+    // Writes `points` to `path` with `wkt` as the CRS (none when it is empty), at `scale`
+    inline void writeLas14(const fs::path &path, const std::string &wkt, const std::vector<LasPoint> &points,
+                           const std::array<double, 3> &scale = MetreScale)
     {
         using detail::putLe;
-        constexpr double Scale = 0.001;
         constexpr uint16_t HeaderSize = 375;
         constexpr uint16_t VlrHeaderSize = 54;
         constexpr uint16_t RecordLength = 30;
@@ -90,7 +97,7 @@ namespace testutils
         for (int i = 0; i < 5; ++i)
             putLe<uint32_t>(out, 0);                      // legacy points by return
         for (int i = 0; i < 3; ++i)
-            putLe<double>(out, Scale);
+            putLe<double>(out, scale[i]);
         for (int i = 0; i < 3; ++i)
             putLe<double>(out, lo[i]);                    // offsets at the minimum
         for (int i = 0; i < 3; ++i)
@@ -119,7 +126,7 @@ namespace testutils
         {
             const double c[3] = {p.x, p.y, p.z};
             for (int i = 0; i < 3; ++i)
-                putLe<int32_t>(out, static_cast<int32_t>(std::llround((c[i] - lo[i]) / Scale)));
+                putLe<int32_t>(out, static_cast<int32_t>(std::llround((c[i] - lo[i]) / scale[i])));
             putLe<uint16_t>(out, 0);     // intensity
             putLe<uint8_t>(out, 0x11);   // return 1 of 1
             putLe<uint8_t>(out, 0);      // flags
