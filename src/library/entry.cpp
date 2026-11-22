@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
 #include <cmath>
+#include "camera_model.h"
 #include "dbops.h"
 #include "json.h"
 #include "stringutil.h"
@@ -104,43 +105,16 @@ namespace ddb
 
         auto center = toUTM(geo.latitude, geo.longitude, utmZone);
 
-        double groundHeight = geo.altitude != 0.0 ? geo.altitude - relAltitude : relAltitude;
+        const double groundHeight = CameraModel::groundHeight(geo.altitude, relAltitude);
 
-        // Field of view
-
-        // Wide
-        double xView = 2.0 * atan(sensorSize.width / (2.0 * focal.length));
-
-        // Tall
-        double yView = 2.0 * atan(sensorSize.height / (2.0 * focal.length));
-
-        // Cap pitch to 60 degrees
-        double pitch = cameraOri.pitch;
-        if (pitch > -30)
-        {
-            LOGD << "Pitch cap exceeded (" << pitch << ") using nadir";
-            pitch = -90; // set to nadir
-        }
-
-        // From drone to...
-        double bottom = relAltitude * tan(ddb::deg2rad(90.0 + pitch) - 0.5 * yView);
-        double top = relAltitude * tan(ddb::deg2rad(90.0 + pitch) + 0.5 * yView);
-        double left = relAltitude * tan(ddb::deg2rad(cameraOri.roll) - 0.5 * xView);
-        double right = relAltitude * tan(ddb::deg2rad(cameraOri.roll) + 0.5 * xView);
-        // ... of picture.
-
-        //    LOGD << "xView: " << ddb::rad2deg(xView);
-        //    LOGD << "yView: " << ddb::rad2deg(yView);
-        //    LOGD << "bottom: " << bottom;
-        //    LOGD << "top: " << top;
-        //    LOGD << "left: " << left;
-        //    LOGD << "right: " << right;
+        // The ground the camera sees, in metres from the point under it
+        const auto extent = CameraModel(sensorSize, focal, cameraOri, relAltitude).groundExtent();
 
         // Corners aligned north
-        auto upperLeft = Projected2D(center.x + left, center.y + top);
-        auto upperRight = Projected2D(center.x + right, center.y + top);
-        auto lowerLeft = Projected2D(center.x + left, center.y + bottom);
-        auto lowerRight = Projected2D(center.x + right, center.y + bottom);
+        auto upperLeft = Projected2D(center.x + extent.left, center.y + extent.top);
+        auto upperRight = Projected2D(center.x + extent.right, center.y + extent.top);
+        auto lowerLeft = Projected2D(center.x + extent.left, center.y + extent.bottom);
+        auto lowerRight = Projected2D(center.x + extent.right, center.y + extent.bottom);
 
         // Rotate
         upperLeft.rotate(center, -cameraOri.yaw);
