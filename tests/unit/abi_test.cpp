@@ -78,14 +78,15 @@ namespace
     // tiles and builds of ddb-tilers, the artefactCacheMb setting of the configuration); 2.7 adds no export
     // (the renders, reads and operations of rasters through ddb-tilers and the raster helper); 2.8 adds no
     // export (point clouds in any coordinate system: the crsStatus property, the crs of the pointcloud.copc
-    // artifact, the completeness of COPCs built before 2.8, bounded point-cloud tiles).
+    // artifact, the completeness of COPCs built before 2.8, bounded point-cloud tiles); 2.9 adds DDBRescanEx2
+    // (the rescan of the entries a list of paths names).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_8)
+    TEST(AbiVersion, is2_9)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 8);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x00020008u);
+        EXPECT_EQ(DDB_ABI_MINOR, 9);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x00020009u);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

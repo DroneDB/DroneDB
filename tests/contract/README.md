@@ -893,3 +893,10 @@ Registry has to adopt first.
   `\tmtllib odm_textured_model_geo.mtl`) is tiled: v1.10.3 dropped its material library from the levels it decimated
   (models of 10K faces or more) and failed with "Material material0000 not found", so the model had a bm3d build and
   no 3D Tiles. No fixture changed for it.
+* 2.9.0 (ABI 2.9: `capabilities` has `abi.minor` 9, and `DDBRescanEx2` in `symbols`, not in `cancellable`): the
+  rescan of the entries a list of entry paths names. A file is that entry, a folder the entries below it, and the
+  type and extension filters of `DDBRescanEx` still apply; no paths is the whole index, as `DDBRescanEx`. The output
+  elements are those of `DDBRescanEx`. A path not in the index is an element `{path, error: "Not in index: <path>",
+  success: false}`, reported before any entry is re-read. With paths each entry is parsed outside the writer lock of
+  the index and written on its own, so the dataset stays usable during the rescan. No other fixture or schema
+  changed.

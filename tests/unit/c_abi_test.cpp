@@ -962,4 +962,43 @@ namespace
                          DDBAlignRasterEx(source.c_str(), reference.c_str(), reference.c_str(), nullptr, &keep, &out));
         EXPECT_EQ(calculateHash(reference), original);
     }
+    TEST_F(CAbi, RescanEx2)
+    {
+        Dataset ds(TEST_NAME);
+        ds.add("docs/b.md", "# b");
+        char *out = nullptr;
+        const char *aPath[] = {"a.txt"};
+
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBRescanEx2(nullptr, &out, aPath, 1, "", "", true));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBRescanEx2(ds.path().c_str(), nullptr, aPath, 1, "", "", true));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBRescanEx2(ds.path().c_str(), &out, aPath, -1, "", "", true));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBRescanEx2(ds.path().c_str(), &out, nullptr, 1, "", "", true));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBRescanEx2(ds.path().c_str(), &out, aPath, 1, "nosuchtype", "", true));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBRescanEx2(ds.path().c_str(), &out, aPath, 1, "", "*.md", true));
+        const char *refused[] = {"../a.txt"};
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBRescanEx2(ds.path().c_str(), &out, refused, 1, "", "", true));
+        const char *root[] = {""};
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBRescanEx2(ds.path().c_str(), &out, root, 1, "", "", true));
+        const char *unknown[] = {"nope.txt"};
+        EXPECT_DDB_FAILS(DDBERR_NOTFOUND, DDBRescanEx2(ds.path().c_str(), &out, unknown, 1, "", "", true));
+
+        // No paths: the whole index
+        ASSERT_DDB_OK(DDBRescanEx2(ds.path().c_str(), &out, nullptr, 0, nullptr, nullptr, true));
+        EXPECT_EQ(json::parse(take(out)).size(), 2u);
+
+        // A path in its other spelling is the entry; a folder is the entries below it
+        const char *paths[] = {"docs\\", "./a.txt", "nope.txt"};
+        ASSERT_DDB_OK(DDBRescanEx2(ds.path().c_str(), &out, paths, 3, "", "", false));
+        const auto j = json::parse(take(out));
+        ASSERT_EQ(j.size(), 3u);
+        EXPECT_EQ(j[0]["path"], "nope.txt");
+        EXPECT_EQ(j[0]["success"], false);
+        EXPECT_EQ(j[0]["error"], "Not in index: nope.txt");
+        EXPECT_EQ(j[1]["path"], "a.txt");
+        EXPECT_EQ(j[1]["success"], true);
+        EXPECT_TRUE(j[1].contains("buildKey"));
+        EXPECT_EQ(j[2]["path"], "docs/b.md");
+        EXPECT_EQ(j[2]["success"], true);
+    }
+
 }

@@ -912,6 +912,44 @@ DDBErr DDBGetStampChecksum(const char* ddbPath, char** output) {
     });
 }
 
+namespace {
+
+// The output of the rescan exports: an element per entry the rescan visits. A failed entry has its path
+// and its error; a re-read one is the entry, with the key of its build now and whether the rescan moved it,
+// so a host rebuilds only the entries whose build is elsewhere now (the key callback of an entry comes just
+// before its result)
+json rescanOutput(const char* ddbPath, const RescanScope& scope, bool stopOnError) {
+    const auto db = ddb::open(std::string(ddbPath), true);
+    auto outJson = json::array();
+    std::string buildKey;
+    bool buildKeyChanged = false;
+    rescanIndex(
+        db.get(), scope, stopOnError,
+        [&](const Entry& e, bool success, const std::string& error) {
+            json j = success ? json(e) : json{{"path", e.path}, {"error", error}};
+            j["success"] = success;
+            if (success) {
+                j["buildKey"] = buildKey;
+                j["buildKeyChanged"] = buildKeyChanged;
+            }
+            outJson.push_back(j);
+            return true; // continue processing
+        },
+        [&](const Entry&, const std::string& key, bool changed) {
+            buildKey = key;
+            buildKeyChanged = changed;
+        });
+    return outJson;
+}
+
+// The filters of a rescan, as the exports take them
+RescanScope rescanScope(const char* types, const char* extensions, std::vector<std::string> paths) {
+    return RescanScope{filters::parseEntryTypeList(types), filters::parseExtensionList(extensions),
+                       std::move(paths)};
+}
+
+}  // namespace
+
 DDBErr DDBRescan(const char* ddbPath, char** output, const char* types, bool stopOnError) {
     return DDBRescanEx(ddbPath, output, types, "", stopOnError);
 }
@@ -921,36 +959,18 @@ DDBErr DDBRescanEx(const char* ddbPath, char** output, const char* types, const 
     return guardedOutput(output, [&] {
         requireDdbPath(ddbPath);
         requireOutput(output);
+        return rescanOutput(ddbPath, rescanScope(types, extensions, {}), stopOnError);
+    });
+}
 
-        // Parse filter strings into vectors
-        const std::vector<EntryType> typeFilter = filters::parseEntryTypeList(types);
-        const std::vector<std::string> extensionFilter = filters::parseExtensionList(extensions);
-
-        const auto db = ddb::open(std::string(ddbPath), true);
-        auto outJson = json::array();
-
-        // The key callback of an entry comes just before its result: its build key and whether the
-        // rescan moved it (D-020), so a host rebuilds only the entries whose build is elsewhere now
-        std::string buildKey;
-        bool buildKeyChanged = false;
-        rescanIndex(
-            db.get(), typeFilter, extensionFilter, stopOnError,
-            [&](const Entry& e, bool success, const std::string& error) {
-                // A failed entry has its path only
-                json j = success ? json(e) : json{{"path", e.path}, {"error", error}};
-                j["success"] = success;
-                if (success) {
-                    j["buildKey"] = buildKey;
-                    j["buildKeyChanged"] = buildKeyChanged;
-                }
-                outJson.push_back(j);
-                return true; // continue processing
-            },
-            [&](const Entry&, const std::string& key, bool changed) {
-                buildKey = key;
-                buildKeyChanged = changed;
-            });
-        return outJson;
+DDBErr DDBRescanEx2(const char* ddbPath, char** output, const char** paths, int numPaths, const char* types,
+                    const char* extensions, bool stopOnError) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
+        // No paths, a NULL list with numPaths 0 too: the whole index
+        auto list = paths == nullptr && numPaths == 0 ? std::vector<std::string>{} : entryPathList(paths, numPaths);
+        return rescanOutput(ddbPath, rescanScope(types, extensions, std::move(list)), stopOnError);
     });
 }
 

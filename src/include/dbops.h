@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <optional>
+#include <utility>
 
 #include "database.h"
 #include "entry_filters.h"
@@ -230,14 +231,24 @@ namespace ddb
     void syncIndex(Database *db, SyncCallback callback = nullptr);
 
     /**
+     * The entries a rescan re-reads. An entry must match every filter that is not empty.
+     *   - types:      the entry types (directories are never re-read).
+     *   - extensions: the file extensions, lowercase and without the dot (see filters::parseExtensionList).
+     *   - paths:      entry paths (normalized, see requireEntryPath); a folder names the entries below it.
+     *                 Empty: the whole index.
+     */
+    struct RescanScope
+    {
+        std::vector<EntryType> types;
+        std::vector<std::string> extensions;
+        std::vector<std::string> paths;
+    };
+
+    /**
      * Rescans entries in the index, updating their metadata and status.
      *
      * @param db           Pointer to the Database to operate on. Must be valid and open.
-     * @param types        Optional list of EntryType values to restrict which entries are rescanned.
-     *                     If empty, all entry types are rescanned.
-     * @param extensions   Optional list of file extensions (lowercase, without the dot, see
-     *                     filters::parseExtensionList) to restrict which entries are rescanned.
-     *                     If empty, all extensions are rescanned. An entry must match both filters.
+     * @param scope        The entries to re-read (see RescanScope).
      * @param stopOnError  If true, the function throws an exception (AppException) on the first error encountered.
      *                     If false, errors are reported via the callback and rescanning continues.
      * @param callback     Optional callback function called for each entry processed.
@@ -255,18 +266,32 @@ namespace ddb
      *                     depends on it), or the hash, the name of the folders before the build key, when
      *                     there is no folder of that key but one of the hash (so the first rescan after the
      *                     upgrade reports the built models and splats that have a georeference, and nothing
-     *                     else, as changed; an entry with no build at all is not reported again). The rescan also moves the pending markers of the layout before the
-     *                     build key to the markers of their entries (once the index is committed).
+     *                     else, as changed; an entry with no build at all is not reported again).
+     *
+     * Whole index (no paths): one transaction holds the writer lock for the whole run, so the index is
+     * either fully re-read or left as it was (a cancel or a stop rolls back). Once it is committed the
+     * pending markers of the layout before the build key become the markers of their entries.
+     *
+     * Paths: the dataset stays live, so each entry is parsed outside the writer lock and written in a
+     * transaction of its own; the entries written before a cancel or a stop stay written. A path that is not
+     * in the index fails with "Not in index" (EntryNotFoundException with stopOnError) before any entry is
+     * re-read. An entry whose file changed, or whose row was removed, while it was parsed is not written: it
+     * fails, and the add or the remove that changed it keeps the index right.
      *
      * Exceptions:
      *   - Throws AppException if stopOnError is true and an error occurs.
-     *
-     * Thread Safety:
-     *   - Uses database transactions internally; not safe for concurrent modification of the same database.
      */
-    void rescanIndex(Database *db, const std::vector<EntryType> &types,
-                     const std::vector<std::string> &extensions, bool stopOnError = true,
+    void rescanIndex(Database *db, const RescanScope &scope, bool stopOnError = true,
                      RescanCallback callback = nullptr, RescanKeyCallback keyCallback = nullptr);
+
+    /** Rescans the entries of `types` and `extensions` in the whole index (see the RescanScope overload) */
+    inline void rescanIndex(Database *db, const std::vector<EntryType> &types,
+                            const std::vector<std::string> &extensions, bool stopOnError = true,
+                            RescanCallback callback = nullptr, RescanKeyCallback keyCallback = nullptr)
+    {
+        rescanIndex(db, RescanScope{types, extensions, {}}, stopOnError, std::move(callback),
+                    std::move(keyCallback));
+    }
     void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
     void moveEntry(Database *db, const std::string &source, const std::string &dest);
     /** Exact lookup of one entry (without its metadata); nothing when `path` is not indexed. */

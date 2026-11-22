@@ -121,6 +121,7 @@ DDBRenderRasterRegionEx
 DDBRenderRasterRegionEx2
 DDBRescan
 DDBRescanEx
+DDBRescanEx2
 DDBResolveBuildFile
 DDBSearch
 DDBSetLastError
