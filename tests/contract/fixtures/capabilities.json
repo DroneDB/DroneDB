@@ -10,7 +10,7 @@
   "output": {
     "abi": {
       "major": 2,
-      "minor": 9
+      "minor": 10
     },
     "cancellable": [
       "DDBApplyDelta",
@@ -108,6 +108,7 @@
       "DDBExportRaster3",
       "DDBExportSplatSpz",
       "DDBExportSplatTrainingData",
+      "DDBFindCoverage",
       "DDBFree",
       "DDBFreeCancelToken",
       "DDBGenerateContours",

@@ -1001,4 +1001,83 @@ namespace
         EXPECT_EQ(j[2]["success"], true);
     }
 
+    TEST_F(CAbi, FindCoverage)
+    {
+        Dataset ds(TEST_NAME);
+        char *out = nullptr;
+        const char *point = R"({"type":"Point","coordinates":[9.0005,45.0003]})";
+
+        // Every argument that is wrong is DDBERR_INVALIDARGS
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(nullptr, point, nullptr, &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage("", point, nullptr, &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, nullptr, nullptr));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), nullptr, nullptr, &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), "", nullptr, &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), "{", nullptr, &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), R"({"type":"MultiPoint","coordinates":[[9,45]]})", nullptr, &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), R"({"type":"Point","coordinates":[9,91]})", nullptr, &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, "{", &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, "[]", &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, R"({"limit":0})", &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, R"({"limit":101})", &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, R"({"limit":"3"})", &out));
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, R"({"limits":3})", &out));
+        EXPECT_EQ(out, nullptr);
+
+        // A dataset with no images, with the default options in any of their spellings
+        for (const char *options : {static_cast<const char *>(nullptr), "", "{}", R"({"limit":20})"})
+        {
+            ASSERT_DDB_OK(DDBFindCoverage(ds.path().c_str(), point, options, &out));
+            EXPECT_EQ(take(out), "[]");
+        }
+
+        // Two images whose footprints are rectangles of 0.001 degrees around their centres, one beside the other
+        const auto insert = [&](const char *path, double lon)
+        {
+            auto q = ds.db->query("INSERT INTO entries (path, hash, type, properties, mtime, size, depth, point_geom, polygon_geom) "
+                                  "VALUES (?, ?, 3, '{}', 0, 1, 0, GeomFromText(?, 4326), GeomFromText(?, 4326))");
+            q->bind(1, std::string(path));
+            q->bind(2, std::string(path));
+            const auto number = [](double v) { return std::to_string(v); };
+            q->bind(3, "POINT Z (" + number(lon) + " 45.0003 300)");
+            q->bind(4, "POLYGONZ ((" + number(lon - 0.0005) + " 45.0008 200, " + number(lon - 0.0005) + " 44.9998 200, " +
+                           number(lon + 0.0005) + " 44.9998 200, " + number(lon + 0.0005) + " 45.0008 200, " +
+                           number(lon - 0.0005) + " 45.0008 200))");
+            q->execute();
+        };
+        insert("far.jpg", 9.0007);
+        insert("near.jpg", 9.0004);
+
+        ASSERT_DDB_OK(DDBFindCoverage(ds.path().c_str(), point, nullptr, &out));
+        const auto j = json::parse(take(out));
+        ASSERT_EQ(j.size(), 2u);
+        for (const auto &element : j)
+        {
+            EXPECT_EQ(element.size(), 4u);
+            EXPECT_TRUE(element["path"].is_string());
+            EXPECT_TRUE(element["score"].is_number());
+            EXPECT_EQ(element["overlap"], 1.0);
+            // The camera parameters are not in the properties
+            EXPECT_TRUE(element["pixel"].is_null());
+        }
+        EXPECT_EQ(j[0]["path"], "near.jpg");
+        EXPECT_EQ(j[1]["path"], "far.jpg");
+        EXPECT_LT(j[0]["score"].get<double>(), j[1]["score"].get<double>());
+
+        // The limit, and a polygon that holds only one of them
+        ASSERT_DDB_OK(DDBFindCoverage(ds.path().c_str(), point, R"({"limit":1})", &out));
+        EXPECT_EQ(json::parse(take(out)).size(), 1u);
+        const char *polygon = R"({"type":"Polygon","coordinates":[[[9.0010,45.0002],[9.0012,45.0002],[9.0012,45.0004],[9.0010,45.0004]]]})";
+        ASSERT_DDB_OK(DDBFindCoverage(ds.path().c_str(), polygon, nullptr, &out));
+        const auto onlyFar = json::parse(take(out));
+        ASSERT_EQ(onlyFar.size(), 1u);
+        EXPECT_EQ(onlyFar[0]["path"], "far.jpg");
+        EXPECT_GT(onlyFar[0]["overlap"].get<double>(), 0.0);
+        EXPECT_LE(onlyFar[0]["overlap"].get<double>(), 1.0);
+
+        // Nothing there
+        ASSERT_DDB_OK(DDBFindCoverage(ds.path().c_str(), R"({"type":"Point","coordinates":[10,46]})", nullptr, &out));
+        EXPECT_EQ(take(out), "[]");
+    }
+
 }

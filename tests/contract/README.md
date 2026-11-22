@@ -900,3 +900,14 @@ Registry has to adopt first.
   success: false}`, reported before any entry is re-read. With paths each entry is parsed outside the writer lock of
   the index and written on its own, so the dataset stays usable during the rescan. No other fixture or schema
   changed.
+* 2.10.0 (ABI 2.10: `capabilities` has `abi.minor` 10, and `DDBFindCoverage` in `symbols`, not in `cancellable`): the
+  images that see a place. `DDBFindCoverage(ddbPath, geometryJson, optionsJson, output)` takes a GeoJSON Point,
+  LineString or Polygon in EPSG:4326 and the options `{"limit": 1..100}` (default 20), and returns the geotagged
+  images whose footprint intersects it as `[{path, score, overlap, pixel}]`, by ascending `score` and then `path`.
+  `score` is the distance in metres from the centroid of the geometry to the centroid of the footprint over the
+  diagonal of the footprint; `overlap` is the part of a polygon the footprint covers, 1 for a point or a line;
+  `pixel` is `[x, y]` of the centroid of the geometry in the image, or null when the camera parameters of the image
+  are missing or it is outside the image. An argument that is wrong (bad JSON, another type of geometry, a position
+  out of range, a polygon that is not valid, an unknown option, a limit out of range) is `DDBERR_INVALIDARGS`. The
+  footprint of an image is unchanged: the camera model it is made with is now shared with the pixel estimate. No
+  other fixture or schema changed.
