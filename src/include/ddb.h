@@ -677,7 +677,12 @@ extern "C"
      * @param tms Generate TMS-style tiles instead of XYZ
      * @param forceRecreate ignore cache and always recreate the tile
      * @param inputPathHash Optional hash of the resource to tile (if available), allowing smarter decisions about file downloads for certain resource types.
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success, an error otherwise
+     * Changed in 2.8.1: a point-cloud tile zoomed in past the density of the cloud draws a surface, not separate
+     * dots: the disc of each point grows with the distance to its 4th nearest point (at most 32 px), and the points
+     * up to 72 px around the tile are read so that adjacent tiles agree at their edges. Tiles where the points are
+     * at most 2 sqrt(2) px apart are as before. This applies to every tile export (DDBTile, DDBMemoryTileFmt,
+     * DDBMemoryTileEx to DDBMemoryTileEx3); thumbnails are unchanged. */
     DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize, bool tms, bool forceRecreate, const char *inputPathHash);
 
     /** Generate a tile in memory with explicit output format: "png", "jpeg" or "webp"
