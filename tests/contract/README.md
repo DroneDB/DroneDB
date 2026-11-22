@@ -885,3 +885,7 @@ Registry has to adopt first.
   subject, were inside a room, or looked down on a piece of ground; a georeferenced splat is a `site`) and the box
   of its core in the frame of `model.rad`, from a sample of every splat of the model. It is missing for fewer than
   16 splats and in the `bounds.json` of earlier builds. No fixture changed for it.
+* After 2.8.0 (no export added or removed): the 3D Tiles of models are built by Obj2Tiles v1.10.4. A textured OBJ
+  whose statements are indented with a tab (ODM writes `\tmtllib odm_textured_model_geo.mtl`) is tiled: v1.10.3
+  dropped its material library from the levels it decimated (models of 10K faces or more) and failed with
+  "Material material0000 not found", so the model had a bm3d build and no 3D Tiles. No fixture changed for it.

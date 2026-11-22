@@ -540,6 +540,46 @@ TEST(tiles3dBuild, realObj2TilesFromNoUvGltf) {
     expectNoLeftovers(out);
 }
 
+// The textured OBJ of ODM indents its material library with a tab and ends its lines with CRLF
+// ("\tmtllib odm_textured_model_geo.mtl\r\n"). Obj2Tiles before v1.10.4 dropped that library from
+// the levels it decimated, then failed on their first usemtl ("Material material0000 not found").
+TEST(tiles3dBuild, realObj2TilesFromAnOdmTexturedObj) {
+    Obj2TilesEnvReset reset;
+    SKIP_WITHOUT_OBJ2TILES();
+    TestArea ta(TEST_NAME);
+    // 10082 faces: past the 10K faces under which the model is tiled without decimated levels.
+    constexpr int n = 72;
+    std::ostringstream o;
+    o << "\tmtllib model.mtl\r\n";
+    for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i)
+            o << "v " << i << " " << j << " " << ((i + j) % 3) * 0.25 << "\r\n";
+    for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i)
+            o << "vt " << i / double(n - 1) << " " << j / double(n - 1) << "\r\n";
+    // The lower rows of the grid take the first material, the upper ones the second.
+    for (const auto& [material, rows] : {std::pair{0, std::pair{0, n / 2}}, std::pair{1, std::pair{n / 2, n - 1}}}) {
+        o << "usemtl material000" << material << "\r\n";
+        for (int j = rows.first; j < rows.second; ++j)
+            for (int i = 0; i + 1 < n; ++i) {
+                const int a = j * n + i + 1, b = a + 1, c = a + n + 1, d = a + n;
+                o << "f " << a << "/" << a << " " << b << "/" << b << " " << c << "/" << c << "\r\n"
+                  << "f " << a << "/" << a << " " << c << "/" << c << " " << d << "/" << d << "\r\n";
+            }
+    }
+    const fs::path obj = ta.getPath("model.obj");
+    writeFile(obj, o.str());
+    writeFile(ta.getPath("model.mtl"),
+              "newmtl material0000\r\n\tKd 1.000000 0.000000 0.000000\r\n"
+              "newmtl material0001\r\n\tKd 0.000000 1.000000 0.000000\r\n");
+    const fs::path out = ta.getPath("3dtiles");
+
+    std::string tileset;
+    ASSERT_NO_THROW(tileset = buildModel3DTiles(obj.string(), out.string(), {.overwrite = true}));
+    EXPECT_TRUE(fs::exists(tileset));
+    expectNoLeftovers(out);
+}
+
 // Heavy: the 772K-face brighton.ply through the real Obj2Tiles.
 MANUAL_TEST(tiles3dBuild, realObj2TilesFromBrightonPly) {
     Obj2TilesEnvReset reset;
