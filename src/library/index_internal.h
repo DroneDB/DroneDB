@@ -21,6 +21,12 @@ namespace ddb
     // describes the build output of that content, which stays (a file uploaded again, a rescan).
     const std::string &updateEntrySql();
 
+    // Whether the file at `absPath` changed (or is gone) since it was seen with this modification time and
+    // size, with one stat: an entry parsed outside the writer lock is written only when it did not.
+    // Directories use logical size (0, or aggregate for nested DroneDBs), so only the size of regular
+    // files is compared.
+    bool fileChangedSince(const fs::path &absPath, double observedMtime, long long observedSize);
+
     // The entries below `folder` (an index range: '0' is the character after '/', so sibling
     // folders such as "folder2" are excluded)
     PathPredicate descendantsPredicate(const std::string &folder, const std::string &column);

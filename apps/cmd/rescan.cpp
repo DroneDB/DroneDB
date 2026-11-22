@@ -7,6 +7,8 @@
 #include "dbops.h"
 #include "entry_types.h"
 #include "entry_filters.h"
+#include "entry_path.h"
+#include "mio.h"
 #include "stringutil.h"
 
 namespace cmd
@@ -26,19 +28,21 @@ namespace cmd
     {
         // clang-format off
         opts
-            .positional_help("[args]")
+            .positional_help("[args] [PATHS]")
             .custom_help("rescan");
         cmd::addWorkingDirOption(opts);
         opts.add_options()
             ("t,type", "Entry types to rescan (comma-separated). Valid types: " + validTypes(), cxxopts::value<std::string>()->default_value(""))
             ("e,ext", "File extensions to rescan (comma-separated, e.g. dwg,dxf). Combined with --type, an entry must match both", cxxopts::value<std::string>()->default_value(""))
-            ("continue-on-error", "Continue processing if an error occurs", cxxopts::value<bool>());
+            ("continue-on-error", "Continue processing if an error occurs", cxxopts::value<bool>())
+            ("p,paths", "Files or folders to rescan (a folder rescans the files below it). Default: all", cxxopts::value<std::vector<std::string>>());
         // clang-format on
+        opts.parse_positional({"paths"});
     }
 
     std::string Rescan::description()
     {
-        return "Re-process all indexed files to update metadata.";
+        return "Re-process indexed files (all, or the given ones) to update metadata.";
     }
 
     std::string Rescan::extendedDescription()
@@ -64,10 +68,21 @@ namespace cmd
 
         const auto db = ddb::open(ddbPath, true);
 
+        // The paths of the filesystem, as the other commands take them, become entry paths
+        ddb::RescanScope scope{types, extensions, {}};
+        if (opts.count("paths"))
+            for (const auto &path : opts["paths"].as<std::vector<std::string>>())
+                scope.paths.push_back(readArgument(
+                    [&]
+                    {
+                        return ddb::requireEntryPath(
+                            ddb::io::Path(ddb::io::fromUtf8(path)).relativeTo(db->rootDirectory()).generic());
+                    }));
+
         int processed = 0;
         int errors = 0;
 
-        ddb::rescanIndex(db.get(), types, extensions, stopOnError,
+        ddb::rescanIndex(db.get(), scope, stopOnError,
                          [&processed, &errors](const ddb::Entry &e, bool success, const std::string &error)
                          {
                              if (success)

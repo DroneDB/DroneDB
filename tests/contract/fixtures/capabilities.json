@@ -10,7 +10,7 @@
   "output": {
     "abi": {
       "major": 2,
-      "minor": 8
+      "minor": 9
     },
     "cancellable": [
       "DDBApplyDelta",
@@ -186,6 +186,7 @@
       "DDBRenderRasterRegionEx2",
       "DDBRescan",
       "DDBRescanEx",
+      "DDBRescanEx2",
       "DDBResolveBuildFile",
       "DDBSearch",
       "DDBSetLastError",

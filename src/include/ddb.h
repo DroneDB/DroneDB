@@ -132,7 +132,8 @@ extern "C"
      * ddb-tilers and the raster helper (protocol 1.3).
      * ABI 2.8 (libddb 2.8.0, 0x00020008) adds no export: point clouds in any CRS (the raster helper of
      * protocol 1.4, the "crsStatus" property of a point cloud entry, the "crs" of the pointcloud.copc
-     * artifact). */
+     * artifact).
+     * ABI 2.9 (libddb 2.9.0, 0x00020009) adds DDBRescanEx2: the rescan of the entries a list of paths names. */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -401,7 +402,7 @@ extern "C"
      *   DDBGet (path), DDBListEntries and DDBListEntriesEx (folder: "" and "." are the root),
      *   DDBSearch (query: a pattern over entry paths, "" for all), DDBMoveEntry (source, dest),
      *   DDBBuild (source: "" for all), DDBIsBuildable, DDBIsBuildActive, DDBIsBuildComplete (path),
-     *   DDBGetBuildStatus and DDBGetBuildArtifacts (paths), DDBMetaAdd, DDBMetaSet, DDBMetaGet,
+     *   DDBGetBuildStatus and DDBGetBuildArtifacts (paths), DDBRescanEx2 (paths), DDBMetaAdd, DDBMetaSet, DDBMetaGet,
      *   DDBMetaUnset and DDBMetaList (path: "" is the dataset itself), DDBMetaRestore (the "path"
      *   of each row of the dump), DDBStac and DDBStacData (entry: "" is the collection),
      *   DDBResolveBuildFile (path, relative to the build folder: it applied the rules since 2.0),
@@ -795,6 +796,26 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBRescanEx(const char *ddbPath, char **output, const char *types,
                                const char *extensions, bool stopOnError);
+
+    /** Rescan the entries a list of entry paths names (new in 2.9), or the whole index, that match both a type
+     * and an extension filter
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param output pointer to C-string where to store output (JSON array of results, same format as DDBRescan)
+     * @param paths entry paths (see "Entry paths"): a file is that entry, a folder the entries below it
+     * @param numPaths number of paths; 0 (paths may then be NULL) rescans the whole index, as DDBRescanEx
+     * @param types comma-separated list of entry types to rescan (see DDBRescan), or empty for all
+     * @param extensions comma-separated list of file extensions to rescan (see DDBRescanEx), or empty for all
+     * @param stopOnError whether to stop processing on first error
+     * @return DDBERR_NONE on success, an error otherwise: DDBERR_INVALIDARGS for a refused path, an unknown type
+     *         or an invalid extension, DDBERR_NOTFOUND with stopOnError for a path that is not in the index.
+     *         With paths the dataset stays usable during the call: each entry is parsed outside the
+     *         writer lock of the index and written on its own, so the entries re-read before a stop stay
+     *         written. A path that is not in the index is an element {"path", "error": "Not in index: <path>",
+     *         "success": false}, reported before any entry is re-read; an entry whose file changed, or that was
+     *         removed, while it was re-read is an element of error and is not written. Without paths the call is
+     *         DDBRescanEx: the whole rescan is written at once or not at all */
+    DDB_DLL DDBErr DDBRescanEx2(const char *ddbPath, char **output, const char **paths, int numPaths,
+                                const char *types, const char *extensions, bool stopOnError);
 
     /** Move entry
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")

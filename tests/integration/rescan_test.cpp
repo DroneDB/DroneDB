@@ -529,4 +529,152 @@ namespace
         EXPECT_NE(DDBRescanEx(testFolder.string().c_str(), &output, "", "*.md", true), DDBERR_NONE);
     }
 
+    // A dataset of files in folders, whose rows a rescan restores: every row has a stale hash
+    struct ScopedDataset
+    {
+        TestArea ta;
+        fs::path folder;
+        std::unique_ptr<Database> db;
+
+        explicit ScopedDataset(const std::string &name) : ta(name, true), folder(ta.getFolder())
+        {
+            ddb::initIndex(folder.string());
+            db = ddb::open(folder.string(), true);
+            std::vector<std::string> files;
+            for (const auto *rel : {"a.txt", "other.txt", "docs/b.md", "docs/sub/c.txt", "docs2/d.txt"})
+            {
+                const fs::path file = folder / rel;
+                fs::create_directories(file.parent_path());
+                std::ofstream(file) << rel;
+                files.push_back(file.string());
+            }
+            ddb::addToIndex(db.get(), files);
+            db->exec("UPDATE entries SET hash = 'stale' WHERE type != " +
+                     std::to_string(static_cast<int>(EntryType::Directory)));
+        }
+
+        bool reRead(const std::string &path)
+        {
+            Entry e;
+            return getEntryFromDb(db.get(), path, e) && e.hash != "stale";
+        }
+
+        // Rescans `paths`, returning the path of each result, failures with a "!" in front
+        std::vector<std::string> rescan(const std::vector<std::string> &paths, bool stopOnError = false,
+                                        const std::vector<EntryType> &types = {},
+                                        const std::vector<std::string> &extensions = {})
+        {
+            std::vector<std::string> results;
+            ddb::rescanIndex(db.get(), RescanScope{types, extensions, paths}, stopOnError,
+                             [&](const Entry &e, bool success, const std::string &)
+                             {
+                                 results.push_back(success ? e.path : "!" + e.path);
+                                 return true;
+                             });
+            return results;
+        }
+    };
+
+    TEST(rescanPaths, reReadsOnlyTheNamedEntry)
+    {
+        ScopedDataset ds(TEST_NAME);
+
+        EXPECT_EQ(ds.rescan({"a.txt"}), std::vector<std::string>{"a.txt"});
+        EXPECT_TRUE(ds.reRead("a.txt"));
+        EXPECT_FALSE(ds.reRead("other.txt"));
+        EXPECT_FALSE(ds.reRead("docs/b.md"));
+    }
+
+    TEST(rescanPaths, aFolderIsTheEntriesBelowIt)
+    {
+        ScopedDataset ds(TEST_NAME);
+
+        // Not the folders themselves, not the sibling "docs2"; a path named twice is re-read once
+        EXPECT_EQ(ds.rescan({"docs", "docs/sub/c.txt"}), (std::vector<std::string>{"docs/b.md", "docs/sub/c.txt"}));
+        EXPECT_FALSE(ds.reRead("docs2/d.txt"));
+        EXPECT_FALSE(ds.reRead("a.txt"));
+    }
+
+    TEST(rescanPaths, pathsAndFiltersMustAllMatch)
+    {
+        ScopedDataset ds(TEST_NAME);
+
+        EXPECT_EQ(ds.rescan({"docs"}, false, {EntryType::Markdown}), std::vector<std::string>{"docs/b.md"});
+        EXPECT_EQ(ds.rescan({"docs", "a.txt"}, false, {}, {"txt"}),
+                  (std::vector<std::string>{"a.txt", "docs/sub/c.txt"}));
+        EXPECT_TRUE(ds.rescan({"a.txt"}, false, {EntryType::Markdown}).empty());
+    }
+
+    TEST(rescanPaths, aPathNotInTheIndexFailsBeforeAnyEntryIsReRead)
+    {
+        ScopedDataset ds(TEST_NAME);
+
+        EXPECT_THROW(ds.rescan({"a.txt", "missing.txt"}, true), EntryNotFoundException);
+        EXPECT_FALSE(ds.reRead("a.txt"));
+
+        EXPECT_EQ(ds.rescan({"a.txt", "missing.txt"}), (std::vector<std::string>{"!missing.txt", "a.txt"}));
+        EXPECT_TRUE(ds.reRead("a.txt"));
+    }
+
+    TEST(rescanPaths, aMissingFileFailsAndTheOthersAreReRead)
+    {
+        ScopedDataset ds(TEST_NAME);
+        fs::remove(ds.folder / "a.txt");
+
+        EXPECT_EQ(ds.rescan({"a.txt", "other.txt"}), (std::vector<std::string>{"!a.txt", "other.txt"}));
+        EXPECT_TRUE(ds.reRead("other.txt"));
+        EXPECT_THROW(ds.rescan({"a.txt"}, true), FSException);
+    }
+
+    TEST(rescanPaths, aCancelKeepsTheEntriesAlreadyWritten)
+    {
+        ScopedDataset ds(TEST_NAME);
+
+        int calls = 0;
+        ddb::rescanIndex(ds.db.get(), RescanScope{{}, {}, {"a.txt", "other.txt"}}, true,
+                         [&](const Entry &, bool, const std::string &) { return ++calls < 1; });
+        EXPECT_EQ(calls, 1);
+        EXPECT_TRUE(ds.reRead("a.txt"));
+        EXPECT_FALSE(ds.reRead("other.txt"));
+    }
+
+    // The dataset stays live during a rescan of paths: another connection writes the index between two
+    // entries, which the writer lock of a whole-index rescan would refuse
+    TEST(rescanPaths, theIndexStaysWritableBetweenEntries)
+    {
+        ScopedDataset ds(TEST_NAME);
+        const fs::path added = ds.folder / "added.txt";
+        std::ofstream(added) << "added";
+
+        bool wrote = false;
+        ddb::rescanIndex(ds.db.get(), RescanScope{{}, {}, {"a.txt", "other.txt"}}, true,
+                         [&](const Entry &e, bool, const std::string &)
+                         {
+                             if (e.path == "a.txt")
+                             {
+                                 const auto other = ddb::open(ds.folder.string(), true);
+                                 ddb::addToIndex(other.get(), {added.string()});
+                                 wrote = true;
+                             }
+                             return true;
+                         });
+        EXPECT_TRUE(wrote);
+        Entry e;
+        EXPECT_TRUE(getEntryFromDb(ds.db.get(), "added.txt", e));
+        EXPECT_TRUE(ds.reRead("other.txt"));
+    }
+
+    // Without paths the rescan is the whole index, written at once: a cancel leaves every row as it was
+    TEST(rescanPaths, withoutPathsACancelRollsTheWholeRescanBack)
+    {
+        ScopedDataset ds(TEST_NAME);
+
+        int calls = 0;
+        ddb::rescanIndex(ds.db.get(), RescanScope{}, true,
+                         [&](const Entry &, bool, const std::string &) { return ++calls < 2; });
+        EXPECT_EQ(calls, 2);
+        EXPECT_FALSE(ds.reRead("a.txt"));
+        EXPECT_FALSE(ds.reRead("docs/b.md"));
+    }
+
 } // namespace

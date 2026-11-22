@@ -114,6 +114,20 @@ namespace ddb
         updateQ->execute();
     }
 
+    bool fileChangedSince(const fs::path &absPath, double observedMtime, long long observedSize)
+    {
+        try
+        {
+            const auto state = io::Path(absPath).getState();
+            const long long size = state.directory ? observedSize : static_cast<long long>(state.size);
+            return state.mtime != observedMtime || size != observedSize;
+        }
+        catch (const FSException &)
+        {
+            return true; // gone
+        }
+    }
+
     namespace {
 
     // Relative path -> the SHA-256 the caller already knows (and the size/mtime it saw, if any)
@@ -357,17 +371,9 @@ namespace ddb
         std::vector<std::string> unchanged;
     };
 
-    // Whether the file of a computed item changed (or is gone) since COMPUTE: re-validates its
-    // (mtime, size) with one stat. Directories use logical size (0, or aggregate for nested
-    // DroneDBs), so only the size of regular files is compared.
+    // Whether the file of a computed item changed (or is gone) since COMPUTE
     bool changedSinceCompute(const fs::path &absPath, const ComputedAddItem &ci) {
-        try {
-            const auto state = io::Path(absPath).getState();
-            const long long size = state.directory ? ci.observedSize : static_cast<long long>(state.size);
-            return state.mtime != ci.observedMtime || size != ci.observedSize;
-        } catch (const FSException &) {
-            return true; // gone
-        }
+        return fileChangedSince(absPath, ci.observedMtime, ci.observedSize);
     }
 
     // INSERT of the entry (insertQ is the statement of commitAddEntries)

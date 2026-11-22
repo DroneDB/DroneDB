@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 
 namespace ddb
 {
@@ -282,124 +283,245 @@ namespace ddb
         tx.commit();
     }
 
-    void rescanIndex(Database *db, const std::vector<EntryType> &types, const std::vector<std::string> &extensions,
-                     bool stopOnError, RescanCallback callback, RescanKeyCallback keyCallback)
-    {
-        const fs::path directory = db->rootDirectory();
+    namespace {
 
-        // Always exclude directories from rescan because they do not contain file metadata
-        // that can be re-parsed. This check is defensive and prevents potential issues
-        // even if validation fails at higher layers (C API, CLI).
+    // The paths a rescan re-reads (sorted, once each) and the paths of the scope that are not in the index
+    struct RescanSelection
+    {
+        std::vector<std::string> paths;
+        std::vector<std::string> unknown;
+    };
+
+    // The rows of the scope's types (never a directory: it has no file metadata to re-read), and of
+    // `predicate` when it is not empty
+    std::vector<std::string> selectRescanRows(Database *db, const std::vector<EntryType> &types,
+                                              const PathPredicate &predicate)
+    {
         SqlConditions conditions;
         conditions.add(typeCondition("type", "!=", EntryType::Directory));
         if (!types.empty())
             conditions.addEntryTypes("type", types);
+        conditions.add(predicate);
 
-        auto q = db->query("SELECT path FROM entries" + conditions.whereClause());
+        auto q = db->query("SELECT path FROM entries" + conditions.whereClause() + " ORDER BY path");
         conditions.bind(*q);
+        std::vector<std::string> paths;
+        while (q->fetch())
+            paths.push_back(q->getText(0));
+        q->reset();
+        return paths;
+    }
 
-        const auto updateQ = db->query(updateEntrySql());
-        // What the index holds of an entry before it is re-read: the build key reads it (D-020)
-        const BuildPropertyColumns buildProperties;
-        const auto beforeQ = db->query("SELECT hash, type, " + buildProperties.sql() + " FROM entries WHERE path = ?");
-        const fs::path buildDirectory = db->buildDirectory();
+    RescanSelection selectRescanPaths(Database *db, const RescanScope &scope)
+    {
+        RescanSelection selection;
+        if (scope.paths.empty())
+            selection.paths = selectRescanRows(db, scope.types, {});
+        else
+        {
+            const auto typeQ = db->query("SELECT type FROM entries WHERE path = ?");
+            std::set<std::string> paths;
+            for (const auto &path : scope.paths)
+            {
+                typeQ->bind(1, path);
+                const bool indexed = typeQ->fetch();
+                const bool folder = indexed && static_cast<EntryType>(typeQ->getInt(0)) == EntryType::Directory;
+                typeQ->reset();
+                if (!indexed)
+                {
+                    selection.unknown.push_back(path);
+                    continue;
+                }
+                const PathPredicate predicate =
+                    folder ? descendantsPredicate(path, "path") : PathPredicate{"path = ?", {path}};
+                for (auto &row : selectRescanRows(db, scope.types, predicate))
+                    paths.insert(std::move(row));
+            }
+            selection.paths.assign(paths.begin(), paths.end());
+        }
+
+        if (!scope.extensions.empty())
+            std::erase_if(selection.paths, [&](const std::string &path)
+                          { return !filters::hasAnyExtension(path, scope.extensions); });
+        return selection;
+    }
+
+    // Re-reads entries one at a time and tells the callbacks. Whether a row is written in the caller's
+    // transaction or in one of its own is the caller's (see rescanIndex).
+    class EntryRescanner
+    {
+        Database *db_;
+        fs::path directory_;
+        fs::path buildDirectory_;
+        bool stopOnError_;
+        RescanCallback callback_;
+        RescanKeyCallback keyCallback_;
+        std::unique_ptr<Statement> updateQ_;
+        // What the index holds of an entry before it is re-read: the build key reads it
+        BuildPropertyColumns buildProperties_;
+        std::unique_ptr<Statement> beforeQ_;
+        // The folders of an unbundled SOG splat are looked at once for the whole rescan
+        std::shared_ptr<SogFolderCache> sogFolders_ = std::make_shared<SogFolderCache>();
+
+        // The key of the build the row of `path` names; nothing when the row is gone
+        std::optional<std::string> keyBefore(const std::string &path)
+        {
+            beforeQ_->bind(1, path);
+            std::optional<std::string> key;
+            if (beforeQ_->fetch())
+            {
+                const auto type = static_cast<EntryType>(beforeQ_->getInt(1));
+                key = buildKeyBeforeRescan(buildDirectory_, beforeQ_->getText(0), type,
+                                           buildProperties_.read(*beforeQ_, 2, type));
+            }
+            beforeQ_->reset();
+            return key;
+        }
+
+        // The entry of the file, parsed again from scratch (its hash too)
+        Entry parsed(const fs::path &fullPath)
+        {
+            Entry e;
+            FingerprintContext ctx;
+            ctx.sogFolders = sogFolders_;
+            parseEntry(fullPath, directory_, e, true, ctx);
+            return e;
+        }
+
+        // Tells the callbacks of the re-read entry; false when the callback cancels
+        bool written(const Entry &e, const std::string &keyBefore)
+        {
+            if (keyCallback_ != nullptr)
+            {
+                const std::string keyAfter = entryHandler(e.type).buildKey(e);
+                keyCallback_(e, keyAfter, keyAfter != keyBefore);
+            }
+            return callback_ == nullptr || callback_(e, true, "");
+        }
+
+        // Tells the callback that `path` failed; false when it cancels
+        bool reported(const std::string &path, const std::string &error)
+        {
+            if (callback_ == nullptr)
+                return true;
+            Entry e;
+            e.path = path;
+            return callback_(e, false, error);
+        }
+
+        // Runs `reread` on the file of `path` and reports what fails: a missing file, or what `reread`
+        // throws (with stopOnError that exception goes on, so a stop throws what failed). False when the
+        // callback cancels
+        template <typename Reread> bool rescan(const std::string &path, Reread reread)
+        {
+            const fs::path fullPath = directory_ / io::Path(io::fromUtf8(path)).get();
+            if (!fs::exists(fullPath))
+                return failed(path, FSException("File not found: " + io::toUtf8(fullPath)));
+
+            try
+            {
+                return reread(fullPath);
+            }
+            catch (const std::exception &ex)
+            {
+                LOGD << "Error processing " << fullPath << ": " << ex.what();
+                if (!reported(path, ex.what()))
+                    return false;
+                if (stopOnError_)
+                    throw;
+                return true;
+            }
+        }
+
+    public:
+        EntryRescanner(Database *db, bool stopOnError, RescanCallback callback, RescanKeyCallback keyCallback)
+            : db_(db), directory_(db->rootDirectory()), buildDirectory_(db->buildDirectory()),
+              stopOnError_(stopOnError), callback_(std::move(callback)), keyCallback_(std::move(keyCallback)),
+              updateQ_(db->query(updateEntrySql())),
+              beforeQ_(db->query("SELECT hash, type, " + buildProperties_.sql() + " FROM entries WHERE path = ?"))
+        {
+        }
+
+        // Reports that `path` failed with `error`; false when the callback cancels. With stopOnError,
+        // throws `error`
+        template <typename Error> bool failed(const std::string &path, const Error &error)
+        {
+            LOGD << "Cannot rescan " << path << ": " << error.what();
+            if (!reported(path, error.what()))
+                return false;
+            if (stopOnError_)
+                throw error;
+            return true;
+        }
+
+        // Re-reads `path` inside the caller's transaction; false when the callback cancels
+        bool rescanInTransaction(const std::string &path)
+        {
+            return rescan(path, [&](const fs::path &fullPath)
+            {
+                const std::string before = keyCallback_ != nullptr ? keyBefore(path).value_or("") : "";
+                Entry e = parsed(fullPath);
+                doUpdate(updateQ_.get(), e);
+                return written(e, before);
+            });
+        }
+
+        // Re-reads `path` outside the writer lock and writes it in a transaction of its own, unless its
+        // file or its row changed meanwhile; false when the callback cancels
+        bool rescanOwnTransaction(const std::string &path)
+        {
+            return rescan(path, [&](const fs::path &fullPath)
+            {
+                const double observedMtime = io::Path(fullPath).getState().mtime;
+                Entry e = parsed(fullPath);
+
+                Transaction tx(db_);
+                if (fileChangedSince(fullPath, observedMtime, static_cast<long long>(e.size)))
+                    throw FSException("Changed while it was re-read: " + io::toUtf8(fullPath));
+                const auto before = keyBefore(path);
+                if (!before)
+                    throw EntryNotFoundException("Removed from the index while it was re-read: " + path);
+                // The time the file had when it was read, with its sub-second part, as an add writes it
+                doUpdate(updateQ_.get(), e, observedMtime);
+                tx.commit();
+                return written(e, *before);
+            });
+        }
+    };
+
+    } // namespace
+
+    void rescanIndex(Database *db, const RescanScope &scope, bool stopOnError, RescanCallback callback,
+                     RescanKeyCallback keyCallback)
+    {
+        EntryRescanner rescanner(db, stopOnError, std::move(callback), std::move(keyCallback));
+
+        if (!scope.paths.empty())
+        {
+            const auto selection = selectRescanPaths(db, scope);
+            for (const auto &path : selection.unknown)
+                if (!rescanner.failed(path, EntryNotFoundException("Not in index: " + path)))
+                    return;
+            for (const auto &path : selection.paths)
+                if (!rescanner.rescanOwnTransaction(path))
+                    return;
+            return;
+        }
 
         // Deliberately one IMMEDIATE transaction for the whole rescan (design choice, kept):
         // the entries table is always left in a consistent, fully re-parsed state, even for
         // consumers reading between statements. The cost is that re-scan holds the sole SQLite
         // writer lock for its entire duration; concurrent addToIndexEx callers see busy and
-        // retry/jitter per RetryPolicy.
+        // retry/jitter per RetryPolicy. A cancel or a stop returns early: tx's destructor rolls back.
         Transaction tx(db);
-
-        // The folders of an unbundled SOG splat are looked at once for the whole rescan
-        const auto sogFolders = std::make_shared<SogFolderCache>();
-
-        while (q->fetch())
-        {
-            const std::string path = q->getText(0);
-            if (!extensions.empty() && !filters::hasAnyExtension(path, extensions))
-                continue;
-
-            io::Path relPath = io::fromUtf8(path);
-            fs::path fullPath = directory / relPath.get();
-
-            // Check if file still exists (outside try-catch to handle stopOnError correctly)
-            if (!fs::exists(fullPath))
-            {
-                std::string error = "File not found: " + io::toUtf8(fullPath);
-                LOGD << error;
-
-                if (callback != nullptr)
-                {
-                    Entry e;
-                    e.path = relPath.generic();
-                    // tx's destructor rolls back on this early return.
-                    if (!callback(e, false, error))
-                        return;
-                }
-
-                if (stopOnError)
-                    throw FSException(error); // tx's destructor rolls back
-
-                continue;
-            }
-
-            try
-            {
-                std::string keyBefore;
-                if (keyCallback != nullptr)
-                {
-                    beforeQ->bind(1, path);
-                    if (beforeQ->fetch())
-                    {
-                        const auto type = static_cast<EntryType>(beforeQ->getInt(1));
-                        keyBefore = buildKeyBeforeRescan(buildDirectory, beforeQ->getText(0), type,
-                                                         buildProperties.read(*beforeQ, 2, type));
-                    }
-                    beforeQ->reset();
-                }
-
-                Entry e;
-                FingerprintContext ctx;
-                ctx.sogFolders = sogFolders;
-                parseEntry(fullPath, directory, e, true, ctx);
-                doUpdate(updateQ.get(), e);
-
-                if (keyCallback != nullptr)
-                {
-                    const std::string keyAfter = entryHandler(e.type).buildKey(e);
-                    keyCallback(e, keyAfter, keyAfter != keyBefore);
-                }
-
-                if (callback != nullptr)
-                {
-                    if (!callback(e, true, ""))
-                        return; // tx's destructor rolls back
-                }
-            }
-            catch (const std::exception &ex)
-            {
-                std::string error = ex.what();
-                LOGD << "Error processing " << fullPath << ": " << error;
-
-                if (callback != nullptr)
-                {
-                    Entry e;
-                    e.path = relPath.generic();
-                    if (!callback(e, false, error))
-                        return; // tx's destructor rolls back
-                }
-
-                if (stopOnError)
-                    throw; // tx's destructor rolls back
-            }
-        }
-
+        for (const auto &path : selectRescanPaths(db, scope).paths)
+            if (!rescanner.rescanInTransaction(path))
+                return;
         tx.commit();
 
         // The markers of the layout before the build key become those of their entries, with the keys
         // the rescan gave them
-        migrateLegacyPendingMarkers(db, buildDirectory);
+        migrateLegacyPendingMarkers(db, db->buildDirectory());
     }
 
     // Sets the modified times of files in the filesystem
