@@ -1022,6 +1022,11 @@ namespace
         EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, R"({"limit":101})", &out));
         EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, R"({"limit":"3"})", &out));
         EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBFindCoverage(ds.path().c_str(), point, R"({"limits":3})", &out));
+        // A valid polygon across the antimeridian: its box goes around the world
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS,
+                         DDBFindCoverage(ds.path().c_str(), R"({"type":"Polygon","coordinates":[[[179.9,44],[-179.9,44],[-179.9,46],[179.9,46],[179.9,44]]]})",
+                                         nullptr, &out));
+        EXPECT_NE(std::string(DDBGetLastError()).find("antimeridian"), std::string::npos);
         EXPECT_EQ(out, nullptr);
 
         // A dataset with no images, with the default options in any of their spellings

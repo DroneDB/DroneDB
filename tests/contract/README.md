@@ -908,6 +908,7 @@ Registry has to adopt first.
   diagonal of the footprint; `overlap` is the part of a polygon the footprint covers, 1 for a point or a line;
   `pixel` is `[x, y]` of the centroid of the geometry in the image, or null when the camera parameters of the image
   are missing or it is outside the image. An argument that is wrong (bad JSON, another type of geometry, a position
-  out of range, a polygon that is not valid, an unknown option, a limit out of range) is `DDBERR_INVALIDARGS`. The
-  footprint of an image is unchanged: the camera model it is made with is now shared with the pixel estimate. No
-  other fixture or schema changed.
+  out of range, a polygon that is not valid, a geometry whose longitudes span more than 180 degrees (one across the
+  antimeridian) or that is too large to be projected in the UTM zone of its middle, an unknown option, a limit out of
+  range) is `DDBERR_INVALIDARGS`. The footprint of an image is unchanged: the camera model it is made with is now
+  shared with the pixel estimate. No other fixture or schema changed.

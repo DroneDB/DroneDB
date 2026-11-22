@@ -608,7 +608,10 @@ extern "C"
      * @param geometryJson a GeoJSON geometry object in EPSG:4326: Point, LineString or Polygon (the outer ring
      *        and the holes; a height in a position is ignored). Another type, a position out of the range of
      *        longitude and latitude, or a geometry that is not valid (a polygon that crosses itself) is
-     *        DDBERR_INVALIDARGS
+     *        DDBERR_INVALIDARGS. The distances are measured in the UTM zone of the middle of the box of the
+     *        geometry, so a geometry whose longitudes span more than 180 degrees (one that crosses the
+     *        antimeridian: split it there) or that is too large to be projected in that zone is
+     *        DDBERR_INVALIDARGS too
      * @param optionsJson NULL or "" for the defaults, or a JSON object with the members "limit", a whole number
      *        from 1 to 100 (default 20): the most images returned. Any other member is DDBERR_INVALIDARGS
      * @param output pointer to C-string where to store the JSON array, empty when no image intersects

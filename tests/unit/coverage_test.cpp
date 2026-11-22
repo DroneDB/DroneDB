@@ -17,6 +17,7 @@
 #include "coverage.h"
 #include "entry.h"
 #include "exceptions.h"
+#include "geo.h"
 #include "gtest/gtest.h"
 #include "json.h"
 #include "test.h"
@@ -27,8 +28,13 @@ namespace
 {
     using namespace ddb;
 
-    constexpr double Latitude = 45.0;
-    constexpr double Longitude = 9.0;
+    // The origin of the metres east and north of a test
+    struct Site
+    {
+        double latitude;
+        double longitude;
+    };
+    constexpr Site Origin{45.0, 9.0};
     constexpr double MetresPerDegree = 111195.0;
     constexpr int Width = 6000;
     constexpr int Height = 4000;
@@ -38,9 +44,10 @@ namespace
     const double FootprintDiagonal = std::hypot(FootprintWidth, FootprintHeight);
 
     // Longitude and latitude of a place east and north of the origin of the test, in metres
-    Point place(double east, double north)
+    Point place(double east, double north, const Site &site = Origin)
     {
-        return Point(Longitude + east / (MetresPerDegree * std::cos(deg2rad(Latitude))), Latitude + north / MetresPerDegree);
+        return Point(site.longitude + east / (MetresPerDegree * std::cos(deg2rad(site.latitude))),
+                     site.latitude + north / MetresPerDegree);
     }
 
     struct Camera
@@ -53,6 +60,7 @@ namespace
         double roll = 0.0;
         double relAltitude = 100.0;
         bool hasOrientation = true;
+        Site site = Origin;
     };
 
     Entry imageOf(const std::string &path, const Camera &camera)
@@ -69,7 +77,7 @@ namespace
                                 {"cameraPitch", camera.pitch},
                                 {"cameraRoll", camera.roll},
                                 {"hasCameraOrientation", camera.hasOrientation}};
-        const Point at = place(camera.east, camera.north);
+        const Point at = place(camera.east, camera.north, camera.site);
         entry.point_geom.addPoint(at.x, at.y, camera.altitude);
         calculateFootprint(SensorSize(13.2, 8.8), GeoLocation(at.y, at.x, camera.altitude), Focal(8.8, 24.0),
                            CameraOrientation(camera.pitch, camera.yaw, camera.roll), camera.relAltitude, entry.polygon_geom);
@@ -105,11 +113,12 @@ namespace
     }
 
     // A rectangle of the ground, by its corners in metres east and north
-    CoverageGeometry rectangle(double west, double south, double east, double north)
+    CoverageGeometry rectangle(double west, double south, double east, double north, const Site &site = Origin)
     {
         CoverageGeometry geometry;
         geometry.kind = CoverageGeometry::Kind::Polygon;
-        geometry.parts.push_back({place(west, south), place(east, south), place(east, north), place(west, north), place(west, south)});
+        geometry.parts.push_back({place(west, south, site), place(east, south, site), place(east, north, site),
+                                  place(west, north, site), place(west, south, site)});
         return geometry;
     }
 
@@ -380,6 +389,53 @@ namespace
         EXPECT_EQ(j[0].size(), 4u);
     }
 
+    // A square of the UTM grid the footprint is made in (a footprint is a rectangle of that grid around the point
+    // under the camera), `east` and `north` metres from the point under the camera of a site
+    CoverageGeometry utmSquare(const Site &site, double east, double north, double side)
+    {
+        const UtmProjector projector(getUTMZone(site.latitude, site.longitude));
+        const Projected2D under = projector.toUTM(site.latitude, site.longitude);
+        const auto corner = [&](double dx, double dy)
+        {
+            const Geographic2D g = projector.fromUTM(under.x + east + dx * side / 2, under.y + north + dy * side / 2);
+            return Point(g.longitude, g.latitude);
+        };
+        CoverageGeometry geometry;
+        geometry.kind = CoverageGeometry::Kind::Polygon;
+        geometry.parts.push_back({corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1), corner(-1, -1)});
+        return geometry;
+    }
+
+    // A polygon of a metre or less, far from the equator and the false easting: its centroid is the one of its
+    // corners, not the noise of products of UTM coordinates (millions of metres) that cancel each other
+    TEST(Coverage, CentroidOfASmallPolygon)
+    {
+        // The north (zone 15N, about 5.19e6 m north) and the south (zone 56S, about 6.25e6 m north, a false northing)
+        for (const Site site : {Site{46.84, -91.99456}, Site{-33.8688, 151.2093}})
+        {
+            IndexFixture index(TEST_NAME + (site.latitude > 0 ? "-north" : "-south"));
+            insertImage(index.db.get(), "a.jpg", {.site = site});
+
+            for (const double side : {1.0, 0.5})
+            {
+                SCOPED_TRACE(std::to_string(site.latitude) + ", " + std::to_string(side) + " m");
+                // Around the point under the nadir camera: the middle of the footprint and of the image. 1e-6 of
+                // the diagonal is 0.2 mm, and a pixel is 25 mm
+                auto matches = findCoverage(index.db.get(), utmSquare(site, 0, 0, side), {});
+                ASSERT_EQ(matches.size(), 1u);
+                EXPECT_NEAR(matches[0].score, 0.0, 1e-6);
+                EXPECT_NEAR(matches[0].overlap, 1.0, 1e-6);
+                expectPixel(matches[0], Width / 2.0, Height / 2.0, 1.0);
+
+                // 30 m east and 20 m south of it: a fifth of the width to the right and a fifth of the height down
+                matches = findCoverage(index.db.get(), utmSquare(site, 30, -20, side), {});
+                ASSERT_EQ(matches.size(), 1u);
+                EXPECT_NEAR(matches[0].score, std::hypot(30.0, 20.0) / FootprintDiagonal, 1e-6);
+                expectPixel(matches[0], 0.7 * Width, 0.7 * Height, 1.0);
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ arguments
 
     TEST(Coverage, GeometryFromGeoJson)
@@ -441,6 +497,33 @@ namespace
         bowTie.kind = CoverageGeometry::Kind::Polygon;
         bowTie.parts.push_back({place(-10, -10), place(10, 10), place(10, -10), place(-10, 10), place(-10, -10)});
         EXPECT_THROW(findCoverage(index.db.get(), bowTie, {}), InvalidArgsException);
+    }
+
+    // The distances are measured in the UTM zone of the middle of the box of the geometry: the box of a geometry
+    // that crosses the antimeridian goes around the world, and its middle is on the other side of it. The
+    // geometries are valid: they are refused for their width
+    TEST(Coverage, GeometryTooWideIsRefused)
+    {
+        IndexFixture index(TEST_NAME);
+        insertImage(index.db.get(), "a.jpg", {});
+
+        for (const char *text : {
+                 R"({"type":"Polygon","coordinates":[[[179.9,44],[-179.9,44],[-179.9,46],[179.9,46],[179.9,44]]]})",
+                 R"({"type":"LineString","coordinates":[[179.9,45],[-179.9,45]]})",
+                 R"({"type":"Polygon","coordinates":[[[-90.5,44],[90,44],[90,46],[-90.5,46],[-90.5,44]]]})",
+                 // 180 degrees on the equator: its ends are 90 degrees from the meridian of the zone of its middle,
+                 // where the transverse Mercator projection has no value
+                 R"({"type":"Polygon","coordinates":[[[-81,-1],[99,-1],[99,1],[-81,1],[-81,-1]]]})",
+             })
+            EXPECT_THROW(findCoverage(index.db.get(), parseCoverageGeometry(json::parse(text)), {}), InvalidArgsException) << text;
+
+        // 180 degrees, from 81 W to 99 E, is the widest geometry: its middle is 9 E, the image
+        const auto widest = findCoverage(
+            index.db.get(),
+            parseCoverageGeometry(json::parse(R"({"type":"Polygon","coordinates":[[[-81,44],[99,44],[99,46],[-81,46],[-81,44]]]})")),
+            {});
+        ASSERT_EQ(widest.size(), 1u);
+        EXPECT_EQ(widest[0].path, "a.jpg");
     }
 
     TEST(Coverage, Options)

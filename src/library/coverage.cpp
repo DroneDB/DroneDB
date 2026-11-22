@@ -83,8 +83,14 @@ namespace ddb
         // The planar centroid of a geometry that is already in metres: the area centroid of a polygon (its
         // holes take away), the length centroid of a line, a point itself. A geometry with no area or no
         // length is the mean of its positions.
+        // The sums are taken from the first position: UTM coordinates are hundreds of thousands to millions
+        // of metres, and the products of the area formula on them cancel each other to an error of metres
+        // to kilometres for a polygon of a metre.
         Projected2D centroidOf(CoverageGeometry::Kind kind, const std::vector<Planar> &parts)
         {
+            const Projected2D origin = parts.front().front();
+            const auto local = [&origin](const Projected2D &p) { return Projected2D(p.x - origin.x, p.y - origin.y); };
+
             double weight = 0.0;
             double sumX = 0.0;
             double sumY = 0.0;
@@ -99,10 +105,12 @@ namespace ddb
                     double cy = 0.0;
                     for (size_t i = 0; i + 1 < ring.size(); i++)
                     {
-                        const double cross = ring[i].x * ring[i + 1].y - ring[i + 1].x * ring[i].y;
+                        const Projected2D a = local(ring[i]);
+                        const Projected2D b = local(ring[i + 1]);
+                        const double cross = a.x * b.y - b.x * a.y;
                         twiceArea += cross;
-                        cx += (ring[i].x + ring[i + 1].x) * cross;
-                        cy += (ring[i].y + ring[i + 1].y) * cross;
+                        cx += (a.x + b.x) * cross;
+                        cy += (a.y + b.y) * cross;
                     }
                     if (twiceArea == 0.0)
                         continue;
@@ -119,15 +127,17 @@ namespace ddb
                 const Planar &line = parts.front();
                 for (size_t i = 0; i + 1 < line.size(); i++)
                 {
-                    const double length = std::hypot(line[i + 1].x - line[i].x, line[i + 1].y - line[i].y);
+                    const Projected2D a = local(line[i]);
+                    const Projected2D b = local(line[i + 1]);
+                    const double length = std::hypot(b.x - a.x, b.y - a.y);
                     weight += length;
-                    sumX += length * (line[i].x + line[i + 1].x) / 2.0;
-                    sumY += length * (line[i].y + line[i + 1].y) / 2.0;
+                    sumX += length * (a.x + b.x) / 2.0;
+                    sumY += length * (a.y + b.y) / 2.0;
                 }
             }
 
             if (weight > 0.0)
-                return Projected2D(sumX / weight, sumY / weight);
+                return Projected2D(origin.x + sumX / weight, origin.y + sumY / weight);
 
             const Planar &first = parts.front();
             size_t count = first.size();
@@ -137,20 +147,49 @@ namespace ddb
             Projected2D mean(0.0, 0.0);
             for (size_t i = 0; i < count; i++)
             {
-                mean.x += first[i].x / static_cast<double>(count);
-                mean.y += first[i].y / static_cast<double>(count);
+                const Projected2D p = local(first[i]);
+                mean.x += p.x / static_cast<double>(count);
+                mean.y += p.y / static_cast<double>(count);
             }
-            return mean;
+            return Projected2D(origin.x + mean.x, origin.y + mean.y);
         }
 
+        // A position (longitude and latitude) in the zone of a projector; nothing when it is too far from the
+        // zone to be projected
+        std::optional<Projected2D> projectedIn(const UtmProjector &projector, const Point &p)
+        {
+            try
+            {
+                const Projected2D planar = projector.toUTM(p.y, p.x);
+                if (std::isfinite(planar.x) && std::isfinite(planar.y))
+                    return planar;
+            }
+            catch (const GDALException &)
+            {
+            }
+            return std::nullopt;
+        }
+
+        // The positions of a geometry or a footprint in the zone the search measures in. A position that cannot
+        // be projected there belongs to a geometry too large to be measured in one zone
         Planar project(const UtmProjector &projector, const std::vector<Point> &positions)
         {
             Planar planar;
             planar.reserve(positions.size());
             for (const auto &p : positions)
-                planar.push_back(projector.toUTM(p.y, p.x));
+            {
+                const auto projected = projectedIn(projector, p);
+                if (!projected)
+                    throw InvalidArgsException("The geometry is too large to be measured in the UTM zone " +
+                                               std::to_string(projector.zone().zone) + (projector.zone().north ? "N" : "S") +
+                                               " of its middle");
+                planar.push_back(*projected);
+            }
             return planar;
         }
+
+        // The widest geometry, in degrees of longitude, whose middle is the middle of its box
+        constexpr double MaxLongitudeSpan = 180.0;
 
         // The box of a geometry, in longitude and latitude
         struct Box
@@ -220,9 +259,12 @@ namespace ddb
 
             // The footprint is built in the grid of the zone of the camera, and this is its inverse
             const UtmProjector &projector = projectors.of(getUTMZone(camera.y, camera.x));
-            const Projected2D under = projector.toUTM(camera.y, camera.x);
-            const Projected2D ground = projector.toUTM(centroid.y, centroid.x);
-            const auto position = model->imagePosition(ground.x - under.x, ground.y - under.y);
+            const auto under = projectedIn(projector, camera);
+            // A centroid too far from the zone of the camera to be projected in it is far outside its image
+            const auto ground = projectedIn(projector, centroid);
+            if (!under || !ground)
+                return std::nullopt;
+            const auto position = model->imagePosition(ground->x - under->x, ground->y - under->y);
             if (!position)
                 return std::nullopt;
 
@@ -361,12 +403,17 @@ namespace ddb
     std::vector<CoverageMatch> findCoverage(Database *db, const CoverageGeometry &geometry,
                                             const CoverageOptions &options)
     {
+        // The distances are in metres, in the UTM zone of the middle of the box of the geometry. A geometry that
+        // crosses the antimeridian has a box around the world, whose middle is on the other side of it
+        const Box box = boxOf(geometry);
+        if (box.maxX - box.minX > MaxLongitudeSpan)
+            throw InvalidArgsException("The geometry spans more than 180 degrees of longitude: a geometry that crosses "
+                                       "the antimeridian must be split at it");
+
         const std::string wkt = geometry.toWkt();
         requireValid(db, wkt);
 
-        // The distances are in metres, in the UTM zone of the middle of the geometry
         Projectors projectors;
-        const Box box = boxOf(geometry);
         const Point middle = box.center();
         const UtmProjector &frame = projectors.of(getUTMZone(middle.y, middle.x));
 

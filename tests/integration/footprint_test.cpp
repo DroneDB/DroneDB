@@ -76,7 +76,7 @@ namespace
             wkts[name] = entry.polygon_geom.toWkt();
         }
         golden::expectGolden("footprint_drone_images", footprints);
-        // The bytes of the WKT, compared between two builds with DDB_GOLDEN_DUMP_DIR
-        golden::dumpOnly("footprint_drone_images_wkt", wkts);
+        // The WKT the index stores, compared as strings: exactly, digit by digit
+        golden::expectGolden("footprint_drone_images_wkt", wkts);
     }
 }
