@@ -13,7 +13,10 @@
     "availablePresets",
     "defaultPreset",
     "detectedSensor",
-    "indexLayer"
+    "indexLayer",
+    "algorithms",
+    "colormaps",
+    "autoBands"
   ],
   "additionalProperties": false,
   "properties": {
@@ -122,6 +125,111 @@
         ]
       },
       "description": "The spectral indices the WMS vegetation-index layer renders from the raster, in the layer's order"
+    },
+    "algorithms": {
+      "description": "as in DDBGetRasterMetadata without a band filter (new in 2.11)",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "expr",
+          "help",
+          "requiredBands",
+          "category"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "expr": {
+            "type": "string"
+          },
+          "help": {
+            "type": "string"
+          },
+          "requiredBands": {
+            "description": "the names of the bands the formula reads (new in 2.4)",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "category": {
+            "description": "the kind of raster the formula is for (new in 2.4)",
+            "enum": [
+              "rgb",
+              "multispectral",
+              "thermal"
+            ]
+          },
+          "range": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "disabledReason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "colormaps": {
+      "description": "as in DDBGetRasterMetadata without a band filter (new in 2.11)",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "colors"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            }
+          }
+        }
+      }
+    },
+    "autoBands": {
+      "description": "as in DDBGetRasterMetadata without a band filter (new in 2.11)",
+      "type": "object",
+      "required": [
+        "filter",
+        "match"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "type": "string"
+        },
+        "match": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }

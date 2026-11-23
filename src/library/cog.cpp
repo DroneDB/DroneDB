@@ -15,8 +15,14 @@
 #include "exceptions.h"
 #include "json.h"
 #include "tilers_call.h"
+#include "tilers_raster.h"
+#include "buildlock.h"
+#include "database.h"
+#include "dbops.h"
+#include "entry_handler.h"
 
 #include <functional>
+#include <numeric>
 #include <array>
 #include <atomic>
 
@@ -164,6 +170,49 @@ namespace ddb
         if (!raster::writtenRasterOpens(produced))
             throw GDALException(std::string(raster::kGdalUtilName) + " wrote a COG of " + input +
                                 " that cannot be opened");
+    }
+
+    CogStatisticsStatus buildCogStatistics(Database* db, const std::string& entryPath, size_t maxThreads,
+                                           const std::function<void(double)>& progress)
+    {
+        cancel::throwIfCanceled();
+        const auto entry = getEntry(db, entryPath);
+        if (!entry)
+            throw EntryNotFoundException("No entry " + entryPath);
+        if (entry->type != EntryType::GeoRaster)
+            throw InvalidArgsException(entryPath + " is not a GeoRaster");
+
+        const EntryHandler& handler = entryHandler(entry->type);
+        const fs::path baseOutputPath = fs::absolute(db->buildDirectory() / io::fromUtf8(handler.buildKey(*entry)));
+        std::error_code ec;
+        if (!fs::is_directory(baseOutputPath, ec) || ec)
+            return CogStatisticsStatus::NotBuilt;
+
+        // The lock of the whole build of a GeoRaster is the one of its COG folder: a build that runs holds it until it
+        // has published the COG and its statistics, and none starts while the statistics are written
+        const fs::path folder = baseOutputPath / CogBuildSubfolder;
+        BuildLock lock(io::toUtf8(folder));
+        if (!handler.isComplete(*entry, baseOutputPath))
+            return CogStatisticsStatus::NotBuilt;
+        const fs::path cog = folder / CogFileName;
+        if (hasFreshStatsSidecar(cog))
+            return CogStatisticsStatus::Present;
+
+        cancel::throwIfCanceled();
+        const auto raster = tilers::Raster::open(cog);
+        const auto source = rasterSourceOf(*raster);
+        std::vector<int> bands(static_cast<size_t>(source->bandCount()));
+        std::iota(bands.begin(), bands.end(), 1);
+        const std::string cogPath = io::toUtf8(cog);
+        const auto stats = RasterStatsProvider::instance().getAll(cogPath, *source, bands, std::nullopt, true,
+                                                                  progress, maxThreads);
+        // Statistics this process knew already were not written again: the sidecar gets them now
+        if (!hasFreshStatsSidecar(cog))
+            for (size_t i = 0; i < bands.size(); i++)
+                if (stats[i])
+                    writeStatsSidecar(cogPath, bands[i], *stats[i]);
+        writeEmptyStatsSidecar(cogPath);
+        return CogStatisticsStatus::Computed;
     }
 
 }

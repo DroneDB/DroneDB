@@ -17,6 +17,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_helper.h"
+#include "raster_stats.h"
 
 namespace ddb {
 
@@ -53,7 +54,7 @@ class GeoRasterEntryHandler : public EntryHandler {
     bool buildReadsFootprint() const override { return true; }
 
     std::vector<BuildArtifact> artifacts() const override {
-        return {BuildArtifact::file("raster.cog", artifactPath(CogBuildSubfolder, CogFileName),
+        return {BuildArtifact::file(CogRole, artifactPath(CogBuildSubfolder, CogFileName),
                                     "image/tiff; application=geotiff; profile=cloud-optimized", CogFileName)};
     }
 
@@ -91,6 +92,15 @@ class GeoRasterEntryHandler : public EntryHandler {
             LOGD << "The COG of " << e.path << " is built again: " << ex.what();
             return false;
         }
+    }
+
+    // Whether the exact statistics of the COG are kept next to it: a COG built before libddb wrote them has none,
+    // and its first statistics read every pixel (DDBBuildRasterStatistics writes them)
+    void describeArtifacts(const Entry& /*e*/, const fs::path& baseOutputPath,
+                           std::vector<BuildArtifact>& artifacts) const override {
+        for (BuildArtifact& a : artifacts)
+            if (a.role == CogRole)
+                a.statistics = hasFreshStatsSidecar(baseOutputPath / io::fromUtf8(a.openedPath()));
     }
 
     void build(const BuildContext& ctx) const override {

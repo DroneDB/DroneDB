@@ -64,6 +64,7 @@
 #include "raster_utils.h"
 #include "vector_query.h"
 #include "gsplat.h"
+#include "cog.h"
 #include "sensorprofile.h"
 #include "splat_training_export.h"
 #include "stac.h"
@@ -1315,6 +1316,56 @@ DDBErr DDBExportSplatTrainingData(const char* ddbPath, const char* folder, const
 
         const SplatTrainingExportResult result = exportSplatTrainingData(project, out, options);
         return json{{"warnings", result.warnings}, {"images", result.images}, {"points", result.points}};
+    });
+}
+
+namespace {
+
+// The options of DDBBuildRasterStatistics: NULL and "" are none; otherwise a JSON object whose one member,
+// "threads", is a whole number from 0
+size_t rasterStatisticsThreadsArg(const char* optionsJson) {
+    if (optionsJson == nullptr || optionsJson[0] == '\0')
+        return 0;
+    const json given = parseJsonArg(optionsJson);
+    if (!given.is_object())
+        throw InvalidArgsException("The raster statistics options must be a JSON object");
+    rejectUnknownMembers(given, {"threads"}, "raster statistics option");
+    const auto threads = given.find("threads");
+    if (threads == given.end())
+        return 0;
+    const bool negative = threads->is_number_integer() && !threads->is_number_unsigned() && threads->get<int64_t>() < 0;
+    if (!threads->is_number_integer() || negative)
+        throw InvalidArgsException("\"threads\" must be a whole number from 0");
+    return static_cast<size_t>(std::min<uint64_t>(threads->get<uint64_t>(), 4096));
+}
+
+const char* cogStatisticsStatusName(CogStatisticsStatus status) {
+    switch (status) {
+        case CogStatisticsStatus::Computed: return "computed";
+        case CogStatisticsStatus::Present: return "present";
+        case CogStatisticsStatus::NotBuilt: break;
+    }
+    return "notBuilt";
+}
+
+}  // namespace
+
+DDBErr DDBBuildRasterStatistics(const char* ddbPath, const char* entryPath, const char* optionsJson,
+                                DDBProgressCallback progress, void* progressUserData, char** output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireDdbPath(ddbPath);
+        const std::string path = entryPathArg(entryPath, "No entry path provided", "entry path");
+        requireOutput(output);
+        const size_t threads = rasterStatisticsThreadsArg(optionsJson);
+
+        const auto db = ddb::open(std::string(ddbPath), false);
+        std::optional<CBuildProgress> session;
+        std::function<void(double)> report;
+        if (progress != nullptr) {
+            session.emplace(progress, progressUserData);
+            report = [fn = session->function()](double fraction) { fn(fraction, "statistics"); };
+        }
+        return json{{"status", cogStatisticsStatusName(buildCogStatistics(db.get(), path, threads, report))}};
     });
 }
 

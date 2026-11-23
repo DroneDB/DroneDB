@@ -69,7 +69,9 @@ namespace ddb
      * version of a file.
      *
      * The statistics are always exact: a pass over every pixel (bApproxOK FALSE: never an overview or a
-     * sample of the blocks), excluding the pixels without a value. They are keyed by the version of the
+     * sample of the blocks), excluding the pixels without a value. A raster ddb-tilers reads is passed once
+     * for all its bands, on several threads, with the arithmetic of the sidecar of a COG build (exact sums:
+     * for integer samples the values of that sidecar); any other source is read row by row. They are keyed by the version of the
      * file, the band and the effective NoData value (the override of the caller, else the NoData value
      * of the band). For a key it returns, in order: the statistics of the "<raster>.stats.json" sidecar
      * when it holds an exact entry for the key (a sidecar of an earlier build that did not say they
@@ -117,12 +119,15 @@ namespace ddb
         /// them band by band (each band takes its pixels in the same order), and kept as get() keeps them. One
         /// element per band of `bands`; nullopt for a band in which no pixel has a value (get() throws
         /// NoValidPixelsException for it). `progress`, when set, is told the fraction (0 to 1) of the rows of
-        /// the raster read by that pass (1 at once when every band is known). The call can be canceled.
+        /// the raster read by that pass (1 at once when every band is known). `maxThreads` caps the threads of that
+        /// pass over a raster ddb-tilers reads (0: DDB_STATS_THREADS, by default up to 8; the CPU pool decides how
+        /// many run). A band found without a pixel with a value is remembered as such. The call can be canceled.
         /// @throws GDALException when a band cannot be read (nothing is kept then)
         std::vector<std::optional<BandStatistics>> getAll(const std::string &path, const RasterSource &source,
                                                           const std::vector<int> &bands,
                                                           const std::optional<double> &nodata, bool persist,
-                                                          const std::function<void(double)> &progress = {});
+                                                          const std::function<void(double)> &progress = {},
+                                                          size_t maxThreads = 0);
         std::vector<std::optional<BandStatistics>> getAll(const std::string &path, GDALDatasetH ds,
                                                           const std::vector<int> &bands,
                                                           const std::optional<double> &nodata, bool persist,
@@ -192,6 +197,15 @@ namespace ddb
     /// of a build of before version 2) or it has no entry for the key.
     bool readStatsSidecar(const std::string &path, int band, BandStatistics &out,
                           const std::optional<double> &nodata = std::nullopt);
+
+    /// Whether the raster has a sidecar of its statistics that is used: not older than the raster, exact (a
+    /// sidecar of a COG build, or one written by a pass over its pixels)
+    bool hasFreshStatsSidecar(const fs::path &raster);
+
+    /// Writes an exact sidecar without an entry next to path when it has none that is used: a raster in which no
+    /// band has a pixel with a value then says that its statistics were computed. False (logged) when it cannot be
+    /// written.
+    bool writeEmptyStatsSidecar(const std::string &path);
 
     /// Writes the entry for (band, nodata) into the sidecar of path, keeping the entries of the
     /// other keys that the sidecar already has (a sidecar that is stale or not exact is replaced).

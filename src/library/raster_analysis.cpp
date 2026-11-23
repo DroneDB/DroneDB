@@ -19,6 +19,7 @@
 #include "vis_render.h"
 
 
+#include <numeric>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1265,17 +1266,15 @@ json formulaRasterStatistics(const RasterSource &source, const std::string &form
 // when none
 json bandStatistics(const std::string &path, const RasterSource &source) {
     json stats;
-    const int nBands = source.bandCount();
-    for (int i = 1; i <= nBands; i++) {
-        BandStatistics s;
-        try {
-            s = RasterStatsProvider::instance().get(path, source, i);
-        } catch (const GDALException &) {
-            // A band with no pixel that has a value has no statistics
-            cancel::throwIfCanceled();
+    std::vector<int> bands(static_cast<size_t>(source.bandCount()));
+    std::iota(bands.begin(), bands.end(), 1);
+    // Every band in one pass: a band with no pixel that has a value has no statistics
+    const auto all = RasterStatsProvider::instance().getAll(path, source, bands, std::nullopt, false);
+    for (size_t b = 0; b < all.size(); b++) {
+        if (!all[b])
             continue;
-        }
-        stats[std::to_string(i)] = {
+        const BandStatistics &s = *all[b];
+        stats[std::to_string(bands[b])] = {
             {"min", s.min}, {"max", s.max}, {"mean", s.mean}, {"std", s.stdDev},
             {"percentiles", {{"p2", s.mean - 2.33 * s.stdDev}, {"p98", s.mean + 2.33 * s.stdDev}}}
         };
@@ -1307,6 +1306,14 @@ json algorithmList(const VegetationEngine &ve, const RasterSource &source, const
         algorithms.push_back(fj);
     }
     return algorithms;
+}
+
+// What a raster can be styled with, from its metadata alone (no pixel is read): every formula of the engine
+// (those it cannot compute with this band filter disabled with their reason), the colormaps, and the band filter
+json styleChoices(const VegetationEngine &ve, const RasterSource &source, const BandFilter &filter) {
+    return {{"algorithms", algorithmList(ve, source, filter)},
+            {"colormaps", ve.getColormapsJson()},
+            {"autoBands", {{"filter", filter.id}, {"match", !filter.id.empty()}}}};
 }
 
 } // anonymous namespace
@@ -1374,11 +1381,7 @@ std::string getRasterMetadataJson(const std::string &path, const std::string &fo
     result["statistics"] = !formula.empty() ? formulaRasterStatistics(*source, formula, effectiveFilter)
                                             : bandStatistics(path, *source);
 
-    // Available algorithms for this band filter and this data
-    // Include all formulas, mark the ones the raster cannot compute as disabled
-    result["algorithms"] = algorithmList(ve, *source, effectiveFilter);
-    result["colormaps"] = ve.getColormapsJson();
-    result["autoBands"] = {{"filter", effectiveFilter.id}, {"match", !effectiveFilter.id.empty()}};
+    result.update(styleChoices(ve, *source, effectiveFilter));
     result["detectedSensor"] = SensorProfileManager::instance().detectSensor(path).sensorId;
 
     return result.dump();
@@ -1388,6 +1391,13 @@ std::string getRasterInfoJson(const std::string &path) {
     json info = json::parse(SensorProfileManager::instance().getRasterInfoJson(path));
     // The indices the WMS vegetation-index layer renders from this raster
     info["indexLayer"] = rasterIndexLayerIndices(path);
+    // The formulas, colormaps and band filter of getRasterMetadataJson without a band filter (new in 2.11): from the
+    // metadata of the raster alone, so a host lists them without waiting for the statistics of its pixels
+    auto raster = tilers::Raster::openInput(path);
+    if (!raster)
+        throw GDALException("Cannot open " + path);
+    auto &ve = VegetationEngine::instance();
+    info.update(styleChoices(ve, *rasterSourceOf(*raster), ve.autoDetectFilter(path)));
     return info.dump();
 }
 
