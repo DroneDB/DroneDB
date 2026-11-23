@@ -1,6 +1,6 @@
 {
   "call": "DDBInfo([<root>/site-contract.las], format=\"json\", recursive=false, maxRecursionDepth=0, geometry=\"auto\", withHash=false, stopOnError=true)",
-  "description": "A LAS 1.4 point cloud (4 points) whose CRS is a LOCAL_CS site grid, so it has no transformation to WGS84, copied to <root> with mtime 1700000000",
+  "description": "A LAS 1.4 point cloud (4 points) whose CRS is a LOCAL_CS site grid, so it has no position on the earth, copied to <root> with mtime 1700000000",
   "normalisation": {
     "placeholders": [
       "<root>"
@@ -39,7 +39,7 @@
         ],
         "pointCount": 4,
         "projection": "LOCAL_CS[\"Site grid\",LOCAL_DATUM[\"Site datum\",32767],UNIT[\"metre\",1],AXIS[\"X\",EAST],AXIS[\"Y\",NORTH]]",
-        "warning": "footprint unavailable: No coordinate transformation from Site grid to EPSG:4326"
+        "warning": "footprint unavailable: the file's coordinate system (\"Site grid\") is a local one, with no position on the earth"
       },
       "size": 0,
       "type": 5

@@ -133,7 +133,8 @@ extern "C"
      * ABI 2.8 (libddb 2.8.0, 0x00020008) adds no export: point clouds in any CRS (the raster helper of
      * protocol 1.4, the "crsStatus" property of a point cloud entry, the "crs" of the pointcloud.copc
      * artifact).
-     * ABI 2.9 (libddb 2.9.0, 0x00020009) adds DDBRescanEx2: the rescan of the entries a list of paths names. */
+     * ABI 2.9 (libddb 2.9.0, 0x00020009) adds DDBRescanEx2: the rescan of the entries a list of paths names.
+     * ABI 2.10 (libddb 2.10.0, 0x0002000A) adds DDBFindCoverage: the images whose footprint covers a geometry. */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -529,7 +530,9 @@ extern "C"
      * coordinates do not fit <name of the CRS>". The footprint of a geocentric cloud is transformed
      * in 3-D. The polygon of a cloud across the antimeridian has its east past 180 (179.9 to 180.1),
      * never a ring around the globe, and its centroid a longitude in [-180, 180). A footprint that is not a longitude/latitude envelope is left out, with "warning"
-     * "footprint unavailable: <why>".
+     * "footprint unavailable: <why>". A cloud in a local CRS ("local") has no footprint, and <why> is
+     * "the file's coordinate system ("<name>") is a local one, with no position on the earth"
+     * (without the parentheses for a CRS without a name).
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth,
                            const char *geometry, bool withHash, bool stopOnError);
@@ -599,6 +602,34 @@ extern "C"
      * @param format output format. One of: ["text", "json"]
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBSearch(const char *ddbPath, const char *query, char **output, const char *format);
+
+    /** Find the images that see a place (new in 2.10): the images of the index whose footprint intersects
+     * a geometry, best view first. The footprint of a geotagged image is the polygon "ddb info" shows for it;
+     * only entries of type "geoimage" are searched.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param geometryJson a GeoJSON geometry object in EPSG:4326: Point, LineString or Polygon (the outer ring
+     *        and the holes; a height in a position is ignored). Another type, a position out of the range of
+     *        longitude and latitude, or a geometry that is not valid (a polygon that crosses itself) is
+     *        DDBERR_INVALIDARGS. The distances are measured in the UTM zone of the middle of the box of the
+     *        geometry, so a geometry whose longitudes span more than 180 degrees (one that crosses the
+     *        antimeridian: split it there) or that is too large to be projected in that zone is
+     *        DDBERR_INVALIDARGS too
+     * @param optionsJson NULL or "" for the defaults, or a JSON object with the members "limit", a whole number
+     *        from 1 to 100 (default 20): the most images returned. Any other member is DDBERR_INVALIDARGS
+     * @param output pointer to C-string where to store the JSON array, empty when no image intersects
+     *        the geometry, of at most "limit" elements in ascending order of "score" and then of "path":
+     *          "path"    the entry path of the image
+     *          "score"   the distance, in metres, from the centroid of the geometry to the centroid of the
+     *                    footprint, over the diagonal of the footprint: 0 is an image whose middle is the geometry
+     *          "overlap" the area of the intersection over the area of the geometry for a polygon (0 to 1);
+     *                    1 for a point or a line, which intersect
+     *          "pixel"   [x, y], the pixel of the centroid of the geometry in the image, estimated with the camera
+     *                    model the footprint is made with (sensor, focal length, orientation, height above the
+     *                    ground); null when a parameter is missing (an image whose camera orientation is
+     *                    not in its tags) or the centroid is not in the image
+     * @return DDBERR_NONE on success, DDBERR_INVALIDARGS for an argument, an error otherwise */
+    DDB_DLL DDBErr DDBFindCoverage(const char *ddbPath, const char *geometryJson, const char *optionsJson,
+                                   char **output);
 
     /** Append password to database
      * @param ddbPath path to a DroneDB database (parent of ".ddb")

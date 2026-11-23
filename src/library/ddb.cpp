@@ -35,6 +35,7 @@
 #include "raster_cache.h"
 #include "dbops.h"
 #include "cad.h"
+#include "coverage.h"
 #include "delta.h"
 #include "delta_apply.h"
 #include "deppath.h"
@@ -526,6 +527,21 @@ DDBErr DDBSearch(const char* ddbPath, const char* query, char** output, const ch
         std::ostringstream ss;
         searchIndex(db.get(), pattern, ss, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}));
         return ss.str();
+    });
+}
+
+DDBErr DDBFindCoverage(const char* ddbPath, const char* geometryJson, const char* optionsJson, char** output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
+        const auto geometry = parseCoverageGeometry(parseJsonArg(geometryJson));
+        // NULL and "" are the defaults
+        const auto options = optionsJson == nullptr || optionsJson[0] == '\0'
+                                 ? CoverageOptions{}
+                                 : parseCoverageOptions(parseJsonArg(optionsJson));
+
+        const auto db = ddb::open(std::string(ddbPath), false);
+        return coverageToJson(findCoverage(db.get(), geometry, options));
     });
 }
 

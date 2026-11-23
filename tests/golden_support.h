@@ -8,10 +8,11 @@
 // output-neutral, so the outputs of the old code are stored in tests/golden/<name>.json
 // and every run compares with them.
 //
-// Numbers are compared with a relative tolerance of 1e-9: the goldens must also hold on
-// platforms whose libm differs in the last bit. The pixels of a float raster (a float32 pixel of
-// a warp can differ in its last bit) are in a file of their own, compared pixel by pixel with a
-// tolerance (expectPixelsNear). Two environment variables serve the exact
+// Numbers are compared with a relative tolerance of 1e-7 (absolute for a number below 1 in size):
+// the goldens must also hold on platforms whose libm differs in the last bits, and a reprojected
+// raster carries that into its areas and volumes. Strings are compared exactly. The pixels of a
+// float raster (a float32 pixel of a warp can differ in its last bit) are in a file of their own,
+// compared pixel by pixel with a tolerance (expectPixelsNear). Two environment variables serve the exact
 // comparison between two builds:
 //   DDB_GOLDEN_DUMP_DIR=<dir>      writes every actual output, unrounded, to <dir>/<name>.json
 //   DDB_UPDATE_GOLDEN=1     rewrites the goldens from the actual outputs
@@ -42,7 +43,8 @@ namespace golden
     // else: the exact hashes of outputs whose bytes are not portable
     void dumpOnly(const std::string &name, const json &value);
 
-    // Numbers equal to the relative tolerance 1e-9 (absolute near zero), everything else exactly. On a difference `where` names the JSON pointer.
+    // Numbers equal to the relative tolerance 1e-7 (absolute for a number below 1 in size), everything else
+    // exactly. On a difference `where` names the JSON pointer.
     bool jsonNear(const json &a, const json &b, std::string &where, const std::string &at = "");
 
     // The pixels of a float raster, `bands` planes of width * height values, against the golden

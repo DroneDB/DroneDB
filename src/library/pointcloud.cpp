@@ -263,14 +263,16 @@ void populatePointCloudFootprint(PointCloudInfo& info, int footprintSrs, const s
 // The status of the CRS of the cloud and its footprint. A footprint that cannot be computed does
 // not make the file unreadable: it is indexed and built without one (the native bounds stay), and
 // the entry says why it has none. A CRS the coordinates do not fit is handled as no CRS: no
-// footprint, and its warning.
+// footprint, and its warning. A local CRS has no footprint either, and the reason is that it is
+// local (no transformation is tried: its name, "WGS 84" for a Metashape site frame, would make
+// the reason read as a bug of PROJ).
 void addFootprint(PointCloudInfo& info, int footprintSrs, const std::string& utf8Path) {
     info.centroid.clear();
     info.polyBounds.clear();
     info.footprintWarning.clear();
     const PointCloudCrsCheck check = PointCloudCrsPolicy::classify(info.wktProjection, info.bounds);
     info.crsStatus = check.status;
-    if (check.status == PointCloudCrsStatus::Implausible) {
+    if (!check.warning.empty()) {
         info.footprintWarning = check.warning;
         return;
     }

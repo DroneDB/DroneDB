@@ -43,6 +43,7 @@ DDBExportRaster2
 DDBExportRaster3
 DDBExportSplatSpz
 DDBExportSplatTrainingData
+DDBFindCoverage
 DDBFree
 DDBFreeCancelToken
 DDBGenerateContours

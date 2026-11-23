@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include "mathutil.h"
 
 namespace ddb
@@ -109,6 +110,29 @@ namespace ddb
 
     Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone);
     Geographic2D fromUTM(double x, double y, const UTMZone &zone);
+
+    class CoordsTransformer;
+
+    /// WGS 84 <-> one UTM zone, for a caller that converts many points of a zone: toUTM and fromUTM build
+    /// their transformation on every call, this one builds it once. Throws GDALException when it cannot
+    class UtmProjector
+    {
+    public:
+        explicit UtmProjector(const UTMZone &zone);
+        ~UtmProjector();
+        UtmProjector(const UtmProjector &) = delete;
+        UtmProjector &operator=(const UtmProjector &) = delete;
+
+        const UTMZone &zone() const { return zone_; }
+        Projected2D toUTM(double latitude, double longitude) const;
+        Geographic2D fromUTM(double x, double y) const;
+
+    private:
+        UTMZone zone_;
+        // The transformers keep a PROJ context that is not const-correct; a projector is used by one thread
+        mutable std::unique_ptr<CoordsTransformer> forward_;
+        mutable std::unique_ptr<CoordsTransformer> inverse_;
+    };
 
     // True when the envelope is a plausible WGS 84 longitude/latitude one: all four values finite,
     // longitudes within [-180, 180], latitudes within [-90, 90], and min <= max on both axes. The one

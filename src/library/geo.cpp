@@ -139,6 +139,31 @@ namespace ddb
         return Geographic2D(geoX, geoY);
     }
 
+    UtmProjector::UtmProjector(const UTMZone &zone)
+        : zone_(zone), forward_(createUtmTransform(zone, true)), inverse_(createUtmTransform(zone, false))
+    {
+    }
+
+    UtmProjector::~UtmProjector() = default;
+
+    Projected2D UtmProjector::toUTM(double latitude, double longitude) const
+    {
+        double x = longitude;
+        double y = latitude;
+        if (!forward_->tryTransform(1, &x, &y))
+            throw GDALException("Cannot transform coordinates to UTM " + std::to_string(latitude) + "," + std::to_string(longitude));
+        return Projected2D(x, y);
+    }
+
+    Geographic2D UtmProjector::fromUTM(double x, double y) const
+    {
+        double longitude = x;
+        double latitude = y;
+        if (!inverse_->tryTransform(1, &longitude, &latitude))
+            throw GDALException("Cannot transform coordinates from UTM " + std::to_string(x) + "," + std::to_string(y));
+        return Geographic2D(longitude, latitude);
+    }
+
     bool isWgs84Envelope(double minX, double minY, double maxX, double maxY)
     {
         return std::isfinite(minX) && std::isfinite(minY) && std::isfinite(maxX) && std::isfinite(maxY) &&
