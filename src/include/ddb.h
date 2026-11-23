@@ -530,7 +530,9 @@ extern "C"
      * coordinates do not fit <name of the CRS>". The footprint of a geocentric cloud is transformed
      * in 3-D. The polygon of a cloud across the antimeridian has its east past 180 (179.9 to 180.1),
      * never a ring around the globe, and its centroid a longitude in [-180, 180). A footprint that is not a longitude/latitude envelope is left out, with "warning"
-     * "footprint unavailable: <why>".
+     * "footprint unavailable: <why>". A cloud in a local CRS ("local") has no footprint, and <why> is
+     * "the file's coordinate system ("<name>") is a local one, with no position on the earth"
+     * (without the parentheses for a CRS without a name).
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth,
                            const char *geometry, bool withHash, bool stopOnError);

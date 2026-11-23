@@ -905,10 +905,14 @@ Registry has to adopt first.
   LineString or Polygon in EPSG:4326 and the options `{"limit": 1..100}` (default 20), and returns the geotagged
   images whose footprint intersects it as `[{path, score, overlap, pixel}]`, by ascending `score` and then `path`.
   `score` is the distance in metres from the centroid of the geometry to the centroid of the footprint over the
-  diagonal of the footprint; `overlap` is the part of a polygon the footprint covers, 1 for a point or a line;
-  `pixel` is `[x, y]` of the centroid of the geometry in the image, or null when the camera parameters of the image
-  are missing or it is outside the image. An argument that is wrong (bad JSON, another type of geometry, a position
-  out of range, a polygon that is not valid, a geometry whose longitudes span more than 180 degrees (one across the
+  diagonal of the footprint; `overlap` is the part of a polygon the footprint covers, 1 for a point or a line; `pixel`
+  is `[x, y]` of the centroid of the geometry in the image, or null when the camera parameters of the image are
+  missing or it is outside the image. An argument that is wrong (bad JSON, another type of geometry, a position out of
+  range, a polygon that is not valid, a geometry whose longitudes span more than 180 degrees (one across the
   antimeridian) or that is too large to be projected in the UTM zone of its middle, an unknown option, a limit out of
   range) is `DDBERR_INVALIDARGS`. The footprint of an image is unchanged: the camera model it is made with is now
-  shared with the pixel estimate. No other fixture or schema changed.
+  shared with the pixel estimate. `info-pointcloud-no-footprint`: the `warning` of a point cloud in a local CRS says
+  that the CRS is local, `footprint unavailable: the file's coordinate system ("Site grid") is a local one, with no
+  position on the earth`, instead of `footprint unavailable: No coordinate transformation from Site grid to EPSG:4326`
+  (Agisoft Metashape names its site frame "WGS 84", so the former read "from WGS 84 to EPSG:4326"); ddb-tilers 0.13.5
+  refuses the tiles of such a cloud with the same words. Same field and type. No other fixture or schema changed.

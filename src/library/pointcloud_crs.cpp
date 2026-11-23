@@ -62,6 +62,26 @@ namespace ddb
             return name != nullptr && name[0] != '\0' ? std::string(name) : std::string("the coordinate system of the file");
         }
 
+        // Why a cloud in a local CRS has no footprint. The name of the horizontal part is given, as
+        // ddb-tilers gives it: a local CRS may be named for what it is not (Agisoft Metashape calls
+        // its site frame "WGS 84")
+        std::string localReason(const OGRSpatialReference &srs)
+        {
+            OGRSpatialReference horizontal(srs);
+            try
+            {
+                horizontal = horizontalSrs(srs);
+            }
+            catch (const GDALException &)
+            {
+                // A compound CRS that cannot be split: its own name
+            }
+            const char *name = horizontal.GetName();
+            const bool named = name != nullptr && name[0] != '\0';
+            return "the file's coordinate system" + (named ? " (\"" + std::string(name) + "\")" : std::string()) +
+                   " is a local one, with no position on the earth";
+        }
+
         // The kind of CRS srs is, whatever the coordinates
         PointCloudCrsStatus kindOf(const OGRSpatialReference &srs)
         {
@@ -428,6 +448,8 @@ namespace ddb
             return check;
         const OGRSpatialReference &s = srsOf(srs);
         check.status = kindOf(s);
+        if (check.status == PointCloudCrsStatus::Local)
+            check.warning = localReason(s);
         if (bounds.size() != 6)
             return check;
 

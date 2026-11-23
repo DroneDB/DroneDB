@@ -174,7 +174,7 @@ namespace
         EXPECT_NEAR(info.polyBounds.points[0].z, 2480.0, 1e-3);
     }
 
-    TEST(PointCloudCrs, CrsWithoutTransformationIsIndexedWithoutFootprintAndWithAWarning)
+    TEST(PointCloudCrs, LocalCrsIsIndexedWithoutFootprintAndSaysItIsLocal)
     {
         TestArea ta(TEST_NAME);
         const fs::path las = ta.getPath("site.las");
@@ -198,8 +198,32 @@ namespace
         EXPECT_TRUE(entry.polygon_geom.empty());
         EXPECT_TRUE(entry.point_geom.empty());
         EXPECT_EQ(entry.properties.value("pointCount", 0), 4);
-        ASSERT_TRUE(entry.properties.contains("warning"));
-        EXPECT_EQ(entry.properties["warning"].get<std::string>().rfind("footprint unavailable: ", 0), 0u);
+        EXPECT_EQ(entry.properties.value("crsStatus", ""), "local");
+        EXPECT_EQ(entry.properties.value("warning", ""),
+                  "footprint unavailable: the file's coordinate system (\"Site grid\") is a local one, with no "
+                  "position on the earth");
+    }
+
+    // Agisoft Metashape writes its site frame as a compound CRS whose local part is named "WGS 84":
+    // the warning says that the CRS is local, not that no transformation from "WGS 84" to
+    // EPSG:4326 exists
+    TEST(PointCloudCrs, LocalCrsNamedWgs84SaysItIsLocal)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path las = ta.getPath("metashape.las");
+        writeLas(las,
+                 R"wkt(COMPD_CS["WGS 84",LOCAL_CS["WGS 84",UNIT["metre",1,AUTHORITY["EPSG","9001"]],)wkt"
+                 R"wkt(AXIS["Easting",EAST],AXIS["Northing",NORTH]],VERT_CS["unknown",VERT_DATUM["unknown",2005],)wkt"
+                 R"wkt(UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Up",UP]]])wkt",
+                 {{-80.4, -40.2, -19.1}, {73.4, -40.2, 0.0}, {73.4, 17.7, 7.3}, {-80.4, 17.7, 1.0}});
+
+        Entry entry;
+        ASSERT_NO_THROW(parseEntry(las, ta.getFolder(), entry, false));
+        EXPECT_TRUE(entry.polygon_geom.empty());
+        EXPECT_EQ(entry.properties.value("crsStatus", ""), "local");
+        EXPECT_EQ(entry.properties.value("warning", ""),
+                  "footprint unavailable: the file's coordinate system (\"WGS 84\") is a local one, with no "
+                  "position on the earth");
     }
 
     TEST(PointCloudCrs, CrsWithoutTransformationBuilds)
@@ -363,8 +387,8 @@ namespace
         contract::expectMatchesFixture(
             contract::Fixture{
                 "info-pointcloud-no-footprint",
-                "A LAS 1.4 point cloud (4 points) whose CRS is a LOCAL_CS site grid, so it has no transformation to "
-                "WGS84, copied to <root> with mtime 1700000000",
+                "A LAS 1.4 point cloud (4 points) whose CRS is a LOCAL_CS site grid, so it has no position on the "
+                "earth, copied to <root> with mtime 1700000000",
                 "DDBInfo([<root>/site-contract.las], format=\"json\", recursive=false, maxRecursionDepth=0, "
                 "geometry=\"auto\", withHash=false, stopOnError=true)",
                 "entries.schema.json",
