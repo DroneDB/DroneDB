@@ -900,3 +900,8 @@ Registry has to adopt first.
   success: false}`, reported before any entry is re-read. With paths each entry is parsed outside the writer lock of
   the index and written on its own, so the dataset stays usable during the rescan. No other fixture or schema
   changed.
+* 2026-11-23: `info-pointcloud-no-footprint`: the `warning` of a point cloud in a local CRS says that the CRS is local,
+  `footprint unavailable: the file's coordinate system ("Site grid") is a local one, with no position on the earth`,
+  instead of `footprint unavailable: No coordinate transformation from Site grid to EPSG:4326` (Agisoft Metashape
+  names its site frame "WGS 84", so the former read "from WGS 84 to EPSG:4326"). Same field and type; no schema
+  changed.

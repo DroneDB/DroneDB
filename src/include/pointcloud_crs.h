@@ -61,11 +61,15 @@ namespace ddb
     // west is the greatest, its east the least plus 360); 0 to 360 is folded into -180 to 180.
     LonLatEnvelope continuousEnvelope(const LonLatEnvelope &envelope);
 
-    // The status of a cloud's CRS and, for one the coordinates do not fit, the warning of its entry
+    // The status of a cloud's CRS and, for a status that leaves the cloud without a footprint
+    // whatever PROJ can transform, why
     struct PointCloudCrsCheck
     {
         PointCloudCrsStatus status = PointCloudCrsStatus::None;
-        // "coordinate system ignored: the coordinates do not fit <name>" for Implausible, else ""
+        // Implausible: "coordinate system ignored: the coordinates do not fit <name>", the warning
+        // of the entry. Local: "the file's coordinate system ("<name>") is a local one, with no
+        // position on the earth", the reason after "footprint unavailable: " (ddb-tilers refuses
+        // the tiles of the cloud with the same words). Else "".
         std::string warning;
     };
 
