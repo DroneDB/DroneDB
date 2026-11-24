@@ -127,7 +127,7 @@ namespace
             // The tiles below are forced, so each one makes the COG again: the tiler that gives
             // their range is closed first, since Windows replaces no file a process holds open
             const auto [zooms, ranges] = [&] {
-                const auto tiler = TilerHelper::rasterTilerFor(ortho, "", 256, false);
+                const auto tiler = TilerHelper::tilerFor(ortho, "", 256, false);
                 const auto z = tiler->getMinMaxZ();
                 return std::make_pair(z, std::vector{tiler->getMinMaxCoordsForZ(z.min), tiler->getMinMaxCoordsForZ(z.max)});
             }();

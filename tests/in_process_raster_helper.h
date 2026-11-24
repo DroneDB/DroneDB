@@ -34,6 +34,10 @@ namespace testutils
         {
             ddb::raster::thumbnail(path, out, params);
         }
+        void photoTile(const fs::path &path, const fs::path &out, const ddb::raster::PhotoTileParams &params) override
+        {
+            ddb::raster::photoTile(path, out, params);
+        }
         void normalize(const fs::path &path, const fs::path &out, const json &) override
         {
             ddb::raster::normalizeRaster(path, out);

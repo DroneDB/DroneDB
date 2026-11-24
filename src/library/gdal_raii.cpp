@@ -7,7 +7,9 @@
 #include "randomutil.h"
 
 #include <cerrno>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -15,6 +17,13 @@
 
 namespace ddb
 {
+    std::string utilityNumber(double value)
+    {
+        std::ostringstream os;
+        os << std::setprecision(17) << value;
+        return os.str();
+    }
+
     SrsPtr srsFromWkt(const char *wkt)
     {
         if (wkt == nullptr || wkt[0] == '\0')

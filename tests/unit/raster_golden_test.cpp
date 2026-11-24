@@ -396,7 +396,7 @@ namespace
         // makes the COG again: the tiler that gives their range is closed first, since Windows
         // replaces no file a process holds open
         const auto [zooms, bounds] = [&] {
-            const auto tiler = TilerHelper::rasterTilerFor(ms, "", 256, false);
+            const auto tiler = TilerHelper::tilerFor(ms, "", 256, false);
             const auto z = tiler->getMinMaxZ();
             return std::make_pair(z, tiler->getMinMaxCoordsForZ(z.max));
         }();

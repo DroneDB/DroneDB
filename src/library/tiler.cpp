@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <mutex>
 #include <memory>
 #include <vector>
@@ -41,6 +42,14 @@ namespace ddb
             fs::path p = dir / (std::to_string(y) + ".png");
             return io::toUtf8(p);
         }
+    }
+
+    bool tileInWorld(int tz, int tx, int ty)
+    {
+        if (tz < 0 || tz > 30 || tx < 0 || ty < 0)
+            return false;
+        const int64_t n = int64_t{1} << tz;
+        return tx < n && ty < n;
     }
 
     Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
@@ -218,6 +227,13 @@ namespace ddb
         b.max.x = std::max(b.max.x, b.min.x);
         b.max.y = std::max(b.max.y, b.min.y);
         return b;
+    }
+
+    Projected2D GlobalMercator::lonLatToMeters(double lon, double lat)
+    {
+        constexpr double radius = 6378137.0;
+        const double toRadians = ddb::kPi / 180.0;
+        return Projected2D(radius * lon * toRadians, radius * std::log(std::tan(ddb::kPi / 4.0 + lat * toRadians / 2.0)));
     }
 
     Projected2D GlobalMercator::pixelsToMeters(double px, double py, int zoom) const

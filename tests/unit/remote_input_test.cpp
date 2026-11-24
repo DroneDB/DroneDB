@@ -126,11 +126,11 @@ namespace
             {testutils::http(200, "OK", first), testutils::http(200, "OK", first), testutils::http(200, "OK", second)});
         const fs::path url = io::fromUtf8(server.url("/remote/ortho.tif"));
 
-        TilerHelper::rasterTilerFor(url, "");
-        TilerHelper::rasterTilerFor(url, "");
+        TilerHelper::tilerFor(url, "");
+        TilerHelper::tilerFor(url, "");
         EXPECT_EQ(helper.cogRequests, 2) << "each tiler converts the download";
         EXPECT_EQ(server.requests.size(), 2u) << "downloaded on every request";
-        TilerHelper::rasterTilerFor(url, "");
+        TilerHelper::tilerFor(url, "");
         EXPECT_EQ(helper.cogRequests, 3);
         std::error_code ec;
         EXPECT_TRUE(!fs::exists(raster::requestsDir(), ec) || fs::is_empty(raster::requestsDir(), ec))

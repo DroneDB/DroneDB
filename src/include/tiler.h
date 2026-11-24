@@ -39,6 +39,10 @@ namespace ddb
         // and to the left of a point on a corner of tiles)
         BoundingBox<Projected2Di> tilesIntersecting(const BoundingBox<Projected2D> &meters, int zoom) const;
 
+        // EPSG:3857 coordinates of a longitude and a latitude in EPSG:4326 (spherical Mercator, as PROJ
+        // computes it)
+        static Projected2D lonLatToMeters(double lon, double lat);
+
         // Converts pixel coordinates in given zoom level of pyramid to EPSG:3857"
         Projected2D pixelsToMeters(double px, double py, int zoom) const;
 
@@ -57,6 +61,10 @@ namespace ddb
         // Maximal scaledown zoom of the pyramid closest to the pixelSize.
         int zoomForPixelSize(double pixelSize) const;
     };
+
+    // Whether tile (tx, ty) exists at zoom tz (0 to 30): the tiles of a zoom number 2^tz on each axis.
+    // A tile out of the world is out of any raster.
+    bool tileInWorld(int tz, int tx, int ty);
 
     struct TileInfo
     {

@@ -758,7 +758,7 @@ namespace
         // raster is under, which are blank whatever the formula
         for (const fs::path &raster : {f32, u16})
         {
-            const auto tiler = TilerHelper::rasterTilerFor(raster, "", 256, false);
+            const auto tiler = TilerHelper::tilerFor(raster, "", 256, false);
             const auto info = tiler->getMinMaxZ();
             const auto range = tiler->getMinMaxCoordsForZ(info.max);
             BoundingBox<Projected2Di> bounds = range;

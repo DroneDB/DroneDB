@@ -22,6 +22,7 @@
 #include "cloud_sample.h"
 #include "pointcloud_info.h"
 #include "thumbs.h"
+#include "tile_encoder.h"
 
 namespace ddb
 {
@@ -120,6 +121,9 @@ namespace ddb
             // validateParamsFromJson, no `out`, the result {"hostReadable": true, "bands":
             // statisticsByBandToJson} or {"hostReadable": false, "reason"}
             constexpr const char *kValidate = "validate";
+            // One web map tile of a photo placed on the ground by its footprint (new in 1.6), served
+            // by a worker of the pool: params of photoTileParamsFromJson, the tile image written to `out`
+            constexpr const char *kPhotoTile = "photoTile";
         } // namespace op
 
         // An operation on a user's raster for a call of the host (not a build, not a read): one
@@ -392,6 +396,24 @@ namespace ddb
         json toJson(const GeoprojectParams &params);
         // @throws ProtocolError
         GeoprojectParams geoprojectParamsFromJson(const json &params);
+
+        // The params of a `photoTile` (new in 1.6): the photo's georeference, the tile `z`/`x`/`y` (z from 0
+        // to 30, x and y within the 2^z tiles of the zoom), `y` a TMS row (counted from the south) when
+        // `tms`, else an XYZ row (from the north), the side of the tile in pixels (`tileSize`, a power of
+        // two from 1 to 4096) and the encoding of the image (`format`: "png", "jpg" or "webp")
+        struct PhotoTileParams : PhotoGeoreference
+        {
+            int z = 0;
+            int x = 0;
+            int y = 0;
+            bool tms = false;
+            int tileSize = 256;
+            ImageFormat format = ImageFormat::Png;
+        };
+
+        json toJson(const PhotoTileParams &params);
+        // @throws ProtocolError
+        PhotoTileParams photoTileParamsFromJson(const json &params);
 
         // The params of a `mask` (gdal_nearblack -setmask -alg floodfill): how far from black (or
         // white, or `color`) a border pixel may be (`nearDist`, -near), white borders (`white`),

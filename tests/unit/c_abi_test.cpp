@@ -556,7 +556,7 @@ namespace
         // other runs nor leaves its own in the user's profile
         const ScopedProcessConfig cache(json{{"cacheDir", ta.getPath("cache").string()}}.dump());
         const auto raster = smallRaster(ta.getPath("ortho.tif"), 3, 512).string();
-        const auto tiler = TilerHelper::rasterTilerFor(raster, "", 256);
+        const auto tiler = TilerHelper::tilerFor(raster, "", 256);
         const int z = tiler->getMinMaxZ().max;
         const auto bounds = tiler->getMinMaxCoordsForZ(z);
         const int x = bounds.min.x;

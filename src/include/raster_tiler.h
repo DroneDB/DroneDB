@@ -19,7 +19,7 @@ namespace ddb
     }
 
     /// Renders web-map tiles of an EPSG:3857 COG that libddb wrote (an artefact,
-    /// raster_artefacts.h: the COG of a build, or the COG TilerHelper::rasterTilerFor makes from a
+    /// raster_artefacts.h: the COG of a build, or the COG TilerHelper::tilerFor makes from a
     /// raster or a photo of a user) with ddb-tilers (TilersTiler), with the visualization parameters of a
     /// raster. A tile that does not exist at its zoom is out of the raster: transparent, or "Out of
     /// bounds" with visualization parameters.

@@ -11,6 +11,7 @@
 // synchronization.
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <algorithm>
@@ -1698,6 +1699,41 @@ namespace
         EXPECT_EQ(expected.at("bands").size(), 3u) << "RGB, the footprint in the mask";
         EXPECT_EQ(expected.at("maskFlags"), GMF_PER_DATASET);
         EXPECT_NE(expected.at("projection").get<std::string>().find("4326"), std::string::npos);
+    }
+
+    // The tile of zoom 16 that holds the middle of the footprint of photoParams(), as an XYZ row
+    raster::PhotoTileParams photoTileParams()
+    {
+        raster::PhotoTileParams tile;
+        static_cast<raster::PhotoGeoreference &>(tile) = photoParams();
+        tile.z = 16;
+        const double n = std::pow(2.0, tile.z);
+        const double lat = 45.2995 * std::acos(-1.0) / 180.0;
+        tile.x = static_cast<int>((9.101 + 180.0) / 360.0 * n);
+        tile.y = static_cast<int>((1.0 - std::asinh(std::tan(lat)) / std::acos(-1.0)) / 2.0 * n);
+        return tile;
+    }
+
+    USER_OPEN_TEST_F(GdalUtilToolTest, aPhotoTileIsDrawnByTheProgramLikeInTheProcess)
+    {
+        const fs::path inProcess = area_->getFolder() / "tile-process.png";
+        raster::photoTile(jpeg_, inProcess, photoTileParams());
+
+        const fs::path byProgram = area_->getFolder() / "tile-program.png";
+        const ToolRun run = runTool({"--request", raster::encodeRequest(buildRequest(59, raster::op::kPhotoTile, jpeg_,
+                                                                                     byProgram,
+                                                                                     raster::toJson(photoTileParams())))});
+        ASSERT_FALSE(run.lines.empty()) << run.stderrText;
+        const auto response = raster::decodeResponse(run.lines.back());
+        ASSERT_TRUE(response.ok) << response.message;
+        EXPECT_EQ(response.result.at("bytes"), fs::file_size(byProgram));
+
+        const auto expected = testutils::decodeImageFile(inProcess);
+        const auto drawn = testutils::decodeImageFile(byProgram);
+        EXPECT_EQ(drawn.width, 256);
+        EXPECT_EQ(drawn.bands, expected.bands);
+        EXPECT_GT(std::count(drawn.alpha().begin(), drawn.alpha().end(), 255), 0) << "the photo is in the tile";
+        EXPECT_GT(std::count(drawn.alpha().begin(), drawn.alpha().end(), 0), 0) << "and only where its footprint is";
     }
 
     TEST_F(GdalUtilToolTest, aGeoprojectRequestWithoutTheFootprintOfThePhotoIsRefused)

@@ -762,7 +762,7 @@ TEST(multispectral, tileWithBandSelection) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_tile.tif", 256, 256, 5, GDT_UInt16);
     // Use empty outputFolder for in-memory tile generation
-    const auto tiler = TilerHelper::rasterTilerFor(rasterPath, "", 256, false);
+    const auto tiler = TilerHelper::tilerFor(rasterPath, "", 256, false);
 
     // Get valid tile coords from tiler info
     auto info = tiler->getMinMaxZ();
@@ -820,7 +820,7 @@ TEST(multispectral, tileWithFormula) {
     }
 
     // Use empty outputFolder for in-memory tile generation
-    const auto tiler = TilerHelper::rasterTilerFor(rasterPath, "", 256, false);
+    const auto tiler = TilerHelper::tilerFor(rasterPath, "", 256, false);
     auto info = tiler->getMinMaxZ();
 
     ThumbVisParams visParams;
@@ -851,7 +851,7 @@ TEST(multispectral, tileNoVisParamsFallback) {
     fs::path rasterPath = createGeoRaster(ta, "rgb_tile.tif", 256, 256, 3, GDT_Byte);
 
     // Use empty outputFolder for in-memory tile generation
-    const auto tiler = TilerHelper::rasterTilerFor(rasterPath, "", 256, false);
+    const auto tiler = TilerHelper::tilerFor(rasterPath, "", 256, false);
     auto info = tiler->getMinMaxZ();
 
     // Empty vis params should fall through to standard tile
@@ -878,7 +878,7 @@ TEST(multispectral, tileNoVisParamsFallback) {
 // closed on return: a forced tile makes the COG again, and Windows replaces no file a tiler
 // holds open
 std::pair<int, BoundingBox<Projected2Di>> deepestTilesOf(const fs::path& raster) {
-    const auto tiler = TilerHelper::rasterTilerFor(raster, "", 256, false);
+    const auto tiler = TilerHelper::tilerFor(raster, "", 256, false);
     const int z = tiler->getMinMaxZ().max;
     return {z, tiler->getMinMaxCoordsForZ(z)};
 }

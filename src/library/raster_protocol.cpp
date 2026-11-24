@@ -1386,5 +1386,58 @@ namespace ddb
             return ValidateParams{buildThreadsFromJson(params)};
         }
 
+        json toJson(const PhotoTileParams &params)
+        {
+            json result = photoToJson(params);
+            result["z"] = params.z;
+            result["x"] = params.x;
+            result["y"] = params.y;
+            if (params.tms)
+                result["tms"] = true;
+            result["tileSize"] = params.tileSize;
+            result["format"] = imageFormatExtension(params.format);
+            return result;
+        }
+
+        PhotoTileParams photoTileParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the photoTile params are not an object");
+            PhotoTileParams result;
+            readPhoto(params, result);
+
+            // An integer member from `min` to `max`
+            const auto integer = [&params](const char *name, int64_t min, int64_t max) {
+                const json &value = required(params, name);
+                if (!value.is_number_integer() || value.get<int64_t>() < min || value.get<int64_t>() > max)
+                    throw ProtocolError(std::string("'") + name + "' is not an integer from " + std::to_string(min) +
+                                        " to " + std::to_string(max));
+                return static_cast<int>(value.get<int64_t>());
+            };
+            result.z = integer("z", 0, 30);
+            const int64_t last = (int64_t{1} << result.z) - 1;
+            result.x = integer("x", 0, last);
+            result.y = integer("y", 0, last);
+            result.tms = optionalBool(params, "tms", false);
+            result.tileSize = integer("tileSize", 1, 4096);
+            if ((result.tileSize & (result.tileSize - 1)) != 0)
+                throw ProtocolError("'tileSize' is not a power of two");
+
+            const json &format = required(params, "format");
+            if (!format.is_string())
+                throw ProtocolError("'format' is not a string");
+            const std::string name = format.get<std::string>();
+            bool known = false;
+            for (const ImageFormat candidate : {ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::Webp})
+                if (name == imageFormatExtension(candidate))
+                {
+                    result.format = candidate;
+                    known = true;
+                }
+            if (!known)
+                throw ProtocolError("'format' is not \"png\", \"jpg\" or \"webp\"");
+            return result;
+        }
+
     } // namespace raster
 } // namespace ddb

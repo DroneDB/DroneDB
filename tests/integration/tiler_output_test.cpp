@@ -287,7 +287,7 @@ namespace
         TestArea ta(TEST_NAME, true);
         const auto tif =
             writeRaster(ta, "raster.tif", {1000003.0, 7.0, 0.0, 5000635.0, 0.0, -7.0}, 50, 30, true);
-        const auto tiler = TilerHelper::rasterTilerFor(tif, io::toUtf8(ta.getFolder("rendered")));
+        const auto tiler = TilerHelper::tilerFor(tif, io::toUtf8(ta.getFolder("rendered")));
 
         for (int z = 13; z <= 18; z++)
         {

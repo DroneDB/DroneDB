@@ -1569,7 +1569,7 @@ namespace
         int z = 0;
         BoundingBox<Projected2Di> b;
         {
-            const auto t = TilerHelper::rasterTilerFor(raster, "", 256);
+            const auto t = TilerHelper::tilerFor(raster, "", 256);
             z = t->getMinMaxZ().max;
             b = t->getMinMaxCoordsForZ(z);
         }

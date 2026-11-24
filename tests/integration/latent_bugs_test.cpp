@@ -91,7 +91,7 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createNegativeRaster(ta.getPath("neg.tif"), 512, 512);
-        const auto t = TilerHelper::rasterTilerFor(raster, "", 256);
+        const auto t = TilerHelper::tilerFor(raster, "", 256);
         const int tz = t->getMinMaxZ().max;
         const auto b = t->getMinMaxCoordsForZ(tz);
         // The brightest valid pixel over all tiles must be stretched to (close to)

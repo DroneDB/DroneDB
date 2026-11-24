@@ -944,4 +944,6 @@ Registry has to adopt first.
   checked and reported, with no effect, default 0 (`effective-config.schema.json` says so).
   `DDBCleanupCache(optionsJson, output)` removes what the cache and the temporary folder kept past an age and
   returns `{"dryRun", "kinds": {kind: {"entries", "bytes"}}}` (`cache-cleanup.schema.json`, fixture
-  `cache-cleanup`). The raster helper speaks protocol 1.6. No other fixture or schema changed.
+  `cache-cleanup`). The tiles of a photo are drawn from the photo for each tile by the raster helper (the
+  `photoTile` operation); nothing of a photo is kept. The raster helper speaks protocol 1.6. No other fixture or
+  schema changed.

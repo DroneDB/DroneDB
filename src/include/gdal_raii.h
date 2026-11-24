@@ -122,6 +122,10 @@ namespace ddb
         return list;
     }
 
+    // A number as an argument of a GDAL utility (-te, -scale...): every digit a double holds, so the
+    // utility reads back the same value
+    std::string utilityNumber(double value);
+
     // Takes a string that GDAL allocated (exportToWkt, OSRExportToProj4...): returns a copy and
     // frees it, also when the copy throws. "" for null.
     inline std::string takeGdalString(char *s)

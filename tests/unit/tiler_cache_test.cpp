@@ -45,7 +45,7 @@ namespace
     // Every tile of the deepest zoom of the raster (XYZ)
     std::vector<TileRef> maxZoomTiles(const fs::path &raster)
     {
-        const auto t = TilerHelper::rasterTilerFor(raster, "", 256);
+        const auto t = TilerHelper::tilerFor(raster, "", 256);
         const int z = t->getMinMaxZ().max;
         auto b = t->getMinMaxCoordsForZ(z);
         std::vector<TileRef> tiles;

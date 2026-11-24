@@ -38,7 +38,7 @@ TEST(testTiler, RGB) {
         "ortho.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    const auto t = TilerHelper::rasterTilerFor(ortho, tileDir.string());
+    const auto t = TilerHelper::tilerFor(ortho, tileDir.string());
 
     t->tile(19, 128168, 339545);
 
@@ -52,7 +52,7 @@ TEST(testTiler, DSM) {
                              "dsm.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    const auto t = TilerHelper::rasterTilerFor(dsm, tileDir.string());
+    const auto t = TilerHelper::tilerFor(dsm, tileDir.string());
     t->tile(21, 512674, 1358189);
     t->tile(20, 256337, 679094);
 
@@ -60,7 +60,7 @@ TEST(testTiler, DSM) {
     EXPECT_TRUE(fs::exists(tileDir / "20" / "256337" / "679094.png"));
 
     fs::path tmsTileDir = ta.getFolder("tmsTiles");
-    const auto tms = TilerHelper::rasterTilerFor(dsm, tmsTileDir.string(), 256, true);
+    const auto tms = TilerHelper::tilerFor(dsm, tmsTileDir.string(), 256, true);
     tms->tile(20, 256337, 369481);
 
     EXPECT_TRUE(fs::exists(tmsTileDir / "20" / "256337" / "369481.png"));
@@ -80,7 +80,7 @@ TEST(testTiler, DeepZoomNotBlank) {
         "ortho.tif");
 
     for (const auto &[tz, tileSize] : std::vector<std::pair<int, int>>{{24, 256}, {23, 512}, {26, 256}}) {
-        const auto t = TilerHelper::rasterTilerFor(ortho, "", tileSize);
+        const auto t = TilerHelper::tilerFor(ortho, "", tileSize);
         const auto b = t->getMinMaxCoordsForZ(tz);
         const int tx = (b.min.x + b.max.x) / 2;
         const int ty = (b.min.y + b.max.y) / 2;
@@ -249,7 +249,7 @@ TEST(testTiler, MultipleZoomLevels) {
         "wro.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    const auto t = TilerHelper::rasterTilerFor(ortho, tileDir.string(), 256, true);
+    const auto t = TilerHelper::tilerFor(ortho, tileDir.string(), 256, true);
 
     // Test tiles from the provided table
     struct TileTest {
@@ -284,7 +284,7 @@ TEST(testTiler, MultipleZoomLevels) {
  *        renamed into the tiles cache
  *
  * Runs the download in a child capped by RLIMIT_FSIZE so the transfer is cut
- * short mid-write; rasterTilerFor must throw and leave neither the cache entry nor
+ * short mid-write; tilerFor must throw and leave neither the cache entry nor
  * a stale temp file behind.
  */
 TEST(testTilerHelper, FailedDownloadIsNotCached) {
@@ -304,7 +304,7 @@ TEST(testTilerHelper, FailedDownloadIsNotCached) {
         rl.rlim_cur = rl.rlim_max = 64 * 1024;
         setrlimit(RLIMIT_FSIZE, &rl);
         try {
-            TilerHelper::rasterTilerFor(url, "");
+            TilerHelper::tilerFor(url, "");
             _exit(1);  // a >64 KB transfer truncated at 64 KB must not succeed
         } catch (const NetException&) {
             _exit(0);

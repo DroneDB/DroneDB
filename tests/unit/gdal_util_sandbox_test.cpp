@@ -904,6 +904,13 @@ namespace
             return json{{"size", 32}};
         if (std::string(op) == raster::op::kProbe)
             return json{{"kind", "raster"}};
+        if (std::string(op) == raster::op::kPhotoTile)
+        {
+            // A footprint in the one tile of zoom 0: the worker opens the photo
+            raster::PhotoTileParams tile;
+            static_cast<raster::PhotoGeoreference &>(tile) = {10, 10, {{{9.1, 45.3}, {9.1, 45.2}, {9.2, 45.2}, {9.2, 45.3}}}};
+            return raster::toJson(tile);
+        }
         return json::object();
     }
 
@@ -942,6 +949,7 @@ namespace
         const std::vector<ExpectedLimits> table = {
             {raster::op::kProbe, 25, 16 * kMiB, 256, 2 * kGiB},
             {raster::op::kThumbnail, 25, 64 * kMiB, 256, 2 * kGiB},
+            {raster::op::kPhotoTile, 25, 64 * kMiB, 256, 2 * kGiB},
             {raster::op::kNormalize, 110, 128 * kGiB, 1024, 4 * kGiB},
         };
         for (const auto &expected : table)

@@ -4,6 +4,7 @@
 
 #include "tilerhelper.h"
 #include "timeutil.h"
+#include "photo_tiler.h"
 #include "raster_tiler.h"
 #include "tilers_call.h"
 #include "threadlock.h"
@@ -19,11 +20,9 @@
 
 #include "cache_cleanup.h"
 #include "cancellation.h"
-#include "entry.h"
 #include "entry_handler.h"
 #include "exceptions.h"
 #include "cog.h"
-#include "geoproject.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
 #include "raster_stats.h"
@@ -125,8 +124,9 @@ namespace ddb
     {
         const fs::path &tileablePath = source.path;
         // Files an entry handler tiles itself (COPC point clouds) are read in place; the
-        // others are downloaded when remote, converted to a COG and tiled by ddb-tilers. Each
-        // step checks whether the call was canceled; the conversions also while they run.
+        // others are downloaded when remote, then a photo is drawn tile by tile and a raster is
+        // converted to a COG and tiled by ddb-tilers. Each step checks whether the call was
+        // canceled; the conversions also while they run.
         cancel::throwIfCanceled();
         const TilerFactory *factory = findTilerFactory(tileablePath);
         const fs::path localPath = factory != nullptr ? tileablePath : toLocalFile(tileablePath, source.pathHash);
@@ -141,7 +141,7 @@ namespace ddb
             if (factory != nullptr)
                 return factory->create(localPath, source.outputFolder, source.tileSize, source.tms);
 
-            return rasterTilerFor(localPath, io::toUtf8(source.outputFolder), source.tileSize, source.tms);
+            return tilerFor(localPath, io::toUtf8(source.outputFolder), source.tileSize, source.tms);
         });
         cancel::throwIfCanceled();
         return render(*tiler);
@@ -248,9 +248,8 @@ namespace ddb
         }
     }
 
-    std::unique_ptr<RasterTiler> TilerHelper::rasterTilerFor(const fs::path &tileablePath,
-                                                             const std::string &tilesFolder, int tileSize, bool tms,
-                                                             const std::string &tileablePathHash)
+    std::unique_ptr<Tiler> TilerHelper::tilerFor(const fs::path &tileablePath, const std::string &tilesFolder,
+                                                 int tileSize, bool tms, const std::string &tileablePathHash)
     {
         const fs::path local = toLocalFile(tileablePath, tileablePathHash);
 
@@ -260,21 +259,16 @@ namespace ddb
 
         maybeCleanupUserCache();
 
-        // The tiler reads EPSG:3857 COGs, so a file of a user (or a download) is read by the raster
-        // helper, which writes the COG of a georaster, or of a photo warped from its corners on the
-        // ground (its EXIF footprint) in one pass, into a request folder the tiler keeps while it lives
-        std::optional<raster::PhotoGeoreference> photo;
-        if (!entryHandler(fingerprint(local)).tilesWithoutReprojection())
-        {
-            std::string problem;
-            photo = photoGeoreferenceOf(local, problem);
-            if (!photo)
-                throw FSException("Cannot geoproject " + io::toUtf8(local) + ", " + problem);
-        }
+        // A photo is drawn from itself tile by tile, in the raster helper: nothing of it is kept
+        if (const auto photo = photoToTile(local))
+            return std::make_unique<PhotoTiler>(local, tilesFolder, tileSize, tms, *photo);
+
+        // The tiler reads EPSG:3857 COGs, so a georaster of a user (or a download) is read by the raster
+        // helper, which writes its COG into a request folder the tiler keeps while it lives
         auto request = std::make_unique<raster::RequestFolder>("cog-");
         const fs::path produced = request->path() / "cog.tif";
         // The build refuses an output that does not open as a raster
-        buildCogInPrivateFolder(io::toUtf8(local), produced, {}, photo);
+        buildCogInPrivateFolder(io::toUtf8(local), produced);
         auto tiler = std::make_unique<RasterTiler>(io::toUtf8(produced), tilesFolder, tileSize, tms);
         tiler->keep(std::move(request));
         return tiler;
@@ -325,8 +319,8 @@ namespace ddb
         }
         else
         {
-            // A raster or a photo
-            tiler = rasterTilerFor(input, io::toUtf8(output), run.tileSize, xyzRows);
+            // A photo, drawn tile by tile, or a raster, tiled from its COG
+            tiler = tilerFor(input, io::toUtf8(output), run.tileSize, xyzRows);
         }
 
         BoundingBox<int> zb;
