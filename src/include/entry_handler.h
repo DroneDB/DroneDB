@@ -80,6 +80,9 @@ struct BuildArtifact {
     // statistics of the raster are kept next to it (a sidecar of the build, or one DDBBuildRasterStatistics
     // wrote). Nothing in the manifest of a type.
     std::optional<bool> statistics;
+    // The same, of the uploaded file the COG was built from (sourceStatsSidecarOf: written by the build, or
+    // by DDBBuildRasterStatistics). Nothing in the manifest of a type.
+    std::optional<bool> sourceStatistics;
 
     // Not an aggregate on purpose: an artifact is made by file(), directory() and legacyFor(), so a
     // member added later has its default in one place instead of in every list of artifacts, and a

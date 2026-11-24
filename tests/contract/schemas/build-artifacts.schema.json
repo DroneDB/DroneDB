@@ -237,6 +237,10 @@
         "statistics": {
           "type": "boolean",
           "description": "raster.cog only (new in 2.11): whether the exact statistics of the COG are kept next to it (a sidecar of its build, or one DDBBuildRasterStatistics wrote)"
+        },
+        "sourceStatistics": {
+          "type": "boolean",
+          "description": "raster.cog only (new in 2.12): whether the exact statistics of the uploaded file the COG was built from are kept next to it (counted by its build, or written by DDBBuildRasterStatistics); DDBGetRasterValueInfoEx2 reads them"
         }
       }
     }

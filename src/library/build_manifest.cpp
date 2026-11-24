@@ -84,6 +84,8 @@ void to_json(json& j, const BuildArtifact& artifact) {
                     {"transformed", artifact.crs->transformed}};
     if (artifact.statistics)
         j["statistics"] = *artifact.statistics;
+    if (artifact.sourceStatistics)
+        j["sourceStatistics"] = *artifact.sourceStatistics;
 }
 
 void to_json(json& j, const EntryBuild& build) {

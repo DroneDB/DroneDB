@@ -928,3 +928,12 @@ Registry has to adopt first.
   2.4), `{"threads": n}`, and returns `{"status": "computed" | "present" | "notBuilt"}`; the `raster.cog` artifact of
   `build-artifacts` and `list-entries-ex` has `"statistics": true | false` (`build-artifacts.schema.json`). No other
   fixture or schema changed.
+* 2.12.0 (ABI 2.12: `capabilities` has `abi.minor` 12, and `DDBGetRasterValueInfoEx2` in `symbols` and in
+  `cancellable`): the statistics of the uploaded file of a GeoRaster are counted by its COG build, in the same pass,
+  and kept next to the COG (`<cog>.source.stats.json`, the schema of the sidecar). The `raster.cog` artifact of
+  `build-artifacts` and `list-entries-ex` has `"sourceStatistics": true | false` (`build-artifacts.schema.json`).
+  `DDBGetRasterValueInfoEx2(ddbPath, entryPath, options, output)` gives the output of `DDBGetRasterValueInfoEx` for
+  the file of an entry and takes those statistics instead of reading the pixels, when the file is still the one the
+  entry was indexed from. `DDBBuildRasterStatistics` also writes them for a COG built without them (`present` only
+  when both are there). The raster helper speaks protocol 1.5 (the `statistics` operation, `sourceStatistics` of
+  `cog`). No other fixture or schema changed.

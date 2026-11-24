@@ -137,7 +137,10 @@ extern "C"
      * ABI 2.10 (libddb 2.10.0, 0x0002000A) adds DDBFindCoverage: the images whose footprint covers a geometry.
      * ABI 2.11 (libddb 2.11.0, 0x0002000B) adds DDBBuildRasterStatistics: the statistics of the COG of a built
      * GeoRaster written next to it, the "statistics" member of the raster.cog artifact, and the formulas, colormaps
-     * and bands of a raster in DDBGetRasterInfo. */
+     * and bands of a raster in DDBGetRasterInfo.
+     * ABI 2.12 (libddb 2.12.0, 0x0002000C) adds DDBGetRasterValueInfoEx2: the value info of the file of an entry,
+     * with the statistics its COG build counted in the uploaded file (the "sourceStatistics" member of the
+     * raster.cog artifact, which DDBBuildRasterStatistics also writes). */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -1771,6 +1774,21 @@ extern "C"
      * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for a formula that does not exist or that the raster
      *         cannot compute, or invalid options; an error otherwise */
     DDB_DLL DDBErr DDBGetRasterValueInfoEx(const char *filePath, const DDBRasterOptions *options, char **output);
+
+    /** DDBGetRasterValueInfoEx of the file of an entry of a dataset (new in 2.12), with the same output. The exact
+     * statistics of a GeoRaster are those its COG build counted in the uploaded file (the "sourceStatistics" member of
+     * the raster.cog artifact, DDBGetBuildArtifacts) when the build has them and the file is still the one the entry
+     * was indexed from (same size and modification time): no pixel is read for them. Otherwise, and with a NoData
+     * override, the call reads them as DDBGetRasterValueInfoEx does.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param entryPath dataset-relative path of the entry (see "Entry paths")
+     * @param options see DDBRasterOptions, or NULL
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS as DDBGetRasterValueInfoEx, or when an argument is NULL or
+     *         empty; DDBERR_NOTFOUND when the entry is not in the dataset; DDBERR_BUSY on database contention; an
+     *         error otherwise */
+    DDB_DLL DDBErr DDBGetRasterValueInfoEx2(const char *ddbPath, const char *entryPath, const DDBRasterOptions *options,
+                                            char **output);
 
     /** The value of the raster at a map coordinate (new in 2.4): the pixel of the file under the WGS84 point,
      * found with the one geo-to-pixel conversion of libddb (the point is moved to the CRS of the file and

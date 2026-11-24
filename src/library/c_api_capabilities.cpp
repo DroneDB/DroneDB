@@ -81,6 +81,7 @@ constexpr std::string_view kCancellable[] = {
     "DDBGetRasterProfileEx",
     "DDBGetRasterValueInfo",
     "DDBGetRasterValueInfoEx",
+    "DDBGetRasterValueInfoEx2",
     "DDBMaskBorders",
     "DDBMaskBordersEx",
     "DDBMemoryTile",

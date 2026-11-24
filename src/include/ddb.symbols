@@ -76,6 +76,7 @@ DDBGetRasterProfile
 DDBGetRasterProfileEx
 DDBGetRasterValueInfo
 DDBGetRasterValueInfoEx
+DDBGetRasterValueInfoEx2
 DDBGetStamp
 DDBGetStampChecksum
 DDBGetTag

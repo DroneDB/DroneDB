@@ -4,6 +4,7 @@
 #include "raster_stats.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -114,11 +115,23 @@ namespace ddb
                     {"valid", s.validCount}, {"total", s.pixelCount}};
         }
 
-        // The usable sidecar of the raster: it exists, is not older than the raster, parses and says
-        // that its statistics are exact. Null json otherwise.
-        json readFreshSidecar(const fs::path &rasterPath)
+        // The statistics of a band in a sidecar. @throws std::exception (a member missing or not a number)
+        BandStatistics statsFromJson(const json &j)
         {
-            const fs::path sidecar = statsSidecarOf(rasterPath);
+            BandStatistics out;
+            out.min = j.at("min").get<double>();
+            out.max = j.at("max").get<double>();
+            out.mean = j.at("mean").get<double>();
+            out.stdDev = j.at("std").get<double>();
+            out.validCount = j.value("valid", static_cast<uint64_t>(0));
+            out.pixelCount = j.value("total", static_cast<uint64_t>(0));
+            return out;
+        }
+
+        // The usable statistics file `sidecar` of the raster: it exists, is not older than the raster, parses
+        // and says that its statistics are exact. Null json otherwise.
+        json readFreshSidecarFile(const fs::path &sidecar, const fs::path &rasterPath)
+        {
             std::error_code ec;
             const auto sidecarTime = fs::last_write_time(sidecar, ec);
             if (ec)
@@ -146,6 +159,12 @@ namespace ddb
                 LOGW << "Ignoring unreadable statistics sidecar " << io::toUtf8(sidecar) << ": " << e.what();
                 return nullptr;
             }
+        }
+
+        // The usable sidecar of the raster (readFreshSidecarFile)
+        json readFreshSidecar(const fs::path &rasterPath)
+        {
+            return readFreshSidecarFile(statsSidecarOf(rasterPath), rasterPath);
         }
     }
 
@@ -425,6 +444,17 @@ namespace ddb
                 step++;
             return step;
         }
+    }
+
+    std::vector<std::optional<BandStatistics>> computeExactStatistics(const RasterSource &source,
+                                                                      const std::vector<int> &bands,
+                                                                      const std::optional<double> &nodata,
+                                                                      size_t maxThreads,
+                                                                      const std::function<void(double)> &progress)
+    {
+        if (bands.empty())
+            return {};
+        return exactPass(source, bands, nodata, maxThreads, progress);
     }
 
     std::vector<BandStatistics> computeBandStatistics(const RasterSource &source, const std::vector<int> &bands,
@@ -905,6 +935,16 @@ namespace ddb
         entries_.clear();
     }
 
+    void RasterStatsProvider::adopt(const std::string &path, const StatisticsByBand &bands)
+    {
+        const auto entry = entryFor(path);
+        if (entry->version.empty())
+            return; // not a local file: nothing to keep them for
+        std::lock_guard<std::mutex> lock(entry->mutex);
+        for (const auto &[band, stats] : bands)
+            entry->bands.emplace(std::to_string(band) + "|" + nodataKey(std::nullopt), stats);
+    }
+
     std::pair<double, double> approximateMinMax(const RasterSource &source, int band)
     {
         const auto statsMin = source.metadataItem(band, "STATISTICS_MINIMUM");
@@ -1042,12 +1082,7 @@ namespace ddb
             if (b == bands->end())
                 return false;
 
-            out.min = b->at("min").get<double>();
-            out.max = b->at("max").get<double>();
-            out.mean = b->at("mean").get<double>();
-            out.stdDev = b->at("std").get<double>();
-            out.validCount = b->value("valid", static_cast<uint64_t>(0));
-            out.pixelCount = b->value("total", static_cast<uint64_t>(0));
+            out = statsFromJson(*b);
             return true;
         }
         catch (const std::exception &e)
@@ -1059,9 +1094,9 @@ namespace ddb
 
     namespace
     {
-        // Writes `j` as the exact sidecar of the raster, stamped now; whole, by a rename: a reader never sees half
-        // of it. False (logged) when it cannot be written
-        bool writeSidecar(const fs::path &rasterPath, json j)
+        // Writes `j` as the exact statistics file `target`, stamped now; whole, by a rename: a reader never sees
+        // half of it. False (logged) when it cannot be written
+        bool writeSidecarFile(const fs::path &target, json j)
         {
             try
             {
@@ -1080,7 +1115,6 @@ namespace ddb
                 stamp << std::put_time(&tm, "%FT%TZ");
                 j["computedAt"] = stamp.str();
 
-                const fs::path target = statsSidecarOf(rasterPath);
                 const fs::path temp = io::concat(target, "." + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())) + ".tmp");
                 {
                     std::ofstream out(temp, std::ios::trunc);
@@ -1102,9 +1136,15 @@ namespace ddb
             }
             catch (const std::exception &e)
             {
-                LOGW << "Cannot write the statistics sidecar of " << io::toUtf8(rasterPath) << ": " << e.what();
+                LOGW << "Cannot write the statistics file " << io::toUtf8(target) << ": " << e.what();
                 return false;
             }
+        }
+
+        // Writes `j` as the exact sidecar of the raster (writeSidecarFile)
+        bool writeSidecar(const fs::path &rasterPath, json j)
+        {
+            return writeSidecarFile(statsSidecarOf(rasterPath), std::move(j));
         }
     }
 
@@ -1133,5 +1173,78 @@ namespace ddb
         if (hasFreshStatsSidecar(rasterPath))
             return true;
         return writeSidecar(rasterPath, json{{"bands", json::object()}});
+    }
+
+    fs::path sourceStatsSidecarOf(const fs::path &cog)
+    {
+        return io::concat(cog, ".source.stats.json");
+    }
+
+    json statisticsByBandToJson(const StatisticsByBand &bands)
+    {
+        json j = json::object();
+        for (const auto &[band, stats] : bands)
+            j[std::to_string(band)] = statsToJson(stats);
+        return j;
+    }
+
+    StatisticsByBand statisticsByBandFromJson(const json &bands)
+    {
+        if (!bands.is_object())
+            throw InvalidArgsException("The statistics of the bands are not an object");
+        StatisticsByBand result;
+        for (const auto &[key, value] : bands.items())
+        {
+            int band = 0;
+            const auto [end, ec] = std::from_chars(key.data(), key.data() + key.size(), band);
+            if (ec != std::errc() || end != key.data() + key.size() || band < 1 || band > 65535)
+                throw InvalidArgsException("'" + key + "' is not the number of a band");
+            if (!value.is_object())
+                throw InvalidArgsException("The statistics of band " + key + " are not an object");
+            for (const char *member : {"min", "max", "mean", "std"})
+            {
+                const auto it = value.find(member);
+                if (it == value.end() || !it->is_number() || !std::isfinite(it->get<double>()))
+                    throw InvalidArgsException(std::string("'") + member + "' of band " + key +
+                                               " is not a finite number");
+            }
+            for (const char *member : {"valid", "total"})
+            {
+                const auto it = value.find(member);
+                if (it == value.end() || !it->is_number_unsigned())
+                    throw InvalidArgsException(std::string("'") + member + "' of band " + key +
+                                               " is not a count");
+            }
+            const BandStatistics s = statsFromJson(value);
+            if (!(s.min <= s.mean && s.mean <= s.max) || s.stdDev < 0 || s.validCount == 0 ||
+                s.validCount > s.pixelCount)
+                throw InvalidArgsException("The statistics of band " + key + " do not hold together");
+            result[band] = s;
+        }
+        return result;
+    }
+
+    std::optional<StatisticsByBand> readSourceStatistics(const fs::path &cog)
+    {
+        const json j = readFreshSidecarFile(sourceStatsSidecarOf(cog), cog);
+        if (j.is_null())
+            return std::nullopt;
+        try
+        {
+            const auto bands = j.find("bands");
+            if (bands == j.end())
+                return StatisticsByBand{};
+            return statisticsByBandFromJson(*bands);
+        }
+        catch (const std::exception &e)
+        {
+            LOGW << "Ignoring the unreadable source statistics of " << io::toUtf8(cog) << ": " << e.what();
+            return std::nullopt;
+        }
+    }
+
+    bool writeSourceStatistics(const fs::path &cog, const StatisticsByBand &bands)
+    {
+        return writeSidecarFile(sourceStatsSidecarOf(cog), json{{"bands", statisticsByBandToJson(bands)}});
     }
 }

@@ -94,17 +94,23 @@ class GeoRasterEntryHandler : public EntryHandler {
         }
     }
 
-    // Whether the exact statistics of the COG are kept next to it: a COG built before libddb wrote them has none,
-    // and its first statistics read every pixel (DDBBuildRasterStatistics writes them)
+    // Whether the exact statistics of the COG, and those of the uploaded file it was built from, are kept next to
+    // it: a COG built before libddb wrote them has none, and its first statistics read every pixel
+    // (DDBBuildRasterStatistics writes them)
     void describeArtifacts(const Entry& /*e*/, const fs::path& baseOutputPath,
                            std::vector<BuildArtifact>& artifacts) const override {
         for (BuildArtifact& a : artifacts)
-            if (a.role == CogRole)
-                a.statistics = hasFreshStatsSidecar(baseOutputPath / io::fromUtf8(a.openedPath()));
+            if (a.role == CogRole) {
+                const fs::path cog = baseOutputPath / io::fromUtf8(a.openedPath());
+                a.statistics = hasFreshStatsSidecar(cog);
+                a.sourceStatistics = readSourceStatistics(cog).has_value();
+            }
     }
 
     void build(const BuildContext& ctx) const override {
-        buildCog(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder / CogFileName), ctx.options);
+        // The statistics of the uploaded file are counted in the same pass: the analysis of the raster
+        // reads them instead of every pixel of the file
+        buildCog(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder / CogFileName), ctx.options, true, true);
         writeCogBuildRecord(ctx.tempFolder / CogBuildRecordFileName, CogBuildRecord{});
     }
 
