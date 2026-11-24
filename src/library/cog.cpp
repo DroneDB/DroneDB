@@ -79,6 +79,8 @@ namespace ddb
             options["gcps"] = photoGcps(*params.photo, 1.0);
             options["gcpSrs"] = "EPSG:4326";
         }
+        if (params.sourceStatistics)
+            options["sourceStatistics"] = io::toUtf8(sourceStatsSidecarOf(outFile));
         // An input that cannot be built (no coordinate system, no geotransform, a layout the
         // builder does not read) is a raster that cannot be read, as GDAL's build reported it
         buildWithTilers(path, outFile, params.threads, std::move(options), reportProgress,
@@ -89,20 +91,20 @@ namespace ddb
 
     namespace
     {
-        // Moves the statistics the helper wrote next to `produced` beside `target`. Without them
-        // the sidecar that is there describes the COG that was replaced: it goes.
-        void publishStatsSidecar(const fs::path &produced, const fs::path &target)
+        // Moves the statistics file `of(produced)` the helper wrote beside `target` as `of(target)`.
+        // Without it the one that is there describes the COG that was replaced: it goes.
+        void publishStatsFile(const fs::path &produced, const fs::path &target, decltype(&statsSidecarOf) of)
         {
-            const fs::path stats = statsSidecarOf(produced);
+            const fs::path stats = of(produced);
             if (fs::exists(stats))
-                raster::publishArtefact(stats, statsSidecarOf(target));
+                raster::publishArtefact(stats, of(target));
             else
-                io::assureIsRemoved(statsSidecarOf(target));
+                io::assureIsRemoved(of(target));
         }
     } // namespace
 
     void buildCog(const std::string &input, const std::string &outputCog, const BuildOptions &options,
-                  bool overwrite)
+                  bool overwrite, bool sourceStatistics)
     {
         const fs::path target = fs::absolute(io::fromUtf8(outputCog));
         if (!target.has_filename())
@@ -114,17 +116,19 @@ namespace ddb
         const io::ScopedTempDir staging =
             raster::makePrivateFolder(target.parent_path(), CogStagingPrefix);
         const fs::path produced = staging.path() / target.filename();
-        buildCogInPrivateFolder(input, produced, options);
+        buildCogInPrivateFolder(input, produced, options, std::nullopt, sourceStatistics);
 
         // The output may have appeared while the COG was built: it is replaced only when asked.
         // The COG first: the statistics count only while they are not older than it.
         io::assureReplaceable(io::fromUtf8(outputCog), overwrite);
         raster::publishArtefact(produced, target);
-        publishStatsSidecar(produced, target);
+        publishStatsFile(produced, target, statsSidecarOf);
+        publishStatsFile(produced, target, sourceStatsSidecarOf);
     }
 
     void buildCogInPrivateFolder(const std::string &input, const fs::path &produced,
-                                 const BuildOptions &options, const std::optional<raster::PhotoGeoreference> &photo)
+                                 const BuildOptions &options, const std::optional<raster::PhotoGeoreference> &photo,
+                                 bool sourceStatistics)
     {
         // The threads of the build come from the CPU pool of this process, which bounds all the
         // builds it runs: the helper has a pool of its own and is told how many it may use. The
@@ -135,6 +139,7 @@ namespace ddb
         raster::CogParams params;
         params.threads = static_cast<int>(cpu.threads());
         params.photo = photo;
+        params.sourceStatistics = sourceStatistics;
 
         // The phases of the work depend on whether the helper warps the raster: an optimized COG is
         // encoded again at its own grid and has none. The helper says which in its
@@ -195,24 +200,96 @@ namespace ddb
         if (!handler.isComplete(*entry, baseOutputPath))
             return CogStatisticsStatus::NotBuilt;
         const fs::path cog = folder / CogFileName;
-        if (hasFreshStatsSidecar(cog))
+        const bool cogMissing = !hasFreshStatsSidecar(cog);
+        // The statistics of the uploaded file are those of the file the entry was indexed from: a file
+        // replaced since then has a build of its own to come
+        const fs::path input = db->rootDirectory() / io::fromUtf8(entry->path);
+        const bool sourceMissing = !readSourceStatistics(cog) && isIndexedFile(input, *entry);
+        if (!cogMissing && !sourceMissing)
             return CogStatisticsStatus::Present;
 
-        cancel::throwIfCanceled();
-        const auto raster = tilers::Raster::open(cog);
-        const auto source = rasterSourceOf(*raster);
-        std::vector<int> bands(static_cast<size_t>(source->bandCount()));
-        std::iota(bands.begin(), bands.end(), 1);
-        const std::string cogPath = io::toUtf8(cog);
-        const auto stats = RasterStatsProvider::instance().getAll(cogPath, *source, bands, std::nullopt, true,
-                                                                  progress, maxThreads);
-        // Statistics this process knew already were not written again: the sidecar gets them now
-        if (!hasFreshStatsSidecar(cog))
-            for (size_t i = 0; i < bands.size(); i++)
-                if (stats[i])
-                    writeStatsSidecar(cogPath, bands[i], *stats[i]);
-        writeEmptyStatsSidecar(cogPath);
+        // Each pass reports its half of the work when there are two
+        const double share = cogMissing && sourceMissing ? 0.5 : 1.0;
+        const auto partOf = [&progress, share](double start) -> std::function<void(double)> {
+            if (!progress)
+                return {};
+            return [&progress, share, start](double fraction) { progress(start + share * fraction); };
+        };
+
+        if (cogMissing)
+        {
+            cancel::throwIfCanceled();
+            const auto raster = tilers::Raster::open(cog);
+            const auto source = rasterSourceOf(*raster);
+            std::vector<int> bands(static_cast<size_t>(source->bandCount()));
+            std::iota(bands.begin(), bands.end(), 1);
+            const std::string cogPath = io::toUtf8(cog);
+            const auto stats = RasterStatsProvider::instance().getAll(cogPath, *source, bands, std::nullopt, true,
+                                                                      partOf(0.0), maxThreads);
+            // Statistics this process knew already were not written again: the sidecar gets them now
+            if (!hasFreshStatsSidecar(cog))
+                for (size_t i = 0; i < bands.size(); i++)
+                    if (stats[i])
+                        writeStatsSidecar(cogPath, bands[i], *stats[i]);
+            writeEmptyStatsSidecar(cogPath);
+        }
+
+        if (sourceMissing)
+        {
+            cancel::throwIfCanceled();
+            // The uploaded file is read where the files of users are read: by the raster helper, on the
+            // CPU tokens of this process
+            const size_t wanted =
+                maxThreads > 0 ? maxThreads : static_cast<size_t>(parallel::threadsOption("DDB_STATS_THREADS", 8));
+            const auto cpu = parallel::tryAcquireThreads(wanted);
+            raster::StatisticsParams params;
+            params.threads = static_cast<int>(cpu.threads());
+            const json result = raster::rasterHelper().operate(raster::op::kStatistics, fs::absolute(input), fs::path(),
+                                                               raster::toJson(params),
+                                                               partOf(cogMissing ? 0.5 : 0.0));
+            StatisticsByBand bands;
+            try
+            {
+                bands = statisticsByBandFromJson(result.at("bands"));
+            }
+            catch (const std::exception &e)
+            {
+                throw GDALException(std::string(raster::kGdalUtilName) + " gave statistics of " + entry->path +
+                                    " that cannot be used: " + e.what());
+            }
+            if (!writeSourceStatistics(cog, bands))
+                throw FSException("Cannot write the statistics of " + entry->path + " next to its COG");
+        }
+        if (progress)
+            progress(1.0);
         return CogStatisticsStatus::Computed;
+    }
+
+    bool isIndexedFile(const fs::path &file, const Entry &e)
+    {
+        std::error_code ec;
+        const auto size = fs::file_size(file, ec);
+        if (ec || size != e.size)
+            return false;
+        try
+        {
+            return io::Path(file).getModifiedTime() == e.mtime;
+        }
+        catch (const FSException &)
+        {
+            return false;
+        }
+    }
+
+    std::optional<StatisticsByBand> entrySourceStatistics(Database *db, const Entry &e)
+    {
+        if (e.type != EntryType::GeoRaster)
+            return std::nullopt;
+        if (!isIndexedFile(db->rootDirectory() / io::fromUtf8(e.path), e))
+            return std::nullopt;
+        const EntryHandler &handler = entryHandler(e.type);
+        const fs::path cog = db->buildDirectory() / io::fromUtf8(handler.buildKey(e)) / CogBuildSubfolder / CogFileName;
+        return readSourceStatistics(cog);
     }
 
 }

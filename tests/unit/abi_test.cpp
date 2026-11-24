@@ -81,14 +81,16 @@ namespace
     // artifact, the completeness of COPCs built before 2.8, bounded point-cloud tiles); 2.9 adds DDBRescanEx2
     // (the rescan of the entries a list of paths names); 2.10 adds DDBFindCoverage (the images whose footprint
     // covers a geometry); 2.11 adds DDBBuildRasterStatistics (the statistics of a built COG written next to it,
-    // the statistics member of the raster.cog artifact, the formulas of DDBGetRasterInfo).
+    // the statistics member of the raster.cog artifact, the formulas of DDBGetRasterInfo); 2.12 adds
+    // DDBGetRasterValueInfoEx2 (the value info of an entry, with the statistics its COG build counted in the
+    // uploaded file, the sourceStatistics member of the raster.cog artifact).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_11)
+    TEST(AbiVersion, is2_12)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 11);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x0002000Bu);
+        EXPECT_EQ(DDB_ABI_MINOR, 12);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x0002000Cu);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

@@ -4,7 +4,9 @@
 
 // The statistics of a built COG: DDBBuildRasterStatistics writes them next to a COG that has none (one built
 // before libddb wrote them at build time), the raster.cog artifact says whether it has them, and
-// DDBGetRasterInfo lists the formulas of a raster without its statistics.
+// DDBGetRasterInfo lists the formulas of a raster without its statistics. The statistics of the uploaded
+// file: the COG build counts them, DDBBuildRasterStatistics writes them for an older build, and
+// DDBGetRasterValueInfoEx2 reads them instead of the pixels.
 
 #include <chrono>
 #include <fstream>
@@ -13,6 +15,9 @@
 #include <vector>
 
 #include "buildlock.h"
+#include "helper_operations.h"
+#include "raster_protocol.h"
+#include "tilers_raster.h"
 #include "dbops.h"
 #include "ddb.h"
 #include "gtest/gtest.h"
@@ -22,6 +27,7 @@
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
+#include "user_open_child.h"
 #include "utils.h"
 
 namespace
@@ -87,6 +93,32 @@ namespace
             return rc;
         }
     };
+
+    // The exact statistics of every band of a raster, read here (ddb-tilers): what the build is to count
+    json exactBandsOf(const fs::path &file)
+    {
+        const auto raster = tilers::Raster::openPrivate(file);
+        const auto source = rasterSourceOf(*raster);
+        std::vector<int> bands(static_cast<size_t>(source->bandCount()));
+        for (size_t i = 0; i < bands.size(); i++)
+            bands[i] = static_cast<int>(i) + 1;
+        const auto stats = computeExactStatistics(*source, bands, std::nullopt);
+        StatisticsByBand byBand;
+        for (size_t i = 0; i < bands.size(); i++)
+            if (stats[i])
+                byBand[bands[i]] = *stats[i];
+        return statisticsByBandToJson(byBand);
+    }
+
+    json valueInfoOf(const RasterDataset &ds, const char *entryPath)
+    {
+        char *out = nullptr;
+        EXPECT_EQ(DDBGetRasterValueInfoEx2(ds.root.c_str(), entryPath, nullptr, &out), DDBERR_NONE)
+            << DDBGetLastError();
+        const json info = json::parse(out != nullptr ? out : "null");
+        DDBFree(out);
+        return info;
+    }
 
     json bandsOf(const fs::path &sidecar)
     {
@@ -207,5 +239,169 @@ namespace
         for (const char *key : {"algorithms", "colormaps", "autoBands"})
             EXPECT_EQ(info.at(key), metadata.at(key)) << key;
         EXPECT_FALSE(info.at("algorithms").empty());
+    }
+
+    // The build counts the statistics of the uploaded file in its pass: those of its own pixels (not of the COG,
+    // which is warped and resampled), bit for bit, and the artifact says so
+    TEST(RasterSourceStatistics, theBuildCountsTheStatisticsOfTheUploadedFile)
+    {
+        RasterDataset ds(TEST_NAME);
+        EXPECT_FALSE(ds.cogArtifact().is_object()) << "not built yet";
+        ASSERT_DDB_OK(DDBBuild(ds.root.c_str(), "ortho.tif", nullptr, false, false));
+        EXPECT_TRUE(ds.cogArtifact().at("sourceStatistics").get<bool>());
+        const json source = bandsOf(sourceStatsSidecarOf(ds.cog()));
+        ASSERT_EQ(source.size(), 3u);
+        EXPECT_EQ(source, exactBandsOf(ds.index.root / "ortho.tif"));
+        EXPECT_EQ(source.at("1").at("total").get<uint64_t>(), 96u * 96u) << "the pixels of the file";
+        EXPECT_NE(source, bandsOf(statsSidecarOf(ds.cog()))) << "not those of the warped COG";
+    }
+
+    // The value info of an entry takes the statistics of its build: no pixel is read for them, and the info is
+    // the one of the file
+    TEST(RasterSourceStatistics, theValueInfoOfAnEntryReadsNoPixelForItsStatistics)
+    {
+        RasterDataset ds(TEST_NAME);
+        ASSERT_DDB_OK(DDBBuild(ds.root.c_str(), "ortho.tif", nullptr, false, false));
+        const std::string file = (ds.index.root / "ortho.tif").string();
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetRasterValueInfoEx(file.c_str(), nullptr, &out));
+        const json read = json::parse(out);
+        DDBFree(out);
+
+        RasterStatsProvider::instance().clear();
+        const auto before = RasterStatsProvider::instance().counters();
+        EXPECT_EQ(valueInfoOf(ds, "ortho.tif"), read);
+        const auto after = RasterStatsProvider::instance().counters();
+        EXPECT_EQ(after.computed, before.computed) << "no pass over the pixels";
+        EXPECT_EQ(after.fromSidecar, before.fromSidecar) << "not the sidecar of a copy either";
+
+        // A NoData override is another key: it is computed
+        DDBRasterOptions options{};
+        options.structSize = sizeof(options);
+        options.flags = DDB_RASTER_OPT_NODATA;
+        options.nodata = 0.0;
+        ASSERT_DDB_OK(DDBGetRasterValueInfoEx2(ds.root.c_str(), "ortho.tif", &options, &out));
+        DDBFree(out);
+        EXPECT_GT(RasterStatsProvider::instance().counters().computed + RasterStatsProvider::instance().counters().fromSidecar,
+                  after.computed + after.fromSidecar);
+    }
+
+    // A file changed since it was indexed is not described by the statistics of its build: they are read again,
+    // and DDBBuildRasterStatistics leaves them alone
+    TEST(RasterSourceStatistics, aFileChangedSinceItWasIndexedIsReadAgain)
+    {
+        RasterDataset ds(TEST_NAME);
+        ASSERT_DDB_OK(DDBBuild(ds.root.c_str(), "ortho.tif", nullptr, false, false));
+        const fs::path file = ds.index.root / "ortho.tif";
+        fs::last_write_time(file, fs::last_write_time(file) + std::chrono::seconds(10));
+        RasterStatsProvider::instance().clear();
+        const auto before = RasterStatsProvider::instance().counters();
+        valueInfoOf(ds, "ortho.tif");
+        const auto after = RasterStatsProvider::instance().counters();
+        EXPECT_GT(after.computed + after.fromSidecar, before.computed + before.fromSidecar);
+
+        fs::remove(sourceStatsSidecarOf(ds.cog()));
+        json result;
+        ASSERT_DDB_OK(ds.statistics("ortho.tif", nullptr, result));
+        EXPECT_EQ(result, json({{"status", "present"}})) << "the COG has its own; the file is not the indexed one";
+        EXPECT_FALSE(fs::exists(sourceStatsSidecarOf(ds.cog())));
+    }
+
+    // A build that did not count them (before 2.12) gets them from DDBBuildRasterStatistics: the raster helper
+    // reads the uploaded file, with the values the build counts; with the statistics of the COG missing too,
+    // both are written and the progress covers both passes
+    TEST(RasterSourceStatistics, anOlderBuildGetsThemFromTheStatisticsCall)
+    {
+        RasterDataset ds(TEST_NAME);
+        ASSERT_DDB_OK(DDBBuild(ds.root.c_str(), "ortho.tif", nullptr, false, false));
+        const fs::path cog = ds.cog();
+        const json built = bandsOf(sourceStatsSidecarOf(cog));
+        fs::remove(sourceStatsSidecarOf(cog));
+        EXPECT_FALSE(ds.cogArtifact().at("sourceStatistics").get<bool>());
+        EXPECT_TRUE(ds.cogArtifact().at("statistics").get<bool>());
+
+        json result;
+        ASSERT_DDB_OK(ds.statistics("ortho.tif", R"({"threads": 2})", result));
+        EXPECT_EQ(result, json({{"status", "computed"}}));
+        EXPECT_EQ(bandsOf(sourceStatsSidecarOf(cog)), built) << "the values of the build, bit for bit";
+        EXPECT_TRUE(ds.cogArtifact().at("sourceStatistics").get<bool>());
+        ASSERT_DDB_OK(ds.statistics("ortho.tif", nullptr, result));
+        EXPECT_EQ(result, json({{"status", "present"}}));
+
+        fs::remove(sourceStatsSidecarOf(cog));
+        fs::remove(statsSidecarOf(cog));
+        Progress progress;
+        ASSERT_DDB_OK(ds.statistics("ortho.tif", nullptr, result, &Progress::report, &progress));
+        EXPECT_EQ(result, json({{"status", "computed"}}));
+        EXPECT_TRUE(ds.cogArtifact().at("statistics").get<bool>());
+        EXPECT_TRUE(ds.cogArtifact().at("sourceStatistics").get<bool>());
+        ASSERT_FALSE(progress.fractions.empty());
+        for (size_t i = 1; i < progress.fractions.size(); i++)
+            EXPECT_GE(progress.fractions[i], progress.fractions[i - 1]) << "monotonic";
+        EXPECT_EQ(progress.fractions.back(), 1.0);
+
+        // Statistics older than the COG are of another build
+        fs::last_write_time(sourceStatsSidecarOf(cog), fs::last_write_time(cog) - std::chrono::seconds(10));
+        EXPECT_FALSE(ds.cogArtifact().at("sourceStatistics").get<bool>());
+    }
+
+    // The source statistics of a JPEG 2000: the build counts them as the helper's statistics operation reads the
+    // file (GDAL), the same values
+    TEST(RasterSourceStatistics, aJpeg2000HasTheValuesTheHelperReads)
+    {
+        IndexFixture index(TEST_NAME);
+        const std::string root = index.root.string();
+        testutils::GeoRasterSpec spec;
+        spec.width = spec.height = 80;
+        spec.bands = 1;
+        spec.type = GDT_UInt16;
+        spec.epsg = 32632;
+        spec.originX = 500000.0;
+        spec.originY = 4500000.0;
+        spec.value = [](int, int x, int y) { return static_cast<double>(1000 + (x * 37 + y * 11) % 3001); };
+        testutils::createGeoJp2(index.root / "dem.jp2", spec);
+        addToIndex(index.db.get(), {(index.root / "dem.jp2").string()});
+        ASSERT_DDB_OK(DDBBuild(root.c_str(), "dem.jp2", nullptr, false, false));
+
+        const char *paths[] = {"dem.jp2"};
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetBuildArtifacts(root.c_str(), paths, 1, &out));
+        const json build = json::parse(out).at(0).at("build");
+        DDBFree(out);
+        const fs::path cog = io::fromUtf8(build.at("root").get<std::string>()) / "cog" / "cog.tif";
+        const json counted = bandsOf(sourceStatsSidecarOf(cog));
+
+        EXPECT_EQ(counted.at("1").at("min").get<double>(), 1000.0);
+        DDBReleaseConnections(root.c_str(), nullptr);
+        testutils::runWithUserFileOpens([&] {
+            const json read = raster::runHelperOperation(raster::op::kStatistics, index.root / "dem.jp2", fs::path(),
+                                                         json::object(), raster::ProgressCallback());
+            EXPECT_EQ(counted, read.at("bands"));
+        });
+    }
+
+    // Statistics another process wrote are checked member by member before they are used
+    TEST(RasterSourceStatistics, statisticsFromAnotherProcessAreChecked)
+    {
+        const json good = json::parse(R"({"1": {"min": 1, "max": 9, "mean": 4.5, "std": 2, "valid": 10, "total": 12}})");
+        const StatisticsByBand parsed = statisticsByBandFromJson(good);
+        ASSERT_EQ(parsed.size(), 1u);
+        EXPECT_EQ(parsed.at(1).validCount, 10u);
+        EXPECT_EQ(statisticsByBandToJson(parsed), good);
+        EXPECT_TRUE(statisticsByBandFromJson(json::object()).empty());
+
+        for (const char *bad : {
+                 R"([])",
+                 R"({"0": {"min": 1, "max": 9, "mean": 4.5, "std": 2, "valid": 10, "total": 12}})",
+                 R"({"x": {"min": 1, "max": 9, "mean": 4.5, "std": 2, "valid": 10, "total": 12}})",
+                 R"({"1": {"max": 9, "mean": 4.5, "std": 2, "valid": 10, "total": 12}})",
+                 R"({"1": {"min": "1", "max": 9, "mean": 4.5, "std": 2, "valid": 10, "total": 12}})",
+                 R"({"1": {"min": 1, "max": 9, "mean": 10, "std": 2, "valid": 10, "total": 12}})",
+                 R"({"1": {"min": 1, "max": 9, "mean": 4.5, "std": -1, "valid": 10, "total": 12}})",
+                 R"({"1": {"min": 1, "max": 9, "mean": 4.5, "std": 2, "valid": 13, "total": 12}})",
+                 R"({"1": {"min": 1, "max": 9, "mean": 4.5, "std": 2, "valid": 0, "total": 12}})",
+                 R"({"1": {"min": 1, "max": 9, "mean": 4.5, "std": 2, "valid": -1, "total": 12}})",
+                 R"({"1": 5})"})
+            EXPECT_THROW(statisticsByBandFromJson(json::parse(bad)), InvalidArgsException) << bad;
     }
 }

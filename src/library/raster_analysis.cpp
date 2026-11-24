@@ -17,6 +17,10 @@
 #include "logger.h"
 #include "vegetation.h"
 #include "vis_render.h"
+#include "cog.h"
+#include "database.h"
+#include "dbops.h"
+#include "mio.h"
 
 
 #include <numeric>
@@ -1061,6 +1065,17 @@ std::string getRasterValueInfoJson(const std::string &filePath, const RasterValu
         throw AppException("Cannot read raster data from " + filePath);
     }
     return result.dump();
+}
+
+std::string getEntryRasterValueInfoJson(Database *db, const std::string &entryPath, const RasterValueOptions &options) {
+    cancel::throwIfCanceled();
+    const auto entry = getEntry(db, entryPath);
+    if (!entry)
+        throw EntryNotFoundException("No entry " + entryPath);
+    const std::string file = io::toUtf8(db->rootDirectory() / io::fromUtf8(entry->path));
+    if (const auto stats = entrySourceStatistics(db, *entry))
+        RasterStatsProvider::instance().adopt(file, *stats);
+    return getRasterValueInfoJson(file, options);
 }
 
 namespace {

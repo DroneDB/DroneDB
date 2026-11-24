@@ -441,6 +441,12 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
              return withString(
                  [&](char** text) { return DDBGetRasterValueInfoEx(raster.c_str(), nullptr, text); });
          }},
+        {"DDBGetRasterValueInfoEx2",
+         [=] {
+             return withString([&](char** text) {
+                 return DDBGetRasterValueInfoEx2(dataset.c_str(), "ortho.tif", nullptr, text);
+             });
+         }},
         {"DDBMaskBorders",
          [=] { return DDBMaskBorders(raster.c_str(), masked.c_str(), 15, false); }},
         {"DDBMaskBordersEx",

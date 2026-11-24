@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -17,6 +18,7 @@
 #include "exceptions.h"
 #include "fs.h"
 #include "gdal_inc.h"
+#include "json_fwd.h"
 #include "raster_source.h"
 #include "raster_utils.h"
 
@@ -56,6 +58,9 @@ namespace ddb
         // validCount counts the sampled pixels that have a value. False for exact statistics.
         bool sampled = false;
     };
+
+    /// Statistics by band (1-based): the bands of a raster that have a pixel with a value
+    using StatisticsByBand = std::map<int, BandStatistics>;
 
     /// The most pixels of a band the default stretch of a render reads when the exact statistics of
     /// the band are not known yet (2048 x 2048): a thumbnail runs in the confined gdal-util worker,
@@ -168,6 +173,12 @@ namespace ddb
         /// Forgets every cached file (tests start from an empty cache with it)
         void clear();
 
+        /// Takes `bands` as the exact statistics of those bands of the raster at path, for the NoData value of
+        /// each band (no override), in its version of now: get() and getAll() return them without a pass. The
+        /// statistics of a build of the file (readSourceStatistics) that the caller checked are of this file.
+        /// A key known already keeps its statistics.
+        void adopt(const std::string &path, const StatisticsByBand &bands);
+
     private:
         struct Entry;
 
@@ -190,6 +201,27 @@ namespace ddb
 
     /// The statistics sidecar of a raster: "<raster>.stats.json", next to it
     fs::path statsSidecarOf(const fs::path &raster);
+
+    /// The statistics of the input of a COG build, next to the COG: "<cog>.source.stats.json". They are those of
+    /// the pixels of the file the COG was built from (the uploaded raster), not of the COG (warped, resampled,
+    /// encoded again), with the rules of the exact pass (computeExactStatistics, no NoData override), in the
+    /// schema of the sidecar: written by the build in the same pass, or later by DDBBuildRasterStatistics.
+    fs::path sourceStatsSidecarOf(const fs::path &cog);
+
+    /// The source statistics of the COG at `cog` (sourceStatsSidecarOf): one per band that has a pixel with a
+    /// value. nullopt when there are none that are used: missing, older than the COG, not exact or unreadable.
+    std::optional<StatisticsByBand> readSourceStatistics(const fs::path &cog);
+
+    /// Writes `bands` as the source statistics of the COG at `cog` (whole, by a rename), replacing what is there.
+    /// False (logged) when they cannot be written.
+    bool writeSourceStatistics(const fs::path &cog, const StatisticsByBand &bands);
+
+    /// {"<band>": {min, max, mean, std, valid, total}}, as the "bands" of a sidecar holds them
+    json statisticsByBandToJson(const StatisticsByBand &bands);
+    /// The reverse of statisticsByBandToJson, for statistics another process wrote: every member is checked
+    /// (finite numbers, counts, min <= mean <= max, 0 < valid <= total).
+    /// @throws InvalidArgsException when they are not such statistics
+    StatisticsByBand statisticsByBandFromJson(const json &bands);
 
     /// Reads the statistics of band (1-based) from the "<raster>.stats.json" sidecar next to path,
     /// for the effective NoData value `nodata` (null: the one of the band). False when there is no
@@ -220,6 +252,15 @@ namespace ddb
     /// @throws NoValidPixelsException (a GDALException) when no pixel of a band has a value
     std::vector<BandStatistics> computeBandStatistics(const RasterSource &source, const std::vector<int> &bands,
                                                       const std::optional<double> &nodata);
+
+    /// computeBandStatistics without the rule that every band has a pixel with a value (nullopt for a band that
+    /// has none), on at most `maxThreads` threads for a raster ddb-tilers reads (0: DDB_STATS_THREADS), telling
+    /// `progress` the fraction read. Nothing is kept. The call can be canceled.
+    std::vector<std::optional<BandStatistics>> computeExactStatistics(const RasterSource &source,
+                                                                      const std::vector<int> &bands,
+                                                                      const std::optional<double> &nodata,
+                                                                      size_t maxThreads = 0,
+                                                                      const std::function<void(double)> &progress = {});
     inline std::vector<BandStatistics> computeBandStatistics(GDALDatasetH ds, const std::vector<int> &bands,
                                                              const std::optional<double> &nodata)
     {

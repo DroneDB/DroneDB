@@ -1399,6 +1399,24 @@ namespace
         EXPECT_EQ(placed.photo->footprint, cog.photo->footprint);
         EXPECT_THROW(cogParamsFromJson(json{{"photo", json{{"width", 4000}}}}), ProtocolError) << "no footprint";
         EXPECT_THROW(cogParamsFromJson(json{{"photo", 1}}), ProtocolError);
+        EXPECT_FALSE(cogParamsFromJson(json::object()).sourceStatistics);
+        CogParams counted;
+        counted.sourceStatistics = true;
+        EXPECT_EQ(toJson(counted), json({{"sourceStatistics", true}}));
+        EXPECT_TRUE(cogParamsFromJson(toJson(counted)).sourceStatistics);
+        EXPECT_THROW(cogParamsFromJson(json{{"sourceStatistics", 1}}), ProtocolError);
+
+        StatisticsParams stats;
+        EXPECT_EQ(toJson(stats), json::object());
+        stats.nodata = -9999.5;
+        stats.threads = 3;
+        const StatisticsParams statsBack = statisticsParamsFromJson(toJson(stats));
+        EXPECT_EQ(statsBack.nodata, std::optional<double>(-9999.5));
+        EXPECT_EQ(statsBack.threads, std::optional<int>(3));
+        EXPECT_FALSE(statisticsParamsFromJson(json::object()).nodata);
+        EXPECT_THROW(statisticsParamsFromJson(json{{"nodata", "nan"}}), ProtocolError);
+        EXPECT_THROW(statisticsParamsFromJson(json::array()), ProtocolError);
+        EXPECT_TRUE(isHelperOperation(op::kStatistics));
 
         VectorParams vector;
         EXPECT_EQ(toJson(vector), json::object());

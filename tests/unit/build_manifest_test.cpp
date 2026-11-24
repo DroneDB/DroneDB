@@ -328,8 +328,9 @@ TEST(BuildManifest, Json) {
                   "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
                   "downloadName": "cog.tif"}])");
     expectedCog[0]["version"] = buildFileVersion(fx.build / H_COG / "cog" / "cog.tif");
-    // The stand-in COG has no statistics next to it
+    // The stand-in COG has no statistics next to it, nor those of its source
     expectedCog[0]["statistics"] = false;
+    expectedCog[0]["sourceStatistics"] = false;
     EXPECT_EQ(cog["artifacts"], expectedCog);
 
     // A legacy artifact names the role it stands in for; no other artifact has the member

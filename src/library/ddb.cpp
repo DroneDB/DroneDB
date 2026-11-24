@@ -2081,6 +2081,18 @@ DDBErr DDBGetRasterValueInfoEx(const char *filePath, const DDBRasterOptions *opt
     });
 }
 
+DDBErr DDBGetRasterValueInfoEx2(const char *ddbPath, const char *entryPath, const DDBRasterOptions *options,
+                                 char **output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireDdbPath(ddbPath);
+        const std::string path = entryPathArg(entryPath, "No entry path provided", "entry path");
+        requireOutput(output);
+        const auto values = rasterOptions(options).values;
+        const auto db = ddb::open(std::string(ddbPath), false);
+        return ddb::getEntryRasterValueInfoJson(db.get(), path, values);
+    });
+}
+
 DDBErr DDBGetRasterPointValueEx(const char *filePath, double lon, double lat, const DDBRasterOptions *options,
                                 char **output) {
     return guardedOutput<kNewExportCodes>(output, [&] {

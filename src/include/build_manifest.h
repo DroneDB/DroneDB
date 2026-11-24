@@ -67,7 +67,7 @@ struct EntryBuild {
 };
 
 // {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?, "fallbackFor"?,
-// "version", "crs"?, "statistics"?}: an artifact that exists
+// "version", "crs"?, "statistics"?, "sourceStatistics"?}: an artifact that exists
 void to_json(json& j, const BuildArtifact& artifact);
 // {"buildable", "source", "hash", "key", "root", "state", "missingDependencies", "awaitingFiles",
 // "lastAttempt", "retryAfter", "artifacts"}; source, hash, key, root, lastAttempt and retryAfter are null when they

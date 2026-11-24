@@ -13,6 +13,7 @@
 #include "fs.h"
 #include "json_fwd.h"
 #include "raster_protocol.h"
+#include "raster_stats.h"
 
 namespace ddb {
 
@@ -33,21 +34,27 @@ namespace ddb {
 // An output that is the input is refused (InvalidArgsException). An output that exists is
 // replaced when `overwrite` is true (the build handlers and the other internal callers), and
 // otherwise refused before anything is built (OutputExistsException, io::assureReplaceable).
+// With `sourceStatistics` the build also writes the exact statistics of the pixels of `input`,
+// counted in the same pass, next to the COG (sourceStatsSidecarOf); otherwise a stale such file
+// next to `outputCog` is removed.
 void buildCog(const std::string& input, const std::string& outputCog, const BuildOptions& options = {},
-              bool overwrite = true);
+              bool overwrite = true, bool sourceStatistics = false);
 // The same build, written as `produced` in a private folder the caller made for it
 // (raster::makePrivateFolder) and left there for the caller to publish, with its statistics
 // (statsSidecarOf) next to it. A photo (which has no georeferencing of its own) is placed on the
-// ground by `photo` and warped from it in the same pass. Throws GDALException when what the
-// helper wrote does not open as a raster.
+// ground by `photo` and warped from it in the same pass. With `sourceStatistics` the statistics of
+// the input (sourceStatsSidecarOf) are written next to `produced` too. Throws GDALException when
+// what the helper wrote does not open as a raster.
 void buildCogInPrivateFolder(const std::string& input, const fs::path& produced,
                              const BuildOptions& options = {},
-                             const std::optional<raster::PhotoGeoreference>& photo = std::nullopt);
+                             const std::optional<raster::PhotoGeoreference>& photo = std::nullopt,
+                             bool sourceStatistics = false);
 
 // The role of the COG of a GeoRaster in its build
 inline constexpr const char* CogRole = "raster.cog";
 
 class Database;
+struct Entry;
 
 // What buildCogStatistics found or did
 enum class CogStatisticsStatus
@@ -61,12 +68,23 @@ enum class CogStatisticsStatus
 // next to it (statsSidecarOf) when it has none that is used: a COG built before libddb wrote them at build time
 // gets them without being built again. One parallel pass over its pixels (RasterStatsProvider::getAll), on at most
 // `maxThreads` threads (0: DDB_STATS_THREADS); a COG in which no band has a pixel with a value gets a sidecar
-// without an entry, so it is not passed again. The build lock of the entry is held meanwhile.
+// without an entry, so it is not passed again. The statistics of the uploaded file the COG was built from
+// (sourceStatsSidecarOf) are written too when they are missing and the file is still the one the entry was
+// indexed from (isIndexedFile): the raster helper reads it (the `statistics` operation, a COG built before the
+// build counted them). Present when both are there. The build lock of the entry is held meanwhile.
 // `progress`, when set, is told the fraction done. Can be canceled.
 // @throws EntryNotFoundException (no such entry), InvalidArgsException (not a GeoRaster), BuildInProgressException
 // (a build of the entry runs), GDALException (the COG cannot be read)
 CogStatisticsStatus buildCogStatistics(Database* db, const std::string& entryPath, size_t maxThreads,
                                        const std::function<void(double)>& progress = {});
+
+// Whether `file` is the file the entry `e` was indexed from: the same size and modification time (seconds)
+bool isIndexedFile(const fs::path& file, const Entry& e);
+
+// The statistics of the uploaded file of the GeoRaster entry `e` that its COG build kept (readSourceStatistics),
+// when the file is still the one the entry was indexed from (isIndexedFile); nullopt otherwise (another type, no
+// build, a build without them, a file changed since it was indexed)
+std::optional<StatisticsByBand> entrySourceStatistics(Database* db, const Entry& e);
 
 }
 

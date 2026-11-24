@@ -10,7 +10,7 @@
   "output": {
     "abi": {
       "major": 2,
-      "minor": 11
+      "minor": 12
     },
     "cancellable": [
       "DDBApplyDelta",
@@ -46,6 +46,7 @@
       "DDBGetRasterProfileEx",
       "DDBGetRasterValueInfo",
       "DDBGetRasterValueInfoEx",
+      "DDBGetRasterValueInfoEx2",
       "DDBMaskBorders",
       "DDBMaskBordersEx",
       "DDBMemoryTile",
@@ -142,6 +143,7 @@
       "DDBGetRasterProfileEx",
       "DDBGetRasterValueInfo",
       "DDBGetRasterValueInfoEx",
+      "DDBGetRasterValueInfoEx2",
       "DDBGetStamp",
       "DDBGetStampChecksum",
       "DDBGetTag",

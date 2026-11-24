@@ -297,7 +297,8 @@ namespace ddb
         bool isHelperOperation(std::string_view name)
         {
             return name == op::kMask || name == op::kRasterShapes || name == op::kResizeImages || name == op::kMergeBands ||
-                   name == op::kMergePreview || name == op::kAlign || name == op::kAlignValidation;
+                   name == op::kMergePreview || name == op::kAlign || name == op::kAlignValidation ||
+                   name == op::kStatistics;
         }
 
         bool outIsFolder(std::string_view name)
@@ -803,6 +804,8 @@ namespace ddb
             setBuildThreads(result, params.threads);
             if (params.photo)
                 result["photo"] = photoToJson(*params.photo);
+            if (params.sourceStatistics)
+                result["sourceStatistics"] = true;
             return result;
         }
 
@@ -819,6 +822,7 @@ namespace ddb
                 result.photo = PhotoGeoreference{};
                 readPhoto(*photo, *result.photo);
             }
+            result.sourceStatistics = optionalBool(params, "sourceStatistics", false);
             return result;
         }
 
@@ -1339,6 +1343,30 @@ namespace ddb
                 if (!color->is_string())
                     throw ProtocolError("'color' is not a string");
                 result.color = color->get<std::string>();
+            }
+            result.threads = buildThreadsFromJson(params);
+            return result;
+        }
+
+        json toJson(const StatisticsParams &params)
+        {
+            json result = json::object();
+            if (params.nodata)
+                result["nodata"] = *params.nodata;
+            setBuildThreads(result, params.threads);
+            return result;
+        }
+
+        StatisticsParams statisticsParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the statistics params are not an object");
+            StatisticsParams result;
+            if (const json *nodata = member(params, "nodata"))
+            {
+                if (!nodata->is_number() || !std::isfinite(nodata->get<double>()))
+                    throw ProtocolError("'nodata' is not a finite number");
+                result.nodata = nodata->get<double>();
             }
             result.threads = buildThreadsFromJson(params);
             return result;

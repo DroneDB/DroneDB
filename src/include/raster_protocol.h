@@ -34,7 +34,7 @@ namespace ddb
         // The version this side implements. A helper is accepted when its major version is the
         // same and its minor version is not lower.
         constexpr int kMajorVersion = 1;
-        constexpr int kMinorVersion = 4;
+        constexpr int kMinorVersion = 5;
 
         // The longest line of either side
         constexpr size_t kMaxLineBytes = 16 * 1024 * 1024;
@@ -113,6 +113,9 @@ namespace ddb
             // The check of an alignment (new in 1.3), one-shot: params of alignParamsFromJson, no
             // `out`, the result of alignValidationToJson
             constexpr const char *kAlignValidation = "alignValidation";
+            // The exact statistics of the bands of a raster (new in 1.5), one-shot: params of
+            // statisticsParamsFromJson, no `out`, the result {"bands": statisticsByBandToJson}
+            constexpr const char *kStatistics = "statistics";
         } // namespace op
 
         // An operation on a user's raster for a call of the host (not a build, not a read): one
@@ -311,11 +314,14 @@ namespace ddb
         };
 
         // The params of a `cog`: the warp and the compression of the COG use `threads`; `photo`
-        // places a photo, which has no georeferencing of its own, on the ground
+        // places a photo, which has no georeferencing of its own, on the ground; `sourceStatistics`
+        // (new in 1.5, absent when false) also writes the exact statistics of the pixels of the
+        // input, counted in the same pass, next to `out` (sourceStatsSidecarOf)
         struct CogParams
         {
             std::optional<int> threads;
             std::optional<PhotoGeoreference> photo;
+            bool sourceStatistics = false;
         };
 
         json toJson(const CogParams &params);
@@ -397,6 +403,18 @@ namespace ddb
         json toJson(const MaskParams &params);
         // @throws ProtocolError
         MaskParams maskParamsFromJson(const json &params);
+
+        // The params of a `statistics` (new in 1.5): the NoData value that replaces the one of
+        // each band (`nodata`, a finite number; absent: the bands' own) and the threads of the pass
+        struct StatisticsParams
+        {
+            std::optional<double> nodata;
+            std::optional<int> threads;
+        };
+
+        json toJson(const StatisticsParams &params);
+        // @throws ProtocolError
+        StatisticsParams statisticsParamsFromJson(const json &params);
 
         // The params of a `rasterShapes`: the rasters (`inputs`, a path each as the inputs of a copc),
         // and whether their xml:XMP is asked for too (`xmp`)

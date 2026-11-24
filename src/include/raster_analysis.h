@@ -60,6 +60,16 @@ struct RasterValueOptions {
  */
 std::string getRasterValueInfoJson(const std::string &filePath, const RasterValueOptions &options = {});
 
+class Database;
+
+/**
+ * getRasterValueInfoJson of the file of the entry `entryPath` of `db`. The statistics of a GeoRaster whose COG
+ * build counted those of the uploaded file (entrySourceStatistics) are taken from the build: no pixel is read for
+ * them. @throws EntryNotFoundException when the entry is not in the dataset
+ */
+std::string getEntryRasterValueInfoJson(Database *db, const std::string &entryPath,
+                                        const RasterValueOptions &options = {});
+
 /**
  * Get raster value at pixel (x, y).
  *
