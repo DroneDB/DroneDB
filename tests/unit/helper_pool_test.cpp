@@ -21,6 +21,7 @@
 #include "helper_pool.h"
 #include "mio.h"
 #include "process_config.h"
+#include "sanitizer_hooks.h"
 #include "testarea.h"
 #include "utils.h"
 
@@ -43,22 +44,6 @@ namespace
 
     // How long a step that must succeed may take before the test calls it hung
     constexpr seconds kPatience(30);
-
-    // The address space limit cannot be tested under a sanitizer: the instrumented child reserves
-    // terabytes of shadow memory at start, so it dies from any limit, whatever it allocates.
-#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
-#define SKIP_UNDER_SANITIZER() GTEST_SKIP() << "an address space limit does not fit a sanitizer build"
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
-#define SKIP_UNDER_SANITIZER() GTEST_SKIP() << "an address space limit does not fit a sanitizer build"
-#endif
-#endif
-#ifndef SKIP_UNDER_SANITIZER
-#define SKIP_UNDER_SANITIZER() \
-    do                         \
-    {                          \
-    } while (0)
-#endif
 
     fs::path fakeLinePath()
     {
@@ -722,7 +707,7 @@ namespace
 #ifdef _WIN32
         GTEST_SKIP() << "the fake reports an address space limit only where the system has one per process";
 #else
-        SKIP_UNDER_SANITIZER();
+        SKIP_UNDER_SANITIZER(kAddressSpaceLimitUnderSanitizer);
         constexpr uint64_t kLimit = 512ull * 1024 * 1024;
         PoolOptions options = fakeOptions(1);
         options.session.maxMemoryBytes = kLimit;

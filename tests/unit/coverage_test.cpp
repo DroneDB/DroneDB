@@ -20,6 +20,7 @@
 #include "geo.h"
 #include "gtest/gtest.h"
 #include "json.h"
+#include "sanitizer_hooks.h"
 #include "test.h"
 #include "transaction.h"
 #include "utils.h"
@@ -561,7 +562,9 @@ namespace
         const auto timed = [&](const CoverageGeometry &geometry, std::vector<CoverageMatch> &matches)
         {
             std::vector<double> milliseconds;
-            for (int run = 0; run < 7; run++)
+            // One run is enough where the time is not checked
+            const int runs = kSanitizedBuild ? 1 : 7;
+            for (int run = 0; run < runs; run++)
             {
                 const auto begin = std::chrono::steady_clock::now();
                 matches = findCoverage(index.db.get(), geometry, options);
@@ -576,7 +579,7 @@ namespace
         const double median = timed(rectangle(4000, 1500, 4600, 1900), matches);
         std::vector<CoverageMatch> overall;
         const double medianOfAll = timed(rectangle(-100, -100, 10000, 3600), overall);
-        std::cout << "coverage on 5000 images, median of 7: " << median << " ms for a polygon over some of them, "
+        std::cout << "coverage on 5000 images, median: " << median << " ms for a polygon over some of them, "
                   << medianOfAll << " ms over all of them" << std::endl;
 
         ASSERT_EQ(matches.size(), 20u);
@@ -585,8 +588,12 @@ namespace
         // The best of them is the one whose middle is nearest the middle of the polygon (4300, 1700)
         EXPECT_LT(matches.front().score, 0.3);
         ASSERT_EQ(overall.size(), 20u);
-        // The target is 300 ms; a loaded CI machine gets more room
-        EXPECT_LT(median, 1000.0);
-        EXPECT_LT(medianOfAll, 1000.0);
+        // The target is 300 ms; a loaded CI machine gets more room. A sanitizer build runs several times slower, so
+        // its times say nothing about the budget.
+        if (!kSanitizedBuild)
+        {
+            EXPECT_LT(median, 1000.0);
+            EXPECT_LT(medianOfAll, 1000.0);
+        }
     }
 }
