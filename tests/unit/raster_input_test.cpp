@@ -2,26 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// The normalized copies of the rasters of users (artefact_cache.h) and the operation that writes
-// them (raster_ops.h normalizeRaster): what a copy keeps of a raster and what it leaves behind,
-// the cache it lives in (name, reuse, concurrent callers, cleanup), the size limit, and the
-// analyses that read a raw raster through it.
+// How the host reads the rasters of users (raster_input.h): in place when the raster helper found
+// that ddb-tilers reads them whole (the validation, once per version of a file), else through a copy
+// the helper writes (raster_ops.h normalizeRaster) for one reader, which goes with it. What a copy
+// keeps of a raster and what it leaves behind, the size limit, and the analyses that read a raw
+// raster.
 
 #include <atomic>
 #include <chrono>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
-#ifdef __linux__
-#include <sys/inotify.h>
-#include <unistd.h>
-#endif
 
 #include "real_raster_helper.h"
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "build_layout.h"
 #include "cpl_string.h"
 #include "ddb.h"
@@ -36,6 +34,8 @@
 #include "raster_cache.h"
 #include "raster_helper.h"
 #include "raster_ops.h"
+#include "raster_source.h"
+#include "raster_stats.h"
 #include "raster_test_utils.h"
 #include "tilers_raster.h"
 #include "test.h"
@@ -50,8 +50,8 @@ namespace
 
     constexpr const char *kHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-    // The real program, counting the requests for a normalized copy; the copies are made by the
-    // operation itself, in gdal-util
+    // The real program, counting the requests for a normalized copy and for a validation; the copies are
+    // made by the operation itself, in gdal-util
     class CountingHelper : public testutils::RealRasterHelper
     {
       public:
@@ -61,27 +61,39 @@ namespace
             RealRasterHelper::normalize(path, out, params);
         }
 
+        json operate(const char *op, const fs::path &path, const fs::path &out, const json &params,
+                     const raster::ProgressCallback &progress) override
+        {
+            if (std::string_view(op) == raster::op::kValidate)
+                validations++;
+            return RealRasterHelper::operate(op, path, out, params, progress);
+        }
+
         std::atomic<int> requests{0};
+        std::atomic<int> validations{0};
     };
 
-    // The cache of the test, apart from the one of the user
-    class ArtefactCache : public ::testing::Test
+    // The cache of the test, apart from the one of the user, and no answer of an earlier test
+    class RasterInput : public ::testing::Test
     {
       protected:
         void SetUp() override
         {
-            area_ = std::make_unique<TestArea>(std::string("ArtefactCache.") +
+            area_ = std::make_unique<TestArea>(std::string("RasterInput.") +
                                                    ::testing::UnitTest::GetInstance()->current_test_info()->name(),
                                                true);
             cache_ = area_->getPath("cache");
             config_ = std::make_unique<ScopedProcessConfig>(json{{"cacheDir", io::toUtf8(cache_)}}.dump());
             scope_ = std::make_unique<raster::ScopedRasterHelper>(helper_);
+            raster::forgetHostReadable();
         }
 
         void TearDown() override
         {
             RasterCache::instance().clear();
+            copies_.clear();
             scope_.reset();
+            raster::forgetHostReadable();
         }
 
         // A small georeferenced raster
@@ -98,12 +110,23 @@ namespace
             return testutils::createGeoRaster(area_->getPath(name), spec);
         }
 
-        std::vector<fs::path> normalizedFiles() const
+        // The copy the raster helper writes of `source` (normalize), in a request folder the test keeps
+        fs::path copyOf(const fs::path &source)
         {
-            std::vector<fs::path> files;
-            for (const auto &entry : fs::directory_iterator(raster::normalizedDir()))
-                files.push_back(entry.path());
-            return files;
+            copies_.push_back(std::make_unique<raster::RequestFolder>("test-copy-"));
+            const fs::path out = copies_.back()->path() / "copy.tif";
+            raster::rasterHelper().normalize(source, out, json::object());
+            return out;
+        }
+
+        // The folders of the requests that are left in the cache of the test
+        std::vector<fs::path> requestFolders() const
+        {
+            std::vector<fs::path> folders;
+            std::error_code ec;
+            for (const auto &entry : fs::directory_iterator(raster::requestsDir(), ec))
+                folders.push_back(entry.path());
+            return folders;
         }
 
         std::unique_ptr<TestArea> area_;
@@ -111,6 +134,7 @@ namespace
         fs::path cache_;
         CountingHelper helper_;
         std::unique_ptr<raster::ScopedRasterHelper> scope_;
+        std::vector<std::unique_ptr<raster::RequestFolder>> copies_;
     };
 
     GDALDatasetUniquePtr openPlain(const fs::path &path) { return testutils::openRaster(path); }
@@ -128,7 +152,7 @@ namespace
 
     // ------------------------------------------------------------------ what the copy keeps
 
-    TEST_F(ArtefactCache, theCopyKeepsTheBandsValuesAndPropertiesOfTheRaster)
+    TEST_F(RasterInput, theCopyKeepsTheBandsValuesAndPropertiesOfTheRaster)
     {
         // A sensor raster as ODM writes it: 16-bit bands with names, units, scale, offset and
         // no-data values, metadata in the default domain and in two others
@@ -170,8 +194,7 @@ namespace
             ds->SetMetadataItem("note", "kept", "xml:SIDECAR");
         }
 
-        const fs::path copy = raster::artefactFor(source);
-        EXPECT_NE(copy, source);
+        const fs::path copy = copyOf(source);
         const auto in = openPlain(source);
         const auto out = openPlain(copy);
         ASSERT_TRUE(in);
@@ -216,7 +239,7 @@ namespace
         EXPECT_STREQ(out->GetMetadataItem("COMPRESSION", "IMAGE_STRUCTURE"), "DEFLATE");
     }
 
-    TEST_F(ArtefactCache, theCopyKeepsThePaletteAndTheGroundControlPointsOfARasterWithoutGeotransform)
+    TEST_F(RasterInput, theCopyKeepsThePaletteAndTheGroundControlPointsOfARasterWithoutGeotransform)
     {
         const fs::path source = area_->getPath("gcps.tif");
         {
@@ -242,7 +265,7 @@ namespace
             CPLFree(wkt);
         }
 
-        const auto out = openPlain(raster::artefactFor(source));
+        const auto out = openPlain(copyOf(source));
         ASSERT_TRUE(out);
         EXPECT_EQ(out->GetRasterBand(1)->GetColorInterpretation(), GCI_PaletteIndex);
         ASSERT_NE(out->GetRasterBand(1)->GetColorTable(), nullptr);
@@ -251,7 +274,7 @@ namespace
         EXPECT_EQ(out->GetGCPCount(), 4);
     }
 
-    TEST_F(ArtefactCache, theCopyLeavesTheDomainsThatNameFilesBehind)
+    TEST_F(RasterInput, theCopyLeavesTheDomainsThatNameFilesBehind)
     {
         // A two-page TIFF lists its pages as subdatasets by file name
         const fs::path source = area_->getPath("pages.tif");
@@ -271,7 +294,7 @@ namespace
         ASSERT_TRUE(in);
         ASSERT_NE(in->GetMetadata("SUBDATASETS"), nullptr) << "the source must name its pages";
 
-        const fs::path copy = raster::artefactFor(source);
+        const fs::path copy = copyOf(source);
         const auto out = openPlain(copy);
         ASSERT_TRUE(out);
         EXPECT_EQ(out->GetMetadata("SUBDATASETS"), nullptr);
@@ -294,7 +317,7 @@ namespace
     // The approximate statistics of GDAL (the statistics of the analyses) read an overview when there is one and
     // else sample whole blocks, so a copy must have the blocks and the overviews of the raster for
     // the same raster to give the same statistics
-    TEST_F(ArtefactCache, theCopyGivesTheApproximateStatisticsOfTheRaster)
+    TEST_F(RasterInput, theCopyGivesTheApproximateStatisticsOfTheRaster)
     {
         const fs::path source = area_->getPath("stripes.tif");
         {
@@ -315,7 +338,7 @@ namespace
         }
 
         const auto in = openPlain(source);
-        const auto out = openPlain(raster::artefactFor(source));
+        const auto out = openPlain(copyOf(source));
         ASSERT_TRUE(in);
         ASSERT_TRUE(out);
 
@@ -333,52 +356,141 @@ namespace
             EXPECT_DOUBLE_EQ(outStats[i], inStats[i]) << i;
     }
 
-    // ------------------------------------------------------------------ the cache
+    // ------------------------------------------------------------------ in place or through a copy
 
-    TEST_F(ArtefactCache, aRawRasterIsCopiedOnceAndTheCopyIsReused)
+    TEST_F(RasterInput, aGeoTiffDdbTilersReadsWholeIsReadInPlaceOnceValidated)
     {
         const fs::path source = makeRaster("raw.tif");
 
-        const fs::path first = raster::artefactFor(source);
-        EXPECT_EQ(helper_.requests, 1);
-        EXPECT_EQ(first.parent_path(), raster::normalizedDir());
-        EXPECT_EQ(first.extension(), ".tif");
-        EXPECT_EQ(first.stem().string(), raster::artefactKey(source));
-        EXPECT_TRUE(raster::isLibddbArtefact(first));
-        EXPECT_TRUE(openPlain(first));
+        const raster::InputFile read = raster::inputFileFor(source);
+        EXPECT_EQ(read.file, source);
+        EXPECT_FALSE(read.request);
+        EXPECT_EQ(helper_.validations, 1);
+        EXPECT_EQ(helper_.requests, 0);
 
-        // Asked again, also through the opening of the analyses: no request
-        EXPECT_EQ(raster::artefactFor(source), first);
-        EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(source)));
-        EXPECT_EQ(helper_.requests, 1);
-        EXPECT_EQ(normalizedFiles().size(), 1u);
+        // Asked again, also through the opening of the analyses: the answer is kept
+        const auto raster = tilers::Raster::openInput(io::toUtf8(source));
+        ASSERT_TRUE(raster);
+        EXPECT_EQ(raster->file(), source);
+        EXPECT_TRUE(raster::isHostReadable(source));
+        EXPECT_EQ(helper_.validations, 1);
+        EXPECT_EQ(helper_.requests, 0);
+        EXPECT_TRUE(requestFolders().empty());
+        EXPECT_FALSE(fs::exists(cache_ / "artefacts")) << "a copy was kept";
     }
 
-    TEST_F(ArtefactCache, aChangedFileGetsAnotherCopy)
+    TEST_F(RasterInput, theValidationGivesTheStatisticsOfTheRaster)
     {
         const fs::path source = makeRaster("raw.tif");
-        const fs::path first = raster::artefactFor(source);
+        ASSERT_TRUE(raster::isHostReadable(source));
+
+        // Adopted: the statistics of the file are known with no pass over its pixels
+        auto &provider = RasterStatsProvider::instance();
+        const auto before = provider.counters();
+        const auto raster = tilers::Raster::openInput(io::toUtf8(source));
+        ASSERT_TRUE(raster);
+        const auto known = provider.getAll(io::toUtf8(source), *rasterSourceOf(*raster), {1, 2, 3}, std::nullopt, false);
+        EXPECT_EQ(provider.counters().computed, before.computed);
+        const auto exact = computeExactStatistics(*rasterSourceOf(*raster), {1, 2, 3}, std::nullopt);
+        for (size_t i = 0; i < 3; i++)
+        {
+            ASSERT_TRUE(known[i] && exact[i]) << i;
+            EXPECT_EQ(known[i]->min, exact[i]->min) << i;
+            EXPECT_EQ(known[i]->max, exact[i]->max) << i;
+            EXPECT_EQ(known[i]->mean, exact[i]->mean) << i;
+            EXPECT_EQ(known[i]->stdDev, exact[i]->stdDev) << i;
+        }
+    }
+
+    TEST_F(RasterInput, aChangedFileIsValidatedAgain)
+    {
+        const fs::path source = makeRaster("raw.tif");
+        ASSERT_TRUE(raster::isHostReadable(source));
 
         // The same size, a later time
         fs::last_write_time(source, fs::last_write_time(source) + std::chrono::seconds(30));
-        const fs::path later = raster::artefactFor(source);
-        EXPECT_NE(later, first);
-        EXPECT_EQ(helper_.requests, 2);
+        EXPECT_TRUE(raster::isHostReadable(source));
+        EXPECT_EQ(helper_.validations, 2);
 
         // Another size
         makeRaster("raw.tif", 4);
-        const fs::path bigger = raster::artefactFor(source);
-        EXPECT_NE(bigger, later);
-        EXPECT_EQ(helper_.requests, 3);
-
-        // The copies of the earlier files stay until the cleanup
-        EXPECT_EQ(normalizedFiles().size(), 3u);
-        // Another path with the same content is another file
-        fs::copy_file(source, area_->getPath("copy.tif"));
-        EXPECT_NE(raster::artefactFor(area_->getPath("copy.tif")), bigger);
+        EXPECT_TRUE(raster::isHostReadable(source));
+        EXPECT_EQ(helper_.validations, 3);
     }
 
-    TEST_F(ArtefactCache, anArtefactIsReadAsItIsWithoutARequest)
+    // A block of an overview that does not decode: the full resolution reads, but the host could reach the
+    // overview (a tile, a zoomed out read), so the file is read through a copy the helper writes
+    TEST_F(RasterInput, aBlockOfAnOverviewThatDoesNotDecodeIsReadThroughACopy)
+    {
+        const fs::path source = area_->getPath("overviews.tif");
+        {
+            GDALDriver *driver = GetGDALDriverManager()->GetDriverByName("GTiff");
+            CPLStringList options;
+            options.SetNameValue("TILED", "YES");
+            options.SetNameValue("COMPRESS", "DEFLATE");
+            auto ds = adoptDataset(driver->Create(io::toUtf8(source).c_str(), 512, 512, 1, GDT_Byte, options.List()));
+            ASSERT_TRUE(ds);
+            const double gt[6] = {500000, 1, 0, 4500000, 0, -1};
+            ds->SetGeoTransform(const_cast<double *>(gt));
+            std::vector<uint8_t> row(512);
+            for (int y = 0; y < 512; y++)
+            {
+                for (int x = 0; x < 512; x++)
+                    row[x] = static_cast<uint8_t>((x * 7 + y * 13) % 251);
+                ASSERT_EQ(ds->GetRasterBand(1)->RasterIO(GF_Write, 0, y, 512, 1, row.data(), 512, 1, GDT_Byte, 0, 0), CE_None);
+            }
+            const int levels[1] = {2};
+            ASSERT_EQ(ds->BuildOverviews("AVERAGE", 1, levels, 0, nullptr, nullptr, nullptr), CE_None);
+        }
+        // Where the first block of the overview lies, and its size
+        uint64_t offset = 0, size = 0;
+        {
+            const auto ds = openPlain(source);
+            ASSERT_TRUE(ds);
+            GDALRasterBand *overview = ds->GetRasterBand(1)->GetOverview(0);
+            ASSERT_NE(overview, nullptr);
+            offset = std::stoull(overview->GetMetadataItem("BLOCK_OFFSET_0_0", "TIFF"));
+            size = std::stoull(overview->GetMetadataItem("BLOCK_SIZE_0_0", "TIFF"));
+        }
+        ASSERT_GT(size, 8u);
+        {
+            std::fstream file(source, std::ios::in | std::ios::out | std::ios::binary);
+            file.seekp(static_cast<std::streamoff>(offset));
+            const std::string garbage(static_cast<size_t>(size), '\xA5');
+            file.write(garbage.data(), static_cast<std::streamsize>(garbage.size()));
+        }
+
+        EXPECT_FALSE(raster::isHostReadable(source));
+        EXPECT_EQ(helper_.validations, 1);
+        // Not asked again for this version of the file
+        EXPECT_FALSE(raster::isHostReadable(source));
+        EXPECT_EQ(helper_.validations, 1);
+    }
+
+    TEST_F(RasterInput, aRasterDdbTilersDoesNotOpenIsReadThroughACopyThatGoesWithItsReader)
+    {
+        testutils::GeoRasterSpec spec;
+        spec.width = 64;
+        spec.height = 48;
+        const fs::path source = testutils::createGeoJp2(area_->getPath("raw.jp2"), spec);
+        const uint64_t copies = raster::inputCopiesMade();
+        {
+            const auto raster = tilers::Raster::openInput(io::toUtf8(source));
+            ASSERT_TRUE(raster);
+            EXPECT_NE(raster->file(), source) << "the host reads the copy";
+            EXPECT_TRUE(raster::isLibddbArtefact(raster->file()));
+            EXPECT_EQ(raster->width(), 64);
+            EXPECT_EQ(requestFolders().size(), 1u);
+        }
+        EXPECT_TRUE(requestFolders().empty()) << "the copy outlived its reader";
+        EXPECT_FALSE(raster::isLibddbArtefact(source));
+        EXPECT_EQ(raster::inputCopiesMade(), copies + 1);
+        EXPECT_EQ(helper_.requests, 1);
+        EXPECT_EQ(helper_.validations, 0) << "a file that is no TIFF is not validated";
+        EXPECT_FALSE(fs::exists(cache_ / "artefacts"));
+    }
+
+    TEST_F(RasterInput, anArtefactIsReadAsItIsWithoutARequest)
     {
         const fs::path build = area_->getPath("dataset") / DDB_FOLDER / DDB_BUILD_PATH / kHash;
         fs::create_directories(build / CogBuildSubfolder);
@@ -390,134 +502,49 @@ namespace
             return spec;
         }());
 
-        EXPECT_EQ(raster::artefactFor(cog), cog);
+        EXPECT_EQ(raster::inputFileFor(cog).file, cog);
         EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(cog)));
-        // A copy is an artefact too: it is not copied again
-        const fs::path copy = raster::artefactFor(makeRaster("raw.tif"));
-        EXPECT_EQ(raster::artefactFor(copy), copy);
-        EXPECT_EQ(helper_.requests, 1);
+        EXPECT_EQ(helper_.requests, 0);
+        EXPECT_EQ(helper_.validations, 0);
     }
 
-    TEST_F(ArtefactCache, theCopyIsPublishedInOneRenameAndNothingStaysOfTheRequest)
-    {
-        const fs::path source = makeRaster("raw.tif");
-        const fs::path copy = raster::artefactFor(source);
-
-        // The folders the requests write to are gone, and only the copy is in the cache
-        std::vector<std::string> names;
-        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
-            names.push_back(entry.path().filename().string());
-        EXPECT_EQ(names, std::vector<std::string>{"normalized"});
-        EXPECT_EQ(normalizedFiles(), std::vector<fs::path>{copy});
-    }
-
-#ifdef __linux__
-    // Windows renames no file that a process holds open, so the host closes the copy it checked
-    // before it moves it to its name. Linux renames an open file: the file system says what was
-    // done to the file in the folder it is in at the time, and a copy closed after its rename would
-    // be closed in the folder of the copies.
-    TEST_F(ArtefactCache, theCopyIsClosedBeforeItIsMovedToItsName)
-    {
-        const fs::path source = makeRaster("raw.tif");
-        const fs::path folder = raster::normalizedDir();
-        const int events = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-        ASSERT_GE(events, 0);
-        ASSERT_GE(inotify_add_watch(events, io::toUtf8(folder).c_str(), IN_MOVED_TO | IN_OPEN | IN_CLOSE), 0);
-
-        const fs::path copy = raster::artefactFor(source);
-
-        std::vector<std::string> seen;
-        alignas(inotify_event) char buffer[4096];
-        for (ssize_t length; (length = read(events, buffer, sizeof(buffer))) > 0;)
-        {
-            for (ssize_t at = 0; at < length;)
-            {
-                const auto *event = reinterpret_cast<const inotify_event *>(buffer + at);
-                const std::string name = event->len > 0 ? event->name : "";
-                // The folder itself is listed (the bound of the cache is checked after a copy is
-                // published): only the files in it count
-                if (name.empty())
-                {
-                    at += static_cast<ssize_t>(sizeof(inotify_event) + event->len);
-                    continue;
-                }
-                if (event->mask & IN_MOVED_TO)
-                    seen.push_back("moved " + name);
-                if (event->mask & IN_OPEN)
-                    seen.push_back("opened " + name);
-                if (event->mask & IN_CLOSE)
-                    seen.push_back("closed " + name);
-                at += static_cast<ssize_t>(sizeof(inotify_event) + event->len);
-            }
-        }
-        close(events);
-        EXPECT_EQ(seen, std::vector<std::string>{"moved " + io::toUtf8(copy.filename())});
-    }
-#endif
-
-    TEST_F(ArtefactCache, callersThatAskAtTheSameTimeEachGetAWholeCopy)
+    TEST_F(RasterInput, callersThatAskAtTheSameTimeShareOneValidation)
     {
         const fs::path source = makeRaster("raw.tif");
 
         constexpr int kCallers = 6;
-        std::vector<fs::path> results(kCallers);
         // Not vector<bool>: its elements share words, so threads that each set their own would
         // lose each other's writes
         std::vector<char> opened(kCallers, 0);
         std::vector<std::thread> threads;
         for (int i = 0; i < kCallers; i++)
             threads.emplace_back([&, i] {
-                results[i] = raster::artefactFor(source);
-                const auto dataset = openPlain(results[i]);
-                opened[i] = dataset && dataset->GetRasterCount() == 3 && !bandBytes(*dataset, 3).empty();
+                const auto raster = tilers::Raster::openInput(io::toUtf8(source));
+                opened[i] = raster && raster->file() == source && raster->bandCount() == 3;
             });
         for (auto &thread : threads)
             thread.join();
 
         for (int i = 0; i < kCallers; i++)
-        {
-            EXPECT_EQ(results[i], results[0]);
             EXPECT_TRUE(opened[i]) << i;
-        }
-        EXPECT_EQ(normalizedFiles().size(), 1u);
-        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
-            EXPECT_EQ(entry.path().filename().string(), "normalized") << "a request left " << entry.path();
+        EXPECT_EQ(helper_.validations, 1);
+        EXPECT_EQ(helper_.requests, 0);
     }
 
-    TEST_F(ArtefactCache, theCleanupRemovesTheCopiesThatNobodyAskedForAndKeepsTheFolder)
+    TEST_F(RasterInput, theCacheOfAnEarlierVersionIsRemoved)
     {
-        const fs::path old = makeRaster("old.tif");
-        const fs::path used = makeRaster("used.tif");
-        const fs::path fresh = makeRaster("fresh.tif");
-        const fs::path oldCopy = raster::artefactFor(old);
-        const fs::path usedCopy = raster::artefactFor(used);
-        const fs::path freshCopy = raster::artefactFor(fresh);
-
-        const auto longAgo = fs::file_time_type::clock::now() - std::chrono::hours(24 * 10);
-        fs::last_write_time(oldCopy, longAgo);
-        fs::last_write_time(usedCopy, longAgo);
-        // A copy that is asked for is not one nobody asked for
-        EXPECT_EQ(raster::artefactFor(used), usedCopy);
-
-        TilerHelper::cleanupUserCache();
-
-        EXPECT_FALSE(fs::exists(oldCopy));
-        EXPECT_TRUE(fs::exists(usedCopy));
-        EXPECT_TRUE(fs::exists(freshCopy));
-        EXPECT_TRUE(fs::is_directory(raster::normalizedDir()));
-
-        // And once everything is old, the folder stays and the next copy is made again
-        fs::last_write_time(freshCopy, longAgo);
-        fs::last_write_time(usedCopy, longAgo);
-        raster::cleanupArtefacts(60 * 60 * 24 * 5);
-        EXPECT_TRUE(normalizedFiles().empty());
-        EXPECT_EQ(raster::artefactFor(old), oldCopy);
-        EXPECT_TRUE(fs::exists(oldCopy));
+        const fs::path legacy = cache_ / "artefacts" / "normalized";
+        fs::create_directories(legacy);
+        std::ofstream(legacy / "0123.tif") << "a copy an earlier version kept";
+        raster::removeLegacyArtefactCache();
+        EXPECT_FALSE(fs::exists(cache_ / "artefacts"));
+        // Nothing to do the next time
+        raster::removeLegacyArtefactCache();
     }
 
     // ------------------------------------------------------------------ what cannot be copied
 
-    TEST_F(ArtefactCache, aRasterOfMoreThanABillionPixelsIsRefusedBeforeAnythingIsWritten)
+    TEST_F(RasterInput, theCopyOfARasterOfMoreThanABillionPixelsIsRefusedBeforeAnythingIsWritten)
     {
         // 40000 x 30000 pixels: a sparse file of a few kilobytes
         const fs::path source = area_->getPath("huge.tif");
@@ -534,7 +561,7 @@ namespace
         raster::ScopedRasterHelper real(raster::GdalUtilHelper::instance());
         try
         {
-            raster::artefactFor(source);
+            copyOf(source);
             FAIL() << "no exception";
         }
         catch (const raster::RasterNotReadException &e)
@@ -545,16 +572,12 @@ namespace
             EXPECT_NE(message.find("40000 x 30000"), std::string::npos) << message;
             static_assert(raster::kMaxNormalizePixels == 1000000000, "the limit is a billion pixels");
         }
-        // The analyses open it as they open anything: the limit is an error, not a missing file
-        EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(source)), raster::RasterNotReadException);
-
-        EXPECT_TRUE(normalizedFiles().empty());
-        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
-            EXPECT_EQ(entry.path().filename().string(), "normalized") << "a request left " << entry.path();
+        copies_.clear();
+        EXPECT_TRUE(requestFolders().empty()) << "a request left " << requestFolders().front();
     }
 
     // The operation of the helper itself, run in the process of the test
-    USER_OPEN_TEST_F(ArtefactCache, aSizeThatDoesNotFitIn32BitsIsCountedInFull)
+    USER_OPEN_TEST_F(RasterInput, aSizeThatDoesNotFitIn32BitsIsCountedInFull)
     {
         // 70000 x 70000 pixels: 4.9 billion, a sparse file of a few kilobytes
         const fs::path source = area_->getPath("wide.tif");
@@ -590,22 +613,20 @@ namespace
         return files;
     }
 
-    // The host reads no raster with GDAL: its rasters are read with ddb-tilers, on the copy the helper
-    // writes, and a host path that would open one with GDAL fails here
-    TEST_F(ArtefactCache, theHostOpensNoRasterWithGdal)
+    // The host reads no raster with GDAL: its rasters are read with ddb-tilers, and a host path that would
+    // open one with GDAL fails here
+    TEST_F(RasterInput, theHostOpensNoRasterWithGdal)
     {
         const fs::path source = makeRaster("raw.tif");
         EXPECT_THROW(raster::openInputRaster(io::toUtf8(source)), std::logic_error);
-        const auto read = tilers::Raster::openInput(io::toUtf8(source));
-        ASSERT_TRUE(read);
-        EXPECT_NE(read->file(), source) << "the host reads the copy";
+        EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(source)));
     }
 
     // The operations of the raster helper reach the code of the analyses that reads a raster by its
     // path (the thumbnail of a raster detects its sensor): in the helper, that code reads the file of
     // the request and asks no other helper for a copy in the cache, which a worker of the helper can
     // neither start nor write to
-    USER_OPEN_TEST_F(ArtefactCache, theRasterHelperReadsTheFileOfItsRequestAndAsksForNoCopy)
+    USER_OPEN_TEST_F(RasterInput, theRasterHelperReadsTheFileOfItsRequestAndAsksForNoCopy)
     {
         const fs::path source = makeRaster("raw.tif", 4);
 
@@ -614,7 +635,8 @@ namespace
         EXPECT_EQ(fs::path(opened->GetDescription()), source);
         EXPECT_EQ(opened->GetRasterCount(), 4);
         EXPECT_FALSE(raster::openInputRaster(io::toUtf8(area_->getPath("missing.tif"))));
-        EXPECT_THROW(raster::artefactFor(source), std::logic_error);
+        EXPECT_THROW(raster::inputFileFor(source), std::logic_error);
+        EXPECT_THROW(raster::isHostReadable(source), std::logic_error);
 
         // The thumbnail of a raster whose sensor it detects
         const fs::path out = area_->getPath("thumb.webp");
@@ -622,22 +644,23 @@ namespace
         EXPECT_GT(fs::file_size(out), 0u);
 
         EXPECT_EQ(helper_.requests, 0);
+        EXPECT_EQ(helper_.validations, 0);
         EXPECT_TRUE(filesUnder(cache_).empty()) << filesUnder(cache_).front();
     }
 
-    TEST_F(ArtefactCache, aFileThatIsNoRasterOpensAsNothing)
+    TEST_F(RasterInput, aFileThatIsNoRasterOpensAsNothing)
     {
         const fs::path text = area_->getPath("notes.tif");
         std::ofstream(text) << "this is not a TIFF";
         EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(text)));
         EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(area_->getPath("missing.tif"))));
-        EXPECT_THROW(raster::artefactFor(text), raster::RasterOpException);
-        EXPECT_TRUE(normalizedFiles().empty());
-        EXPECT_THROW(raster::artefactFor(area_->getPath("missing.tif")), FSException);
+        EXPECT_THROW(raster::inputFileFor(text), raster::RasterOpException);
+        EXPECT_THROW(raster::inputFileFor(area_->getPath("missing.tif")), FSException);
+        EXPECT_TRUE(requestFolders().empty());
     }
 
     // A VRT that names a file outside its folder is not copied: the copy would be its pixels
-    TEST_F(ArtefactCache, aRasterThatTheOpenPolicyRefusesIsNotCopied)
+    TEST_F(RasterInput, aRasterThatTheOpenPolicyRefusesIsNotCopied)
     {
         const fs::path secret = makeRaster("secret.tif");
         const fs::path vrt = area_->getPath("sub") / "view.vrt";
@@ -647,12 +670,12 @@ namespace
                            << io::toUtf8(secret)
                            << "</SourceFilename><SourceBand>1</SourceBand></SimpleSource></VRTRasterBand></VRTDataset>";
         EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(vrt)));
-        EXPECT_TRUE(normalizedFiles().empty());
+        EXPECT_TRUE(requestFolders().empty());
     }
 
     // ------------------------------------------------------------------ the analyses read through it
 
-    TEST_F(ArtefactCache, anAnalysisOfARawRasterReadsItsCopyAndGivesTheValuesOfTheRaster)
+    TEST_F(RasterInput, anAnalysisOfARawRasterGivesTheValuesOfTheRaster)
     {
         // A float raster with a no-data value, as a DEM
         const fs::path source = area_->getPath("dem.tif");
@@ -682,20 +705,21 @@ namespace
         const json point = json::parse(out);
         DDBFree(out);
         EXPECT_DOUBLE_EQ(point.at("value").get<double>(), 100.0 + 10 + 4 * 2.0);
-        EXPECT_EQ(helper_.requests, 1);
+        EXPECT_EQ(helper_.validations, 1);
 
-        // The point value is asked of the same copy
+        // The point value is read in place, with the answer of the validation
         ASSERT_EQ(DDBGetRasterPointValue(io::toUtf8(source).c_str(), 11, 4, &out), DDBERR_NONE) << DDBGetLastError();
         DDBFree(out);
-        EXPECT_EQ(helper_.requests, 1) << "the copy is made once for all the analyses";
+        EXPECT_EQ(helper_.validations, 1) << "the file is validated once for all the analyses";
 
-        // The no-data value is kept in the copy: the pixel left out of the statistics is not counted
+        // The no-data value is the file's: the pixel left out of the statistics is not counted
         ASSERT_EQ(DDBGetRasterAreaStats(io::toUtf8(source).c_str(), 0, 0, 39, 29, &out), DDBERR_NONE) << DDBGetLastError();
         const json stats = json::parse(out);
         DDBFree(out);
         EXPECT_DOUBLE_EQ(stats.at("min").get<double>(), 100.0);
         EXPECT_DOUBLE_EQ(stats.at("max").get<double>(), 100.0 + 39 + 29 * 2.0);
         EXPECT_EQ(stats.at("pixelCount").get<int>(), 40 * 30 - 1);
-        EXPECT_EQ(helper_.requests, 1);
+        EXPECT_EQ(helper_.requests, 0) << "no copy";
+        EXPECT_FALSE(fs::exists(cache_ / "artefacts"));
     }
 }

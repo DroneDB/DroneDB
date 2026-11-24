@@ -563,9 +563,9 @@ namespace
         int z = 0;
         BoundingBox<Projected2Di> b;
         {
-            RasterTiler t(TilerHelper::toGeoTIFF(path).string(), "", 256);
-            z = t.getMinMaxZ().max;
-            b = t.getMinMaxCoordsForZ(z);
+            const auto t = TilerHelper::rasterTilerFor(path, "", 256);
+            z = t->getMinMaxZ().max;
+            b = t->getMinMaxCoordsForZ(z);
         }
         const auto tile = [&](const char *formula, const char *rescale, int x, int y,
                               const DDBRasterOptions *options) {

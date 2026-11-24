@@ -299,10 +299,11 @@ namespace
                 out.push_back(item.first);
             return out;
         };
-        EXPECT_EQ(names(same.dataset), (std::vector<std::string>{"TIFFTAG_SOFTWARE", "NITF_BLOCKA_FRLC", "FLIGHT",
-                                                                  "NODATA_VALUES", "AREA_OR_POINT"}));
+        // Sorted as GDAL keeps the metadata a tool sets on its output
+        EXPECT_EQ(names(same.dataset), (std::vector<std::string>{"AREA_OR_POINT", "FLIGHT", "NITF_BLOCKA_FRLC",
+                                                                  "NODATA_VALUES", "TIFFTAG_SOFTWARE"}));
         EXPECT_EQ(same.xmp, kXmp);
-        EXPECT_EQ(names(same.bands[0]), (std::vector<std::string>{"WAVELENGTH", "STATISTICS_MINIMUM"}));
+        EXPECT_EQ(names(same.bands[0]), (std::vector<std::string>{"STATISTICS_MINIMUM", "WAVELENGTH"}));
         EXPECT_EQ(same.units, (std::vector<std::string>{"Celsius", "", "Celsius"}));
         EXPECT_EQ(same.scales, (std::vector<double>{0.1, 0.2, 0.30000000000000004}));
         EXPECT_EQ(same.descriptions[2], "band 3");
@@ -313,7 +314,7 @@ namespace
         EXPECT_EQ(scaled.offsets, (std::vector<double>{-5, -10, -15})) << "the scale and offset stay";
 
         const CopiedMetadata window = translatedMetadata(*source, {3, 1}, false, false);
-        EXPECT_EQ(names(window.dataset), (std::vector<std::string>{"TIFFTAG_SOFTWARE", "FLIGHT", "AREA_OR_POINT"}))
+        EXPECT_EQ(names(window.dataset), (std::vector<std::string>{"AREA_OR_POINT", "FLIGHT", "TIFFTAG_SOFTWARE"}))
             << "no NITF block of another extent, no NODATA_VALUES of other bands";
         EXPECT_EQ(window.descriptions, (std::vector<std::string>{"band 3", "band 1"}));
         EXPECT_EQ(window.bands.size(), 2u);

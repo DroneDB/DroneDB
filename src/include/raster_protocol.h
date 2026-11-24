@@ -34,7 +34,7 @@ namespace ddb
         // The version this side implements. A helper is accepted when its major version is the
         // same and its minor version is not lower.
         constexpr int kMajorVersion = 1;
-        constexpr int kMinorVersion = 5;
+        constexpr int kMinorVersion = 6;
 
         // The longest line of either side
         constexpr size_t kMaxLineBytes = 16 * 1024 * 1024;
@@ -116,6 +116,10 @@ namespace ddb
             // The exact statistics of the bands of a raster (new in 1.5), one-shot: params of
             // statisticsParamsFromJson, no `out`, the result {"bands": statisticsByBandToJson}
             constexpr const char *kStatistics = "statistics";
+            // Whether ddb-tilers reads a raster whole (new in 1.6), one-shot: params of
+            // validateParamsFromJson, no `out`, the result {"hostReadable": true, "bands":
+            // statisticsByBandToJson} or {"hostReadable": false, "reason"}
+            constexpr const char *kValidate = "validate";
         } // namespace op
 
         // An operation on a user's raster for a call of the host (not a build, not a read): one
@@ -415,6 +419,16 @@ namespace ddb
         json toJson(const StatisticsParams &params);
         // @throws ProtocolError
         StatisticsParams statisticsParamsFromJson(const json &params);
+
+        // The params of a `validate` (new in 1.6): the threads of the pass
+        struct ValidateParams
+        {
+            std::optional<int> threads;
+        };
+
+        json toJson(const ValidateParams &params);
+        // @throws ProtocolError
+        ValidateParams validateParamsFromJson(const json &params);
 
         // The params of a `rasterShapes`: the rasters (`inputs`, a path each as the inputs of a copc),
         // and whether their xml:XMP is asked for too (`xmp`)

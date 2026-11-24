@@ -10,7 +10,7 @@
   "output": {
     "abi": {
       "major": 2,
-      "minor": 12
+      "minor": 13
     },
     "cancellable": [
       "DDBApplyDelta",
@@ -20,6 +20,7 @@
       "DDBBuildEx2",
       "DDBBuildRasterStatistics",
       "DDBCalculateVolume",
+      "DDBCleanupCache",
       "DDBComputeDeltaLocals",
       "DDBDetectAllStockpiles",
       "DDBDetectStockpile",
@@ -96,6 +97,7 @@
       "DDBChattr",
       "DDBCheckpoint",
       "DDBCleanup",
+      "DDBCleanupCache",
       "DDBClearPasswords",
       "DDBComputeDeltaLocals",
       "DDBConfigure",

@@ -4,10 +4,9 @@
 #include "raster_artefacts.h"
 
 #include <algorithm>
-#include <chrono>
-#include <iomanip>
+#include <mutex>
 #include <optional>
-#include <sstream>
+#include <set>
 #include <system_error>
 #include <vector>
 
@@ -15,16 +14,14 @@
 #include "database.h"
 #include "entry_handler.h"
 #include "exceptions.h"
+#include "fileversion.h"
 #include "gdal_inc.h"
 #include "gdal_open_policy.h"
-#include "hash.h"
 #include "logger.h"
 #include "process_config.h"
-#include "raster_stats.h"
+#include "userprofile.h"
 #include "tilers_raster.h"
 #include "randomutil.h"
-#include "timeutil.h"
-#include "userprofile.h"
 
 #ifdef _WIN32
 #include "sandbox/sandbox.h"
@@ -49,18 +46,6 @@ namespace ddb
             {
                 const std::string text = io::toUtf8(path);
                 return text.rfind("/vsimem/", 0) == 0 && text.find("..") == std::string::npos;
-            }
-
-            // The scratch folders of the helper requests are named with this
-            constexpr const char *kRequestFolderMark = "req-";
-
-            // Whether `path` is below `folder`, both resolved (`path` is not `folder` itself)
-            bool isInside(const fs::path &path, const fs::path &folder)
-            {
-                const fs::path relative = path.lexically_relative(folder);
-                if (relative.empty() || relative == ".")
-                    return false;
-                return *relative.begin() != "..";
             }
 
             // The path under "<key>" (build_layout.h) of the build root that holds `path`, '/'-separated;
@@ -137,19 +122,69 @@ namespace ddb
             }
         } // namespace
 
-        fs::path artefactsDir()
-        {
-            return UserProfile::get()->getCachePath("artefacts");
-        }
-
         namespace
         {
-            constexpr const char *kNormalizedFolder = "normalized";
+            // The folder of the cache that held the artefact cache of earlier versions
+            constexpr const char *kLegacyArtefactsFolder = "artefacts";
+            // The folder of the cache that holds the folders of requests
+            constexpr const char *kRequestsFolder = "requests";
+
+            // The request folders this process holds (RequestFolder), by resolved place
+            std::mutex liveRequestsMutex;
+            std::set<std::string> liveRequests;
+
+            // Whether `resolved` (a cacheKeyPath) is inside the folder of a live request
+            bool inLiveRequest(const std::string &resolved)
+            {
+                const std::lock_guard lock(liveRequestsMutex);
+                return std::any_of(liveRequests.begin(), liveRequests.end(), [&](const std::string &folder) {
+                    return resolved != folder && isCacheKeyUnder(resolved, folder);
+                });
+            }
+
+            // The resolved place of `path` as the live requests are compared; empty when it cannot be resolved
+            std::string resolvedKey(const fs::path &path)
+            {
+                std::error_code ec;
+                const fs::path absolute = fs::absolute(path, ec);
+                if (ec)
+                    return {};
+                const fs::path resolved = fs::weakly_canonical(absolute, ec);
+                return ec ? std::string() : cacheKeyPath(resolved);
+            }
         } // namespace
 
-        fs::path normalizedDir()
+        fs::path requestsDir()
         {
-            return UserProfile::get()->getCachePath(fs::path("artefacts") / kNormalizedFolder);
+            return ProcessConfig::get().cacheDir() / kRequestsFolder;
+        }
+
+        bool isLiveRequestFolder(const fs::path &folder)
+        {
+            const std::string key = resolvedKey(folder);
+            const std::lock_guard lock(liveRequestsMutex);
+            return !key.empty() && liveRequests.count(key) != 0;
+        }
+
+        RequestFolder::RequestFolder(const std::string &prefix)
+        {
+            std::error_code ec;
+            fs::create_directories(requestsDir(), ec);
+            if (ec)
+                throw FSException("Cannot create " + io::toUtf8(requestsDir()), ec);
+            folder_ = makePrivateFolder(requestsDir(), prefix);
+            key_ = resolvedKey(folder_.path());
+            if (key_.empty())
+                throw FSException("Cannot resolve " + io::toUtf8(folder_.path()));
+            const std::lock_guard lock(liveRequestsMutex);
+            liveRequests.insert(key_);
+        }
+
+        RequestFolder::~RequestFolder()
+        {
+            // Not an artefact place any more before it is removed
+            const std::lock_guard lock(liveRequestsMutex);
+            liveRequests.erase(key_);
         }
 
         void requireArtefact(const fs::path &path)
@@ -173,35 +208,7 @@ namespace ddb
             if (const auto relative = buildRelativePath(resolved); relative && isReadableBuildOutput(*relative))
                 return true;
 
-            // The place of the artefacts folder, not created: the question is asked where the cache may
-            // not be written (a confined helper worker computing statistics), and a folder that does not
-            // exist holds no artefact
-            const fs::path folder = fs::weakly_canonical(ProcessConfig::get().cacheDir() / "artefacts", ec);
-            return !ec && isInside(resolved, folder);
-        }
-
-        void markArtefactUsed(const fs::path &file, std::initializer_list<fs::path> companions)
-        {
-            std::error_code ec;
-            const auto now = fs::file_time_type::clock::now();
-            const auto last = fs::last_write_time(file, ec);
-            if (!ec && now - last < std::chrono::seconds(kArtefactMarkSeconds))
-                return;
-            fs::last_write_time(file, now, ec);
-            for (const auto &companion : companions)
-                if (fs::exists(companion, ec))
-                    fs::last_write_time(companion, now, ec);
-        }
-
-        std::string artefactKey(const fs::path &source)
-        {
-            // The modification time with the fraction of the second the file system keeps: a raster
-            // replaced in the same second by one of the same size is another file
-            io::Path file(source);
-            const io::FileState state = file.getState();
-            std::ostringstream key;
-            key << io::toUtf8(source) << "*" << std::fixed << std::setprecision(6) << state.mtime << "*" << state.size;
-            return Hash::strCRC64(key.str());
+            return inLiveRequest(cacheKeyPath(resolved));
         }
 
         GDALDatasetUniquePtr openArtefactVector(const fs::path &path)
@@ -252,11 +259,6 @@ namespace ddb
             return folder;
         }
 
-        io::ScopedTempDir makeArtefactRequestFolder(const std::string &prefix)
-        {
-            return makePrivateFolder(artefactsDir(), kRequestFolderMark + prefix);
-        }
-
         void publishArtefact(const fs::path &produced, const fs::path &target)
         {
             std::error_code ec;
@@ -283,142 +285,20 @@ namespace ddb
             io::assureIsRemoved(produced);
         }
 
-        namespace
+        void removeLegacyArtefactCache()
         {
-            // Removes the entries of `folder` (files and folders) that were not touched since
-            // `threshold`, except the ones `keep` names
-            void removeOlderThan(const fs::path &folder, time_t threshold, const fs::path &keep)
-            {
-                std::error_code ec;
-                for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
-                {
-                    const fs::path entry = it->path();
-                    if (entry == keep)
-                        continue;
-                    try
-                    {
-                        if (io::Path(entry).getModifiedTime() < threshold)
-                            io::assureIsRemoved(entry);
-                    }
-                    catch (const std::exception &e)
-                    {
-                        // A file a reader still holds (Windows) stays until the next time
-                        LOGD << "Cannot remove the artefact " << io::toUtf8(entry) << ": " << e.what();
-                    }
-                }
-            }
-        } // namespace
-
-        void publishCachedArtefact(const fs::path &produced, const fs::path &target)
-        {
-            publishArtefact(produced, target);
-            trimArtefacts(target);
-        }
-
-        namespace
-        {
-            // A file of the cache and what it takes: an artefact counts with its statistics sidecar,
-            // which goes with it
-            struct CachedFile
-            {
-                fs::path path;
-                uint64_t bytes = 0;
-                time_t used = 0;
-            };
-
-            void addCachedFiles(const fs::path &folder, std::vector<CachedFile> &files)
-            {
-                std::error_code ec;
-                for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
-                {
-                    std::error_code statEc;
-                    if (!it->is_regular_file(statEc) || statEc)
-                        continue;
-                    const fs::path file = it->path();
-                    // A sidecar is counted with its raster
-                    const std::string name = io::toUtf8(file.filename());
-                    if (name.size() > 11 && name.compare(name.size() - 11, 11, ".stats.json") == 0 &&
-                        fs::exists(file.parent_path() / io::fromUtf8(name.substr(0, name.size() - 11)), statEc))
-                        continue;
-                    CachedFile entry{file, it->file_size(statEc), 0};
-                    if (statEc)
-                        continue;
-                    const fs::path sidecar = statsSidecarOf(file);
-                    if (fs::exists(sidecar, statEc))
-                        entry.bytes += fs::file_size(sidecar, statEc);
-                    try
-                    {
-                        entry.used = io::Path(file).getModifiedTime();
-                    }
-                    catch (const std::exception &)
-                    {
-                        continue; // gone meanwhile
-                    }
-                    files.push_back(std::move(entry));
-                }
-            }
-        } // namespace
-
-        void trimArtefacts(const fs::path &keep)
-        {
-            const uint64_t maxBytes = ProcessConfig::get().artefactCacheMb() * 1024 * 1024;
-            if (maxBytes == 0)
+            // Looked at, not made: the cache folder may not exist yet
+            const fs::path legacy = ProcessConfig::get().cacheDir() / kLegacyArtefactsFolder;
+            std::error_code ec;
+            if (!fs::exists(fs::symlink_status(legacy, ec)))
                 return;
-            std::vector<CachedFile> files;
-            // Looked at, not made: a folder that is not there holds nothing
-            const fs::path artefacts = artefactsDir();
-            addCachedFiles(artefacts, files);
-            addCachedFiles(artefacts / kNormalizedFolder, files);
-            uint64_t total = 0;
-            for (const auto &f : files)
-                total += f.bytes;
-            if (total <= maxBytes)
-                return;
-
-            // The least recently used first
-            std::sort(files.begin(), files.end(), [](const CachedFile &a, const CachedFile &b) { return a.used < b.used; });
-            const time_t inUse = currentUnixTimestamp() - kArtefactInUseSeconds - kArtefactMarkSeconds;
-            uint64_t removed = 0;
-            for (const auto &f : files)
-            {
-                if (total <= maxBytes || f.used >= inUse)
-                    break;
-                if (f.path == keep)
-                    continue;
-                try
-                {
-                    io::assureIsRemoved(f.path);
-                    io::assureIsRemoved(statsSidecarOf(f.path));
-                    total -= f.bytes;
-                    removed++;
-                }
-                catch (const std::exception &e)
-                {
-                    // A file a reader still holds (Windows) stays until the next time
-                    LOGD << "Cannot remove the artefact " << io::toUtf8(f.path) << ": " << e.what();
-                }
-            }
-            if (removed != 0)
-            {
-                LOGD << "Artefact cache trimmed: " << removed << " file(s) removed, " << total / (1024 * 1024)
-                     << " MiB left (bound " << maxBytes / (1024 * 1024) << " MiB)";
-            }
-            if (total > maxBytes)
-            {
-                LOGD << "Artefact cache above its bound (" << total / (1024 * 1024)
-                     << " MiB): the rest was used in the last " << kArtefactInUseSeconds << " s";
-            }
-        }
-
-        void cleanupArtefacts(time_t maxAge)
-        {
-            const time_t threshold = currentUnixTimestamp() - maxAge;
-            // The folder of the normalized copies stays: it is the files in it that age, and it
-            // changes only when one is added or removed. It is looked at, not made: the clean-up
-            // runs on the way of any tile request
-            const fs::path normalized = artefactsDir() / kNormalizedFolder;
-            removeOlderThan(artefactsDir(), threshold, normalized);
-            removeOlderThan(normalized, threshold, fs::path());
+            const auto removed = fs::remove_all(legacy, ec);
+            if (ec)
+                LOGW << "Cannot remove the artefact cache of an earlier version, " << io::toUtf8(legacy) << ": "
+                     << ec.message();
+            else
+                LOGI << "Removed the artefact cache of an earlier version, " << io::toUtf8(legacy) << " (" << removed
+                     << " files)";
         }
 
     } // namespace raster

@@ -91,9 +91,9 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createNegativeRaster(ta.getPath("neg.tif"), 512, 512);
-        RasterTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
-        const int tz = t.getMinMaxZ().max;
-        const auto b = t.getMinMaxCoordsForZ(tz);
+        const auto t = TilerHelper::rasterTilerFor(raster, "", 256);
+        const int tz = t->getMinMaxZ().max;
+        const auto b = t->getMinMaxCoordsForZ(tz);
         // The brightest valid pixel over all tiles must be stretched to (close to)
         // 255. With globalMax == numeric_limits<double>::min() the range is
         // [-500, ~0] and the max value -100 lands at ~204.
@@ -104,7 +104,7 @@ namespace
             {
                 uint8_t *buf = nullptr;
                 int size = 0;
-                t.tile(tz, tx, ty, &buf, &size);
+                t->tile(tz, tx, ty, &buf, &size);
                 ASSERT_NE(buf, nullptr);
                 brightest = std::max(brightest, pngMaxBand1(buf, size));
                 VSIFree(buf);

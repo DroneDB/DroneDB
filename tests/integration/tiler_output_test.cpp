@@ -287,15 +287,15 @@ namespace
         TestArea ta(TEST_NAME, true);
         const auto tif =
             writeRaster(ta, "raster.tif", {1000003.0, 7.0, 0.0, 5000635.0, 0.0, -7.0}, 50, 30, true);
-        RasterTiler tiler(io::toUtf8(TilerHelper::toGeoTIFF(tif)), io::toUtf8(ta.getFolder("rendered")));
+        const auto tiler = TilerHelper::rasterTilerFor(tif, io::toUtf8(ta.getFolder("rendered")));
 
         for (int z = 13; z <= 18; z++)
         {
             std::set<std::array<int, 3>> showing;
-            const auto bounds = tiler.getMinMaxCoordsForZ(z);
+            const auto bounds = tiler->getMinMaxCoordsForZ(z);
             for (int x = bounds.min.x; x <= bounds.max.x; x++)
                 for (int y = bounds.min.y; y <= bounds.max.y; y++)
-                    if (showsAPixel(tiler.tile(z, x, y)))
+                    if (showsAPixel(tiler->tile(z, x, y)))
                         showing.insert({z, x, flippedRow(z, y)}); // the tiler takes TMS rows
             ASSERT_FALSE(showing.empty()) << z;
             EXPECT_EQ(listedTiles(ta, tif, std::to_string(z)), showing) << "zoom level " << z;

@@ -298,7 +298,7 @@ namespace ddb
         {
             return name == op::kMask || name == op::kRasterShapes || name == op::kResizeImages || name == op::kMergeBands ||
                    name == op::kMergePreview || name == op::kAlign || name == op::kAlignValidation ||
-                   name == op::kStatistics;
+                   name == op::kStatistics || name == op::kValidate;
         }
 
         bool outIsFolder(std::string_view name)
@@ -1370,6 +1370,20 @@ namespace ddb
             }
             result.threads = buildThreadsFromJson(params);
             return result;
+        }
+
+        json toJson(const ValidateParams &params)
+        {
+            json result = json::object();
+            setBuildThreads(result, params.threads);
+            return result;
+        }
+
+        ValidateParams validateParamsFromJson(const json &params)
+        {
+            if (!params.is_object())
+                throw ProtocolError("the validate params are not an object");
+            return ValidateParams{buildThreadsFromJson(params)};
         }
 
     } // namespace raster

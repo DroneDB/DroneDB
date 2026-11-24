@@ -10,6 +10,7 @@
 // tests/contract/README.md. The drone image fixtures, which need a downloaded asset, are in
 // tests/integration/contract_drone_image_test.cpp.
 
+#include <chrono>
 #include <fstream>
 #include <memory>
 #include <set>
@@ -22,6 +23,7 @@
 #include "json.h"
 #include "json_schema_check.h"
 #include "mio.h"
+#include "scoped_temp_folder.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
@@ -415,6 +417,29 @@ namespace
              "\"minFreeDiskMb\": 256}), then DDBGetEffectiveConfig()",
              "effective-config.schema.json", contract::pathPlaceholders(cache, "<cache>"), {"hardwareThreads"}, {}},
             contract::takeJson(out));
+    }
+
+    // The cleanup of a cache with one old download and the artefact cache of an earlier version, the temporary
+    // folder empty
+    TEST(ContractFixturesConfig, CacheCleanup)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path cache = ta.getFolder("cache");
+        const testutils::ScopedTempFolder temp(ta.getFolder("tmp"));
+        const ScopedProcessConfig configured(json{{"cacheDir", ddb::io::toUtf8(cache)}}.dump());
+        fs::create_directories(cache / "tiles");
+        std::ofstream(cache / "tiles" / "c3d4-e5f6.tif", std::ios::binary) << std::string(200, 'x');
+        fs::last_write_time(cache / "tiles" / "c3d4-e5f6.tif",
+                            fs::file_time_type::clock::now() - std::chrono::hours(24 * 8));
+        fs::create_directories(cache / "artefacts" / "normalized");
+        std::ofstream(cache / "artefacts" / "normalized" / "0123.tif", std::ios::binary) << std::string(600, 'x');
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBCleanupCache(nullptr, &out));
+        contract::expectMatchesFixture({"cache-cleanup",
+                                        "A cache with a download of 200 bytes changed 8 days ago and the artefact "
+                                        "cache of an earlier version (600 bytes), the temporary folder empty",
+                                        "DDBCleanupCache(NULL)", "cache-cleanup.schema.json", {}, {}, {}},
+                                       contract::takeJson(out));
     }
 
     TEST_F(ContractFixtures, Stac)

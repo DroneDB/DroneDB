@@ -940,9 +940,14 @@ namespace ddb
         const auto entry = entryFor(path);
         if (entry->version.empty())
             return; // not a local file: nothing to keep them for
-        std::lock_guard<std::mutex> lock(entry->mutex);
-        for (const auto &[band, stats] : bands)
-            entry->bands.emplace(std::to_string(band) + "|" + nodataKey(std::nullopt), stats);
+        uint64_t taken = 0;
+        {
+            std::lock_guard<std::mutex> lock(entry->mutex);
+            for (const auto &[band, stats] : bands)
+                taken += entry->bands.emplace(std::to_string(band) + "|" + nodataKey(std::nullopt), stats).second ? 1 : 0;
+        }
+        std::lock_guard<std::mutex> countersLock(mutex_);
+        counters_.adopted += taken;
     }
 
     std::pair<double, double> approximateMinMax(const RasterSource &source, int band)

@@ -659,9 +659,9 @@ namespace
 
         // A tile of the raster at its deepest zoom level (the tiler that gives it is closed first)
         const auto [zoom, tile] = [&] {
-            RasterTiler tiler(TilerHelper::toGeoTIFF(dem).string(), "", 256, false);
-            const auto z = tiler.getMinMaxZ();
-            return std::make_pair(z.max, tiler.getMinMaxCoordsForZ(z.max).min);
+            const auto tiler = TilerHelper::rasterTilerFor(dem, "", 256, false);
+            const auto z = tiler->getMinMaxZ();
+            return std::make_pair(z.max, tiler->getMinMaxCoordsForZ(z.max).min);
         }();
         uint8_t *bytes = nullptr;
         int size = 0;

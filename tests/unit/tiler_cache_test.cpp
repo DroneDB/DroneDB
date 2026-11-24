@@ -10,13 +10,16 @@
 #include <chrono>
 #include <fstream>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <vector>
 
 #include "open_descriptors.h"
+#include "cog.h"
 #include "ddb.h"
 #include "raster_tiler.h"
 #include "mio.h"
+#include "raster_artefacts.h"
 #include "raster_cache.h"
 #include "raster_stats.h"
 #include "raster_test_utils.h"
@@ -42,9 +45,9 @@ namespace
     // Every tile of the deepest zoom of the raster (XYZ)
     std::vector<TileRef> maxZoomTiles(const fs::path &raster)
     {
-        RasterTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
-        const int z = t.getMinMaxZ().max;
-        auto b = t.getMinMaxCoordsForZ(z);
+        const auto t = TilerHelper::rasterTilerFor(raster, "", 256);
+        const int z = t->getMinMaxZ().max;
+        auto b = t->getMinMaxCoordsForZ(z);
         std::vector<TileRef> tiles;
         for (int x = b.min.x; x <= b.max.x; x++)
             for (int y = b.min.y; y <= b.max.y; y++)
@@ -146,15 +149,16 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("float.tif"), floatRamp(0, 500));
-        // The COG the tiles come from has the sidecar the COG build writes; here it claims a
+        // A COG of libddb (as a build writes it) with the sidecar the COG build writes; here it claims a
         // range twice the data's
-        const auto cog = TilerHelper::toGeoTIFF(raster);
+        const fs::path cog = artefactFolder() / (TEST_NAME + ".tif");
+        buildCog(raster.string(), cog.string());
         std::ofstream(cog.string() + ".stats.json")
             << R"({"version":2,"exact":true,"bands":{"1":{"min":0,"max":1000,"mean":500,"std":100,"valid":262144,"total":262144}}})";
 
         int brightest = 0;
-        for (const auto &t : maxZoomTiles(raster))
-            brightest = std::max(brightest, maxOfBand(decodeImage(memoryTile(raster, t)), 0));
+        for (const auto &t : maxZoomTiles(cog))
+            brightest = std::max(brightest, maxOfBand(decodeImage(memoryTile(cog, t)), 0));
         EXPECT_NEAR(brightest, 127, 2) << "500 of [0, 1000] is mid grey: ddb-tilers stretched with the sidecar";
     }
 
@@ -264,45 +268,73 @@ namespace
 #ifdef __linux__
     using testutil::openDescriptorsOf;
 
-    // ddb-tilers keeps the COG open between tiles; DDBReleaseConnections closes it
-    TEST(TilerCache, releaseConnectionsClosesTheCogOfTheTiles)
+    // The COGs the tilers of this process read for the rasters of users: one in each request folder
+    std::set<fs::path> requestCogs()
     {
-        TestArea ta(TEST_NAME, true);
-        const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
+        std::set<fs::path> cogs;
+        std::error_code ec;
+        for (const auto &e : fs::directory_iterator(raster::requestsDir(), ec))
+            if (fs::exists(e.path() / "cog.tif"))
+                cogs.insert(e.path() / "cog.tif");
+        return cogs;
+    }
+
+    // The COG the tiles of `raster` made (the request cogs that were not there before)
+    fs::path cogOfTheTiles(const fs::path &raster, const std::set<fs::path> &before)
+    {
         memoryTile(raster, fullTile(raster));
-        const fs::path cog = TilerHelper::toGeoTIFF(raster);
-        EXPECT_GE(openDescriptorsOf(cog), 1);
-        int closed = 0;
-        ASSERT_EQ(DDBReleaseConnections(ta.getFolder().string().c_str(), &closed), DDBERR_NONE);
-        EXPECT_EQ(openDescriptorsOf(cog), 0);
+        std::vector<fs::path> made;
+        for (const auto &cog : requestCogs())
+            if (before.count(cog) == 0)
+                made.push_back(cog);
+        EXPECT_FALSE(made.empty()) << "the tiles of the raster read no COG of a request";
+        return made.empty() ? fs::path() : made.back();
     }
 
     // Open descriptors of this process on a file that was replaced or deleted after it was opened
-    int openReplacedFiles(const fs::path &path)
+    int openRemovedFiles(const fs::path &path)
     {
-        const std::string replaced = fs::weakly_canonical(path).string() + " (deleted)";
+        const std::string removed = fs::weakly_canonical(path).string() + " (deleted)";
         int n = 0;
         for (const auto &e : fs::directory_iterator("/proc/self/fd"))
         {
             std::error_code ec;
-            if (fs::read_symlink(e.path(), ec).string() == replaced && !ec)
+            if (fs::read_symlink(e.path(), ec).string() == removed && !ec)
                 ++n;
         }
         return n;
     }
 
-    // A forced conversion makes the COG again: what reads the one it replaces is closed first
-    // (Windows replaces no file a process holds open), ddb-tilers' copy of it included
-    TEST(TilerCache, aForcedConversionClosesTheCogItReplaces)
+    // ddb-tilers keeps the COG open between tiles; DDBReleaseConnections closes it, and the COG of a request
+    // goes with its tiler
+    TEST(TilerCache, releaseConnectionsClosesTheCogOfTheTiles)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
-        memoryTile(raster, fullTile(raster));
-        const fs::path cog = TilerHelper::toGeoTIFF(raster);
+        const fs::path cog = cogOfTheTiles(raster, requestCogs());
         EXPECT_GE(openDescriptorsOf(cog), 1);
-        EXPECT_EQ(TilerHelper::toGeoTIFF(raster, true), cog);
-        EXPECT_EQ(openReplacedFiles(cog), 0) << "the replaced COG is still open";
-        EXPECT_EQ(openDescriptorsOf(cog), 0);
+        int closed = 0;
+        ASSERT_EQ(DDBReleaseConnections(ta.getFolder().string().c_str(), &closed), DDBERR_NONE);
+        EXPECT_EQ(openRemovedFiles(cog), 0) << "the COG was removed while it was open";
+        EXPECT_FALSE(fs::exists(cog.parent_path())) << "the request folder of the tiles is left";
+    }
+
+    // A forced tile makes the COG again: the tiler of the one before, and what reads that COG, are closed
+    // before its request folder goes (Windows removes no file a process holds open), ddb-tilers' copy included
+    TEST(TilerCache, aForcedTileClosesTheCogItReplaces)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
+        const fs::path cog = cogOfTheTiles(raster, requestCogs());
+        EXPECT_GE(openDescriptorsOf(cog), 1);
+
+        uint8_t *buf = nullptr;
+        int size = 0;
+        const TileRef tile = fullTile(raster);
+        TilerHelper::getTile(inMemory(testTile(raster, tile.z, tile.x, tile.y, 256, false, true), &buf, &size));
+        takeBuffer(buf, size);
+        EXPECT_EQ(openRemovedFiles(cog), 0) << "the replaced COG is still open";
+        EXPECT_FALSE(fs::exists(cog.parent_path())) << "the request folder of the replaced COG is left";
     }
 #endif
 

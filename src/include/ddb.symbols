@@ -29,6 +29,7 @@ DDBCancel
 DDBChattr
 DDBCheckpoint
 DDBCleanup
+DDBCleanupCache
 DDBClearPasswords
 DDBComputeDeltaLocals
 DDBConfigure

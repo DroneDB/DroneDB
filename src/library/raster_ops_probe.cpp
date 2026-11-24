@@ -17,7 +17,7 @@
 #include <system_error>
 #include <vector>
 
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "cad.h"
 #include "cog_utils.h"
 #include "coordstransformer.h"

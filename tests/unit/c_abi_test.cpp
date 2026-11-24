@@ -23,6 +23,7 @@
 #include "ddb.h"
 #include "gdal_inc.h"
 #include "raster_artefacts.h"
+#include "raster_input.h"
 #include "raster_tiler.h"
 #include "tilerhelper.h"
 #include "gtest/gtest.h"
@@ -555,9 +556,9 @@ namespace
         // other runs nor leaves its own in the user's profile
         const ScopedProcessConfig cache(json{{"cacheDir", ta.getPath("cache").string()}}.dump());
         const auto raster = smallRaster(ta.getPath("ortho.tif"), 3, 512).string();
-        RasterTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256);
-        const int z = tiler.getMinMaxZ().max;
-        const auto bounds = tiler.getMinMaxCoordsForZ(z);
+        const auto tiler = TilerHelper::rasterTilerFor(raster, "", 256);
+        const int z = tiler->getMinMaxZ().max;
+        const auto bounds = tiler->getMinMaxCoordsForZ(z);
         const int x = bounds.min.x;
         const int y = bounds.min.y;
         char *tilePath = nullptr;
@@ -639,14 +640,9 @@ namespace
         spec.bands = 2;
         const auto twoBands = testutils::createGeoRaster(ta.getPath("two.tif"), spec).string();
 
-        const auto normalizedCopies = [] {
-            std::error_code ec;
-            const fs::path folder = raster::normalizedDir();
-            return fs::exists(folder, ec) ? std::distance(fs::directory_iterator(folder, ec), fs::directory_iterator()) : 0;
-        };
-        const auto before = normalizedCopies();
+        const uint64_t before = raster::inputCopiesMade();
         ASSERT_DDB_OK(DDBMaskBorders(input.c_str(), ta.getPath("masked.tif").string().c_str(), 15, false));
-        EXPECT_EQ(normalizedCopies(), before) << "the host made a copy of the input";
+        EXPECT_EQ(raster::inputCopiesMade(), before) << "the host made a copy of the input";
 
         DDBMaskBordersOptions options{};
         options.structSize = sizeof(options);

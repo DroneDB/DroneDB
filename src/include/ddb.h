@@ -140,7 +140,10 @@ extern "C"
      * and bands of a raster in DDBGetRasterInfo.
      * ABI 2.12 (libddb 2.12.0, 0x0002000C) adds DDBGetRasterValueInfoEx2: the value info of the file of an entry,
      * with the statistics its COG build counted in the uploaded file (the "sourceStatistics" member of the
-     * raster.cog artifact, which DDBBuildRasterStatistics also writes). */
+     * raster.cog artifact, which DDBBuildRasterStatistics also writes).
+     * ABI 2.13 (libddb 2.13.0, 0x0002000D) adds DDBCleanupCache: the removal of what the cache and the temporary
+     * folder kept past an age. libddb keeps no artefact cache any more (the setting "artefactCacheMb" is
+     * retired), and the raster helper it needs speaks protocol 1.6. */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -189,13 +192,10 @@ extern "C"
      *                    bound only: DDBRegisterProcess lowers GDAL's cache to it, never raises
      *                    it, and leaves a GDAL_CACHEMAX set explicitly alone. Put back to null,
      *                    the cache GDAL had before DDBConfigure is restored and bounded again.
-     *   "artefactCacheMb" integer 0..10^13, env DDB_ARTEFACT_CACHE_MB, default 4096.
-     *                    The bound in MiB of the artefact cache (cacheDir/artefacts): the COG
-     *                    the raster helper writes for the tiles of each photo or raster of a user
-     *                    shown on a map, and the normalized copies of rasters. When a new one
-     *                    takes it past the bound, the least recently used files are removed (not
-     *                    one used in the last 5 minutes). 0: no bound; files not used for 5 days
-     *                    are removed either way.
+     *   "artefactCacheMb" integer 0..10^13, env DDB_ARTEFACT_CACHE_MB, default 0. Retired in 2.13:
+     *                    accepted, checked and reported, and does nothing. libddb keeps no artefact
+     *                    cache: it reads in place the GeoTIFFs of users that ddb-tilers reads whole,
+     *                    and any other raster through a copy that lives as long as its reader.
      *   "cacheDir"       absolute folder path (UTF-8), default the profile folder: DDB_HOME/.ddb
      *                    when DDB_HOME is set (source "environment"), else the home folder's .ddb.
      *                    Where libddb caches thumbnails, tiles, index templates and DSM tiles
@@ -233,6 +233,24 @@ extern "C"
      * @return DDBERR_NONE; DDBERR_INVALIDARGS when output is NULL; DDBERR_EXCEPTION when the
      *         default cache folder cannot be found (no DDB_HOME, HOME or USERPROFILE) */
     DDB_DLL DDBErr DDBGetEffectiveConfig(char **output);
+
+    /** Removes what libddb's cache (the "cacheDir" setting) and the temporary folder of the system kept past
+     * an age, by the last change of each entry (new in 2.13). A host runs it now and then (the Registry, once a
+     * day); a tile request also runs it with the default ages, one in a thousand.
+     *   "tiles"     the folders of rendered tiles, level by level (default 5 days)
+     *   "downloads" the copies of remote rasters a tile request downloaded (default 7 days)
+     *   "dsm"       the elevation tiles of the DSM service (default 30 days)
+     *   "requests"  the folders of requests to the raster helper that no request of this process holds, and
+     *   "temp"      libddb's folders in the temporary folder: what a crash left (default 2 days)
+     *   "artefacts" the artefact cache of an earlier version, whatever its age
+     * Entries that vanish meanwhile are skipped; one that cannot be removed (a reader holds it on Windows)
+     * stays for the next time. Cancellable between entries.
+     * @param optionsJson NULL or "" for the defaults, or a JSON object of "tileDays", "downloadDays",
+     *        "dsmDays", "tempDays" (whole numbers from 0 to 36500) and "dryRun" (true: count, remove nothing)
+     * @param output pointer to C-string where to store the JSON (free with DDBFree):
+     *        {"dryRun": bool, "kinds": {kind: {"entries": n, "bytes": n}}}, every kind above
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS for bad options or a NULL output; DDBERR_CANCELED */
+    DDB_DLL DDBErr DDBCleanupCache(const char *optionsJson, char **output);
 
     /* Shutdown (new in 2.0). A host calls DDBShutdown once, when it stops (after it
      * stopped sending work), so that the index files are left whole and the log is written out

@@ -606,9 +606,8 @@ void expectSameImage(const RasterImage& a, const RasterImage& b) {
 // The thumbnail is rendered in this process as the raster helper renders it, so the test is the helper (its
 // statistics are those of this process)
 USER_OPEN_TEST_F(StyledBandRender, theThumbnailOfALargeBandWithAColormapIsStretchedOverTheSampleOfTheThumbnails) {
-    // Under the artefacts folder: a file libddb wrote, whose exact statistics go to its sidecar
-    fs::create_directories(raster::artefactsDir());
-    const fs::path raster = raster::artefactsDir() / (TEST_NAME + "-large.tif");
+    // In a folder of artefacts: a file libddb wrote, whose exact statistics go to its sidecar
+    const fs::path raster = testutils::artefactFolder() / (TEST_NAME + "-large.tif");
     const fs::path sidecar = statsSidecarOf(raster);
     fs::remove(raster);
     fs::remove(sidecar);

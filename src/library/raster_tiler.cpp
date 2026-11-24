@@ -48,6 +48,20 @@ namespace ddb
     {
     }
 
+    RasterTiler::~RasterTiler()
+    {
+        // ddb-tilers keeps the files it tiles open between tiles: the COG of a request folder is
+        // closed before the folder goes (Windows removes no open file); the other files open again
+        // on their next tile
+        if (request_)
+            ddbtReleaseSources();
+    }
+
+    void RasterTiler::keep(std::unique_ptr<raster::RequestFolder> request)
+    {
+        request_ = std::move(request);
+    }
+
     std::optional<BoundingBox<Projected2D>> RasterTiler::contentBounds() const
     {
         std::call_once(contentOnce, [this] {

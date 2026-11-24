@@ -36,7 +36,6 @@
 #include <vector>
 
 #include "c_api_util.h"
-#include "artefact_cache.h"
 #include "cancellation.h"
 #include "databasepool.h"
 #include "dbops.h"
@@ -49,6 +48,7 @@
 #include "json.h"
 #include "odm_project_support.h"
 #include "parallel.h"
+#include "raster_input.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
@@ -286,6 +286,7 @@ std::map<std::string, std::function<DDBErr()>> cancellableCalls(Inputs& in) {
                                            text);
              });
          }},
+        {"DDBCleanupCache", [=] { return withString([&](char** text) { return DDBCleanupCache(nullptr, text); }); }},
         {"DDBComputeDeltaLocals",
          [=] {
              ddb::Delta d;
@@ -590,11 +591,11 @@ TEST_F(CancelToken, canceledExportsLogNoErrors) {
         }
     } reset;
 
-    // The raster helper copies the rasters of the calls once. A canceled call stops before it asks
-    // the helper, so the copies are made first: the canceled calls then reach GDAL, which is what
-    // the test looks at.
+    // The raster helper validates the rasters of the calls once. A canceled call stops before it asks
+    // the helper, so they are validated first: the canceled calls then reach GDAL, which is what the
+    // test looks at.
     for (const auto& raster : {in.raster, in.raster5, in.dem})
-        raster::artefactFor(raster);
+        ASSERT_TRUE(raster::isHostReadable(raster)) << raster;
     for (const auto& [name, call] : cancellableCalls(in)) {
         SCOPED_TRACE(name);
         HostToken token;
@@ -614,7 +615,7 @@ TEST_F(CancelToken, canceledExportsLogNoErrors) {
         argv.AddString("GTiff");
         GDALTranslateOptions* options = GDALTranslateOptionsNew(argv.List(), nullptr);
         progress.attach(options);
-        GDALDatasetH source = GDALOpen(raster::artefactFor(in.dem).string().c_str(), GA_ReadOnly);
+        GDALDatasetH source = GDALOpen(in.dem.string().c_str(), GA_ReadOnly);
         ASSERT_NE(source, nullptr);
         GDALDatasetH copy =
             GDALTranslate(in.area.getPath("canceled.tif").string().c_str(), source, options, nullptr);

@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "exif.h"
 #include "raster_helper.h"
 #include "gdal_raii.h"

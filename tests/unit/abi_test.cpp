@@ -83,14 +83,15 @@ namespace
     // covers a geometry); 2.11 adds DDBBuildRasterStatistics (the statistics of a built COG written next to it,
     // the statistics member of the raster.cog artifact, the formulas of DDBGetRasterInfo); 2.12 adds
     // DDBGetRasterValueInfoEx2 (the value info of an entry, with the statistics its COG build counted in the
-    // uploaded file, the sourceStatistics member of the raster.cog artifact).
+    // uploaded file, the sourceStatistics member of the raster.cog artifact); 2.13 adds DDBCleanupCache (the
+    // removal of what the cache and the temporary folder kept past an age; no artefact cache any more).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_12)
+    TEST(AbiVersion, is2_13)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 12);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x0002000Cu);
+        EXPECT_EQ(DDB_ABI_MINOR, 13);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x0002000Du);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

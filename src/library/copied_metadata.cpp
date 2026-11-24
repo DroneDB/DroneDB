@@ -24,7 +24,18 @@ namespace ddb
                    });
         }
 
-        // The items of a metadata list GTiff writes (CPLParseNameValue), but those `skip` names, in order
+        // Whether name `a` goes before name `b` in a sorted list of GDAL (CPLCompareKeyValueString): byte by
+        // byte in upper case, a name that ends first before the longer one
+        bool beforeAsGdalSorts(const std::string &a, const std::string &b)
+        {
+            return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(), [](char x, char y) {
+                return std::toupper(static_cast<unsigned char>(x)) < std::toupper(static_cast<unsigned char>(y));
+            });
+        }
+
+        // The items of a metadata list GTiff writes (CPLParseNameValue), but those `skip` names, in the order
+        // the output of a tool has them: GDAL keeps the metadata a tool sets on its output sorted by name
+        // (GDALMultiDomainMetadata::SetMetadata), whatever the order of the source
         template <typename Skip> CopiedMetadata::Items itemsOf(const std::vector<std::string> &list, Skip skip)
         {
             CopiedMetadata::Items items;
@@ -35,6 +46,8 @@ namespace ddb
                 if (auto pair = gdalmeta::parseNameValue(item))
                     items.push_back(std::move(*pair));
             }
+            std::stable_sort(items.begin(), items.end(),
+                             [](const auto &a, const auto &b) { return beforeAsGdalSorts(a.first, b.first); });
             return items;
         }
 

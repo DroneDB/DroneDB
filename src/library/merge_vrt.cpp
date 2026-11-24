@@ -4,8 +4,8 @@
 #include "merge_vrt.h"
 
 #include "exceptions.h"
-#include "artefact_cache.h"
 #include "logger.h"
+#include "raster_input.h"
 
 namespace ddb::merge {
 

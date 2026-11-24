@@ -1519,14 +1519,14 @@ namespace
         int z, x, y;
     };
 
-    // The artefacts this process still holds open after they were replaced (Linux lists them in /proc/self/fd as
-    // "<path> (deleted)"; elsewhere none are reported). Windows replaces no file a process holds open: there the
-    // request that replaced it fails, so a replaced artefact held open here is a tile request that fails there.
+    // The files of request folders this process still holds open after they were removed (Linux lists them in
+    // /proc/self/fd as "<path> (deleted)"; elsewhere none are reported). Windows removes no file a process holds
+    // open: there the folder of the request stays behind, so a removed file held open here is one left there.
     std::vector<std::string> replacedArtefactsHeldOpen()
     {
         std::vector<std::string> held;
 #ifdef __linux__
-        const std::string prefix = fs::weakly_canonical(raster::artefactsDir()).string() + "/";
+        const std::string prefix = fs::weakly_canonical(raster::requestsDir()).string() + "/";
         std::error_code ec;
         for (const auto &fd : fs::directory_iterator("/proc/self/fd", ec))
         {
@@ -1549,7 +1549,7 @@ namespace
                                             nullptr, nullptr, nullptr, nullptr, nullptr, options, &buffer, &size);
         EXPECT_EQ(err, DDBERR_NONE) << DDBGetLastError();
         EXPECT_EQ(replacedArtefactsHeldOpen(), std::vector<std::string>{})
-            << "the COG was replaced under a reader: Windows refuses to replace it";
+            << "the COG was removed under a reader: Windows refuses to remove it";
         const auto image = testutils::decodeImage(buffer, static_cast<size_t>(size));
         DDBVSIFree(buffer);
         return image;
@@ -1569,9 +1569,9 @@ namespace
         int z = 0;
         BoundingBox<Projected2Di> b;
         {
-            RasterTiler t(TilerHelper::toGeoTIFF(raster).string(), "", 256);
-            z = t.getMinMaxZ().max;
-            b = t.getMinMaxCoordsForZ(z);
+            const auto t = TilerHelper::rasterTilerFor(raster, "", 256);
+            z = t->getMinMaxZ().max;
+            b = t->getMinMaxCoordsForZ(z);
         }
         TileAt best{z, b.min.x, b.min.y};
         size_t bestCount = 0;
@@ -1588,9 +1588,9 @@ namespace
         return best;
     }
 
-    // A tile asked for again with forceRecreate builds the COG again and replaces the one the tiler of the previous
-    // tile read: the cache closes that tiler first, so the replacement works on Windows too. A COG replaced under a
-    // reader shows in tileOf (Linux); Windows failed the request (DDBERR_EXCEPTION) when the tests held one open.
+    // A tile asked for again with forceRecreate releases the tiler of the previous tile, which removes the COG it
+    // read: the tiler closes it first, so the removal works on Windows too. A COG removed under a reader shows in
+    // tileOf (Linux).
     TEST(RasterValues, aTileAskedForAgainReplacesNoCogThatIsStillOpen)
     {
         TestArea ta(TEST_NAME, true);

@@ -100,6 +100,7 @@ namespace ddb
             uint64_t fromSidecar = 0;
             uint64_t computed = 0;
             uint64_t sampled = 0; // bands whose stretch statistics were read from a sample
+            uint64_t adopted = 0; // bands whose exact statistics were given (adopt): of a build, of a validation
         };
 
         static RasterStatsProvider &instance();

@@ -25,6 +25,7 @@
 #include "randomutil.h"
 #include "raster_artefacts.h"
 #include "stringutil.h"
+#include "temp_names.h"
 
 namespace ddb {
 namespace {
@@ -537,7 +538,7 @@ std::string stageObjWithoutOutsideTextures(const std::string& obj, const fs::pat
                                            io::ScopedTempDir& tempGuard) {
     const fs::path objPath = io::fromUtf8(obj);
     const fs::path objDir = objPath.parent_path();
-    const fs::path tempDir = fs::temp_directory_path() / ("ddb_obj_stage_" + randomString(16));
+    const fs::path tempDir = fs::temp_directory_path() / (tempnames::kObjStage + randomString(16));
     fs::create_directories(tempDir);
     tempGuard.reset(tempDir);
 
@@ -639,7 +640,7 @@ AssimpConversion convertWithAssimp(const std::string& input,
     LOGD << "Converting " << input << " to OBJ first";
 
     fs::path inputPath = io::fromUtf8(input);
-    fs::path tempDir = fs::temp_directory_path() / ("ddb_assimp_convert_" + randomString(16));
+    fs::path tempDir = fs::temp_directory_path() / (tempnames::kAssimpConvert + randomString(16));
     fs::create_directories(tempDir);
     tempGuard.reset(tempDir);
 
@@ -755,7 +756,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         }
 
         const fs::path tempDir =
-            fs::temp_directory_path() / ("ddb_ply_convert_" + randomString(16));
+            fs::temp_directory_path() / (tempnames::kPlyConvert + randomString(16));
         fs::create_directories(tempDir);
         tempGuard.reset(tempDir);
 

@@ -21,7 +21,7 @@ namespace ddb
     struct CopiedMetadata
     {
         using Items = std::vector<std::pair<std::string, std::string>>;
-        Items dataset;                         // the default-domain items of the dataset, in order
+        Items dataset;                         // the default-domain items of the dataset, sorted as GDAL sorts them
         std::vector<Items> bands;              // the items of each output band (empty: none)
         std::vector<double> scales, offsets;   // of each output band (empty: none; 1 and 0 write nothing)
         std::vector<std::string> units;        // of each output band, "" for none (empty: none)

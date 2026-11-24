@@ -18,6 +18,7 @@
 #include "mio.h"
 #include "raster_artefacts.h"
 #include "stringutil.h"
+#include "temp_names.h"
 #include "thermal.h"
 #include "tool_locator.h"
 #include "tool_run_support.h"
@@ -724,7 +725,7 @@ namespace ddb
             // In the temp folder of the system, not in the thumbnail cache: the destination of a
             // thumbnail is whatever the caller names (and the memory API has none), and the copy
             // into it is made by the caller as any thumbnail is written (atomically)
-            const io::ScopedTempDir request = raster::makePrivateFolder(fs::temp_directory_path(), "ddb-thumb-");
+            const io::ScopedTempDir request = raster::makePrivateFolder(fs::temp_directory_path(), tempnames::kThumbnail);
 
             fs::path input = path;
             const std::string utf8 = io::toUtf8(path);

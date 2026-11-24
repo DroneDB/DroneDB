@@ -16,7 +16,7 @@
 #include "exceptions.h"
 #include "exif.h"
 #include "exifeditor.h"
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "logger.h"

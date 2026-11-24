@@ -22,7 +22,7 @@
 #include <thread>
 #include <vector>
 
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "build_budget.h"
 #include "build_layout.h"
 #include "cancellation.h"
@@ -667,26 +667,17 @@ namespace
 
     // ------------------------------------------------------------------ normalized copies
 
-    // The copies in the cache of the test
-    std::vector<fs::path> copiesInCache()
-    {
-        std::vector<fs::path> copies;
-        for (const auto &entry : fs::directory_iterator(raster::normalizedDir()))
-            copies.push_back(entry.path());
-        return copies;
-    }
-
-    // The folders the requests of the artefact cache write to, in the artefacts of the cache
+    // The folders of the requests that are left in the cache of the test
     std::vector<fs::path> requestFolders()
     {
         std::vector<fs::path> folders;
-        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
-            if (entry.path().filename() != "normalized")
-                folders.push_back(entry.path());
+        std::error_code ec;
+        for (const auto &entry : fs::directory_iterator(raster::requestsDir(), ec))
+            folders.push_back(entry.path());
         return folders;
     }
 
-    // The cache of the artefacts is the one of the test
+    // The cache (and the folders of the requests) is the one of the test
     class RasterNormalizeTest : public RasterHelperTest
     {
       protected:
@@ -705,46 +696,41 @@ namespace
         std::unique_ptr<ScopedProcessConfig> config_;
     };
 
-    TEST_F(RasterNormalizeTest, theCopyTheHelperWroteIsCheckedAndPublishedUnderTheKeyOfTheFile)
+    TEST_F(RasterNormalizeTest, theCopyTheHelperWroteIsCheckedAndGoesWithItsReader)
     {
         const fs::path input = touch("ok.jpg");
-        const fs::path copy = artefactFor(input);
-
-        EXPECT_EQ(copy, normalizedDir() / (artefactKey(input) + ".tif"));
-        ASSERT_TRUE(tilers::Raster::open(copy));
-        EXPECT_EQ(copiesInCache(), std::vector<fs::path>{copy});
-        EXPECT_TRUE(requestFolders().empty());
+        const uint64_t copies = inputCopiesMade();
+        {
+            const InputFile read = inputFileFor(input);
+            ASSERT_TRUE(read.request);
+            EXPECT_EQ(read.file.parent_path(), read.request->path());
+            EXPECT_TRUE(isLibddbArtefact(read.file));
+            ASSERT_TRUE(tilers::Raster::open(read.file));
+            EXPECT_EQ(requestFolders().size(), 1u);
+            EXPECT_EQ(inputCopiesMade(), copies + 1);
+        }
+        EXPECT_TRUE(requestFolders().empty()) << "the copy outlived its reader";
         EXPECT_EQ(requestsFor(log_, "normalize", "ok.jpg").size(), 1u);
+        // A photo is no TIFF: the helper is not asked whether ddb-tilers reads it
+        EXPECT_TRUE(requestsFor(log_, "validate", "ok.jpg").empty());
 
-        // The same file again: the cache answers, the helper is not asked
-        EXPECT_EQ(artefactFor(input), copy);
-        EXPECT_EQ(requestsFor(log_, "normalize", "ok.jpg").size(), 1u);
-    }
-
-    TEST_F(RasterNormalizeTest, aFileThatChangedIsAskedAgain)
-    {
-        const fs::path input = touch("ok.jpg");
-        const fs::path first = artefactFor(input);
-
-        std::ofstream(input, std::ios::binary | std::ios::app) << " and more";
-        const fs::path second = artefactFor(input);
-        EXPECT_NE(second, first);
+        // The same file again: nothing was kept, the helper writes it again
+        EXPECT_TRUE(inputFileFor(input).request);
         EXPECT_EQ(requestsFor(log_, "normalize", "ok.jpg").size(), 2u);
     }
 
-    TEST_F(RasterNormalizeTest, aCopyThatIsNoGeoTiffIsNeverPublished)
+    TEST_F(RasterNormalizeTest, aCopyThatIsNoGeoTiffIsNeverRead)
     {
         const fs::path input = touch("garbagetif.jpg");
         try
         {
-            artefactFor(input);
+            inputFileFor(input);
             FAIL() << "no exception";
         }
         catch (const GDALException &e)
         {
             EXPECT_NE(std::string(e.what()).find("not a GeoTIFF"), std::string::npos) << e.what();
         }
-        EXPECT_TRUE(copiesInCache().empty());
         EXPECT_TRUE(requestFolders().empty()) << "the folder of the request stays";
     }
 
@@ -753,7 +739,7 @@ namespace
         // A raster GDAL cannot open or the policy refuses: as for any file GDAL does not read
         EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(touch("unreadable.jpg"))));
         EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(touch("policy.jpg"))));
-        EXPECT_THROW(artefactFor(touch("unreadable2.jpg")), RasterOpException);
+        EXPECT_THROW(inputFileFor(touch("unreadable2.jpg")), RasterOpException);
         // A raster the helper could not read within its limits, a full device and a broken helper are not
         EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("limit.jpg"))), RasterNotReadException);
         EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("crashed.jpg"))), RasterNotReadException);
@@ -761,18 +747,17 @@ namespace
         EXPECT_THROW(tilers::Raster::openInput(io::toUtf8(touch("internal.jpg"))), RasterOpException);
         try
         {
-            artefactFor(touch("nospace.jpg"));
+            inputFileFor(touch("nospace.jpg"));
             FAIL() << "no exception";
         }
         catch (const FSException &e)
         {
             EXPECT_EQ(e.code(), std::make_error_code(std::errc::no_space_on_device));
         }
-        EXPECT_TRUE(copiesInCache().empty());
         EXPECT_TRUE(requestFolders().empty());
     }
 
-    TEST_F(RasterNormalizeTest, aCanceledCopyKillsTheWorkerAndLeavesNothingInTheCache)
+    TEST_F(RasterNormalizeTest, aCanceledCopyKillsTheWorkerAndLeavesNothing)
     {
         const fs::path input = touch("hang.jpg");
         auto token = cancel::TokenRef::adopt(cancel::Token::create());
@@ -783,7 +768,7 @@ namespace
             cancel::ScopedThreadToken scope(token);
             try
             {
-                artefactFor(input);
+                inputFileFor(input);
             }
             catch (const CanceledException &)
             {
@@ -799,7 +784,6 @@ namespace
         ASSERT_EQ(requests.size(), 1u);
         const unsigned long pid = std::stoul(requests[0].substr(0, requests[0].find(' ')));
         EXPECT_TRUE(goneBy(pid, canceledAt + seconds(1))) << "helper " << pid << " still runs";
-        EXPECT_TRUE(copiesInCache().empty());
         EXPECT_TRUE(requestFolders().empty());
     }
 
@@ -814,7 +798,9 @@ namespace
         spec.height = 32;
         testutils::createGeoRaster(cog, spec);
 
-        EXPECT_EQ(artefactFor(cog), cog);
+        const InputFile read = inputFileFor(cog);
+        EXPECT_EQ(read.file, cog);
+        EXPECT_FALSE(read.request);
         EXPECT_TRUE(tilers::Raster::openInput(io::toUtf8(cog)));
         EXPECT_EQ(helper_->requestsSent(), 0u);
         EXPECT_EQ(helper_->startedHelpers(), 0u);
@@ -2210,7 +2196,7 @@ namespace
         const fs::path target = area_->getPath("photo.tif");
         EXPECT_THROW(geoProject({io::toUtf8(photo_)}, io::toUtf8(target), "100%", true), GDALException);
         EXPECT_FALSE(fs::exists(target));
-        EXPECT_TRUE(fs::is_empty(artefactsDir())) << "nothing is left in the cache";
+        EXPECT_TRUE(requestFolders().empty()) << "nothing is left in the cache";
     }
 
     TEST_F(GeoprojectTest, aPhotoTheHelperCannotOpenIsSkippedOrAnErrorAsTheCallerAsks)

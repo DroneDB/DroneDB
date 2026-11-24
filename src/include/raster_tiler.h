@@ -4,6 +4,7 @@
 #ifndef RASTER_TILER_H
 #define RASTER_TILER_H
 
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -12,9 +13,14 @@
 
 namespace ddb
 {
+    namespace raster
+    {
+        class RequestFolder;
+    }
+
     /// Renders web-map tiles of an EPSG:3857 COG that libddb wrote (an artefact,
-    /// raster_artefacts.h: the COG of a build, or the COG TilerHelper makes from a raster or a
-    /// photo of a user) with ddb-tilers (TilersTiler), with the visualization parameters of a
+    /// raster_artefacts.h: the COG of a build, or the COG TilerHelper::rasterTilerFor makes from a
+    /// raster or a photo of a user) with ddb-tilers (TilersTiler), with the visualization parameters of a
     /// raster. A tile that does not exist at its zoom is out of the raster: transparent, or "Out of
     /// bounds" with visualization parameters.
     class RasterTiler : public TilersTiler
@@ -22,6 +28,10 @@ namespace ddb
     public:
         /// @throws GDALException when the file is not an artefact or ddb-tilers cannot read it
         RasterTiler(const std::string &cogPath, const std::string &tilesFolder, int size = 256, bool tmsRows = false);
+        ~RasterTiler() override;
+
+        /// Keeps `request`, the folder of the COG this tiler reads, until the tiler goes
+        void keep(std::unique_ptr<raster::RequestFolder> request);
 
         using TilersTiler::tile;
 
@@ -37,6 +47,7 @@ namespace ddb
         std::optional<BoundingBox<Projected2D>> contentBounds() const override;
 
     private:
+        std::unique_ptr<raster::RequestFolder> request_;
         mutable std::once_flag contentOnce;
         mutable std::optional<BoundingBox<Projected2D>> content;
     };

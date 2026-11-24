@@ -396,9 +396,9 @@ namespace
         // makes the COG again: the tiler that gives their range is closed first, since Windows
         // replaces no file a process holds open
         const auto [zooms, bounds] = [&] {
-            RasterTiler tiler(TilerHelper::toGeoTIFF(ms).string(), "", 256, false);
-            const auto z = tiler.getMinMaxZ();
-            return std::make_pair(z, tiler.getMinMaxCoordsForZ(z.max));
+            const auto tiler = TilerHelper::rasterTilerFor(ms, "", 256, false);
+            const auto z = tiler->getMinMaxZ();
+            return std::make_pair(z, tiler->getMinMaxCoordsForZ(z.max));
         }();
         for (const auto &f : kFormulas)
         {

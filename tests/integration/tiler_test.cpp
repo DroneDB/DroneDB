@@ -38,9 +38,9 @@ TEST(testTiler, RGB) {
         "ortho.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    RasterTiler t(TilerHelper::toGeoTIFF(ortho).string(), tileDir.string());
+    const auto t = TilerHelper::rasterTilerFor(ortho, tileDir.string());
 
-    t.tile(19, 128168, 339545);
+    t->tile(19, 128168, 339545);
 
     EXPECT_TRUE(fs::exists(tileDir / "19" / "128168" / "339545.png"));
 }
@@ -52,16 +52,16 @@ TEST(testTiler, DSM) {
                              "dsm.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    RasterTiler t(TilerHelper::toGeoTIFF(dsm).string(), tileDir.string());
-    t.tile(21, 512674, 1358189);
-    t.tile(20, 256337, 679094);
+    const auto t = TilerHelper::rasterTilerFor(dsm, tileDir.string());
+    t->tile(21, 512674, 1358189);
+    t->tile(20, 256337, 679094);
 
     EXPECT_TRUE(fs::exists(tileDir / "21" / "512674" / "1358189.png"));
     EXPECT_TRUE(fs::exists(tileDir / "20" / "256337" / "679094.png"));
 
     fs::path tmsTileDir = ta.getFolder("tmsTiles");
-    RasterTiler tms(TilerHelper::toGeoTIFF(dsm).string(), tmsTileDir.string(), 256, true);
-    tms.tile(20, 256337, 369481);
+    const auto tms = TilerHelper::rasterTilerFor(dsm, tmsTileDir.string(), 256, true);
+    tms->tile(20, 256337, 369481);
 
     EXPECT_TRUE(fs::exists(tmsTileDir / "20" / "256337" / "369481.png"));
 
@@ -80,15 +80,15 @@ TEST(testTiler, DeepZoomNotBlank) {
         "ortho.tif");
 
     for (const auto &[tz, tileSize] : std::vector<std::pair<int, int>>{{24, 256}, {23, 512}, {26, 256}}) {
-        RasterTiler t(TilerHelper::toGeoTIFF(ortho).string(), "", tileSize);
-        const auto b = t.getMinMaxCoordsForZ(tz);
+        const auto t = TilerHelper::rasterTilerFor(ortho, "", tileSize);
+        const auto b = t->getMinMaxCoordsForZ(tz);
         const int tx = (b.min.x + b.max.x) / 2;
         const int ty = (b.min.y + b.max.y) / 2;
         ASSERT_GT(static_cast<double>(ty) * tileSize, static_cast<double>(std::numeric_limits<int>::max()));
 
         uint8_t *buffer = nullptr;
         int bufSize = 0;
-        t.tile(tz, tx, ty, &buffer, &bufSize);
+        t->tile(tz, tx, ty, &buffer, &bufSize);
         ASSERT_GT(bufSize, 0);
 
         const std::string memPath = "/vsimem/deepzoom_" + std::to_string(tz) + "_" + std::to_string(tileSize) + ".png";
@@ -249,7 +249,7 @@ TEST(testTiler, MultipleZoomLevels) {
         "wro.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    RasterTiler t(TilerHelper::toGeoTIFF(ortho).string(), tileDir.string(), 256, true);
+    const auto t = TilerHelper::rasterTilerFor(ortho, tileDir.string(), 256, true);
 
     // Test tiles from the provided table
     struct TileTest {
@@ -268,7 +268,7 @@ TEST(testTiler, MultipleZoomLevels) {
                                        {20, 1035186, 655694, 256}};
 
     for (const auto& tile : testTiles) {
-        t.tile(tile.z, tile.x, tile.y);
+        t->tile(tile.z, tile.x, tile.y);
 
         fs::path expectedTile = tileDir / std::to_string(tile.z) / std::to_string(tile.x) /
                                 (std::to_string(tile.y) + ".png");
@@ -284,7 +284,7 @@ TEST(testTiler, MultipleZoomLevels) {
  *        renamed into the tiles cache
  *
  * Runs the download in a child capped by RLIMIT_FSIZE so the transfer is cut
- * short mid-write; toGeoTIFF must throw and leave neither the cache entry nor
+ * short mid-write; rasterTilerFor must throw and leave neither the cache entry nor
  * a stale temp file behind.
  */
 TEST(testTilerHelper, FailedDownloadIsNotCached) {
@@ -304,7 +304,7 @@ TEST(testTilerHelper, FailedDownloadIsNotCached) {
         rl.rlim_cur = rl.rlim_max = 64 * 1024;
         setrlimit(RLIMIT_FSIZE, &rl);
         try {
-            TilerHelper::toGeoTIFF(url);
+            TilerHelper::rasterTilerFor(url, "");
             _exit(1);  // a >64 KB transfer truncated at 64 KB must not succeed
         } catch (const NetException&) {
             _exit(0);
