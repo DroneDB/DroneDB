@@ -5,13 +5,17 @@
 // The files libddb wrote itself (raster_artefacts.h): which places are artefacts and which files
 // are not, what opens as one, and the tiler that reads nothing else: a raster of a user is
 // converted by the raster helper into the artefacts folder of the cache, and a COG of a build is
-// tiled as it is.
+// tiled as it is. A photo is tiled from itself and leaves nothing in the cache.
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -24,6 +28,8 @@
 #include "gdal_inc.h"
 #include "gdal_open_policy.h"
 #include "gdal_raii.h"
+#include "photo_tile.h"
+#include "photo_tiler.h"
 #include "raster_tiler.h"
 #include "gtest/gtest.h"
 #include "json.h"
@@ -488,6 +494,18 @@ namespace
         {
             ADD_FAILURE() << "no thumbnail is asked for";
         }
+        // An opaque tile of the size asked for, in the format asked for
+        void photoTile(const fs::path &path, const fs::path &out, const raster::PhotoTileParams &params) override
+        {
+            record("photoTile", path);
+            lastTileOut = out;
+            lastTileParams = params;
+            RasterImage image(params.tileSize, params.tileSize, 3, false);
+            std::fill(image.color.begin(), image.color.end(), uint8_t{200});
+            EncodeOptions options;
+            options.format = params.format;
+            TileEncoder::write(image, options, io::toUtf8(out));
+        }
         void normalize(const fs::path &, const fs::path &, const json &) override
         {
             ADD_FAILURE() << "no normalization is asked for";
@@ -542,6 +560,8 @@ namespace
 
         fs::path lastCogOut;
         json lastCogParams;
+        fs::path lastTileOut;
+        raster::PhotoTileParams lastTileParams;
 
       private:
         void record(const std::string &op, const fs::path &path)
@@ -674,28 +694,248 @@ namespace
         EXPECT_EQ(helper.count("cog"), 2u) << "removed by the clean-up, then converted again";
     }
 
-    TEST_F(RasterArtefacts, aPhotoIsGeoprojectedAndConvertedToACogForTheTiler)
+    // The files below the artefacts folder of the cache (none when there is no such folder)
+    std::vector<fs::path> filesInArtefacts(const fs::path &cache)
     {
-        const fs::path photo = area_->downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
-
-        const fs::path projected = TilerHelper::toGeoTIFF(photo);
-
-        EXPECT_EQ(projected.parent_path(), raster::artefactsDir());
-        EXPECT_EQ(projected.filename(), fs::path(raster::artefactKey(photo) + ".tif"));
-        const auto dataset = testutils::openRaster(projected);
-        ASSERT_TRUE(dataset);
-        EXPECT_EQ(GDALGetRasterCount(datasetHandle(dataset)), 3) << "RGB, the footprint in the mask";
-        OGRSpatialReference srs(GDALGetProjectionRef(datasetHandle(dataset)));
-        EXPECT_STREQ(srs.GetAuthorityCode(nullptr), "3857") << "the COG the tilers read";
-        EXPECT_FALSE(memoryTile(middleTile(photo, projected)).empty());
-        EXPECT_EQ(projected, TilerHelper::toGeoTIFF(photo)) << "made once";
-        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
-            EXPECT_EQ(entry.path().filename().string().rfind("req-", 0), std::string::npos)
-                << "the folder of the request is gone: " << entry.path();
+        std::vector<fs::path> files;
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(cache / "artefacts", ec), end; !ec && it != end; it.increment(ec))
+            if (it->is_regular_file())
+                files.push_back(it->path());
+        return files;
     }
 
-    // A photo is tiled from one build of the helper: the COG warped from the photo by the corners of
-    // its EXIF footprint, with no intermediate projection of it
+    // The photo of the tests of its tiles, with the georeference its EXIF gives it
+    struct TestPhoto
+    {
+        fs::path path;
+        raster::PhotoGeoreference georeference;
+    };
+
+    TestPhoto downloadPhoto(TestArea &area)
+    {
+        TestPhoto photo;
+        photo.path = area.downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
+        std::string problem;
+        const auto georeference = photoGeoreferenceOf(photo.path, problem);
+        if (!georeference)
+            throw AppException("the test photo has no footprint: " + problem);
+        photo.georeference = *georeference;
+        return photo;
+    }
+
+    // The 256 px tile (TMS row) of zoom z that holds the point (x, y) of EPSG:3857
+    TileInfo tileAt(double x, double y, int z)
+    {
+        const Projected2Di t = GlobalMercator(256).metersToTile(x, y, z);
+        return TileInfo(t.x, t.y, z);
+    }
+
+    // The 256 px tile (TMS row) in the middle of what the tiler shows at zoom z
+    TileInfo middleOf(const Tiler &tiler, int z)
+    {
+        const BoundingBox<Projected2D> content = *tiler.contentBounds();
+        return tileAt((content.min.x + content.max.x) / 2, (content.min.y + content.max.y) / 2, z);
+    }
+
+    std::vector<uint8_t> tileOf(Tiler &tiler, const TileInfo &t)
+    {
+        uint8_t *buffer = nullptr;
+        int size = 0;
+        tiler.tile(t.tz, t.tx, t.ty, ImageFormat::Png, &buffer, &size);
+        return testutils::takeBuffer(buffer, size);
+    }
+
+    // Which tiles hold some of a footprint: one inside it (no corner of either inside the other), one across an
+    // edge, one that only comes within the margin; not one beside it, nor one in the corner of the box of a
+    // diamond that the diamond does not reach
+    TEST(PhotoTileGeometry, aBoxMeetsTheFootprintWhereverTheyOverlap)
+    {
+        raster::PhotoGeoreference diamond;
+        diamond.width = 100;
+        diamond.height = 100;
+        diamond.footprint = {{{0.0, 0.001}, {-0.001, 0.0}, {0.0, -0.001}, {0.001, 0.0}}};
+        const auto corners = raster::photoCornersInMeters(diamond);
+        const double r = corners[3].x; // the half diagonal in metres (111 m)
+        const auto box = [](double x0, double y0, double x1, double y1) {
+            return BoundingBox<Projected2D>(Projected2D(x0, y0), Projected2D(x1, y1));
+        };
+        EXPECT_TRUE(raster::footprintMeetsBox(diamond, box(-1, -1, 1, 1), 0)) << "inside";
+        EXPECT_TRUE(raster::footprintMeetsBox(diamond, box(-r, -r, r, r), 0)) << "around";
+        EXPECT_TRUE(raster::footprintMeetsBox(diamond, box(r / 2 - 1, -1, r, 1), 0)) << "across an edge";
+        EXPECT_FALSE(raster::footprintMeetsBox(diamond, box(r + 1, -1, r + 2, 1), 0)) << "beside";
+        EXPECT_TRUE(raster::footprintMeetsBox(diamond, box(r + 1, -1, r + 2, 1), 1.5)) << "within the margin";
+        EXPECT_FALSE(raster::footprintMeetsBox(diamond, box(0.8 * r, 0.8 * r, r, r), 0)) << "the corner of the box";
+        EXPECT_NEAR(raster::photoResolution(diamond), 2 * r / std::hypot(100.0, 100.0), 1e-9);
+    }
+
+    // A photo is tiled from itself, one tile per request of the helper: no COG of it is built, and nothing
+    // lands in the artefacts of the cache, through the tile requests or a run of the tiler
+    TEST_F(RasterArtefacts, aPhotoIsTiledFromItselfAndNothingOfItIsKept)
+    {
+        const TestPhoto photo = downloadPhoto(*area_);
+        const PhotoTiler tiler(photo.path, "", 256, false, photo.georeference);
+        const int z = tiler.getMinMaxZ().max;
+        const TileInfo middle = middleOf(tiler, z);
+
+        const std::vector<uint8_t> tile = memoryTile(testTile(photo.path, z, middle.tx, middle.ty, 256, false, false));
+        const auto image = testutils::decodeImage(tile);
+        EXPECT_EQ(image.width, 256);
+        EXPECT_GT(std::count(image.alpha().begin(), image.alpha().end(), 255), 1000) << "the photo is in the tile";
+        EXPECT_EQ(memoryTile(testTile(photo.path, z, middle.tx, middle.ty, 256, false, false)), tile)
+            << "drawn again the same";
+
+        std::ostringstream listed;
+        TilerRun run;
+        run.zRange = std::to_string(z - 2);
+        TilerHelper::runTiler(photo.path, area_->getFolder("tiles"), listed, run);
+        EXPECT_FALSE(listed.str().empty());
+
+        const std::vector<fs::path> kept = filesInArtefacts(cache_);
+        EXPECT_TRUE(kept.empty()) << io::toUtf8(kept.front());
+    }
+
+    // The tile is asked of the helper with the photo, its footprint and the tile; the helper writes it in a
+    // folder of the request, which is gone with the request. A tile that holds nothing of the footprint is the
+    // blank tile, made without the helper.
+    TEST_F(RasterArtefacts, aPhotoTileIsAskedOfTheHelperOnlyWhereThePhotoIs)
+    {
+        const TestPhoto photo = downloadPhoto(*area_);
+        ConvertingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
+        const raster::ScopedRasterHelper installed(helper);
+        const PhotoTiler tiler(photo.path, "", 256, false, photo.georeference);
+        const int z = tiler.getMinMaxZ().max;
+        const TileInfo middle = middleOf(tiler, z);
+
+        uint8_t *buffer = nullptr;
+        int size = 0;
+        TileRequest request = testTile(photo.path, z, middle.tx, middle.ty, 256, false, false);
+        request.format = "webp";
+        request.outBuffer = &buffer;
+        request.outBufferSize = &size;
+        TilerHelper::getTile(request);
+        const std::vector<uint8_t> tile = testutils::takeBuffer(buffer, size);
+
+        EXPECT_EQ(helper.count("photoTile"), 1u);
+        EXPECT_EQ(helper.count("cog"), 0u) << "no COG of the photo";
+        EXPECT_EQ(helper.pathOf("photoTile"), photo.path);
+        const raster::PhotoTileParams &sent = helper.lastTileParams;
+        EXPECT_EQ(sent.width, photo.georeference.width);
+        EXPECT_EQ(sent.height, photo.georeference.height);
+        EXPECT_EQ(sent.footprint, photo.georeference.footprint);
+        EXPECT_EQ(sent.z, z);
+        EXPECT_EQ(sent.x, middle.tx);
+        EXPECT_EQ(sent.y, middle.ty);
+        EXPECT_TRUE(sent.tms) << "a request whose flag is false names a TMS row";
+        EXPECT_EQ(sent.format, ImageFormat::Webp);
+        EXPECT_EQ(testutils::decodeImage(tile).width, 256) << "the bytes the helper wrote";
+        EXPECT_FALSE(fs::exists(helper.lastTileOut.parent_path())) << "the folder of the request is gone";
+
+        // Far from the photo: blank, and the helper is not asked
+        const std::vector<uint8_t> away =
+            memoryTile(testTile(photo.path, z, middle.tx + 50, middle.ty, 256, false, false));
+        const auto blank = testutils::decodeImage(away);
+        EXPECT_EQ(std::count(blank.alpha().begin(), blank.alpha().end(), 0), 256 * 256);
+        EXPECT_EQ(helper.count("photoTile"), 1u);
+        EXPECT_TRUE(filesInArtefacts(cache_).empty());
+    }
+
+    // A copy of the JPEG `from` without its Multi-Picture Format segment (APP2 "MPF"): the copy has no preview,
+    // and keeps its EXIF (with the EXIF thumbnail) and the main image
+    fs::path withoutPreview(const fs::path &from, const fs::path &to)
+    {
+        const std::string bytes = readFile(from);
+        std::string out = bytes.substr(0, 2);
+        size_t at = 2;
+        while (at + 4 <= bytes.size() && static_cast<unsigned char>(bytes[at]) == 0xFF)
+        {
+            const auto marker = static_cast<unsigned char>(bytes[at + 1]);
+            const size_t length = (static_cast<unsigned char>(bytes[at + 2]) << 8) | static_cast<unsigned char>(bytes[at + 3]);
+            if (marker == 0xDA) // the scan: the rest is the image
+                break;
+            if (!(marker == 0xE2 && bytes.compare(at + 4, 4, std::string("MPF\0", 4)) == 0))
+                out += bytes.substr(at, length + 2);
+            at += length + 2;
+        }
+        out += bytes.substr(at);
+        writeFile(to, out);
+        return to;
+    }
+
+    // The tiles a photo had when they came from the COG of the photo (warped from its footprint by the
+    // builder): the same zoom levels and tiles, the photo where it was, and its colours within the
+    // difference of the resampling (bilinear from the photo, against the nearest pixel of the averaged
+    // levels of a lossy COG). That difference grows where the photo is a few dozen pixels wide: the
+    // nearest pixel of foliage at 1/64 of its size is any of its colours. The colours on average are the
+    // same at every zoom: a tile drawn from the wrong level (the 4:3 EXIF thumbnail of the 16:9 photo, with
+    // its black bands, which GDAL lists among the overviews of a JPEG) or a shifted photo is not. The photo
+    // is tiled as it is (its small tiles come from its preview) and without its preview (from its overviews).
+    TEST_F(RasterArtefacts, theTilesOfAPhotoAreThoseOfItsCogWithinTheResampling)
+    {
+        const TestPhoto photo = downloadPhoto(*area_);
+        const fs::path cog = build_ / CogBuildSubfolder / CogFileName;
+        fs::create_directories(cog.parent_path());
+        buildCogInPrivateFolder(io::toUtf8(photo.path), cog, {}, photo.georeference);
+        RasterTiler fromCog(io::toUtf8(cog), "", 256, false);
+        const int maxZ = fromCog.getMinMaxZ().max;
+        const BoundingBox<Projected2D> content = *fromCog.contentBounds();
+
+        for (const fs::path &file : {photo.path, withoutPreview(photo.path, area_->getPath("no-preview.jpg"))})
+        {
+            SCOPED_TRACE(io::toUtf8(file.filename()));
+            PhotoTiler fromPhoto(file, "", 256, false, photo.georeference);
+            ASSERT_EQ(fromPhoto.getMinMaxZ().min, fromCog.getMinMaxZ().min);
+            ASSERT_EQ(fromPhoto.getMinMaxZ().max, maxZ);
+            for (int z = std::max(0, maxZ - 6); z <= maxZ + 1; z++)
+            {
+                SCOPED_TRACE("zoom " + std::to_string(z));
+                ASSERT_EQ(fromPhoto.getTilesForZoomLevel(z).size(), fromCog.getTilesForZoomLevel(z).size());
+                ASSERT_EQ(fromPhoto.getMinMaxCoordsForZ(z).min.x, fromCog.getMinMaxCoordsForZ(z).min.x);
+                ASSERT_EQ(fromPhoto.getMinMaxCoordsForZ(z).max.y, fromCog.getMinMaxCoordsForZ(z).max.y);
+
+                // The middle of the photo and the tiles of the corners of its box, which hold its edges
+                size_t opaque = 0, mismatch = 0, inside = 0;
+                double difference = 0;
+                std::array<double, 3> bias{};
+                const double x0 = content.min.x + 0.01, x1 = content.max.x - 0.01;
+                const double y0 = content.min.y + 0.01, y1 = content.max.y - 0.01;
+                for (const TileInfo &t : {middleOf(fromCog, z), tileAt(x0, y0, z), tileAt(x0, y1, z),
+                                          tileAt(x1, y0, z), tileAt(x1, y1, z)})
+                {
+                    const auto a = testutils::decodeImage(tileOf(fromCog, t));
+                    const auto b = testutils::decodeImage(tileOf(fromPhoto, t));
+                    ASSERT_EQ(a.width, b.width);
+                    for (size_t i = 0; i < a.alpha().size(); i++)
+                    {
+                        opaque += a.alpha()[i] > 0;
+                        mismatch += (a.alpha()[i] > 0) != (b.alpha()[i] > 0);
+                        // The colours of the edge of the footprint mix with the transparency around it
+                        if (a.alpha()[i] < 255 || b.alpha()[i] < 255)
+                            continue;
+                        inside++;
+                        for (size_t band = 0; band < 3; band++)
+                        {
+                            const int d = int(a.bands[band][i]) - int(b.bands[band][i]);
+                            difference += std::abs(d);
+                            bias[band] += d;
+                        }
+                    }
+                }
+                // The edge of the footprint moves by a pixel at most; inside, the colours differ by a few levels
+                ASSERT_GT(inside, 0u);
+                EXPECT_LE(mismatch, opaque / 50 + 256) << "of " << opaque;
+                EXPECT_LT(difference / (3.0 * static_cast<double>(inside)), z >= maxZ - 3 ? 12.0 : 20.0);
+                for (const double sum : bias)
+                    EXPECT_LT(std::abs(sum / static_cast<double>(inside)), 3.0) << "the colours on average";
+            }
+
+            // Far from the footprint both are blank
+            const TileInfo middle = middleOf(fromCog, maxZ);
+            const TileInfo far(middle.tx + 50, middle.ty, maxZ);
+            EXPECT_EQ(tileOf(fromPhoto, far), tileOf(fromCog, far));
+        }
+    }
+
     // A file of `kib` KiB in `folder`, last used `age` ago
     fs::path cachedFile(const fs::path &folder, const std::string &name, size_t kib, std::chrono::seconds age)
     {
@@ -792,26 +1032,6 @@ namespace
 
         EXPECT_TRUE(fs::exists(cog));
         EXPECT_FALSE(fs::exists(old)) << "the least recently used artefact made room";
-    }
-
-    TEST_F(RasterArtefacts, aPhotoIsWarpedToItsCogInOneBuildFromItsFootprint)
-    {
-        const fs::path photo = area_->downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
-        ConvertingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
-        const raster::ScopedRasterHelper installed(helper);
-
-        TilerHelper::toGeoTIFF(photo);
-
-        EXPECT_EQ(helper.count("cog"), 1u);
-        EXPECT_EQ(helper.pathOf("cog"), photo);
-        std::string problem;
-        const auto expected = photoGeoreferenceOf(photo, problem);
-        ASSERT_TRUE(expected) << problem;
-        const auto params = raster::cogParamsFromJson(helper.lastCogParams);
-        ASSERT_TRUE(params.photo.has_value()) << helper.lastCogParams.dump();
-        EXPECT_EQ(params.photo->width, expected->width);
-        EXPECT_EQ(params.photo->height, expected->height);
-        EXPECT_EQ(params.photo->footprint, expected->footprint);
     }
 
     TEST_F(RasterArtefacts, aCogOfABuildIsTiledAsItIs)

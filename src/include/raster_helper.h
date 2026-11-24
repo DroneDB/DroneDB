@@ -96,6 +96,9 @@ namespace ddb
             // Writes the thumbnail (WebP) of a photo or a raster to `out`, in a folder only this
             // request writes to; the caller checks the file before it trusts it (renderThumbnailWebp())
             virtual void thumbnail(const fs::path &path, const fs::path &out, const ThumbnailParams &params) = 0;
+            // Writes the tile of a photo (PhotoTileParams, renderPhotoTile) to `out`, in a folder only this
+            // request writes to; the caller checks the file before it trusts it (readHelperTile())
+            virtual void photoTile(const fs::path &path, const fs::path &out, const PhotoTileParams &params) = 0;
             // The operations below take the members the protocol defines for them in `params`
             virtual void normalize(const fs::path &path, const fs::path &out, const json &params) = 0;
             virtual void geoproject(const fs::path &path, const fs::path &out, const json &params) = 0;
@@ -188,6 +191,7 @@ namespace ddb
             ProbeResult probe(const fs::path &path, const ProbeParams &params) override;
             PointCloudInfo pointCloudInfo(const fs::path &path) override;
             void thumbnail(const fs::path &path, const fs::path &out, const ThumbnailParams &params) override;
+            void photoTile(const fs::path &path, const fs::path &out, const PhotoTileParams &params) override;
             void normalize(const fs::path &path, const fs::path &out, const json &params) override;
             void geoproject(const fs::path &path, const fs::path &out, const json &params) override;
             void buildCog(const fs::path &path, const fs::path &out, const json &params,
@@ -319,6 +323,14 @@ namespace ddb
         // The WebP the helper wrote to `file` (a thumbnail, a preview) of `source`, checked: a regular file
         // of a thumbnail's size that is a WebP. @throws GDALException otherwise
         std::string readHelperWebp(const fs::path &file, const std::string &source);
+
+        // Whether the bytes are an image of `format` (its signature; a WebP as looksLikeThumbnail says) at most
+        // kMaxThumbnailBytes long
+        bool looksLikeTile(const std::string &bytes, ImageFormat format);
+
+        // The tile of `format` the helper wrote to `file` for `source`, checked as looksLikeTile.
+        // @throws GDALException otherwise
+        std::string readHelperTile(const fs::path &file, ImageFormat format, const std::string &source);
 
         // The largest remote file a tile or a thumbnail reads (it is downloaded first, into a
         // temporary folder or the tile cache): 8 GiB, beyond the largest orthophoto a dataset

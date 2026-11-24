@@ -5,7 +5,6 @@
 #include "raster_tiler.h"
 
 #include <array>
-#include <cstdint>
 
 #include "exceptions.h"
 #include "raster_artefacts.h"
@@ -18,16 +17,6 @@ namespace ddb
     namespace
     {
         const char *optional(const std::string &s) { return s.empty() ? nullptr : s.c_str(); }
-
-        // Whether tile (tx, ty) exists at zoom tz (ddb-tilers refuses the others; the tilers of
-        // libddb answer them as tiles out of the raster)
-        bool inWorld(int tz, int tx, int ty)
-        {
-            if (tz < 0 || tz > 30 || tx < 0 || ty < 0)
-                return false;
-            const int64_t n = int64_t{1} << tz;
-            return tx < n && ty < n;
-        }
 
         bool hasAnyParameter(const ThumbVisParams &v)
         {
@@ -71,8 +60,8 @@ namespace ddb
 
     std::string RasterTiler::tile(int tz, int tx, int ty, ImageFormat format, uint8_t **outBuffer, int *outBufferSize)
     {
-        // Out of the world is out of the raster: the transparent tile
-        if (!inWorld(tz, tx, ty))
+        // Out of the world is out of the raster: the transparent tile (ddb-tilers refuses such a tile)
+        if (!tileInWorld(tz, tx, ty))
             return writeTile(RasterImage(tileSize, tileSize, 3, true), format, tz, tx, ty, outBuffer, outBufferSize);
         return TilersTiler::tile(tz, tx, ty, format, outBuffer, outBufferSize);
     }
@@ -81,7 +70,7 @@ namespace ddb
                                   uint8_t **outBuffer, int *outBufferSize)
     {
         // A tile out of the world, as one out of the raster: refused with parameters, else transparent
-        if (!inWorld(tz, tx, ty))
+        if (!tileInWorld(tz, tx, ty))
         {
             if (hasAnyParameter(visParams))
                 throw GDALException("Out of bounds");

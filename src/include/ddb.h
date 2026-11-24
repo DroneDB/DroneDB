@@ -191,7 +191,7 @@ extern "C"
      *                    the cache GDAL had before DDBConfigure is restored and bounded again.
      *   "artefactCacheMb" integer 0..10^13, env DDB_ARTEFACT_CACHE_MB, default 4096.
      *                    The bound in MiB of the artefact cache (cacheDir/artefacts): the COG
-     *                    the raster helper writes for the tiles of each photo or raster of a user
+     *                    the raster helper writes for the tiles of each raster (not photo) of a user
      *                    shown on a map, and the normalized copies of rasters. When a new one
      *                    takes it past the bound, the least recently used files are removed (not
      *                    one used in the last 5 minutes). 0: no bound; files not used for 5 days

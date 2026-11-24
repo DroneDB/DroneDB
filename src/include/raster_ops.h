@@ -113,6 +113,20 @@ namespace ddb
         // The same thumbnail, written to outFile as the thumbnails are (WebP)
         void thumbnail(const fs::path &path, const fs::path &outFile, const ThumbnailParams &params);
 
+        // The tile of a photo (PhotoTileParams) as an image, drawn from the photo for this request: the photo,
+        // opened with the open policy, is placed on the ground by the corners of its footprint as ground
+        // control points (their homography, as the COG builds of a photo place it) and warped to the tile,
+        // bilinear (the nearest pixel for a palette), from the smallest level of the photo with the pixels the
+        // tile needs: a JPEG preview of the same framing, else the overview gdalwarp picks. Transparent outside
+        // the footprint; a tile that holds none of it is transparent without opening the photo. Data that is
+        // not 8-bit is stretched over the minimum to the maximum of the whole photo, as its thumbnail.
+        // @throws RasterOpException when the photo cannot be opened (code Unreadable) or has blocks larger
+        // than a read may decode (code Limit); GDALException when GDAL fails
+        RasterImage renderPhotoTile(const fs::path &path, const PhotoTileParams &params);
+
+        // The same tile, encoded in params.format to outFile
+        void photoTile(const fs::path &path, const fs::path &outFile, const PhotoTileParams &params);
+
         // The most pixels (width x height) a raster may have to be normalized. The copy is read
         // whole by the analyses, so a raster beyond this is not copied, whatever the memory of
         // the host: its dataset is built first, and the analyses read the COG of the build.

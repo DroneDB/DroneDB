@@ -1687,6 +1687,58 @@ namespace
         EXPECT_THROW(geoprojectParamsFromJson(badOutsize), ProtocolError);
     }
 
+    // The tile of a photo travels whole; a tile that does not exist, a size that is no power of two or a format
+    // the encoders do not write is refused, and a photo tile is a request of the pool, not an operation
+    TEST(RasterBuildParams, theParamsOfAPhotoTileAreWhatTheHostSentAndNothingElse)
+    {
+        PhotoTileParams tile;
+        static_cast<PhotoGeoreference &>(tile) = PhotoGeoreference{4000, 3000, {{{9.1, 45.3}, {9.1, 45.2}, {9.2, 45.2}, {9.2, 45.3}}}};
+        tile.z = 19;
+        tile.x = 274569;
+        tile.y = 187245;
+        tile.tms = true;
+        tile.tileSize = 512;
+        tile.format = ImageFormat::Webp;
+        const json sent = toJson(tile);
+        EXPECT_EQ(sent.at("format"), "webp");
+        const PhotoTileParams back = photoTileParamsFromJson(sent);
+        EXPECT_EQ(back.width, 4000);
+        EXPECT_EQ(back.height, 3000);
+        EXPECT_EQ(back.footprint, tile.footprint);
+        EXPECT_EQ(back.z, 19);
+        EXPECT_EQ(back.x, 274569);
+        EXPECT_EQ(back.y, 187245);
+        EXPECT_TRUE(back.tms);
+        EXPECT_EQ(back.tileSize, 512);
+        EXPECT_EQ(back.format, ImageFormat::Webp);
+        json xyz = sent;
+        xyz.erase("tms");
+        EXPECT_FALSE(photoTileParamsFromJson(xyz).tms) << "rows are XYZ rows unless the request says otherwise";
+        EXPECT_FALSE(isHelperOperation(op::kPhotoTile)) << "served by a worker of the pool";
+
+        const auto refused = [&sent](const char *member, const json &value) {
+            json bad = sent;
+            if (value.is_null())
+                bad.erase(member);
+            else
+                bad[member] = value;
+            EXPECT_THROW(photoTileParamsFromJson(bad), ProtocolError) << member << " = " << value.dump();
+        };
+        for (const char *member : {"z", "x", "y", "tileSize", "format", "footprint", "width"})
+            refused(member, json());
+        refused("z", 31);
+        refused("z", -1);
+        refused("x", int64_t{1} << 19);
+        refused("y", -1);
+        refused("y", "1");
+        refused("tileSize", 384);
+        refused("tileSize", 8192);
+        refused("format", "jpeg");
+        refused("format", "gif");
+        refused("tms", 1);
+        EXPECT_THROW(photoTileParamsFromJson(json::array()), ProtocolError);
+    }
+
     TEST(RasterBuildParams, aProgressLineIsAFractionBetweenZeroAndOne)
     {
         EXPECT_EQ(decodeProgress(encodeProgress(0.25)), std::optional<double>(0.25));
@@ -1720,6 +1772,10 @@ namespace
         void thumbnail(const fs::path &, const fs::path &, const ThumbnailParams &) override
         {
             ADD_FAILURE() << "no thumbnail is asked for";
+        }
+        void photoTile(const fs::path &, const fs::path &, const PhotoTileParams &) override
+        {
+            ADD_FAILURE() << "no photo tile is asked for";
         }
         void normalize(const fs::path &, const fs::path &, const json &) override
         {
