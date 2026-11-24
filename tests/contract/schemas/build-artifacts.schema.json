@@ -233,6 +233,10 @@
               "description": "Whether the build transformed the points of the source to this CRS"
             }
           }
+        },
+        "statistics": {
+          "type": "boolean",
+          "description": "raster.cog only (new in 2.11): whether the exact statistics of the COG are kept next to it (a sidecar of its build, or one DDBBuildRasterStatistics wrote)"
         }
       }
     }

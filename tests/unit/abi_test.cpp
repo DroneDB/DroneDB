@@ -80,14 +80,15 @@ namespace
     // export (point clouds in any coordinate system: the crsStatus property, the crs of the pointcloud.copc
     // artifact, the completeness of COPCs built before 2.8, bounded point-cloud tiles); 2.9 adds DDBRescanEx2
     // (the rescan of the entries a list of paths names); 2.10 adds DDBFindCoverage (the images whose footprint
-    // covers a geometry).
+    // covers a geometry); 2.11 adds DDBBuildRasterStatistics (the statistics of a built COG written next to it,
+    // the statistics member of the raster.cog artifact, the formulas of DDBGetRasterInfo).
     // A new minor or major release changes this on purpose, together with the capabilities
     // fixture (tests/contract/fixtures/capabilities.json).
-    TEST(AbiVersion, is2_10)
+    TEST(AbiVersion, is2_11)
     {
         EXPECT_EQ(DDB_ABI_MAJOR, 2);
-        EXPECT_EQ(DDB_ABI_MINOR, 10);
-        EXPECT_EQ(DDBGetAbiVersion(), 0x0002000Au);
+        EXPECT_EQ(DDB_ABI_MINOR, 11);
+        EXPECT_EQ(DDBGetAbiVersion(), 0x0002000Bu);
     }
 
     // The one source of the version is package.json: the macros ddb_version.h generates from it

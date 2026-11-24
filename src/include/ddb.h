@@ -134,7 +134,10 @@ extern "C"
      * protocol 1.4, the "crsStatus" property of a point cloud entry, the "crs" of the pointcloud.copc
      * artifact).
      * ABI 2.9 (libddb 2.9.0, 0x00020009) adds DDBRescanEx2: the rescan of the entries a list of paths names.
-     * ABI 2.10 (libddb 2.10.0, 0x0002000A) adds DDBFindCoverage: the images whose footprint covers a geometry. */
+     * ABI 2.10 (libddb 2.10.0, 0x0002000A) adds DDBFindCoverage: the images whose footprint covers a geometry.
+     * ABI 2.11 (libddb 2.11.0, 0x0002000B) adds DDBBuildRasterStatistics: the statistics of the COG of a built
+     * GeoRaster written next to it, the "statistics" member of the raster.cog artifact, and the formulas, colormaps
+     * and bands of a raster in DDBGetRasterInfo. */
     DDB_DLL uint32_t DDBGetAbiVersion(void);
 
     /** What the loaded library supports, as a JSON object:
@@ -1309,6 +1312,33 @@ extern "C"
      *         DDBERR_CANCELED when canceled; DDBERR_BUSY on database contention */
     DDB_DLL DDBErr DDBExportSplatSpz(const char *ddbPath, const char *entryPath, char **output);
 
+    /** The exact statistics of the COG of a built GeoRaster, kept next to it (new in 2.11): a COG built before
+     * libddb 2.4 has none, and the first call that needs them (DDBGetRasterMetadata, DDBGetRasterValueInfo, the
+     * stretch of a non-Byte tile, contours) reads every pixel of the raster. This call makes them before a user
+     * asks: one pass over every pixel of the full resolution, every band in one decode, the blocks decoded and
+     * summed on several threads (with the arithmetic of the build: the same values a build of the entry would
+     * write, for integer samples), written in the sidecar of the COG. A COG that has them already is not read
+     * ("status": "present"); an entry without a complete build is left alone ("status": "notBuilt": its build
+     * will write them). The "statistics" member of the raster.cog artifact (DDBGetBuildArtifacts) says whether
+     * the COG has them. The call holds the build lock of the entry meanwhile: it fails with DDBERR_BUILDINPROGRESS
+     * while a build of the entry runs. It is cancellable (DDBSetThreadCancelToken, or the progress callback
+     * returning non-zero): a canceled call writes nothing.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param entryPath dataset-relative path of the entry (see "Entry paths")
+     * @param optionsJson NULL, "" or a JSON object: {"threads": n} the most threads of the pass (a whole number from
+     *                    0; 0 or absent: DDB_STATS_THREADS, by default 8), taken from the CPU pool (DDBConfigure
+     *                    "cpuPoolSize"), the calling thread one of them
+     * @param progress NULL for none; else called with the fraction done (0 to 1) and the phase "statistics"
+     * @param progressUserData opaque pointer forwarded to the progress callback
+     * @param output pointer to C-string where to store the JSON object (free with DDBFree):
+     *               {"status": "computed" | "present" | "notBuilt"}
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, an option is
+     *         refused or the entry is not a GeoRaster; DDBERR_NOTFOUND when the entry is not in the dataset;
+     *         DDBERR_BUILDINPROGRESS as above; DDBERR_EXCEPTION when the COG cannot be read;
+     *         DDBERR_CANCELED when canceled; DDBERR_BUSY on database contention */
+    DDB_DLL DDBErr DDBBuildRasterStatistics(const char *ddbPath, const char *entryPath, const char *optionsJson,
+                                            DDBProgressCallback progress, void *progressUserData, char **output);
+
     /** Options for DDBListEntriesEx (new in 2.0). Set structSize to sizeof(DDBListEntriesOptions)
      * and every other field explicitly. A later version may append fields: a library that does not
      * know them rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
@@ -1455,6 +1485,10 @@ extern "C"
      *  and, for SAVI and EVI, which need reflectance, when its data is floating point:
      *  DDBRenderRasterIndex refuses the others. "detectedSensor" is the id of the sensor profile
      *  and "detectedSensorName" (new in 2.4) its name, absent when no profile matched.
+     *  "algorithms", "colormaps" and "autoBands" (new in 2.11) are those of DDBGetRasterMetadata without a band
+     *  filter: the formulas (those the raster cannot compute disabled with their reason), the colormaps and the
+     *  bands found for the formulas. They come from the metadata of the raster alone, so a host can list them at
+     *  once, without waiting for the statistics DDBGetRasterMetadata computes from the pixels.
      * @param path Path to raster file
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */

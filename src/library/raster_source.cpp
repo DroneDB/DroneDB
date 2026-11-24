@@ -196,6 +196,8 @@ namespace ddb
         public:
             explicit TilersRasterSource(const tilers::Raster &raster) : raster_(raster) {}
 
+            const tilers::Raster *tilersRaster() const override { return &raster_; }
+
             std::string file() const override { return io::toUtf8(raster_.file()); }
             int width() const override { return raster_.width(); }
             int height() const override { return raster_.height(); }

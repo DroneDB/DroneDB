@@ -19,6 +19,7 @@
             "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
             "path": "cog/cog.tif",
             "role": "raster.cog",
+            "statistics": true,
             "version": "<volatile>"
           }
         ],

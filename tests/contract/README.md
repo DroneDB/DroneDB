@@ -916,3 +916,15 @@ Registry has to adopt first.
   position on the earth`, instead of `footprint unavailable: No coordinate transformation from Site grid to EPSG:4326`
   (Agisoft Metashape names its site frame "WGS 84", so the former read "from WGS 84 to EPSG:4326"); ddb-tilers 0.13.5
   refuses the tiles of such a cloud with the same words. Same field and type. No other fixture or schema changed.
+* 2.11.0 (ABI 2.11: `capabilities` has `abi.minor` 11, and `DDBBuildRasterStatistics` in `symbols` and in
+  `cancellable`): the statistics of rasters without waiting for them. `raster-info` has the `algorithms`, `colormaps`
+  and `autoBands` of `raster-metadata` without a band filter, from the metadata of the raster alone (no pixel read),
+  so a host lists the formulas at once; `raster-info.schema.json` has the three members, required. The exact
+  statistics of a raster ddb-tilers reads are one parallel pass over every band (ddb-tilers 0.14.0
+  `ddbtRasterStatistics`) with the arithmetic of the sidecar of a COG build (exact sums), instead of one serial pass
+  per band: `raster-metadata` has the correctly rounded means (126.0 where it had 125.99999999999999) and its
+  percentiles follow; same fields. `DDBBuildRasterStatistics(ddbPath, entryPath, optionsJson, progress, userData,
+  output)` writes the statistics of the COG of a built GeoRaster next to it when it has none (a COG built before
+  2.4), `{"threads": n}`, and returns `{"status": "computed" | "present" | "notBuilt"}`; the `raster.cog` artifact of
+  `build-artifacts` and `list-entries-ex` has `"statistics": true | false` (`build-artifacts.schema.json`). No other
+  fixture or schema changed.

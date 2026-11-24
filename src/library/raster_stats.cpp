@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <limits>
 #include <map>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -24,7 +25,9 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_artefacts.h"
+#include "parallel.h"
 #include "raster_utils.h"
+#include "tilers_raster.h"
 
 namespace ddb
 {
@@ -40,6 +43,7 @@ namespace ddb
         std::string version;
         std::mutex mutex; // held while a band is computed, so callers wait for one computation
         std::map<std::string, BandStatistics> bands; // by "<band>|<effective NoData override>"
+        std::set<std::string> empty; // the keys of the bands found to have no pixel with a value
     };
 
     RasterStatsProvider &RasterStatsProvider::instance()
@@ -147,7 +151,46 @@ namespace ddb
 
     namespace
     {
-        // The pixels of a band that have a value (not NoData, not masked, finite), accumulated as they are read
+        // Double-double arithmetic (Knuth's TwoSum, products with FMA): the exact sums of ddb-tilers' statistics, so
+        // a pass over the reads of a source gives what its parallel pass gives (ddbtRasterStatistics)
+        struct DoubleDouble
+        {
+            double hi = 0.0, lo = 0.0;
+        };
+
+        void twoSum(double a, double b, double &s, double &e)
+        {
+            s = a + b;
+            const double bb = s - a;
+            e = (a - (s - bb)) + (b - bb);
+        }
+
+        void quickTwoSum(double a, double b, double &s, double &e) // |a| >= |b|
+        {
+            s = a + b;
+            e = b - (s - a);
+        }
+
+        void addDD(DoubleDouble &x, const DoubleDouble &y)
+        {
+            double s, e, t, f;
+            twoSum(x.hi, y.hi, s, e);
+            twoSum(x.lo, y.lo, t, f);
+            e += t;
+            quickTwoSum(s, e, s, e);
+            e += f;
+            quickTwoSum(s, e, x.hi, x.lo);
+        }
+
+        DoubleDouble twoProd(double a, double b)
+        {
+            const double p = a * b;
+            return {p, std::fma(a, b, -p)};
+        }
+
+        // The pixels of a band that have a value (not NoData, not masked, finite), accumulated as they are read: the
+        // count, the extremes and the sums of the values and of their squares in double-double, exact for integer
+        // samples whatever the order, so the mean is the correctly rounded quotient
         class BandAccumulator
         {
         public:
@@ -172,9 +215,8 @@ namespace ddb
                     n_++;
                     lo_ = std::min(lo_, v);
                     hi_ = std::max(hi_, v);
-                    const double delta = v - mean_;
-                    mean_ += delta / static_cast<double>(n_);
-                    m2_ += delta * (v - mean_);
+                    addDD(sum_, {v, 0.0});
+                    addDD(sumSq_, twoProd(v, v));
                 }
             }
 
@@ -185,11 +227,27 @@ namespace ddb
                                                            "band has a value"
                                                          : "Cannot compute statistics: no pixel of the band has a value",
                                                  sampled);
+                const double n = static_cast<double>(n_);
+                // mean = sum / n in double-double: q1, then the remainder sum - q1 * n divided again
+                const double q1 = sum_.hi / n;
+                const DoubleDouble p = twoProd(q1, n);
+                DoubleDouble r = sum_;
+                addDD(r, {-p.hi, -p.lo});
+                const double q2 = r.hi / n;
+                DoubleDouble mean;
+                quickTwoSum(q1, q2, mean.hi, mean.lo);
+                // M2 = sumSq - sum * mean
+                DoubleDouble sm = twoProd(sum_.hi, mean.hi);
+                sm.lo += sum_.hi * mean.lo + sum_.lo * mean.hi;
+                quickTwoSum(sm.hi, sm.lo, sm.hi, sm.lo);
+                DoubleDouble m2 = sumSq_;
+                addDD(m2, {-sm.hi, -sm.lo});
+
                 BandStatistics s;
                 s.min = lo_;
                 s.max = hi_;
-                s.mean = mean_;
-                s.stdDev = std::sqrt(m2_ / static_cast<double>(n_));
+                s.mean = mean.hi;
+                s.stdDev = std::sqrt(std::max(0.0, m2.hi + m2.lo) / n);
                 s.validCount = n_;
                 s.pixelCount = pixelCount;
                 s.sampled = sampled;
@@ -200,7 +258,7 @@ namespace ddb
             BandNodata nd_;
             bool floatSamples_;
             bool masked_;
-            double mean_ = 0.0, m2_ = 0.0;
+            DoubleDouble sum_, sumSq_;
             double lo_ = std::numeric_limits<double>::infinity();
             double hi_ = -std::numeric_limits<double>::infinity();
             uint64_t n_ = 0;
@@ -296,6 +354,59 @@ namespace ddb
             return result;
         }
 
+        // The exact statistics of `bands`: one parallel pass of ddb-tilers over a raster it reads (every band in one
+        // decode, on the calling thread and the CPU tokens it gets, up to `maxThreads`: 0 is DDB_STATS_THREADS, by
+        // default up to 8), else one pass over the reads of the source (a dataset GDAL opened in the raster helper, a
+        // warp in memory, a NoData override). None for a band in which no pixel has a value. `progress`, when set, is
+        // told the fraction done. The pass stops when the call is canceled.
+        std::vector<std::optional<BandStatistics>> exactPass(const RasterSource &source, const std::vector<int> &bands,
+                                                             const std::optional<double> &nodata, size_t maxThreads,
+                                                             const std::function<void(double)> &progress)
+        {
+            const BandSet set = bandSetOf(source, bands);
+            std::vector<std::optional<BandStatistics>> result(bands.size());
+            if (const tilers::Raster *raster = source.tilersRaster())
+            {
+                const size_t wanted =
+                    maxThreads > 0 ? maxThreads : static_cast<size_t>(parallel::threadsOption("DDB_STATS_THREADS", 8));
+                const auto cpu = parallel::tryAcquireThreads(wanted);
+                const auto stats = raster->statistics(bands, nodata, cpu.threads(), progress);
+                for (size_t i = 0; i < bands.size() && i < stats.size(); i++)
+                {
+                    if (!stats[i])
+                        continue;
+                    BandStatistics s;
+                    s.min = stats[i]->min;
+                    s.max = stats[i]->max;
+                    s.mean = stats[i]->mean;
+                    s.stdDev = stats[i]->stdDev;
+                    s.validCount = stats[i]->validCount;
+                    s.pixelCount = stats[i]->pixelCount;
+                    result[i] = s;
+                }
+                return result;
+            }
+            auto accumulators = accumulatorsOf(set, nodata);
+            accumulateAll(set, accumulators, progress);
+            const uint64_t pixelCount = static_cast<uint64_t>(set.width) * static_cast<uint64_t>(set.height);
+            for (size_t i = 0; i < accumulators.size(); i++)
+            {
+                try
+                {
+                    result[i] = accumulators[i].finish(pixelCount, false);
+                }
+                catch (const NoValidPixelsException &)
+                {
+                }
+            }
+            return result;
+        }
+
+        [[noreturn]] void throwNoValidPixels()
+        {
+            throw NoValidPixelsException("Cannot compute statistics: no pixel of the band has a value", false);
+        }
+
         // The step of an even lattice over a grid of width x height cells that keeps at most maxCells of
         // them: 1 when the grid has no more cells, else the smallest step whose lattice
         // (ceil(width / step) x ceil(height / step)) has at most maxCells cells
@@ -321,10 +432,14 @@ namespace ddb
     {
         if (bands.empty())
             return {};
-        const BandSet set = bandSetOf(source, bands);
-        auto accumulators = accumulatorsOf(set, nodata);
-        accumulateAll(set, accumulators);
-        return finishAll(accumulators, static_cast<uint64_t>(set.width) * static_cast<uint64_t>(set.height), false);
+        std::vector<BandStatistics> result;
+        for (const auto &s : exactPass(source, bands, nodata, 0, {}))
+        {
+            if (!s)
+                throwNoValidPixels();
+            result.push_back(*s);
+        }
+        return result;
     }
 
     namespace
@@ -513,9 +628,7 @@ namespace ddb
         case BoundedSample::Kind::Whole:
         {
             // Small enough to be read whole: the exact statistics
-            auto accumulators = accumulatorsOf(full, nodata);
-            accumulateAll(full, accumulators);
-            return finishAll(accumulators, pixelCount, false);
+            return computeBandStatistics(source, bands, nodata);
         }
         case BoundedSample::Kind::Overview:
         {
@@ -553,6 +666,8 @@ namespace ddb
         const auto cached = entry->bands.find(key);
         if (cached != entry->bands.end())
             return cached->second;
+        if (entry->empty.count(key) != 0)
+            throwNoValidPixels();
 
         if (band < 1 || band > source.bandCount())
             throw GDALException("Cannot read band " + std::to_string(band) + " of " + path);
@@ -566,7 +681,14 @@ namespace ddb
         }
         else
         {
-            s = computeBandStatistics(source, {band}, nodata).front();
+            const auto computed = exactPass(source, {band}, nodata, 0, {}).front();
+            if (!computed)
+            {
+                // Known from now on: the band is not read again for nothing
+                entry->empty.insert(key);
+                throwNoValidPixels();
+            }
+            s = *computed;
             from = Source::Computed;
             LOGD << "Computed band " << band << " statistics of " << path << " (" << s.min << ", "
                  << s.max << ")";
@@ -594,7 +716,8 @@ namespace ddb
                                                                           const std::vector<int> &bands,
                                                                           const std::optional<double> &nodata,
                                                                           bool persist,
-                                                                          const std::function<void(double)> &progress)
+                                                                          const std::function<void(double)> &progress,
+                                                                          size_t maxThreads)
     {
         const auto entry = entryFor(path);
         std::lock_guard<std::mutex> lock(entry->mutex);
@@ -618,6 +741,8 @@ namespace ddb
                 result[i] = cached->second;
                 continue;
             }
+            if (entry->empty.count(keyOf(b)) != 0)
+                continue; // nullopt, known
             BandStatistics s;
             if (readStatsSidecar(file, b, s, nodata))
             {
@@ -633,24 +758,18 @@ namespace ddb
         uint64_t computed = 0;
         if (!missing.empty())
         {
-            // The pass of computeBandStatistics, but each band finished on its own: a band without a pixel
-            // that has a value does not lose the statistics of the others
-            const BandSet set = bandSetOf(source, missing);
-            auto accumulators = accumulatorsOf(set, nodata);
-            accumulateAll(set, accumulators, progress);
-            const uint64_t pixelCount = static_cast<uint64_t>(set.width) * static_cast<uint64_t>(set.height);
+            // One pass over every band that is missing; a band without a pixel that has a value does not lose
+            // the statistics of the others
+            const auto stats = exactPass(source, missing, nodata, maxThreads, progress);
             for (size_t j = 0; j < missing.size(); j++)
             {
                 const int b = missing[j];
-                BandStatistics s;
-                try
+                if (!stats[j])
                 {
-                    s = accumulators[j].finish(pixelCount, false);
-                }
-                catch (const NoValidPixelsException &)
-                {
+                    entry->empty.insert(keyOf(b));
                     continue; // nullopt, where get() throws
                 }
+                const BandStatistics &s = *stats[j];
                 entry->bands[keyOf(b)] = s;
                 result[missingAt[j]] = s;
                 computed++;
@@ -694,6 +813,8 @@ namespace ddb
             if (b < 1 || b > source.bandCount())
                 throw GDALException("Cannot read band " + std::to_string(b) + " of " + path);
 
+            if (entry->empty.count(keyOf(b)) != 0)
+                throwNoValidPixels();
             // The exact statistics when they are known, else a sample read before
             const auto exact = entry->bands.find(keyOf(b));
             if (exact != entry->bands.end())
@@ -936,60 +1057,81 @@ namespace ddb
         }
     }
 
+    namespace
+    {
+        // Writes `j` as the exact sidecar of the raster, stamped now; whole, by a rename: a reader never sees half
+        // of it. False (logged) when it cannot be written
+        bool writeSidecar(const fs::path &rasterPath, json j)
+        {
+            try
+            {
+                j["version"] = 2;
+                j["exact"] = true;
+
+                const auto now = std::chrono::system_clock::now();
+                const auto time = std::chrono::system_clock::to_time_t(now);
+                std::tm tm{};
+#ifdef _WIN32
+                gmtime_s(&tm, &time);
+#else
+                gmtime_r(&time, &tm);
+#endif
+                std::ostringstream stamp;
+                stamp << std::put_time(&tm, "%FT%TZ");
+                j["computedAt"] = stamp.str();
+
+                const fs::path target = statsSidecarOf(rasterPath);
+                const fs::path temp = io::concat(target, "." + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())) + ".tmp");
+                {
+                    std::ofstream out(temp, std::ios::trunc);
+                    if (!out.is_open())
+                        throw AppException("Cannot write " + io::toUtf8(temp));
+                    out << j.dump(2);
+                    out.flush();
+                    if (!out)
+                        throw AppException("Cannot write " + io::toUtf8(temp));
+                }
+                std::error_code ec;
+                fs::rename(temp, target, ec);
+                if (ec)
+                {
+                    fs::remove(temp, ec);
+                    throw AppException("Cannot replace " + io::toUtf8(target));
+                }
+                return true;
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Cannot write the statistics sidecar of " << io::toUtf8(rasterPath) << ": " << e.what();
+                return false;
+            }
+        }
+    }
+
     bool writeStatsSidecar(const std::string &path, int band, const BandStatistics &stats,
                            const std::optional<double> &nodata)
     {
         const fs::path rasterPath = io::fromUtf8(path);
-        try
-        {
-            json j = readFreshSidecar(rasterPath);
-            if (j.is_null())
-                j = json::object();
+        json j = readFreshSidecar(rasterPath);
+        if (j.is_null())
+            j = json::object();
+        if (!nodata)
+            j["bands"][std::to_string(band)] = statsToJson(stats);
+        else
+            j["overrides"][nodataKey(nodata)][std::to_string(band)] = statsToJson(stats);
+        return writeSidecar(rasterPath, std::move(j));
+    }
 
-            if (!nodata)
-                j["bands"][std::to_string(band)] = statsToJson(stats);
-            else
-                j["overrides"][nodataKey(nodata)][std::to_string(band)] = statsToJson(stats);
-            j["version"] = 2;
-            j["exact"] = true;
+    bool hasFreshStatsSidecar(const fs::path &raster)
+    {
+        return !readFreshSidecar(raster).is_null();
+    }
 
-            const auto now = std::chrono::system_clock::now();
-            const auto time = std::chrono::system_clock::to_time_t(now);
-            std::tm tm{};
-#ifdef _WIN32
-            gmtime_s(&tm, &time);
-#else
-            gmtime_r(&time, &tm);
-#endif
-            std::ostringstream stamp;
-            stamp << std::put_time(&tm, "%FT%TZ");
-            j["computedAt"] = stamp.str();
-
-            // Whole, by a rename: a reader never sees half of it
-            const fs::path target = statsSidecarOf(rasterPath);
-            const fs::path temp = io::concat(target, "." + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())) + ".tmp");
-            {
-                std::ofstream out(temp, std::ios::trunc);
-                if (!out.is_open())
-                    throw AppException("Cannot write " + io::toUtf8(temp));
-                out << j.dump(2);
-                out.flush();
-                if (!out)
-                    throw AppException("Cannot write " + io::toUtf8(temp));
-            }
-            std::error_code ec;
-            fs::rename(temp, target, ec);
-            if (ec)
-            {
-                fs::remove(temp, ec);
-                throw AppException("Cannot replace " + io::toUtf8(target));
-            }
+    bool writeEmptyStatsSidecar(const std::string &path)
+    {
+        const fs::path rasterPath = io::fromUtf8(path);
+        if (hasFreshStatsSidecar(rasterPath))
             return true;
-        }
-        catch (const std::exception &e)
-        {
-            LOGW << "Cannot write the statistics sidecar of " << path << ": " << e.what();
-            return false;
-        }
+        return writeSidecar(rasterPath, json{{"bands", json::object()}});
     }
 }

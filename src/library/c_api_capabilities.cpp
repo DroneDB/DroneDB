@@ -53,6 +53,7 @@ constexpr std::string_view kCancellable[] = {
     "DDBBuild",
     "DDBBuildEx",
     "DDBBuildEx2",
+    "DDBBuildRasterStatistics",
     "DDBCalculateVolume",
     "DDBComputeDeltaLocals",
     "DDBDetectAllStockpiles",

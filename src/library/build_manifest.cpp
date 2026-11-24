@@ -82,6 +82,8 @@ void to_json(json& j, const BuildArtifact& artifact) {
         j["crs"] = {{"name", artifact.crs->name},
                     {"epsg", artifact.crs->epsg ? json(*artifact.crs->epsg) : json(nullptr)},
                     {"transformed", artifact.crs->transformed}};
+    if (artifact.statistics)
+        j["statistics"] = *artifact.statistics;
 }
 
 void to_json(json& j, const EntryBuild& build) {

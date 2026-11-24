@@ -6,12 +6,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
 
 #include "artefact_cache.h"
+#include "cancellation.h"
 #include "ddbt/ddbt.h"
 #include "exceptions.h"
 #include "gdal_open_policy.h"
@@ -351,6 +353,68 @@ namespace ddb::tilers
     {
         check(ddbtRasterRead(handle_, x, y, width, height, bufWidth, bufHeight, bands.data(),
                              static_cast<int>(bands.size()), DDBT_SAMPLE_FLOAT64, out, mask));
+    }
+
+    std::vector<std::optional<Raster::BandStatistics>> Raster::statistics(std::span<const int> bands,
+                                                                          const std::optional<double> &nodata,
+                                                                          size_t threads,
+                                                                          const std::function<void(double)> &progress) const
+    {
+        json options = {{"bands", std::vector<int>(bands.begin(), bands.end())},
+                        {"threads", std::max<size_t>(1, threads)}};
+        if (nodata)
+            options["nodata"] = std::isnan(*nodata) ? json("nan") : json(*nodata);
+
+        // keepGoing runs on this thread: it stops the pass for the call's token, and an exception of `progress`
+        // stops it too and is thrown once ddb-tilers returned (never through its C frames)
+        struct Watch
+        {
+            const std::function<void(double)> *progress;
+            std::exception_ptr failure;
+        } watch{&progress, nullptr};
+        const auto keepGoing = [](double fraction, void *userData) -> int {
+            auto *w = static_cast<Watch *>(userData);
+            if (cancel::isCanceled())
+                return 1;
+            try
+            {
+                if (*w->progress)
+                    (*w->progress)(fraction);
+                return 0;
+            }
+            catch (...)
+            {
+                w->failure = std::current_exception();
+                return 1;
+            }
+        };
+        char *text = nullptr;
+        const ddbtErr rc = ddbtRasterStatistics(handle_, options.dump().c_str(), keepGoing, &watch, &text);
+        if (watch.failure)
+            std::rethrow_exception(watch.failure);
+        if (rc == DDBT_ERR_CANCELED)
+            cancel::throwIfCanceled();
+        check(rc);
+        const tilers::String owned(text);
+        const json report = json::parse(text);
+        std::vector<std::optional<BandStatistics>> out;
+        for (const auto &b : report.at("bands"))
+        {
+            if (b.is_null())
+            {
+                out.emplace_back();
+                continue;
+            }
+            BandStatistics s;
+            s.min = b.at("min").get<double>();
+            s.max = b.at("max").get<double>();
+            s.mean = b.at("mean").get<double>();
+            s.stdDev = b.at("std").get<double>();
+            s.validCount = b.at("valid").get<uint64_t>();
+            s.pixelCount = b.at("total").get<uint64_t>();
+            out.push_back(s);
+        }
+        return out;
     }
 
     size_t WarpedImage::sampleSize() const

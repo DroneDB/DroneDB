@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -108,6 +109,23 @@ namespace ddb::tilers
         // pixel for pixel, with their mask as readMasked() gives it. @throws InvalidArgsException, GDALException
         void readLevel(int level, int x, int y, int width, int height, std::span<const int> bands, double *out,
                        uint8_t *mask) const;
+
+        // The exact statistics of a band: of its pixels that have a value (not its NoData value, not masked, finite)
+        struct BandStatistics
+        {
+            double min = 0, max = 0, mean = 0, stdDev = 0;
+            uint64_t validCount = 0, pixelCount = 0;
+        };
+        // The exact statistics of `bands` (1-based) in one pass of ddb-tilers over every pixel of the full
+        // resolution (ddbtRasterStatistics): every band in one decode, the blocks decoded and summed on `threads`
+        // threads (the calling one among them), with `nodata` instead of the NoData value of each band when set.
+        // The values do not depend on the number of threads; for integer samples they are those of the sidecar of
+        // a COG build. None for a band in which no pixel has a value. `progress`, when set, is told the fraction
+        // done (0 to 1) on the calling thread. The pass stops when the call is canceled.
+        // @throws CanceledException, InvalidArgsException, GDALException
+        std::vector<std::optional<BandStatistics>> statistics(std::span<const int> bands,
+                                                              const std::optional<double> &nodata, size_t threads,
+                                                              const std::function<void(double)> &progress = {}) const;
 
         // The pixels (first and last column and row, inclusive) of the smallest window that holds every
         // pixel that may be visible: band 1 not masked (readMasked) and not its NoData value. None when

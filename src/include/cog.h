@@ -44,6 +44,30 @@ void buildCogInPrivateFolder(const std::string& input, const fs::path& produced,
                              const BuildOptions& options = {},
                              const std::optional<raster::PhotoGeoreference>& photo = std::nullopt);
 
+// The role of the COG of a GeoRaster in its build
+inline constexpr const char* CogRole = "raster.cog";
+
+class Database;
+
+// What buildCogStatistics found or did
+enum class CogStatisticsStatus
+{
+    Computed,  // the statistics were computed and written next to the COG
+    Present,   // the COG had them already (a sidecar that is used)
+    NotBuilt   // the entry has no complete build: nothing to compute
+};
+
+// DDBBuildRasterStatistics: the exact statistics of every band of the COG of the GeoRaster entry `entryPath`, kept
+// next to it (statsSidecarOf) when it has none that is used: a COG built before libddb wrote them at build time
+// gets them without being built again. One parallel pass over its pixels (RasterStatsProvider::getAll), on at most
+// `maxThreads` threads (0: DDB_STATS_THREADS); a COG in which no band has a pixel with a value gets a sidecar
+// without an entry, so it is not passed again. The build lock of the entry is held meanwhile.
+// `progress`, when set, is told the fraction done. Can be canceled.
+// @throws EntryNotFoundException (no such entry), InvalidArgsException (not a GeoRaster), BuildInProgressException
+// (a build of the entry runs), GDALException (the COG cannot be read)
+CogStatisticsStatus buildCogStatistics(Database* db, const std::string& entryPath, size_t maxThreads,
+                                       const std::function<void(double)>& progress = {});
+
 }
 
 #endif  // COG_H

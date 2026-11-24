@@ -23,6 +23,7 @@ DDBApplyDeltaEx
 DDBBuild
 DDBBuildEx
 DDBBuildEx2
+DDBBuildRasterStatistics
 DDBCalculateVolume
 DDBCancel
 DDBChattr

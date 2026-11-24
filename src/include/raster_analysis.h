@@ -191,7 +191,9 @@ ValueHistogram binValues(const std::vector<double> &values, double lo, double hi
 
 /**
  * The sensor profile info of a raster (SensorProfileManager::getRasterInfoJson) with "indexLayer"
- * added: the indices the WMS vegetation-index layer can render from it (DDBGetRasterInfo).
+ * added: the indices the WMS vegetation-index layer can render from it (DDBGetRasterInfo), and
+ * (new in 2.11) the "algorithms", "colormaps" and "autoBands" of getRasterMetadataJson without a
+ * band filter, from the metadata of the raster alone: no pixel is read.
  */
 std::string getRasterInfoJson(const std::string &path);
 

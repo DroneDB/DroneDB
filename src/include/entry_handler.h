@@ -76,6 +76,10 @@ struct BuildArtifact {
     // Of an artifact that exists, when its handler describes it (EntryHandler::describeArtifacts):
     // the CRS of the file. Nothing in the manifest of a type.
     std::optional<ArtifactCrs> crs;
+    // Of an artifact that exists, when its handler describes it (the COG of a GeoRaster): whether the exact
+    // statistics of the raster are kept next to it (a sidecar of the build, or one DDBBuildRasterStatistics
+    // wrote). Nothing in the manifest of a type.
+    std::optional<bool> statistics;
 
     // Not an aggregate on purpose: an artifact is made by file(), directory() and legacyFor(), so a
     // member added later has its default in one place instead of in every list of artifacts, and a

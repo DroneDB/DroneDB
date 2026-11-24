@@ -78,6 +78,10 @@ namespace ddb
         /// The same, at full resolution, into Float32 samples
         virtual void read(const RasterWindow &window, const std::vector<int> &bands, float *samples,
                           uint8_t *mask) const = 0;
+
+        /// The raster ddb-tilers reads when the source is one, as it is (no NoData override): its exact
+        /// statistics then come from one parallel pass of ddb-tilers. Null for any other source
+        virtual const tilers::Raster *tilersRaster() const { return nullptr; }
     };
 
     /// The source seen with the NoData value `nodata` instead of the one of every band (FR-RAS-31), as the VRT of
