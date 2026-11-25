@@ -249,7 +249,9 @@ extern "C"
      *        "dsmDays", "tempDays" (whole numbers from 0 to 36500) and "dryRun" (true: count, remove nothing)
      * @param output pointer to C-string where to store the JSON (free with DDBFree):
      *        {"dryRun": bool, "kinds": {kind: {"entries": n, "bytes": n}}}, every kind above
-     * @return DDBERR_NONE; DDBERR_INVALIDARGS for bad options or a NULL output; DDBERR_CANCELED */
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS for bad options or a NULL output; DDBERR_CANCELED
+     * Changed in 2.13.1: "temp" also counts the temporary files the GDAL COG driver of earlier versions left
+     * in the temporary folder when a COG build was stopped (cog.tif_<pid>_<counter>, about the size of the COG). */
     DDB_DLL DDBErr DDBCleanupCache(const char *optionsJson, char **output);
 
     /* Shutdown (new in 2.0). A host calls DDBShutdown once, when it stops (after it

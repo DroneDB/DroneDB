@@ -947,3 +947,7 @@ Registry has to adopt first.
   `cache-cleanup`). The tiles of a photo are drawn from the photo for each tile by the raster helper (the
   `photoTile` operation); nothing of a photo is kept. The raster helper speaks protocol 1.6. No other fixture or
   schema changed.
+* 2.13.1 (ABI 2.13, a patch: no export is added or removed, `capabilities` is unchanged and no schema or fixture
+  changed): the `temp` kind of `DDBCleanupCache` also counts the temporary files the GDAL COG driver of earlier
+  versions left in the temporary folder when a COG build was stopped (`cog.tif_<pid>_<counter>`, about the size of
+  the COG).
