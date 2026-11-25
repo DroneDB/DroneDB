@@ -823,8 +823,10 @@ namespace
     TEST_F(RasterArtefacts, theTilesOfAPhotoAreThoseOfItsCogWithinTheResampling)
     {
         const TestPhoto photo = downloadPhoto(*area_);
-        const fs::path cog = build_ / CogBuildSubfolder / CogFileName;
-        fs::create_directories(cog.parent_path());
+        // The COG is built where the helper writes on Windows too: a request folder, which gets the low
+        // integrity label the confined helper needs (a folder made by the test has none)
+        const raster::RequestFolder request("photo-cog-");
+        const fs::path cog = request.path() / CogFileName;
         buildCogInPrivateFolder(io::toUtf8(photo.path), cog, {}, photo.georeference);
         RasterTiler fromCog(io::toUtf8(cog), "", 256, false);
         const int maxZ = fromCog.getMinMaxZ().max;
