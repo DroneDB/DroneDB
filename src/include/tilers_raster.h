@@ -21,11 +21,16 @@
 
 struct ddbtRaster;
 
+namespace ddb::raster
+{
+    class RequestFolder;
+}
+
 namespace ddb::tilers
 {
-    // A raster libddb reads in this process with ddb-tilers: the COG of a build, an artefact, or the
-    // normalized copy of any other raster (raster::artefactFor), the file raster::openInputRaster opens
-    // with GDAL. What it reports and reads is what GDAL reports and reads of the file (ddbtRasterInfo,
+    // A raster libddb reads in this process with ddb-tilers: the COG of a build, an artefact, a file of a
+    // user ddb-tilers reads whole, or a copy of any other raster (raster::inputFileFor), the file
+    // raster::openInputRaster opens with GDAL. What it reports and reads is what GDAL reports and reads of the file (ddbtRasterInfo,
     // ddbtRasterRead: nearest resampling, GDAL's choice of overview). A raster is read by several
     // threads at once.
     class Raster
@@ -57,7 +62,7 @@ namespace ddb::tilers
         Raster(const Raster &) = delete;
         Raster &operator=(const Raster &) = delete;
 
-        // The file read: the artefact of the path openInput was given
+        // The file read: the path openInput was given, or the copy of it it reads (raster::inputFileFor)
         const fs::path &file() const { return file_; }
         int width() const { return width_; }
         int height() const { return height_; }
@@ -154,6 +159,8 @@ namespace ddb::tilers
 
         ddbtRaster *handle_;
         fs::path file_;
+        // The request folder of the copy openInput reads, removed after the file is closed
+        std::unique_ptr<raster::RequestFolder> request_;
         int width_ = 0, height_ = 0;
         std::string dataType_;
         int blockWidth_ = 0, blockHeight_ = 0;

@@ -126,6 +126,18 @@ namespace
         EXPECT_EQ(effectiveConfig(), effective);
     }
 
+    // The bound of the artefact cache of earlier versions is still accepted, checked and reported, and does
+    // nothing: libddb keeps no such cache
+    TEST(CAbiConfig, TheRetiredArtefactCacheBoundIsAcceptedAndReported)
+    {
+        const ScopedProcessConfig configured(R"({"artefactCacheMb": 512})");
+        EXPECT_EQ(effectiveConfig()["settings"]["artefactCacheMb"], 512);
+        EXPECT_EQ(DDBConfigure(R"({"artefactCacheMb": -1})"), DDBERR_INVALIDARGS);
+        EXPECT_EQ(DDBConfigure(R"({"artefactCacheMb": "big"})"), DDBERR_INVALIDARGS);
+        ASSERT_DDB_OK(DDBConfigure(R"({"artefactCacheMb": null})"));
+        EXPECT_EQ(effectiveConfig()["settings"]["artefactCacheMb"], 0) << "the default of a setting with no effect";
+    }
+
     // A host configures libddb before DDBRegisterProcess, and the settings outlive it
     // (tests/helpers/config_probe.cpp, its own process: this one registered in main)
     TEST(CAbiConfig, ConfigureBeforeRegisterProcess)

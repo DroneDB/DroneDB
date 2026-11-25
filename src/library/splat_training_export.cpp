@@ -22,7 +22,7 @@
 #include "cancellation.h"
 #include "cloud_sample.h"
 #include "exceptions.h"
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "gdal_raii.h"
 #include "json.h"
 #include "local_frame_georef.h"

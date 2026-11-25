@@ -18,6 +18,7 @@
 #include "mio.h"
 #include "raster_artefacts.h"
 #include "stringutil.h"
+#include "temp_names.h"
 #include "thermal.h"
 #include "tool_locator.h"
 #include "tool_run_support.h"
@@ -323,6 +324,15 @@ namespace ddb
                 serve(op::kThumbnail, path, out, toJson(params), options_.thumbnailTimeout, ResponseCheck());
             if (!response.ok)
                 raiseFailure(op::kThumbnail, path, response);
+        }
+
+        void GdalUtilHelper::photoTile(const fs::path &path, const fs::path &out, const PhotoTileParams &params)
+        {
+            // A request of the pool, as short as a thumbnail and with its limits
+            const Response response =
+                serve(op::kPhotoTile, path, out, toJson(params), options_.thumbnailTimeout, ResponseCheck());
+            if (!response.ok)
+                raiseFailure(op::kPhotoTile, path, response);
         }
 
         void GdalUtilHelper::normalize(const fs::path &path, const fs::path &out, const json &params)
@@ -724,7 +734,7 @@ namespace ddb
             // In the temp folder of the system, not in the thumbnail cache: the destination of a
             // thumbnail is whatever the caller names (and the memory API has none), and the copy
             // into it is made by the caller as any thumbnail is written (atomically)
-            const io::ScopedTempDir request = raster::makePrivateFolder(fs::temp_directory_path(), "ddb-thumb-");
+            const io::ScopedTempDir request = raster::makePrivateFolder(fs::temp_directory_path(), tempnames::kThumbnail);
 
             fs::path input = path;
             const std::string utf8 = io::toUtf8(path);
@@ -754,6 +764,34 @@ namespace ddb
             {
                 LOGW << kGdalUtilName << " thumbnail of " << source << " is not a WebP file; it is dropped";
                 throw GDALException(std::string(kGdalUtilName) + " wrote a file that is not a thumbnail");
+            }
+            return bytes;
+        }
+
+        bool looksLikeTile(const std::string &bytes, ImageFormat format)
+        {
+            if (bytes.size() > kMaxThumbnailBytes)
+                return false;
+            switch (format)
+            {
+            case ImageFormat::Png:
+                return bytes.size() > 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0;
+            case ImageFormat::Jpeg:
+                return bytes.size() > 3 && std::memcmp(bytes.data(), "\xff\xd8\xff", 3) == 0;
+            case ImageFormat::Webp:
+                return looksLikeThumbnail(bytes);
+            }
+            return false;
+        }
+
+        std::string readHelperTile(const fs::path &file, ImageFormat format, const std::string &source)
+        {
+            std::string bytes = readHelperOutput(file);
+            if (!looksLikeTile(bytes, format))
+            {
+                LOGW << kGdalUtilName << " tile of " << source << " is not a " << imageFormatExtension(format)
+                     << " file; it is dropped";
+                throw GDALException(std::string(kGdalUtilName) + " wrote a file that is not a tile");
             }
             return bytes;
         }

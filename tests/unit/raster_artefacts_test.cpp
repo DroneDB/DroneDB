@@ -5,13 +5,17 @@
 // The files libddb wrote itself (raster_artefacts.h): which places are artefacts and which files
 // are not, what opens as one, and the tiler that reads nothing else: a raster of a user is
 // converted by the raster helper into the artefacts folder of the cache, and a COG of a build is
-// tiled as it is.
+// tiled as it is. A photo is tiled from itself and leaves nothing in the cache.
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -24,6 +28,8 @@
 #include "gdal_inc.h"
 #include "gdal_open_policy.h"
 #include "gdal_raii.h"
+#include "photo_tile.h"
+#include "photo_tiler.h"
 #include "raster_tiler.h"
 #include "gtest/gtest.h"
 #include "json.h"
@@ -91,15 +97,32 @@ namespace
             config_ = std::make_unique<ScopedProcessConfig>(json{{"cacheDir", io::toUtf8(cache_)}}.dump());
             dataset_ = area_->getPath("dataset");
             build_ = dataset_ / DDB_FOLDER / DDB_BUILD_PATH / kHash;
+            request_ = std::make_unique<raster::RequestFolder>("test-");
         }
 
         void TearDown() override
         {
             RasterCache::instance().clear();
+            request_.reset();
+        }
+
+        // The folder of a request of the test: a place of artefacts while the test runs
+        const fs::path &artefacts() const { return request_->path(); }
+
+        // The folders of the requests that are left in the cache of the test, the test's own left out
+        std::vector<fs::path> requestFolders() const
+        {
+            std::vector<fs::path> folders;
+            std::error_code ec;
+            for (const auto &entry : fs::directory_iterator(raster::requestsDir(), ec))
+                if (entry.path() != request_->path())
+                    folders.push_back(entry.path());
+            return folders;
         }
 
         std::unique_ptr<TestArea> area_;
         std::unique_ptr<ScopedProcessConfig> config_;
+        std::unique_ptr<raster::RequestFolder> request_;
         fs::path cache_;
         fs::path dataset_;
         fs::path build_;
@@ -151,41 +174,52 @@ namespace
     {
         const fs::path outside = makeGeoTiff(area_->getPath("outside") / "secret.tif");
 
-        // A link in the place of the COG of a build, and one in the artefacts of the cache
+        // A link in the place of the COG of a build, and one in the folder of a request
         fs::create_directories(build_ / CogBuildSubfolder);
         fs::create_symlink(outside, build_ / CogBuildSubfolder / CogFileName);
-        fs::create_symlink(outside, raster::artefactsDir() / "link.tif");
+        fs::create_symlink(outside, artefacts() / "link.tif");
         // A link to a folder: what is below it is outside
-        fs::create_directory_symlink(area_->getPath("outside"), raster::artefactsDir() / "folder");
+        fs::create_directory_symlink(area_->getPath("outside"), artefacts() / "folder");
 
         EXPECT_FALSE(raster::isLibddbArtefact(build_ / CogBuildSubfolder / CogFileName));
-        EXPECT_FALSE(raster::isLibddbArtefact(raster::artefactsDir() / "link.tif"));
-        EXPECT_FALSE(raster::isLibddbArtefact(raster::artefactsDir() / "folder" / "secret.tif"));
-        EXPECT_THROW(raster::requireArtefact(raster::artefactsDir() / "link.tif"), GDALException);
+        EXPECT_FALSE(raster::isLibddbArtefact(artefacts() / "link.tif"));
+        EXPECT_FALSE(raster::isLibddbArtefact(artefacts() / "folder" / "secret.tif"));
+        EXPECT_THROW(raster::requireArtefact(artefacts() / "link.tif"), GDALException);
 
         // A link from outside to a file that is one is judged by the file
-        const fs::path real = makeGeoTiff(raster::artefactsDir() / "real.tif");
+        const fs::path real = makeGeoTiff(artefacts() / "real.tif");
         fs::create_symlink(real, area_->getPath("outside") / "to-artefact.tif");
         EXPECT_TRUE(raster::isLibddbArtefact(area_->getPath("outside") / "to-artefact.tif"));
     }
 #endif
 
-    TEST_F(RasterArtefacts, theArtefactsFolderOfTheCacheHoldsArtefactsAndTheRestOfTheCacheDoesNot)
+    TEST_F(RasterArtefacts, theFolderOfALiveRequestHoldsArtefactsAndTheRestOfTheCacheDoesNot)
     {
-        const fs::path artefacts = raster::artefactsDir();
-        EXPECT_EQ(artefacts, cache_ / "artefacts");
+        EXPECT_EQ(artefacts().parent_path(), cache_ / "requests");
+        EXPECT_TRUE(raster::isLibddbArtefact(artefacts() / "a.tif"));
+        EXPECT_TRUE(raster::isLibddbArtefact(artefacts() / "sub" / "cog.tif"));
+        EXPECT_FALSE(raster::isLibddbArtefact(artefacts())) << "the folder itself is not a file";
 
-        EXPECT_TRUE(raster::isLibddbArtefact(artefacts / "a.tif"));
-        EXPECT_TRUE(raster::isLibddbArtefact(artefacts / "req-x" / "cog.tif"));
-        EXPECT_FALSE(raster::isLibddbArtefact(artefacts)) << "the folder itself is not a file";
-
+        // A folder of the requests folder that no request of this process holds (one a crash left), the
+        // artefact cache of an earlier version, and the rest of the cache are not
+        fs::create_directories(raster::requestsDir() / "cog-left");
+        EXPECT_FALSE(raster::isLibddbArtefact(raster::requestsDir() / "cog-left" / "cog.tif"));
+        EXPECT_FALSE(raster::isLibddbArtefact(raster::requestsDir() / "a.tif"));
+        EXPECT_FALSE(raster::isLibddbArtefact(cache_ / "artefacts" / "a.tif"));
+        EXPECT_FALSE(raster::isLibddbArtefact(cache_ / "artefacts" / "normalized" / "a.tif"));
         // A download in the tiles folder is somebody else's file, whatever its name
         const fs::path download = makeGeoTiff(UserProfile::get()->getTilesDir() / "0123456789abcdef.tif");
         EXPECT_FALSE(raster::isLibddbArtefact(download));
         EXPECT_FALSE(raster::isLibddbArtefact(UserProfile::get()->getThumbsDir() / "a.webp"));
-        EXPECT_FALSE(raster::isLibddbArtefact(artefacts / ".." / "tiles" / "0123456789abcdef.tif"));
-        EXPECT_FALSE(raster::isLibddbArtefact(cache_ / "artefacts-not" / "a.tif"));
+        EXPECT_FALSE(raster::isLibddbArtefact(artefacts() / ".." / ".." / "tiles" / "0123456789abcdef.tif"));
+        EXPECT_FALSE(raster::isLibddbArtefact(io::concat(artefacts(), "-not") / "a.tif"));
         EXPECT_FALSE(raster::isLibddbArtefact(area_->getPath("elsewhere.tif")));
+
+        // Once the request goes, its place is no artefact place any more
+        const fs::path gone = artefacts() / "a.tif";
+        request_.reset();
+        EXPECT_FALSE(raster::isLibddbArtefact(gone));
+        request_ = std::make_unique<raster::RequestFolder>("test-");
     }
 
     // ------------------------------------------------------------------ opening
@@ -204,8 +238,8 @@ namespace
         }
         EXPECT_THROW(raster::openArtefactVector(raw), GDALException);
 
-        // The same file in the place of the artefacts is one, and the host reads it as it is
-        const fs::path copy = raster::artefactsDir() / "raw.tif";
+        // The same file in the folder of a request is one, and the host reads it as it is
+        const fs::path copy = artefacts() / "raw.tif";
         fs::copy_file(raw, copy);
         EXPECT_NO_THROW(raster::requireArtefact(copy));
         const auto raster = tilers::Raster::openInput(io::toUtf8(copy));
@@ -218,20 +252,20 @@ namespace
     // GeoPackage in the place of an artefact is no raster to it
     TEST_F(RasterArtefacts, anArtefactThatIsNoTiffIsNoRaster)
     {
-        const fs::path real = makeGeoTiff(raster::artefactsDir() / "real.tif");
+        const fs::path real = makeGeoTiff(artefacts() / "real.tif");
 
         // A VRT is a list of files to read, wherever it is and whatever it is named
         const std::string vrt = "<VRTDataset rasterXSize=\"300\" rasterYSize=\"200\"><VRTRasterBand dataType=\"Byte\" band=\"1\">"
                                 "<SimpleSource><SourceFilename relativeToVRT=\"0\">" +
                                 io::toUtf8(real) +
                                 "</SourceFilename><SourceBand>1</SourceBand></SimpleSource></VRTRasterBand></VRTDataset>";
-        writeFile(raster::artefactsDir() / "list.vrt", vrt);
-        writeFile(raster::artefactsDir() / "disguised.tif", vrt);
-        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(raster::artefactsDir() / "list.vrt")));
-        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(raster::artefactsDir() / "disguised.tif")));
+        writeFile(artefacts() / "list.vrt", vrt);
+        writeFile(artefacts() / "disguised.tif", vrt);
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(artefacts() / "list.vrt")));
+        EXPECT_FALSE(tilers::Raster::openInput(io::toUtf8(artefacts() / "disguised.tif")));
 
         // A PNG with the name of a GeoTIFF is no GeoTIFF
-        const fs::path png = raster::artefactsDir() / "image.tif";
+        const fs::path png = artefacts() / "image.tif";
         GDALDatasetH source = GDALOpen(io::toUtf8(real).c_str(), GA_ReadOnly);
         ASSERT_NE(source, nullptr);
         GDALClose(GDALCreateCopy(GDALGetDriverByName("PNG"), io::toUtf8(png).c_str(), source, FALSE, nullptr, nullptr, nullptr));
@@ -241,7 +275,7 @@ namespace
 
         // A GeoTIFF is not a vector, and a raster open does not take a GeoPackage
         EXPECT_FALSE(raster::openArtefactVector(real));
-        const fs::path gpkg = raster::artefactsDir() / "layers.gpkg";
+        const fs::path gpkg = artefacts() / "layers.gpkg";
         {
             GDALDatasetH dataset = GDALCreate(GDALGetDriverByName("GPKG"), io::toUtf8(gpkg).c_str(), 0, 0, 0, GDT_Unknown, nullptr);
             ASSERT_NE(dataset, nullptr);
@@ -267,7 +301,7 @@ namespace
         for (const auto &[domain, item] : items)
         {
             SCOPED_TRACE(item);
-            const fs::path artefact = makeGeoTiff(raster::artefactsDir() / (std::string(item) + ".tif"));
+            const fs::path artefact = makeGeoTiff(artefacts() / (std::string(item) + ".tif"));
             {
                 auto update = adoptDataset(GDALOpenEx(io::toUtf8(artefact).c_str(), GDAL_OF_RASTER | GDAL_OF_UPDATE,
                                                       nullptr, nullptr, nullptr));
@@ -284,7 +318,7 @@ namespace
 
     TEST_F(RasterArtefacts, theGuardOfTheOpenPolicyIsTheOneAnArtefactOpensWith)
     {
-        const fs::path file = makeGeoTiff(raster::artefactsDir() / "guarded.tif");
+        const fs::path file = makeGeoTiff(artefacts() / "guarded.tif");
         EXPECT_EQ(CPLGetThreadLocalConfigOption("CPL_VSIL_CURL_ALLOWED_FILENAME", nullptr), nullptr);
         {
             const gdalopen::NoNetworkWhileOpening guard(io::toUtf8(file));
@@ -391,34 +425,13 @@ namespace
 
     // ------------------------------------------------------------------ names and folders
 
-    TEST_F(RasterArtefacts, theKeyOfAFileChangesWithTheFileAndOnlyThen)
-    {
-        const fs::path file = area_->getPath("source.tif");
-        writeFile(file, "one");
-        const std::string key = raster::artefactKey(file);
-        EXPECT_EQ(key, raster::artefactKey(file));
-        EXPECT_EQ(key.find_first_not_of("0123456789abcdefABCDEF"), std::string::npos) << key;
-
-        writeFile(file, "one and more");
-        EXPECT_NE(raster::artefactKey(file), key) << "another size is another file";
-
-        const fs::path other = area_->getPath("other.tif");
-        writeFile(other, "one and more");
-        fs::last_write_time(other, fs::last_write_time(file));
-        EXPECT_NE(raster::artefactKey(other), raster::artefactKey(file)) << "another path is another file";
-
-        fs::last_write_time(file, fs::last_write_time(file) - std::chrono::hours(1));
-        EXPECT_NE(raster::artefactKey(file), raster::artefactKey(other));
-        EXPECT_THROW(raster::artefactKey(area_->getPath("missing.tif")), std::exception);
-    }
-
-    TEST_F(RasterArtefacts, aRequestFolderIsPrivateInTheArtefactsAndGoneWithItsOwner)
+    TEST_F(RasterArtefacts, aRequestFolderIsPrivateInTheRequestsFolderAndGoneWithItsOwner)
     {
         fs::path folder;
         {
-            const io::ScopedTempDir request = raster::makeArtefactRequestFolder("test-");
+            const raster::RequestFolder request("test-");
             folder = request.path();
-            EXPECT_EQ(folder.parent_path(), raster::artefactsDir());
+            EXPECT_EQ(folder.parent_path(), raster::requestsDir());
             EXPECT_TRUE(raster::isLibddbArtefact(folder / "out.tif"));
 #ifndef _WIN32
             EXPECT_EQ(fs::status(folder).permissions() & fs::perms::all, fs::perms::owner_all);
@@ -426,13 +439,14 @@ namespace
             EXPECT_TRUE(fs::is_directory(folder));
         }
         EXPECT_FALSE(fs::exists(folder));
+        EXPECT_FALSE(raster::isLibddbArtefact(folder / "out.tif"));
     }
 
     TEST_F(RasterArtefacts, publishingReplacesTheTargetWithTheWholeFile)
     {
-        const fs::path target = raster::artefactsDir() / "target.tif";
+        const fs::path target = artefacts() / "target.tif";
         writeFile(target, "old");
-        const io::ScopedTempDir request = raster::makeArtefactRequestFolder("publish-");
+        const raster::RequestFolder request("publish-");
         writeFile(request.path() / "new.tif", "new content");
 
         raster::publishArtefact(request.path() / "new.tif", target);
@@ -441,24 +455,6 @@ namespace
         EXPECT_FALSE(fs::exists(request.path() / "new.tif"));
         EXPECT_THROW(raster::publishArtefact(request.path() / "missing.tif", target), FSException);
         EXPECT_EQ(readFile(target), "new content") << "a failed publish leaves the target as it was";
-    }
-
-    TEST_F(RasterArtefacts, theCleanupRemovesWhatWasNotTouchedForFiveDaysAndNothingElse)
-    {
-        const fs::path artefacts = raster::artefactsDir();
-        const auto longAgo = fs::file_time_type::clock::now() - std::chrono::hours(24 * 6);
-        writeFile(artefacts / "old.tif", "old");
-        fs::last_write_time(artefacts / "old.tif", longAgo);
-        writeFile(artefacts / "req-old" / "cog.tif", "left behind by a request");
-        fs::last_write_time(artefacts / "req-old", longAgo);
-        writeFile(artefacts / "recent.tif", "recent");
-        fs::last_write_time(artefacts / "recent.tif", fs::file_time_type::clock::now() - std::chrono::hours(24 * 4));
-
-        TilerHelper::cleanupUserCache();
-
-        EXPECT_FALSE(fs::exists(artefacts / "old.tif"));
-        EXPECT_FALSE(fs::exists(artefacts / "req-old"));
-        EXPECT_TRUE(fs::exists(artefacts / "recent.tif"));
     }
 
     // ------------------------------------------------------------------ the tiler
@@ -487,6 +483,18 @@ namespace
         void thumbnail(const fs::path &, const fs::path &, const raster::ThumbnailParams &) override
         {
             ADD_FAILURE() << "no thumbnail is asked for";
+        }
+        // An opaque tile of the size asked for, in the format asked for
+        void photoTile(const fs::path &path, const fs::path &out, const raster::PhotoTileParams &params) override
+        {
+            record("photoTile", path);
+            lastTileOut = out;
+            lastTileParams = params;
+            RasterImage image(params.tileSize, params.tileSize, 3, false);
+            std::fill(image.color.begin(), image.color.end(), uint8_t{200});
+            EncodeOptions options;
+            options.format = params.format;
+            TileEncoder::write(image, options, io::toUtf8(out));
         }
         void normalize(const fs::path &, const fs::path &, const json &) override
         {
@@ -542,6 +550,8 @@ namespace
 
         fs::path lastCogOut;
         json lastCogParams;
+        fs::path lastTileOut;
+        raster::PhotoTileParams lastTileParams;
 
       private:
         void record(const std::string &op, const fs::path &path)
@@ -555,13 +565,19 @@ namespace
         std::vector<std::pair<std::string, fs::path>> requests_;
     };
 
-    // The tile at the deepest zoom of the middle of the raster, from the artefact
+    // The tile at the deepest zoom of the middle of the raster `tiler` reads, asked of `source`
+    TileRequest middleTile(const fs::path &source, Tiler &tiler, bool force = false)
+    {
+        const int z = tiler.getMinMaxZ().max;
+        const auto bounds = tiler.getMinMaxCoordsForZ(z);
+        return testTile(source, z, (bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, 256, false, force);
+    }
+
+    // The same, from the artefact itself
     TileRequest middleTile(const fs::path &source, const fs::path &artefact)
     {
         RasterTiler tiler(io::toUtf8(artefact), "", 256);
-        const int z = tiler.getMinMaxZ().max;
-        const auto bounds = tiler.getMinMaxCoordsForZ(z);
-        return testTile(source, z, (bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, 256, false, false);
+        return middleTile(source, tiler);
     }
 
     std::vector<uint8_t> memoryTile(TileRequest request)
@@ -574,7 +590,7 @@ namespace
         return testutils::takeBuffer(buffer, size);
     }
 
-    TEST_F(RasterArtefacts, aRawRasterIsTiledFromACogOfTheCacheAndNeverOpenedByTheTiler)
+    TEST_F(RasterArtefacts, aRawRasterIsTiledFromTheCogOfARequestAndNeverOpenedByTheTiler)
     {
         const fs::path preparedCog = makeGeoTiff(area_->getPath("prepared") / "cog.tif");
         // A file GDAL cannot open: only the helper (here, the stand-in) converts it
@@ -583,235 +599,293 @@ namespace
         ConvertingHelper helper(preparedCog);
         const raster::ScopedRasterHelper installed(helper);
 
-        const fs::path cog = TilerHelper::toGeoTIFF(raw);
+        auto tiler = TilerHelper::tilerFor(raw, "", 256);
 
-        EXPECT_EQ(cog.parent_path(), raster::artefactsDir());
-        EXPECT_EQ(cog.filename(), fs::path(raster::artefactKey(raw) + ".tif"));
-        EXPECT_TRUE(raster::isLibddbArtefact(cog));
         EXPECT_EQ(helper.count("cog"), 1u);
         EXPECT_EQ(helper.pathOf("cog"), raw);
-        // The helper wrote into a folder of the artefacts, and the file was moved to its name
-        EXPECT_EQ(helper.lastCogOut.parent_path().parent_path(), raster::artefactsDir());
-        EXPECT_FALSE(fs::exists(helper.lastCogOut));
+        // The helper wrote into the folder of a request, which the tiler reads and keeps
+        const fs::path cog = helper.lastCogOut;
+        EXPECT_EQ(cog.parent_path().parent_path(), raster::requestsDir());
+        EXPECT_TRUE(raster::isLibddbArtefact(cog));
         EXPECT_TRUE(helper.lastCogParams.contains("threads"));
 
         // The tiles come from the COG: the tiler of the raw file refuses it, the helper's COG serves
         EXPECT_THROW(RasterTiler(io::toUtf8(raw), "", 256), GDALException);
-        const std::vector<uint8_t> tile = memoryTile(middleTile(raw, cog));
-        EXPECT_FALSE(tile.empty());
-        EXPECT_EQ(tile, memoryTile(middleTile(raw, cog)));
-        // Once per state of the file
-        EXPECT_EQ(helper.count("cog"), 1u);
-        EXPECT_EQ(cog, TilerHelper::toGeoTIFF(raw));
-        EXPECT_EQ(helper.count("cog"), 1u);
+        const TileRequest request = middleTile(raw, *tiler);
+        tiler.reset();
+        EXPECT_FALSE(fs::exists(cog.parent_path())) << "the COG outlived its tiler";
 
-        // A forced tile is converted again; a changed file is another artefact
-        EXPECT_EQ(cog, TilerHelper::toGeoTIFF(raw, true));
+        // The tiles of a request: one more COG, for the tiler the tiles keep while they are asked for
+        const std::vector<uint8_t> tile = memoryTile(request);
+        EXPECT_FALSE(tile.empty());
+        EXPECT_EQ(tile, memoryTile(request));
         EXPECT_EQ(helper.count("cog"), 2u);
-        writeFile(raw, "other bytes, other size, that no driver of GDAL opens");
-        EXPECT_NE(cog, TilerHelper::toGeoTIFF(raw));
+
+        // A forced tile is converted again
+        TileRequest forced = request;
+        forced.source.forceRecreate = true;
+        EXPECT_EQ(memoryTile(forced), tile);
         EXPECT_EQ(helper.count("cog"), 3u);
+        RasterCache::instance().clear();
+        EXPECT_TRUE(requestFolders().empty()) << "a COG outlived its tiler";
+        EXPECT_FALSE(fs::exists(cache_ / "artefacts")) << "a COG was kept";
     }
 
     TEST_F(RasterArtefacts, theTilesOfARawRasterAreTheTilesOfItsCog)
     {
         // The real program: the COG it builds is the one the tiles come from
         const fs::path raw = makeGeoTiff(area_->getPath("raw.tif"), 32632);
+        const fs::path cog = artefacts() / "cog.tif";
+        buildCog(io::toUtf8(raw), io::toUtf8(cog));
 
-        const fs::path cog = TilerHelper::toGeoTIFF(raw);
-        ASSERT_TRUE(fs::exists(cog));
-        EXPECT_TRUE(raster::isLibddbArtefact(cog));
-
-        const TileRequest request = middleTile(raw, cog);
+        const auto tiler = TilerHelper::tilerFor(raw, "", 256);
+        const TileRequest request = middleTile(raw, *tiler);
         EXPECT_EQ(memoryTile(request), memoryTile(middleTile(cog, cog)))
             << "the tiles of the raw file and of the COG are the same";
     }
 
-    TEST_F(RasterArtefacts, aCogThatServesTilesIsTouchedAndTheCleanupLeavesIt)
+    // The files below the artefacts folder of the cache (none when there is no such folder)
+    std::vector<fs::path> filesInArtefacts(const fs::path &cache)
     {
-        // The clean-up runs when the test asks for it: one that toGeoTIFF ran at random before it touched the
-        // aged COG would remove it, and the COG would be converted again
-        const ScopedCacheCleanupChanceForTesting noRandomCleanup(0);
-        const fs::path preparedCog = makeGeoTiff(area_->getPath("prepared") / "cog.tif");
-        ConvertingHelper helper(preparedCog);
-        const raster::ScopedRasterHelper installed(helper);
-        const fs::path raw = area_->getPath("raw.tif");
-        writeFile(raw, "bytes that no driver of GDAL opens");
-
-        const fs::path cog = TilerHelper::toGeoTIFF(raw);
-        const fs::path unused = raster::artefactsDir() / "unused.tif";
-        writeFile(unused, "not used for days");
-        const auto longAgo = fs::file_time_type::clock::now() - std::chrono::hours(24 * 6);
-        fs::last_write_time(cog, longAgo);
-        fs::last_write_time(unused, longAgo);
-
-        EXPECT_EQ(TilerHelper::toGeoTIFF(raw), cog) << "served from the cache";
-        TilerHelper::cleanupUserCache();
-
-        EXPECT_TRUE(fs::exists(cog)) << "a COG that tiles are made from stays";
-        EXPECT_FALSE(fs::exists(unused));
-        EXPECT_EQ(helper.count("cog"), 1u);
+        std::vector<fs::path> files;
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(cache / "artefacts", ec), end; !ec && it != end; it.increment(ec))
+            if (it->is_regular_file())
+                files.push_back(it->path());
+        return files;
     }
 
-    // What made the test above fail now and then: a conversion whose clean-up runs (one in a thousand, here
-    // every time) removes the COG no request touched for six days before it looks for it, and converts it
-    // again, which is harmless
-    TEST_F(RasterArtefacts, aConversionThatCleansUpTheCacheFirstConvertsAnAgedCogAgain)
+    // The photo of the tests of its tiles, with the georeference its EXIF gives it
+    struct TestPhoto
     {
-        const ScopedCacheCleanupChanceForTesting everyTime(1);
-        const fs::path preparedCog = makeGeoTiff(area_->getPath("prepared") / "cog.tif");
-        ConvertingHelper helper(preparedCog);
-        const raster::ScopedRasterHelper installed(helper);
-        const fs::path raw = area_->getPath("raw.tif");
-        writeFile(raw, "bytes that no driver of GDAL opens");
+        fs::path path;
+        raster::PhotoGeoreference georeference;
+    };
 
-        const fs::path cog = TilerHelper::toGeoTIFF(raw);
-        EXPECT_EQ(helper.count("cog"), 1u);
-        fs::last_write_time(cog, fs::file_time_type::clock::now() - std::chrono::hours(24 * 6));
-
-        EXPECT_EQ(TilerHelper::toGeoTIFF(raw), cog);
-        EXPECT_TRUE(fs::exists(cog));
-        EXPECT_EQ(helper.count("cog"), 2u) << "removed by the clean-up, then converted again";
-    }
-
-    TEST_F(RasterArtefacts, aPhotoIsGeoprojectedAndConvertedToACogForTheTiler)
+    TestPhoto downloadPhoto(TestArea &area)
     {
-        const fs::path photo = area_->downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
-
-        const fs::path projected = TilerHelper::toGeoTIFF(photo);
-
-        EXPECT_EQ(projected.parent_path(), raster::artefactsDir());
-        EXPECT_EQ(projected.filename(), fs::path(raster::artefactKey(photo) + ".tif"));
-        const auto dataset = testutils::openRaster(projected);
-        ASSERT_TRUE(dataset);
-        EXPECT_EQ(GDALGetRasterCount(datasetHandle(dataset)), 3) << "RGB, the footprint in the mask";
-        OGRSpatialReference srs(GDALGetProjectionRef(datasetHandle(dataset)));
-        EXPECT_STREQ(srs.GetAuthorityCode(nullptr), "3857") << "the COG the tilers read";
-        EXPECT_FALSE(memoryTile(middleTile(photo, projected)).empty());
-        EXPECT_EQ(projected, TilerHelper::toGeoTIFF(photo)) << "made once";
-        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
-            EXPECT_EQ(entry.path().filename().string().rfind("req-", 0), std::string::npos)
-                << "the folder of the request is gone: " << entry.path();
-    }
-
-    // A photo is tiled from one build of the helper: the COG warped from the photo by the corners of
-    // its EXIF footprint, with no intermediate projection of it
-    // A file of `kib` KiB in `folder`, last used `age` ago
-    fs::path cachedFile(const fs::path &folder, const std::string &name, size_t kib, std::chrono::seconds age)
-    {
-        fs::create_directories(folder);
-        const fs::path file = folder / name;
-        writeFile(file, std::string(kib * 1024, 'x'));
-        fs::last_write_time(file, fs::file_time_type::clock::now() - age);
-        return file;
-    }
-
-    // Past its bound, the artefact cache loses its least recently used files (a raster with its
-    // statistics, the normalized copies too) until it is within it again; the file just made,
-    // the files used in the last minutes and the folders of requests in progress stay
-    TEST_F(RasterArtefacts, theCacheLosesItsLeastRecentlyUsedFilesPastItsBound)
-    {
-        using namespace std::chrono_literals;
-        const ScopedProcessConfig bound(json{{"artefactCacheMb", 1}}.dump());
-        const fs::path dir = raster::artefactsDir();
-        const fs::path a = cachedFile(dir, "a.tif", 400, 3h);
-        const fs::path aStats = cachedFile(dir, "a.tif.stats.json", 10, 3h);
-        const fs::path b = cachedFile(dir, "b.tif", 400, 2h);
-        const fs::path c = cachedFile(dir, "c.tif", 400, 1h);
-        const fs::path made = cachedFile(dir, "made.tif", 400, 4h);
-        const fs::path inUse = cachedFile(dir, "in-use.tif", 400, 10s);
-        const fs::path normalized = cachedFile(raster::normalizedDir(), "n.tif", 400, 5h);
-        const fs::path request = cachedFile(dir / "req-cog-running", "cog.tif", 5 * 1024, 6h);
-
-        raster::trimArtefacts(made);
-
-        // 2410 KiB: n, a with its statistics, b and c go (n, a, b, c are the oldest that may go)
-        for (const fs::path &gone : {normalized, a, aStats, b, c})
-            EXPECT_FALSE(fs::exists(gone)) << gone;
-        EXPECT_TRUE(fs::exists(made)) << "the file just made";
-        EXPECT_TRUE(fs::exists(inUse)) << "a file used in the last minutes";
-        EXPECT_TRUE(fs::exists(request)) << "a request in progress is not the cache's";
-    }
-
-    // A file used now and then keeps its modification time between marks, so a reader keeps the
-    // version of it it has open (ddb-tilers opens a file whose time changed as a new one, with no
-    // block cached); a mark older than the interval is renewed, with the companions that exist
-    TEST_F(RasterArtefacts, aUsedArtefactIsMarkedOnceAnIntervalWithItsCompanions)
-    {
-        using namespace std::chrono_literals;
-        const fs::path dir = raster::artefactsDir();
-        const fs::path recent = cachedFile(dir, "recent.tif", 1, 10s);
-        const auto recentTime = fs::last_write_time(recent);
-        raster::markArtefactUsed(recent);
-        EXPECT_EQ(fs::last_write_time(recent), recentTime) << "marked a moment ago: left as it is";
-
-        const auto stale = std::chrono::seconds(raster::kArtefactMarkSeconds) + 30s;
-        const fs::path old = cachedFile(dir, "old.tif", 1, stale);
-        const fs::path oldStats = cachedFile(dir, "old.tif.stats.json", 1, stale);
-        const fs::path missing = dir / "old.tif.missing";
-        const auto before = fs::file_time_type::clock::now() - 1s;
-        raster::markArtefactUsed(old, {oldStats, missing});
-        EXPECT_GE(fs::last_write_time(old), before);
-        EXPECT_GE(fs::last_write_time(oldStats), before);
-        EXPECT_FALSE(fs::exists(missing)) << "a companion that is not there is not made";
-    }
-
-    // A file used in the last kArtefactInUseSeconds may carry a mark up to kArtefactMarkSeconds
-    // older (it is renewed only after that): the bound leaves it
-    TEST_F(RasterArtefacts, theBoundLeavesAFileWhoseMarkIsOlderThanItsLastUse)
-    {
-        const ScopedProcessConfig bound(json{{"artefactCacheMb", 1}}.dump());
-        const fs::path dir = raster::artefactsDir();
-        const fs::path used = cachedFile(
-            dir, "used.tif", 2048, std::chrono::seconds(raster::kArtefactInUseSeconds + raster::kArtefactMarkSeconds / 2));
-        raster::trimArtefacts(fs::path());
-        EXPECT_TRUE(fs::exists(used));
-    }
-
-    TEST_F(RasterArtefacts, aCacheWithoutABoundKeepsEverything)
-    {
-        using namespace std::chrono_literals;
-        const ScopedProcessConfig unbounded(json{{"artefactCacheMb", 0}}.dump());
-        const fs::path old = cachedFile(raster::artefactsDir(), "old.tif", 2048, 4h);
-        raster::trimArtefacts(fs::path());
-        EXPECT_TRUE(fs::exists(old));
-    }
-
-    // The COG made for the tiles of a file is published within the bound: older artefacts go
-    TEST_F(RasterArtefacts, aNewArtefactKeepsTheCacheWithinItsBound)
-    {
-        using namespace std::chrono_literals;
-        const ScopedProcessConfig bound(json{{"artefactCacheMb", 1}}.dump());
-        const fs::path old = cachedFile(raster::artefactsDir(), "old.tif", 1024, 4h);
-        ConvertingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
-        const raster::ScopedRasterHelper installed(helper);
-        const fs::path raw = area_->getPath("raw.tif");
-        writeFile(raw, "bytes that no driver of GDAL opens");
-
-        const fs::path cog = TilerHelper::toGeoTIFF(raw);
-
-        EXPECT_TRUE(fs::exists(cog));
-        EXPECT_FALSE(fs::exists(old)) << "the least recently used artefact made room";
-    }
-
-    TEST_F(RasterArtefacts, aPhotoIsWarpedToItsCogInOneBuildFromItsFootprint)
-    {
-        const fs::path photo = area_->downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
-        ConvertingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
-        const raster::ScopedRasterHelper installed(helper);
-
-        TilerHelper::toGeoTIFF(photo);
-
-        EXPECT_EQ(helper.count("cog"), 1u);
-        EXPECT_EQ(helper.pathOf("cog"), photo);
+        TestPhoto photo;
+        photo.path = area.downloadTestAsset(testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
         std::string problem;
-        const auto expected = photoGeoreferenceOf(photo, problem);
-        ASSERT_TRUE(expected) << problem;
-        const auto params = raster::cogParamsFromJson(helper.lastCogParams);
-        ASSERT_TRUE(params.photo.has_value()) << helper.lastCogParams.dump();
-        EXPECT_EQ(params.photo->width, expected->width);
-        EXPECT_EQ(params.photo->height, expected->height);
-        EXPECT_EQ(params.photo->footprint, expected->footprint);
+        const auto georeference = photoGeoreferenceOf(photo.path, problem);
+        if (!georeference)
+            throw AppException("the test photo has no footprint: " + problem);
+        photo.georeference = *georeference;
+        return photo;
+    }
+
+    // The 256 px tile (TMS row) of zoom z that holds the point (x, y) of EPSG:3857
+    TileInfo tileAt(double x, double y, int z)
+    {
+        const Projected2Di t = GlobalMercator(256).metersToTile(x, y, z);
+        return TileInfo(t.x, t.y, z);
+    }
+
+    // The 256 px tile (TMS row) in the middle of what the tiler shows at zoom z
+    TileInfo middleOf(const Tiler &tiler, int z)
+    {
+        const BoundingBox<Projected2D> content = *tiler.contentBounds();
+        return tileAt((content.min.x + content.max.x) / 2, (content.min.y + content.max.y) / 2, z);
+    }
+
+    std::vector<uint8_t> tileOf(Tiler &tiler, const TileInfo &t)
+    {
+        uint8_t *buffer = nullptr;
+        int size = 0;
+        tiler.tile(t.tz, t.tx, t.ty, ImageFormat::Png, &buffer, &size);
+        return testutils::takeBuffer(buffer, size);
+    }
+
+    // Which tiles hold some of a footprint: one inside it (no corner of either inside the other), one across an
+    // edge, one that only comes within the margin; not one beside it, nor one in the corner of the box of a
+    // diamond that the diamond does not reach
+    TEST(PhotoTileGeometry, aBoxMeetsTheFootprintWhereverTheyOverlap)
+    {
+        raster::PhotoGeoreference diamond;
+        diamond.width = 100;
+        diamond.height = 100;
+        diamond.footprint = {{{0.0, 0.001}, {-0.001, 0.0}, {0.0, -0.001}, {0.001, 0.0}}};
+        const auto corners = raster::photoCornersInMeters(diamond);
+        const double r = corners[3].x; // the half diagonal in metres (111 m)
+        const auto box = [](double x0, double y0, double x1, double y1) {
+            return BoundingBox<Projected2D>(Projected2D(x0, y0), Projected2D(x1, y1));
+        };
+        EXPECT_TRUE(raster::footprintMeetsBox(diamond, box(-1, -1, 1, 1), 0)) << "inside";
+        EXPECT_TRUE(raster::footprintMeetsBox(diamond, box(-r, -r, r, r), 0)) << "around";
+        EXPECT_TRUE(raster::footprintMeetsBox(diamond, box(r / 2 - 1, -1, r, 1), 0)) << "across an edge";
+        EXPECT_FALSE(raster::footprintMeetsBox(diamond, box(r + 1, -1, r + 2, 1), 0)) << "beside";
+        EXPECT_TRUE(raster::footprintMeetsBox(diamond, box(r + 1, -1, r + 2, 1), 1.5)) << "within the margin";
+        EXPECT_FALSE(raster::footprintMeetsBox(diamond, box(0.8 * r, 0.8 * r, r, r), 0)) << "the corner of the box";
+        EXPECT_NEAR(raster::photoResolution(diamond), 2 * r / std::hypot(100.0, 100.0), 1e-9);
+    }
+
+    // A photo is tiled from itself, one tile per request of the helper: no COG of it is built, and nothing
+    // lands in the artefacts of the cache, through the tile requests or a run of the tiler
+    TEST_F(RasterArtefacts, aPhotoIsTiledFromItselfAndNothingOfItIsKept)
+    {
+        const TestPhoto photo = downloadPhoto(*area_);
+        const PhotoTiler tiler(photo.path, "", 256, false, photo.georeference);
+        const int z = tiler.getMinMaxZ().max;
+        const TileInfo middle = middleOf(tiler, z);
+
+        const std::vector<uint8_t> tile = memoryTile(testTile(photo.path, z, middle.tx, middle.ty, 256, false, false));
+        const auto image = testutils::decodeImage(tile);
+        EXPECT_EQ(image.width, 256);
+        EXPECT_GT(std::count(image.alpha().begin(), image.alpha().end(), 255), 1000) << "the photo is in the tile";
+        EXPECT_EQ(memoryTile(testTile(photo.path, z, middle.tx, middle.ty, 256, false, false)), tile)
+            << "drawn again the same";
+
+        std::ostringstream listed;
+        TilerRun run;
+        run.zRange = std::to_string(z - 2);
+        TilerHelper::runTiler(photo.path, area_->getFolder("tiles"), listed, run);
+        EXPECT_FALSE(listed.str().empty());
+
+        const std::vector<fs::path> kept = filesInArtefacts(cache_);
+        EXPECT_TRUE(kept.empty()) << io::toUtf8(kept.front());
+    }
+
+    // The tile is asked of the helper with the photo, its footprint and the tile; the helper writes it in a
+    // folder of the request, which is gone with the request. A tile that holds nothing of the footprint is the
+    // blank tile, made without the helper.
+    TEST_F(RasterArtefacts, aPhotoTileIsAskedOfTheHelperOnlyWhereThePhotoIs)
+    {
+        const TestPhoto photo = downloadPhoto(*area_);
+        ConvertingHelper helper(makeGeoTiff(area_->getPath("prepared") / "cog.tif"));
+        const raster::ScopedRasterHelper installed(helper);
+        const PhotoTiler tiler(photo.path, "", 256, false, photo.georeference);
+        const int z = tiler.getMinMaxZ().max;
+        const TileInfo middle = middleOf(tiler, z);
+
+        uint8_t *buffer = nullptr;
+        int size = 0;
+        TileRequest request = testTile(photo.path, z, middle.tx, middle.ty, 256, false, false);
+        request.format = "webp";
+        request.outBuffer = &buffer;
+        request.outBufferSize = &size;
+        TilerHelper::getTile(request);
+        const std::vector<uint8_t> tile = testutils::takeBuffer(buffer, size);
+
+        EXPECT_EQ(helper.count("photoTile"), 1u);
+        EXPECT_EQ(helper.count("cog"), 0u) << "no COG of the photo";
+        EXPECT_EQ(helper.pathOf("photoTile"), photo.path);
+        const raster::PhotoTileParams &sent = helper.lastTileParams;
+        EXPECT_EQ(sent.width, photo.georeference.width);
+        EXPECT_EQ(sent.height, photo.georeference.height);
+        EXPECT_EQ(sent.footprint, photo.georeference.footprint);
+        EXPECT_EQ(sent.z, z);
+        EXPECT_EQ(sent.x, middle.tx);
+        EXPECT_EQ(sent.y, middle.ty);
+        EXPECT_TRUE(sent.tms) << "a request whose flag is false names a TMS row";
+        EXPECT_EQ(sent.format, ImageFormat::Webp);
+        EXPECT_EQ(testutils::decodeImage(tile).width, 256) << "the bytes the helper wrote";
+        EXPECT_FALSE(fs::exists(helper.lastTileOut.parent_path())) << "the folder of the request is gone";
+
+        // Far from the photo: blank, and the helper is not asked
+        const std::vector<uint8_t> away =
+            memoryTile(testTile(photo.path, z, middle.tx + 50, middle.ty, 256, false, false));
+        const auto blank = testutils::decodeImage(away);
+        EXPECT_EQ(std::count(blank.alpha().begin(), blank.alpha().end(), 0), 256 * 256);
+        EXPECT_EQ(helper.count("photoTile"), 1u);
+        EXPECT_TRUE(filesInArtefacts(cache_).empty());
+    }
+
+    // A copy of the JPEG `from` without its Multi-Picture Format segment (APP2 "MPF"): the copy has no preview,
+    // and keeps its EXIF (with the EXIF thumbnail) and the main image
+    fs::path withoutPreview(const fs::path &from, const fs::path &to)
+    {
+        const std::string bytes = readFile(from);
+        std::string out = bytes.substr(0, 2);
+        size_t at = 2;
+        while (at + 4 <= bytes.size() && static_cast<unsigned char>(bytes[at]) == 0xFF)
+        {
+            const auto marker = static_cast<unsigned char>(bytes[at + 1]);
+            const size_t length = (static_cast<unsigned char>(bytes[at + 2]) << 8) | static_cast<unsigned char>(bytes[at + 3]);
+            if (marker == 0xDA) // the scan: the rest is the image
+                break;
+            if (!(marker == 0xE2 && bytes.compare(at + 4, 4, std::string("MPF\0", 4)) == 0))
+                out += bytes.substr(at, length + 2);
+            at += length + 2;
+        }
+        out += bytes.substr(at);
+        writeFile(to, out);
+        return to;
+    }
+
+    // The tiles a photo had when they came from the COG of the photo (warped from its footprint by the
+    // builder): the same zoom levels and tiles, the photo where it was, and its colours within the
+    // difference of the resampling (bilinear from the photo, against the nearest pixel of the averaged
+    // levels of a lossy COG). That difference grows where the photo is a few dozen pixels wide: the
+    // nearest pixel of foliage at 1/64 of its size is any of its colours. The colours on average are the
+    // same at every zoom: a tile drawn from the wrong level (the 4:3 EXIF thumbnail of the 16:9 photo, with
+    // its black bands, which GDAL lists among the overviews of a JPEG) or a shifted photo is not. The photo
+    // is tiled as it is (its small tiles come from its preview) and without its preview (from its overviews).
+    TEST_F(RasterArtefacts, theTilesOfAPhotoAreThoseOfItsCogWithinTheResampling)
+    {
+        const TestPhoto photo = downloadPhoto(*area_);
+        // The COG is built where the helper writes on Windows too: a request folder, which gets the low
+        // integrity label the confined helper needs (a folder made by the test has none)
+        const raster::RequestFolder request("photo-cog-");
+        const fs::path cog = request.path() / CogFileName;
+        buildCogInPrivateFolder(io::toUtf8(photo.path), cog, {}, photo.georeference);
+        RasterTiler fromCog(io::toUtf8(cog), "", 256, false);
+        const int maxZ = fromCog.getMinMaxZ().max;
+        const BoundingBox<Projected2D> content = *fromCog.contentBounds();
+
+        for (const fs::path &file : {photo.path, withoutPreview(photo.path, area_->getPath("no-preview.jpg"))})
+        {
+            SCOPED_TRACE(io::toUtf8(file.filename()));
+            PhotoTiler fromPhoto(file, "", 256, false, photo.georeference);
+            ASSERT_EQ(fromPhoto.getMinMaxZ().min, fromCog.getMinMaxZ().min);
+            ASSERT_EQ(fromPhoto.getMinMaxZ().max, maxZ);
+            for (int z = std::max(0, maxZ - 6); z <= maxZ + 1; z++)
+            {
+                SCOPED_TRACE("zoom " + std::to_string(z));
+                ASSERT_EQ(fromPhoto.getTilesForZoomLevel(z).size(), fromCog.getTilesForZoomLevel(z).size());
+                ASSERT_EQ(fromPhoto.getMinMaxCoordsForZ(z).min.x, fromCog.getMinMaxCoordsForZ(z).min.x);
+                ASSERT_EQ(fromPhoto.getMinMaxCoordsForZ(z).max.y, fromCog.getMinMaxCoordsForZ(z).max.y);
+
+                // The middle of the photo and the tiles of the corners of its box, which hold its edges
+                size_t opaque = 0, mismatch = 0, inside = 0;
+                double difference = 0;
+                std::array<double, 3> bias{};
+                const double x0 = content.min.x + 0.01, x1 = content.max.x - 0.01;
+                const double y0 = content.min.y + 0.01, y1 = content.max.y - 0.01;
+                for (const TileInfo &t : {middleOf(fromCog, z), tileAt(x0, y0, z), tileAt(x0, y1, z),
+                                          tileAt(x1, y0, z), tileAt(x1, y1, z)})
+                {
+                    const auto a = testutils::decodeImage(tileOf(fromCog, t));
+                    const auto b = testutils::decodeImage(tileOf(fromPhoto, t));
+                    ASSERT_EQ(a.width, b.width);
+                    for (size_t i = 0; i < a.alpha().size(); i++)
+                    {
+                        opaque += a.alpha()[i] > 0;
+                        mismatch += (a.alpha()[i] > 0) != (b.alpha()[i] > 0);
+                        // The colours of the edge of the footprint mix with the transparency around it
+                        if (a.alpha()[i] < 255 || b.alpha()[i] < 255)
+                            continue;
+                        inside++;
+                        for (size_t band = 0; band < 3; band++)
+                        {
+                            const int d = int(a.bands[band][i]) - int(b.bands[band][i]);
+                            difference += std::abs(d);
+                            bias[band] += d;
+                        }
+                    }
+                }
+                // The edge of the footprint moves by a pixel at most; inside, the colours differ by a few levels
+                ASSERT_GT(inside, 0u);
+                EXPECT_LE(mismatch, opaque / 50 + 256) << "of " << opaque;
+                EXPECT_LT(difference / (3.0 * static_cast<double>(inside)), z >= maxZ - 3 ? 12.0 : 20.0);
+                for (const double sum : bias)
+                    EXPECT_LT(std::abs(sum / static_cast<double>(inside)), 3.0) << "the colours on average";
+            }
+
+            // Far from the footprint both are blank
+            const TileInfo middle = middleOf(fromCog, maxZ);
+            const TileInfo far(middle.tx + 50, middle.ty, maxZ);
+            EXPECT_EQ(tileOf(fromPhoto, far), tileOf(fromCog, far));
+        }
     }
 
     TEST_F(RasterArtefacts, aCogOfABuildIsTiledAsItIs)
@@ -820,27 +894,26 @@ namespace
         ConvertingHelper helper(built);
         const raster::ScopedRasterHelper installed(helper);
 
-        EXPECT_EQ(TilerHelper::toGeoTIFF(built), built);
-        EXPECT_FALSE(memoryTile(middleTile(built, built)).empty());
+        const auto tiler = TilerHelper::tilerFor(built, "", 256);
+        EXPECT_FALSE(memoryTile(middleTile(built, *tiler)).empty());
         EXPECT_EQ(helper.count("cog"), 0u) << "a file libddb wrote is not converted";
         EXPECT_EQ(helper.count("probe"), 0u);
-        EXPECT_TRUE(fs::is_empty(raster::artefactsDir()));
+        EXPECT_TRUE(requestFolders().empty());
     }
 
-    TEST_F(RasterArtefacts, aConversionThatFailsLeavesNothingInTheCache)
+    TEST_F(RasterArtefacts, aConversionThatFailsLeavesNothing)
     {
         ConvertingHelper helper(area_->getPath("missing.tif"));
         const raster::ScopedRasterHelper installed(helper);
         const fs::path raw = area_->getPath("raw.tif");
         writeFile(raw, "bytes");
 
-        // The stand-in cannot write its COG: nothing is left behind in the cache
-        EXPECT_THROW(TilerHelper::toGeoTIFF(raw), std::exception);
-        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
-            ADD_FAILURE() << "left in the artefacts: " << entry.path();
+        // The stand-in cannot write its COG: nothing is left behind
+        EXPECT_THROW(TilerHelper::tilerFor(raw, "", 256), std::exception);
+        EXPECT_TRUE(requestFolders().empty());
     }
 
-    TEST_F(RasterArtefacts, aFileThatIsNoCogIsNotPublished)
+    TEST_F(RasterArtefacts, aFileThatIsNoCogIsNotTiled)
     {
         // The clean-up of the cache runs on the way (it looks at the folders, makes none)
         const ScopedCacheCleanupChanceForTesting always(1);
@@ -851,9 +924,8 @@ namespace
         const fs::path raw = area_->getPath("raw.tif");
         writeFile(raw, "bytes");
 
-        EXPECT_THROW(TilerHelper::toGeoTIFF(raw), GDALException);
-        for (const auto &entry : fs::directory_iterator(raster::artefactsDir()))
-            ADD_FAILURE() << "left in the artefacts: " << entry.path();
+        EXPECT_THROW(TilerHelper::tilerFor(raw, "", 256), GDALException);
+        EXPECT_TRUE(requestFolders().empty());
     }
 
     TEST_F(RasterArtefacts, aRemoteRasterIsDownloadedAndThenConverted)
@@ -863,15 +935,14 @@ namespace
         ConvertingHelper helper(preparedCog);
         const raster::ScopedRasterHelper installed(helper);
 
-        const fs::path cog = TilerHelper::toGeoTIFF(url);
+        const auto tiler = TilerHelper::tilerFor(url, "", 256);
 
         // The download is a file of somebody else, kept in the tiles of the cache, and it is what
-        // the helper converts; the artefact is the COG
+        // the helper converts; the artefact is the COG of the request
         const fs::path converted = helper.pathOf("cog");
         EXPECT_EQ(converted.parent_path(), UserProfile::get()->getTilesDir());
         EXPECT_FALSE(raster::isLibddbArtefact(converted));
-        EXPECT_TRUE(raster::isLibddbArtefact(cog));
-        EXPECT_EQ(cog.filename(), fs::path(raster::artefactKey(converted) + ".tif"));
+        EXPECT_TRUE(raster::isLibddbArtefact(helper.lastCogOut));
     }
 
     // ------------------------------------------------------------------ the COG of an output

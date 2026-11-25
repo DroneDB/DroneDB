@@ -10,7 +10,7 @@
 #include "env.h"
 #include "exceptions.h"
 #include "fileversion.h"
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "raster_artefacts.h"

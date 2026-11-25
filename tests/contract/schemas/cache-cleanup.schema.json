@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb cache cleanup",
+  "description": "DDBCleanupCache (new in 2.13): what the cleanup of the cache and of the temporary folder removed, or would remove with dryRun, by kind.",
+  "type": "object",
+  "required": [
+    "dryRun",
+    "kinds"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "dryRun": {
+      "type": "boolean",
+      "description": "True when nothing was removed, only counted"
+    },
+    "kinds": {
+      "type": "object",
+      "required": [
+        "artefacts",
+        "downloads",
+        "dsm",
+        "requests",
+        "temp",
+        "tiles"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "artefacts": {
+          "$ref": "#/$defs/count",
+          "description": "The artefact cache of an earlier version, whatever its age"
+        },
+        "downloads": {
+          "$ref": "#/$defs/count",
+          "description": "Copies of remote rasters a tile request downloaded"
+        },
+        "dsm": {
+          "$ref": "#/$defs/count",
+          "description": "Elevation tiles of the DSM service"
+        },
+        "requests": {
+          "$ref": "#/$defs/count",
+          "description": "Folders of requests to the raster helper no request of this process holds"
+        },
+        "temp": {
+          "$ref": "#/$defs/count",
+          "description": "libddb's folders in the temporary folder of the system"
+        },
+        "tiles": {
+          "$ref": "#/$defs/count",
+          "description": "Folders of rendered tiles"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "count": {
+      "type": "object",
+      "required": [
+        "entries",
+        "bytes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files or folders removed"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes of their files"
+        }
+      }
+    }
+  }
+}

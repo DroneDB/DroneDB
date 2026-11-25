@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "align.h"
 #include "mathutil.h"
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "raster_artefacts.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"

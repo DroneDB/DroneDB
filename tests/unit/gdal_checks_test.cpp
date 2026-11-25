@@ -32,10 +32,10 @@ namespace
 
     constexpr int Size = 256;
 
-    // A file of the artefacts folder of the cache, made new: the cache of the process outlives a test
+    // A file of a folder of artefacts, made new: the folder outlives a test
     fs::path artefactPath(const std::string &name)
     {
-        const fs::path path = raster::artefactsDir() / name;
+        const fs::path path = testutils::artefactFolder() / name;
         fs::remove(path);
         return path;
     }

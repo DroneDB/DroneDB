@@ -23,6 +23,7 @@
 #include "ogr_spatialref.h"
 
 #include "raster_region.h"
+#include "temp_names.h"
 #include "vegetation.h"
 #include "vis_render.h"
 #include "tile_encoder.h"
@@ -227,7 +228,7 @@ namespace ddb
         void writeTiffBytes(const tilers::WarpedImage &image, const tilers::GeoTiffOptions &options,
                             const std::string &label, uint8_t **outBytes, int *outSize)
         {
-            const io::ScopedTempDir folder = io::ScopedTempDir::create(fs::temp_directory_path(), "ddb-render-");
+            const io::ScopedTempDir folder = io::ScopedTempDir::create(fs::temp_directory_path(), tempnames::kRender);
             const fs::path out = folder.path() / "render.tif";
             tilers::writeGeoTiff(image, out, options);
             takeFileBytes(out, outBytes, outSize, label);

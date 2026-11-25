@@ -32,6 +32,8 @@
 #include "log_forwarding.h"
 #include "database.h"
 #include "databasepool.h"
+#include "cache_cleanup.h"
+#include "raster_artefacts.h"
 #include "raster_cache.h"
 #include "dbops.h"
 #include "cad.h"
@@ -108,8 +110,16 @@ using capi::requireOutput;
 using capi::requirePathList;
 using capi::requireText;
 
+// The process of a host (the CLI, the Registry): the helpers, which read the files of users, call
+// ddb::registerProcess themselves and write nothing in the cache
+static void registerHostProcess(bool verbose) {
+    ddb::registerProcess(verbose);
+    // The copies an earlier version kept in the cache: libddb keeps none any more
+    raster::removeLegacyArtefactCache();
+}
+
 DDBErr DDBRegisterProcess(bool verbose) {
-    return capi::initializeProcess(&ddb::registerProcess, verbose);
+    return capi::initializeProcess(&registerHostProcess, verbose);
 }
 
 // ------------------------------------------------------------------ exempt accessors
@@ -1349,6 +1359,16 @@ const char* cogStatisticsStatusName(CogStatisticsStatus status) {
 }
 
 }  // namespace
+
+DDBErr DDBCleanupCache(const char* optionsJson, char** output) {
+    return guardedOutput<kNewExportCodes>(output, [&] {
+        requireOutput(output);
+        const CacheCleanupOptions options = optionsJson == nullptr || optionsJson[0] == '\0'
+                                                ? CacheCleanupOptions()
+                                                : cacheCleanupOptionsFromJson(parseJsonArg(optionsJson));
+        return toJson(cleanupCache(options));
+    });
+}
 
 DDBErr DDBBuildRasterStatistics(const char* ddbPath, const char* entryPath, const char* optionsJson,
                                 DDBProgressCallback progress, void* progressUserData, char** output) {

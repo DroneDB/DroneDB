@@ -11,6 +11,7 @@
 #include "mio.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
+#include "temp_names.h"
 
 namespace ddb {
 
@@ -63,7 +64,7 @@ void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
     params.size = thumbSize;
 
     // The raster helper reads the files (a user's) and writes the preview in a private folder
-    const io::ScopedTempDir request = raster::makePrivateFolder(fs::temp_directory_path(), "ddb-merge-preview-");
+    const io::ScopedTempDir request = raster::makePrivateFolder(fs::temp_directory_path(), tempnames::kMergePreview);
     const fs::path output = request.path() / "preview.webp";
     raster::rasterHelper().operate(raster::op::kMergePreview, params.inputs.front(), output, raster::toJson(params),
                                    raster::ProgressCallback());

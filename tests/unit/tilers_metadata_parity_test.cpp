@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
-#include "artefact_cache.h"
+#include "raster_input.h"
 #include "raster_helper.h"
 #include "gdal_inc.h"
 #include "gdal_metadata.h"
@@ -297,9 +297,10 @@ namespace
             expectMetadataAsGdal(file);
     }
 
-    // The normalized copy libddb reads of a raster that is not one of its own (the raster helper keeps its domains
-    // in GDAL_METADATA) reports what GDAL reports of it
-    TEST(TilersMetadataParity, theNormalizedCopyOfARasterReportsWhatGdalReports)
+    // The file libddb reads for a raster that is not one of its own (the raster itself when ddb-tilers reads it
+    // whole, else the copy of the raster helper, which keeps its domains in GDAL_METADATA) reports what GDAL
+    // reports of it
+    TEST(TilersMetadataParity, theFileReadForARasterReportsWhatGdalReports)
     {
         TestArea ta(TEST_NAME, true);
         const fs::path source = writeGtiff(ta.getPath("photo.tif"), 120, 90, 3, GDT_Byte,
@@ -310,11 +311,12 @@ namespace
                                                         nullptr);
                                                GDALSetDescription(GDALGetRasterBand(h, 1), "thermal preview");
                                            });
-        expectMetadataAsGdal(raster::artefactFor(source));
+        const raster::InputFile input = raster::inputFileFor(source);
+        expectMetadataAsGdal(input.file);
     }
 
     // Real rasters (DDB_METADATA_PARITY_FILES, separated by ':'): the file libddb reads for each (the file of a build,
-    // the normalized copy of any other)
+    // the raster itself when ddb-tilers reads it whole, the copy of any other)
     TEST(TilersMetadataParity, rastersFromTheEnvironmentReportWhatGdalReports)
     {
         const char *files = std::getenv("DDB_METADATA_PARITY_FILES");
@@ -323,10 +325,10 @@ namespace
         std::stringstream list(files);
         for (std::string name; std::getline(list, name, ':');)
         {
-            fs::path file;
+            raster::InputFile input;
             try
             {
-                file = raster::artefactFor(fs::path(name));
+                input = raster::inputFileFor(fs::path(name));
             }
             catch (const raster::RasterNotReadException &e)
             {
@@ -336,7 +338,7 @@ namespace
                 std::cout << "Not compared (" << e.what() << ")\n";
                 continue;
             }
-            expectMetadataAsGdal(file);
+            expectMetadataAsGdal(input.file);
         }
     }
 }

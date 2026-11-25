@@ -23,6 +23,10 @@ namespace testutils
         {
             real_.thumbnail(path, out, params);
         }
+        void photoTile(const fs::path &path, const fs::path &out, const ddb::raster::PhotoTileParams &params) override
+        {
+            real_.photoTile(path, out, params);
+        }
         void normalize(const fs::path &path, const fs::path &out, const json &params) override
         {
             real_.normalize(path, out, params);

@@ -617,14 +617,6 @@ TEST(multispectral, theBandsAreReadAndMergedInTheHelper) {
         GDALClose(hDs);
         inputs.push_back(bandPath.string());
     }
-    const auto filesUnder = [](const fs::path& folder) {
-        size_t n = 0;
-        std::error_code ec;
-        for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
-            n += it->is_regular_file() ? 1 : 0;
-        return n;
-    };
-    const size_t copiesBefore = filesUnder(raster::normalizedDir());
 
     const fs::path outputPath = ta.getPath("merged.tif");
     ASSERT_NO_THROW(mergeMultispectral(inputs, outputPath.string()));
@@ -644,7 +636,6 @@ TEST(multispectral, theBandsAreReadAndMergedInTheHelper) {
     EXPECT_EQ(std::memcmp(buffer, "RIFF", 4), 0);
     VSIFree(buffer);
     EXPECT_EQ(helper.ran, (std::vector<std::string>{raster::op::kMergePreview}));
-    EXPECT_EQ(filesUnder(raster::normalizedDir()), copiesBefore) << "the host copied a band";
 }
 
 TEST(multispectral, mergeOutputExists) {
@@ -771,10 +762,10 @@ TEST(multispectral, tileWithBandSelection) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_tile.tif", 256, 256, 5, GDT_UInt16);
     // Use empty outputFolder for in-memory tile generation
-    RasterTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
+    const auto tiler = TilerHelper::tilerFor(rasterPath, "", 256, false);
 
     // Get valid tile coords from tiler info
-    auto info = tiler.getMinMaxZ();
+    auto info = tiler->getMinMaxZ();
 
     ThumbVisParams visParams;
     visParams.bands = "3,2,1";  // Custom band selection
@@ -783,10 +774,10 @@ TEST(multispectral, tileWithBandSelection) {
     int outBufferSize = 0;
 
     // Use the max zoom level for best data coverage
-    auto bounds = tiler.getMinMaxCoordsForZ(info.max);
+    auto bounds = tiler->getMinMaxCoordsForZ(info.max);
 
     try {
-        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
+        tiler->tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
         if (outBuffer) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
@@ -829,8 +820,8 @@ TEST(multispectral, tileWithFormula) {
     }
 
     // Use empty outputFolder for in-memory tile generation
-    RasterTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
-    auto info = tiler.getMinMaxZ();
+    const auto tiler = TilerHelper::tilerFor(rasterPath, "", 256, false);
+    auto info = tiler->getMinMaxZ();
 
     ThumbVisParams visParams;
     visParams.formula = "NDVI";
@@ -838,13 +829,13 @@ TEST(multispectral, tileWithFormula) {
     visParams.colormap = "rdylgn";
     visParams.rescale = "-1,1";
 
-    auto bounds = tiler.getMinMaxCoordsForZ(info.max);
+    auto bounds = tiler->getMinMaxCoordsForZ(info.max);
 
     uint8_t* outBuffer = nullptr;
     int outBufferSize = 0;
 
     try {
-        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
+        tiler->tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
         if (outBuffer) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
@@ -860,19 +851,19 @@ TEST(multispectral, tileNoVisParamsFallback) {
     fs::path rasterPath = createGeoRaster(ta, "rgb_tile.tif", 256, 256, 3, GDT_Byte);
 
     // Use empty outputFolder for in-memory tile generation
-    RasterTiler tiler(TilerHelper::toGeoTIFF(rasterPath).string(), "", 256, false);
-    auto info = tiler.getMinMaxZ();
+    const auto tiler = TilerHelper::tilerFor(rasterPath, "", 256, false);
+    auto info = tiler->getMinMaxZ();
 
     // Empty vis params should fall through to standard tile
     ThumbVisParams visParams;
 
-    auto bounds = tiler.getMinMaxCoordsForZ(info.max);
+    auto bounds = tiler->getMinMaxCoordsForZ(info.max);
 
     uint8_t* outBuffer = nullptr;
     int outBufferSize = 0;
 
     try {
-        tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
+        tiler->tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &outBuffer, &outBufferSize);
         if (outBuffer) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
@@ -887,9 +878,9 @@ TEST(multispectral, tileNoVisParamsFallback) {
 // closed on return: a forced tile makes the COG again, and Windows replaces no file a tiler
 // holds open
 std::pair<int, BoundingBox<Projected2Di>> deepestTilesOf(const fs::path& raster) {
-    RasterTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
-    const int z = tiler.getMinMaxZ().max;
-    return {z, tiler.getMinMaxCoordsForZ(z)};
+    const auto tiler = TilerHelper::tilerFor(raster, "", 256, false);
+    const int z = tiler->getMinMaxZ().max;
+    return {z, tiler->getMinMaxCoordsForZ(z)};
 }
 
 TEST(multispectral, cApiMemoryTileEx) {

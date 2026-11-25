@@ -748,14 +748,6 @@ namespace
         }
         e.write();
         std::ofstream(e.project / "images" / "d.JPG", std::ios::binary) << "not a JPEG";
-        const auto filesUnder = [](const fs::path &folder) {
-            size_t n = 0;
-            std::error_code ec;
-            for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
-                n += it->is_regular_file() ? 1 : 0;
-            return n;
-        };
-        const size_t copiesBefore = filesUnder(raster::normalizedDir());
         SplatTrainingExportOptions options;
         options.maxImageSize = 64;
         const auto result = e.run(options);
@@ -768,7 +760,6 @@ namespace
         EXPECT_FALSE(fs::exists(e.out / "images" / "d.JPG"));
         for (const auto &entry : fs::directory_iterator(e.out))
             EXPECT_EQ(entry.path().filename().string().rfind("ddb-", 0), std::string::npos) << "left: " << entry.path();
-        EXPECT_EQ(filesUnder(raster::normalizedDir()), copiesBefore) << "the host copied a photo";
     }
 
     TEST(SplatTrainingExport, anImageNotLargerThanTheLimitKeepsItsSizeAndName)

@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <type_traits>
 
-#include "artefact_cache.h"
 #include "cancellation.h"
 #include "ddbt/ddbt.h"
 #include "exceptions.h"
@@ -21,6 +20,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_artefacts.h"
+#include "raster_input.h"
 #include "raster_ops.h"
 #include "raster_utils.h"
 #include "tilers_call.h"
@@ -154,14 +154,14 @@ namespace ddb::tilers
             throw std::logic_error("tilers::Raster::openInput runs in the host: the raster helper reads the files "
                                    "of users with GDAL");
         const fs::path file = io::fromUtf8(path);
-        // A raster that is not there has no copy to make
+        // A raster that is not there has nothing to read
         std::error_code ec;
         if (!raster::isLibddbArtefact(file) && !fs::exists(file, ec))
             return nullptr;
-        fs::path artefact;
+        raster::InputFile input;
         try
         {
-            artefact = raster::artefactFor(file);
+            input = raster::inputFileFor(file);
         }
         catch (const raster::RasterOpException &e)
         {
@@ -172,14 +172,18 @@ namespace ddb::tilers
             LOGD << "Cannot open " << path << ": " << e.what();
             return nullptr;
         }
-        // The file of libddb opens, or there is no raster (as when GDAL cannot open it)
+        // The file opens, or there is no raster (as when GDAL cannot open it). A copy is opened for this
+        // reader alone, so its folder can go when the reader closes it (Windows removes no open file).
         ddbtRaster *handle = nullptr;
-        if (const ddbtErr rc = ddbtRasterOpen(io::toUtf8(artefact).c_str(), &handle); rc != DDBT_ERR_NONE)
+        const unsigned int flags = input.request ? DDBT_RASTER_OPEN_PRIVATE : 0u;
+        if (const ddbtErr rc = ddbtRasterOpenEx(io::toUtf8(input.file).c_str(), flags, &handle); rc != DDBT_ERR_NONE)
         {
             LOGD << "Cannot open " << path << ": " << ddbtLastError();
             return nullptr;
         }
-        return std::unique_ptr<Raster>(new Raster(handle, artefact));
+        std::unique_ptr<Raster> raster(new Raster(handle, input.file));
+        raster->request_ = std::move(input.request);
+        return raster;
     }
 
     bool Raster::hasMask(int band1) const

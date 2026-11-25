@@ -58,8 +58,6 @@ namespace ddb
         // from (build_budget.h applies it)
         uint64_t gdalCacheMb() const;
         ConfigSource gdalCacheSource() const;
-        // The bound of the artefact cache in MiB (raster_artefacts.h, trimArtefacts); 0: none
-        uint64_t artefactCacheMb() const;
         // The folder of libddb's caches (thumbnails, tiles, index templates, DSM tiles); not
         // created here (UserProfile::getCacheDir creates it)
         fs::path cacheDir() const;

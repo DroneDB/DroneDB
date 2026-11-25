@@ -758,9 +758,9 @@ namespace
         // raster is under, which are blank whatever the formula
         for (const fs::path &raster : {f32, u16})
         {
-            RasterTiler tiler(TilerHelper::toGeoTIFF(raster).string(), "", 256, false);
-            const auto info = tiler.getMinMaxZ();
-            const auto range = tiler.getMinMaxCoordsForZ(info.max);
+            const auto tiler = TilerHelper::tilerFor(raster, "", 256, false);
+            const auto info = tiler->getMinMaxZ();
+            const auto range = tiler->getMinMaxCoordsForZ(info.max);
             BoundingBox<Projected2Di> bounds = range;
             size_t mostOpaque = 0;
             for (int x = range.min.x; x <= range.max.x; x++)
@@ -768,7 +768,7 @@ namespace
                 {
                     uint8_t *plain = nullptr;
                     int plainSize = 0;
-                    tiler.tile(info.max, x, y, ImageFormat::Png, &plain, &plainSize);
+                    tiler->tile(info.max, x, y, ImageFormat::Png, &plain, &plainSize);
                     const auto image = testutils::decodeImage(testutils::takeBuffer(plain, plainSize));
                     const size_t opaque = static_cast<size_t>(
                         std::count_if(image.alpha().begin(), image.alpha().end(), [](uint8_t a) { return a > 0; }));
@@ -786,12 +786,12 @@ namespace
             int size = 0;
             if (raster == f32)
             {
-                EXPECT_NO_THROW(tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &bytes, &size));
+                EXPECT_NO_THROW(tiler->tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &bytes, &size));
                 VSIFree(bytes);
             }
             else
             {
-                EXPECT_THROW(tiler.tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &bytes, &size), InvalidArgsException);
+                EXPECT_THROW(tiler->tile(info.max, bounds.min.x, bounds.min.y, visParams, ImageFormat::Png, &bytes, &size), InvalidArgsException);
             }
         }
         // And a ratio index over the same integer raster is fine

@@ -19,9 +19,11 @@
 #include "json.h"
 #include "loopback_server.h"
 #include "mio.h"
+#include "raster_artefacts.h"
 #include "raster_cache.h"
 #include "raster_helper.h"
 #include "raster_test_utils.h"
+#include "raster_tiler.h"
 #include "test.h"
 #include "testarea.h"
 #include "tilerhelper.h"
@@ -103,9 +105,10 @@ namespace
         return files;
     }
 
-    // A remote raster whose version the caller does not know is downloaded on every request, and
-    // converted once per content: an unchanged file is not converted again, a changed one is
-    TEST(RemoteInput, anUnchangedRemoteRasterIsConvertedOnce)
+    // A remote raster whose version the caller does not know is downloaded on every request, and each
+    // tiler of it converts the download into a COG of its own request, which goes with the tiler: the
+    // cache keeps one download of the URL, the latest, and no COG
+    TEST(RemoteInput, aRemoteRasterKeepsOneDownloadAndNoCog)
     {
         TestArea ta(TEST_NAME, true);
         const ScopedProcessConfig config(json{{"cacheDir", io::toUtf8(ta.getPath("cache"))}}.dump());
@@ -123,15 +126,15 @@ namespace
             {testutils::http(200, "OK", first), testutils::http(200, "OK", first), testutils::http(200, "OK", second)});
         const fs::path url = io::fromUtf8(server.url("/remote/ortho.tif"));
 
-        const fs::path cog = TilerHelper::toGeoTIFF(url);
-        RasterCache::instance().clear();
-        EXPECT_EQ(TilerHelper::toGeoTIFF(url), cog);
-        EXPECT_EQ(helper.cogRequests, 1);
+        TilerHelper::tilerFor(url, "");
+        TilerHelper::tilerFor(url, "");
+        EXPECT_EQ(helper.cogRequests, 2) << "each tiler converts the download";
         EXPECT_EQ(server.requests.size(), 2u) << "downloaded on every request";
-
-        const fs::path changed = TilerHelper::toGeoTIFF(url);
-        EXPECT_NE(changed, cog);
-        EXPECT_EQ(helper.cogRequests, 2);
+        TilerHelper::tilerFor(url, "");
+        EXPECT_EQ(helper.cogRequests, 3);
+        std::error_code ec;
+        EXPECT_TRUE(!fs::exists(raster::requestsDir(), ec) || fs::is_empty(raster::requestsDir(), ec))
+            << "a COG outlived its tiler";
 
         // One copy of the URL, the latest, with the extension of its path
         const auto copies = filesIn(UserProfile::get()->getTilesDir());

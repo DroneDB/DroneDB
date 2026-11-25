@@ -9,12 +9,12 @@
 #include <mutex>
 #include <unordered_map>
 
-#include "artefact_cache.h"
 #include "cancellation.h"
 #include "exceptions.h"
 #include "fileversion.h"
 #include "gdal_open_policy.h"
 #include "mio.h"
+#include "raster_input.h"
 #include "tilers_raster.h"
 
 namespace ddb

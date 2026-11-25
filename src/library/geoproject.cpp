@@ -171,7 +171,7 @@ namespace ddb
             // The helper writes the GeoTIFF into a folder only this call writes to; it is
             // moved to its name once it is known to be a GeoTIFF (publishing it is one rename, so
             // processes that share a cache never see half of a file or clobber each other)
-            const io::ScopedTempDir request = raster::makeArtefactRequestFolder("geoproject-");
+            const raster::RequestFolder request("geoproject-");
             const fs::path produced = request.path() / "geoprojected.tif";
             try
             {

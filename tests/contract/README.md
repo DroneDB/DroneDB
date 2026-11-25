@@ -937,3 +937,13 @@ Registry has to adopt first.
   entry was indexed from. `DDBBuildRasterStatistics` also writes them for a COG built without them (`present` only
   when both are there). The raster helper speaks protocol 1.5 (the `statistics` operation, `sourceStatistics` of
   `cog`). No other fixture or schema changed.
+* 2.13.0 (ABI 2.13: `capabilities` has `abi.minor` 13, and `DDBCleanupCache` in `symbols` and in `cancellable`):
+  libddb keeps no artefact cache. A GeoTIFF of a user that ddb-tilers reads whole (the raster helper decodes every
+  block of every level once, the `validate` operation of protocol 1.6) is read in place; any other raster through a
+  copy that lives as long as its reader. The setting `artefactCacheMb` of `effective-config` is retired: accepted,
+  checked and reported, with no effect, default 0 (`effective-config.schema.json` says so).
+  `DDBCleanupCache(optionsJson, output)` removes what the cache and the temporary folder kept past an age and
+  returns `{"dryRun", "kinds": {kind: {"entries", "bytes"}}}` (`cache-cleanup.schema.json`, fixture
+  `cache-cleanup`). The tiles of a photo are drawn from the photo for each tile by the raster helper (the
+  `photoTile` operation); nothing of a photo is kept. The raster helper speaks protocol 1.6. No other fixture or
+  schema changed.

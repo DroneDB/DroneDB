@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_test_utils.h"
+
+#include "raster_artefacts.h"
 #include "randomutil.h"
 
 #include <cstring>
@@ -212,5 +214,10 @@ namespace testutils
         std::vector<uint8_t> out(buffer, buffer + size);
         VSIFree(buffer);
         return out;
+    }
+    const fs::path &artefactFolder()
+    {
+        static const ddb::raster::RequestFolder folder("test-artefacts-");
+        return folder.path();
     }
 }

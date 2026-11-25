@@ -23,6 +23,7 @@
 #include "gtest/gtest.h"
 #include "json.h"
 #include "mio.h"
+#include "raster_input.h"
 #include "raster_stats.h"
 #include "raster_test_utils.h"
 #include "test.h"
@@ -235,7 +236,10 @@ namespace
         ASSERT_DDB_OK(DDBGetRasterMetadata(path.c_str(), nullptr, nullptr, &out));
         const json metadata = json::parse(out);
         DDBFree(out);
-        EXPECT_EQ(RasterStatsProvider::instance().counters().computed, after.computed + 3) << "every band, once";
+        // Every band, once over both calls: the validation of the file (its first opening) counted them on
+        // the way, else a pass of the host
+        const auto counted = RasterStatsProvider::instance().counters();
+        EXPECT_EQ(counted.computed + counted.adopted, before.computed + before.adopted + 3) << "every band, once";
         for (const char *key : {"algorithms", "colormaps", "autoBands"})
             EXPECT_EQ(info.at(key), metadata.at(key)) << key;
         EXPECT_FALSE(info.at("algorithms").empty());
@@ -298,7 +302,10 @@ namespace
         const auto before = RasterStatsProvider::instance().counters();
         valueInfoOf(ds, "ortho.tif");
         const auto after = RasterStatsProvider::instance().counters();
-        EXPECT_GT(after.computed + after.fromSidecar, before.computed + before.fromSidecar);
+        // The file is read again: by a pass of the host, or by its validation (a changed file is validated
+        // again), not taken from its build
+        EXPECT_GT(after.computed + after.fromSidecar + after.adopted, before.computed + before.fromSidecar + before.adopted);
+        EXPECT_EQ(raster::inputFileFor(file).file, file) << "read in place";
 
         fs::remove(sourceStatsSidecarOf(ds.cog()));
         json result;

@@ -83,6 +83,11 @@ namespace testutils
     /// Writes a GeoTIFF with spec's georeference and pixel values (bands 1-based)
     fs::path createGeoRaster(const fs::path &path, const GeoRasterSpec &spec);
 
+    /// A folder whose files libddb trusts as files it wrote (raster::isLibddbArtefact): a request folder
+    /// (raster::RequestFolder) that lives until the test program ends, for a test that writes an
+    /// artefact itself
+    const fs::path &artefactFolder();
+
     /// Writes a lossless JPEG 2000 with spec's pixel values, and its georeference in GeoJP2 and
     /// GMLJP2 boxes unless georeferenced is false
     fs::path createGeoJp2(const fs::path &path, const GeoRasterSpec &spec, bool georeferenced = true);

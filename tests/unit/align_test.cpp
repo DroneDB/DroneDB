@@ -164,15 +164,6 @@ namespace
         const fs::path out = ta.getFolder("out") / "aligned.tif";
         createSyntheticGeoTiff(refPath, 512, 512, refGt);
         createSyntheticGeoTiff(srcPath, 512, 512, srcGt);
-        const auto filesUnder = [](const fs::path &folder) {
-            size_t n = 0;
-            std::error_code ec;
-            for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator();
-                 it.increment(ec))
-                n += it->is_regular_file() ? 1 : 0;
-            return n;
-        };
-        const size_t copiesBefore = filesUnder(ddb::raster::normalizedDir());
 
         EXPECT_TRUE(ddb::validateAlignRaster(srcPath, refPath).ok);
         ddb::AlignOptions opts;
@@ -182,7 +173,6 @@ namespace
         EXPECT_EQ(r.mode, "translation") << "the options reach the helper";
         EXPECT_NEAR(r.txMapUnits, -3.0, 1.0);
         EXPECT_EQ(helper.ran, (std::vector<std::string>{ddb::raster::op::kAlignValidation, ddb::raster::op::kAlign}));
-        EXPECT_EQ(filesUnder(ddb::raster::normalizedDir()), copiesBefore) << "the host copied a raster";
         std::vector<fs::path> left;
         for (const auto &entry : fs::directory_iterator(out.parent_path()))
             left.push_back(entry.path());

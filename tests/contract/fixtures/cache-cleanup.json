@@ -1,0 +1,38 @@
+{
+  "call": "DDBCleanupCache(NULL)",
+  "description": "A cache with a download of 200 bytes changed 8 days ago and the artefact cache of an earlier version (600 bytes), the temporary folder empty",
+  "normalisation": {
+    "placeholders": [],
+    "volatileKeys": []
+  },
+  "output": {
+    "dryRun": false,
+    "kinds": {
+      "artefacts": {
+        "bytes": 600,
+        "entries": 1
+      },
+      "downloads": {
+        "bytes": 200,
+        "entries": 1
+      },
+      "dsm": {
+        "bytes": 0,
+        "entries": 0
+      },
+      "requests": {
+        "bytes": 0,
+        "entries": 0
+      },
+      "temp": {
+        "bytes": 0,
+        "entries": 0
+      },
+      "tiles": {
+        "bytes": 0,
+        "entries": 0
+      }
+    }
+  },
+  "schema": "cache-cleanup.schema.json"
+}

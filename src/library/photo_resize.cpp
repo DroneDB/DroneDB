@@ -7,12 +7,12 @@
 #include <atomic>
 #include <mutex>
 
-#include "artefact_cache.h"
 #include "cancellation.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "mio.h"
 #include "parallel.h"
+#include "raster_input.h"
 
 namespace ddb::raster
 {

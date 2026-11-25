@@ -4,7 +4,6 @@
 #ifndef RASTER_ARTEFACTS_H
 #define RASTER_ARTEFACTS_H
 
-#include <initializer_list>
 #include <string>
 
 #include "fs.h"
@@ -13,18 +12,19 @@
 
 namespace ddb
 {
-    // Files that libddb wrote itself, as opposed to the files of users. The host never opens a
-    // file of a user with GDAL: the raster helper (gdal-util, raster_helper.h) reads it once and
-    // writes what the host needs, and the host opens only that.
+    // Files that libddb wrote itself, as opposed to the files of users. The host opens no file of
+    // a user with GDAL: the raster helper (gdal-util, raster_helper.h) reads it, and the host
+    // reads with ddb-tilers only a file libddb wrote or a GeoTIFF the helper found that ddb-tilers
+    // reads whole (raster_input.h).
     //
     // An artefact is a file in one of these places, and in no other:
     //   - a build output of a dataset that GDAL reads (the COG of a raster, the GeoPackage of a
     //     vector, the MVT tiles), at the place the build layout gives it:
     //     "<dataset>/.ddb/build/<hash>/<output of a role>". Any other file under ".ddb/build"
     //     (the content of an extracted archive, a file somebody put there) is not one;
-    //   - the "artefacts" folder of the cache (UserProfile::getCacheDir()), where the host puts
-    //     the files the helper wrote on request: the COG a raster is tiled from, the GeoTIFF of
-    //     a photo, and the folders the helper writes into;
+    //   - the folder of a request to the helper that this process made and still holds
+    //     (RequestFolder): what the helper wrote for the request, which the host checks before it
+    //     reads it, and which goes with the request;
     //   - a file of GDAL's memory file system (/vsimem/), which only this process can write.
     // A download is not an artefact, whatever it is named and wherever it was put. A link is
     // followed before the place is judged, so a link in an artefact place to a file elsewhere
@@ -35,39 +35,17 @@ namespace ddb
     // build state that lives beside the outputs could be planted as easily as an output.
     namespace raster
     {
-        // The "artefacts" folder of the cache (created)
-        fs::path artefactsDir();
-
-        // The folder of the artefacts folder that holds the normalized copies of rasters of
-        // users (artefact_cache.h), named by artefactKey (created)
-        fs::path normalizedDir();
-
         // Whether the file is an artefact (see above). A file that does not exist can be: the
         // place is what counts. The path is resolved first (symbolic links, "..").
-        // The only "temp" libddb has is the private folder of a request, below the artefacts
-        // folder; the other temporary folders (a DXF converted from a DWG, a model converted
-        // for the 3D builds) hold files the helper or the converters read, never ones the host
-        // opens with GDAL, so they are not artefacts.
+        // The only "temp" libddb trusts is the folder of a live request; the other temporary
+        // folders (a DXF converted from a DWG, a model converted for the 3D builds) hold files the
+        // helper or the converters read, never ones the host opens with GDAL, so they are not
+        // artefacts.
         bool isLibddbArtefact(const fs::path &path);
-
-        // Marks an artefact of a cache as used, for the cleanup that removes what was not used for
-        // days and the bound that removes the least recently used: its modification time, and that
-        // of each of `companions` that exists (its statistics sidecar), becomes now when it is more
-        // than kArtefactMarkSeconds old. Not at every use: the time is part of the version a reader
-        // keeps a file open by (ddb-tilers reads a file whose modification time changed as a new
-        // one, with none of its blocks cached), so a mark at every use would make every read of a
-        // cached artefact a first read.
-        void markArtefactUsed(const fs::path &file, std::initializer_list<fs::path> companions = {});
 
         // @throws GDALException when the file is not an artefact (the tilers and the openers
         // below read nothing else)
         void requireArtefact(const fs::path &path);
-
-        // The name that stands for the file as it is now: CRC64 of its path, modification time
-        // (to the microsecond the file system keeps) and size, in hexadecimal, so a changed file
-        // gets another name.
-        // @throws FSException when the file cannot be read
-        std::string artefactKey(const fs::path &source);
 
         // Opens a vector artefact, read-only, with the driver libddb writes it with: GeoPackage (the one a
         // build writes, or that libddb wrote in memory). No MVT driver: the tiles of a build are served as
@@ -107,9 +85,33 @@ namespace ddb
         io::ScopedTempDir makePrivateFolder(const fs::path &parent, const std::string &prefix,
                                             PrivateFolderWriter writer = PrivateFolderWriter::Helper);
 
-        // A private folder in artefactsDir(): what the helper writes there is an artefact, and
-        // the host checks it with writtenRasterOpens before it moves it to its name
-        io::ScopedTempDir makeArtefactRequestFolder(const std::string &prefix);
+        // The folder of a request to the raster helper: a private folder (makePrivateFolder) in the
+        // "requests" folder of the cache, removed with this object. While it lives, the files in it are
+        // artefacts of this process (isLibddbArtefact): the helper writes there, and the host checks
+        // what it wrote (writtenRasterOpens) before it reads it. A folder a crash left behind is no
+        // longer one, and the cleanup of the cache removes it.
+        class RequestFolder
+        {
+          public:
+            // @throws FSException
+            explicit RequestFolder(const std::string &prefix);
+            ~RequestFolder();
+            RequestFolder(const RequestFolder &) = delete;
+            RequestFolder &operator=(const RequestFolder &) = delete;
+
+            const fs::path &path() const noexcept { return folder_.path(); }
+
+          private:
+            io::ScopedTempDir folder_;
+            // The resolved place of the folder (fileversion.h cacheKeyPath), as isLibddbArtefact compares it
+            std::string key_;
+        };
+
+        // The folder of the cache that holds the request folders (not created)
+        fs::path requestsDir();
+
+        // Whether `folder` is the folder of a request this process holds (RequestFolder)
+        bool isLiveRequestFolder(const fs::path &folder);
 
         // Moves a file the helper wrote (in a folder made by makePrivateFolder) to `target`, replacing
         // what is there, in one rename: readers see the old file or the whole new one. Another
@@ -117,26 +119,10 @@ namespace ddb
         // @throws FSException
         void publishArtefact(const fs::path &produced, const fs::path &target);
 
-        // Removes the artefacts that were not touched for `maxAge` seconds: files, the normalized
-        // copies, and the folders of requests that were left behind
-        void cleanupArtefacts(time_t maxAge);
-
-        // publishArtefact into the artefact cache (artefactsDir(), normalizedDir()), then
-        // trimArtefacts(target): the cache stays within its bound whatever is asked for
-        // @throws FSException
-        void publishCachedArtefact(const fs::path &produced, const fs::path &target);
-
-        // Keeps the artefact cache within artefactCacheMb (ProcessConfig, DDB_ARTEFACT_CACHE_MB;
-        // 0: no bound): while its files (the artefacts, their statistics sidecars, the normalized
-        // copies) take more, removes the least recently used ones, never `keep` nor a file used in
-        // the last kArtefactInUseSeconds (a tile request may be about to open it). The folders of
-        // requests in progress do not count. A file a reader holds open on Windows stays.
-        void trimArtefacts(const fs::path &keep);
-        inline constexpr time_t kArtefactInUseSeconds = 300;
-        // How old the mark of a used artefact gets before the next use renews it (markArtefactUsed):
-        // a file used in the last kArtefactInUseSeconds has a mark at most this much older, which
-        // the bound adds to the time it protects
-        inline constexpr time_t kArtefactMarkSeconds = 60;
+        // Removes the folder of the artefact cache of earlier versions ("<cache>/artefacts": the
+        // normalized copies and the COGs of photos they kept), when it is there. Best effort: what
+        // cannot be removed is logged and left for the next start.
+        void removeLegacyArtefactCache();
 
     } // namespace raster
 } // namespace ddb

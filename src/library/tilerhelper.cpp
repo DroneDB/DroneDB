@@ -4,6 +4,7 @@
 
 #include "tilerhelper.h"
 #include "timeutil.h"
+#include "photo_tiler.h"
 #include "raster_tiler.h"
 #include "tilers_call.h"
 #include "threadlock.h"
@@ -17,12 +18,11 @@
 #include <optional>
 #include <vector>
 
+#include "cache_cleanup.h"
 #include "cancellation.h"
-#include "entry.h"
 #include "entry_handler.h"
 #include "exceptions.h"
 #include "cog.h"
-#include "geoproject.h"
 #include "raster_artefacts.h"
 #include "raster_helper.h"
 #include "raster_stats.h"
@@ -124,8 +124,9 @@ namespace ddb
     {
         const fs::path &tileablePath = source.path;
         // Files an entry handler tiles itself (COPC point clouds) are read in place; the
-        // others are downloaded when remote, converted to a COG and tiled by ddb-tilers. Each
-        // step checks whether the call was canceled; the conversions also while they run.
+        // others are downloaded when remote, then a photo is drawn tile by tile and a raster is
+        // converted to a COG and tiled by ddb-tilers. Each step checks whether the call was
+        // canceled; the conversions also while they run.
         cancel::throwIfCanceled();
         const TilerFactory *factory = findTilerFactory(tileablePath);
         const fs::path localPath = factory != nullptr ? tileablePath : toLocalFile(tileablePath, source.pathHash);
@@ -140,9 +141,7 @@ namespace ddb
             if (factory != nullptr)
                 return factory->create(localPath, source.outputFolder, source.tileSize, source.tms);
 
-            const fs::path fileToTile = toGeoTIFF(localPath, source.forceRecreate, source.pathHash);
-            return std::make_unique<RasterTiler>(io::toUtf8(fileToTile), io::toUtf8(source.outputFolder),
-                                                 source.tileSize, source.tms);
+            return tilerFor(localPath, io::toUtf8(source.outputFolder), source.tileSize, source.tms);
         });
         cancel::throwIfCanceled();
         return render(*tiler);
@@ -249,150 +248,48 @@ namespace ddb
         }
     }
 
-    namespace
+    std::unique_ptr<Tiler> TilerHelper::tilerFor(const fs::path &tileablePath, const std::string &tilesFolder,
+                                                 int tileSize, bool tms, const std::string &tileablePathHash)
     {
-        // The artefact `target` for a tiler: the one that is there, else the one `produce` makes
-        // (a forced call always makes it). One thread at a time makes it, and the file appears
-        // whole, by a rename.
-        fs::path artefactOnce(const fs::path &target, bool forceRecreate, const std::function<void()> &produce)
-        {
-            std::error_code ec;
-            if (!forceRecreate && fs::exists(target))
-            {
-                // A file in use stays: the cleanup removes what was not touched for days. A
-                // statistics sidecar next to it is touched with it, since it counts only while it
-                // is not older than the raster (raster_stats.h)
-                raster::markArtefactUsed(target, {statsSidecarOf(target)});
-                return target;
-            }
-
-            ThreadLock lock(io::toUtf8(target));
-
-            // Another thread may have made it while we waited (it is published by a rename)
-            if (forceRecreate || !fs::exists(target))
-                produce();
-            return target;
-        }
-
-        // Closes what reads `artefact`, the file made from `source`, before it is replaced:
-        // Windows replaces no file a process holds open. The idle tilers are cached under the
-        // path they were asked for (the file of the user), not the artefact they opened, so both
-        // go; ddb-tilers keeps the COG itself open between tiles, and closes every file it keeps
-        // (it has no release by file: the next tiles open theirs again).
-        void releaseTilersOf(const fs::path &source, const fs::path &artefact)
-        {
-            RasterCache::instance().release(source);
-            RasterCache::instance().release(artefact);
-            tilers::check(ddbtReleaseSources());
-        }
-
-        // The COG of the raster of the user `source` (a photo is placed on the ground by `photo`), in
-        // the artefacts of the cache: built by the raster helper, checked, and moved to the name the
-        // source and its state give. Its statistics stay behind: the tiles are stretched with
-        // statistics computed on the whole COG, as they are for any raster without a sidecar, not
-        // with the approximate ones of a build.
-        void produceCogArtefact(const fs::path &source, const fs::path &target,
-                                const std::optional<raster::PhotoGeoreference> &photo = std::nullopt)
-        {
-            const io::ScopedTempDir request = raster::makeArtefactRequestFolder("cog-");
-            const fs::path produced = request.path() / "cog.tif";
-            // The build refuses an output that does not open as a raster
-            buildCogInPrivateFolder(io::toUtf8(source), produced, {}, photo);
-
-            releaseTilersOf(source, target);
-            raster::publishCachedArtefact(produced, target);
-        }
-    } // namespace
-
-    fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, bool forceRecreate,
-                                    const std::string &tileablePathHash)
-    {
-        const fs::path localTileablePath = toLocalFile(tileablePath, tileablePathHash);
+        const fs::path local = toLocalFile(tileablePath, tileablePathHash);
 
         // A file libddb wrote (the COG of a build) is tiled as it is
-        if (raster::isLibddbArtefact(localTileablePath))
-            return localTileablePath;
+        if (raster::isLibddbArtefact(local))
+            return std::make_unique<RasterTiler>(io::toUtf8(local), tilesFolder, tileSize, tms);
 
         maybeCleanupUserCache();
 
-        // The tiler reads only what libddb wrote, so a file of a user (or a download) is read
-        // once, by the raster helper, and the tiles come from what it writes: the COG of a georaster,
-        // or of a photo warped from its corners on the ground (its EXIF footprint) in one pass.
-        // artefactOnce makes it once (a lock, then a rename)
-        const fs::path target = io::concat(raster::artefactsDir() / raster::artefactKey(localTileablePath), ".tif");
-        if (entryHandler(fingerprint(localTileablePath)).tilesWithoutReprojection())
-            return artefactOnce(target, forceRecreate, [&] { produceCogArtefact(localTileablePath, target); });
+        // A photo is drawn from itself tile by tile, in the raster helper: nothing of it is kept
+        if (const auto photo = photoToTile(local))
+            return std::make_unique<PhotoTiler>(local, tilesFolder, tileSize, tms, *photo);
 
-        return artefactOnce(target, forceRecreate, [&] {
-            std::string problem;
-            const auto photo = photoGeoreferenceOf(localTileablePath, problem);
-            if (!photo)
-                throw FSException("Cannot geoproject " + io::toUtf8(localTileablePath) + ", " + problem);
-            produceCogArtefact(localTileablePath, target, photo);
-        });
+        // The tiler reads EPSG:3857 COGs, so a georaster of a user (or a download) is read by the raster
+        // helper, which writes its COG into a request folder the tiler keeps while it lives
+        auto request = std::make_unique<raster::RequestFolder>("cog-");
+        const fs::path produced = request->path() / "cog.tif";
+        // The build refuses an output that does not open as a raster
+        buildCogInPrivateFolder(io::toUtf8(local), produced);
+        auto tiler = std::make_unique<RasterTiler>(io::toUtf8(produced), tilesFolder, tileSize, tms);
+        tiler->keep(std::move(request));
+        return tiler;
     }
-
-    namespace
-    {
-        // Removes the folders below `folder` that were not touched since `threshold`, the oldest
-        // level first (what is below a folder that goes is not looked at). The cache is shared by
-        // every process of the user and by the tile requests of this one, which make and remove
-        // folders at the same time, and so does another clean-up: a folder that was listed may be
-        // gone when it is looked at. That is the normal state of the cache, so the listing of a
-        // folder is taken whole before anything in it is removed, and what vanished is skipped.
-        void removeStaleFolders(const fs::path &folder, time_t threshold)
-        {
-            std::vector<fs::path> subfolders;
-            std::error_code ec;
-            for (fs::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
-            {
-                std::error_code statEc;
-                if (it->symlink_status(statEc).type() == fs::file_type::directory && !statEc)
-                    subfolders.push_back(it->path());
-            }
-
-            for (const auto &subfolder : subfolders)
-            {
-                std::error_code removeEc;
-                try
-                {
-                    if (io::Path(subfolder).getModifiedTime() >= threshold)
-                    {
-                        removeStaleFolders(subfolder, threshold);
-                        continue;
-                    }
-                }
-                catch (const FSException &)
-                {
-                    continue; // removed by somebody else since the listing
-                }
-                fs::remove_all(subfolder, removeEc);
-                if (removeEc)
-                {
-                    LOGD << "Cannot remove " << io::toUtf8(subfolder) << " from the cache: " << removeEc.message();
-                }
-            }
-        }
-    } // namespace
 
     void TilerHelper::cleanupUserCache()
     {
-        LOGD << "Cleaning up tiles user cache";
-
-        constexpr time_t maxAge = 60 * 60 * 24 * 5; // 5 days
-        const time_t threshold = currentUnixTimestamp() - maxAge;
-
+        LOGD << "Cleaning up the cache";
         // A housekeeping done on the way of a request must not fail the request: whatever goes
         // wrong here is logged and the next clean-up looks again
         try
         {
-            // What the raster helper wrote for the tiles: the same rule
-            raster::cleanupArtefacts(maxAge);
-            removeStaleFolders(UserProfile::get()->getTilesDir(), threshold);
+            cleanupCache();
+        }
+        catch (const CanceledException &)
+        {
+            throw;
         }
         catch (const std::exception &e)
         {
-            LOGW << "Cannot clean up the tiles user cache: " << e.what();
+            LOGW << "Cannot clean up the cache: " << e.what();
         }
     }
 
@@ -422,9 +319,8 @@ namespace ddb
         }
         else
         {
-            // A raster or a photo: the COG toGeoTIFF makes of it
-            const fs::path cog = ddb::TilerHelper::toGeoTIFF(input);
-            tiler = std::make_unique<RasterTiler>(io::toUtf8(cog), io::toUtf8(output), run.tileSize, xyzRows);
+            // A photo, drawn tile by tile, or a raster, tiled from its COG
+            tiler = tilerFor(input, io::toUtf8(output), run.tileSize, xyzRows);
         }
 
         BoundingBox<int> zb;

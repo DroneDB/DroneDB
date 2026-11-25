@@ -7,12 +7,14 @@
 #include "gdal_inc.h"
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
 
 #include "fs.h"
 #include "geo.h"
+#include "raster_tiler.h"
 #include "tiler.h"
 #include "output_format.h"
 #include "thumbs.h"
@@ -72,8 +74,7 @@ namespace ddb
                                            time_t modifiedTime, int tileSize);
 
         // Runs render with a tiler for the source: one prepared earlier and kept in
-        // RasterCache when available, otherwise a new one (geoprojecting the file first
-        // when it is not a georaster)
+        // RasterCache when available, otherwise a new one (a PhotoTiler for a photo)
         static std::string withTiler(const TileSource &source,
                                      const std::function<std::string(Tiler &)> &render);
 
@@ -94,20 +95,20 @@ namespace ddb
         // Get a single tile: its path, or the encoded bytes in the request's buffer
         static fs::path getTile(const TileRequest &request);
 
-        // Prepare a tileable file for tiling: the raster the tiler opens. The tiler reads only
-        // files that libddb wrote (raster_artefacts.h), so
-        //  - a file that is one already (the COG of a build) is returned as it is;
-        //  - a georaster is converted by the raster helper into a COG of the artefacts folder of
-        //    the cache (without a limit on its size); the same state of the file is converted once;
-        //  - a geoimage that can be tiled is geoprojected, and the result converted the same way
-        //    (the tilers read EPSG:3857 COGs only);
-        //  - a URL is downloaded first (toLocalFile) and the download converted the same way.
-        // forceRecreate makes the conversion again.
-        static fs::path toGeoTIFF(const fs::path &tileablePath, bool forceRecreate = false,
-                                  const std::string &tileablePathHash = "");
+        // A tiler of the raster or photo at `tileablePath` (a URL is downloaded first, toLocalFile):
+        //  - a file libddb wrote (the COG of a build) is tiled as it is;
+        //  - a photo that can be placed on the ground is drawn from itself tile by tile, in the raster
+        //    helper (PhotoTiler, photoToTile);
+        //  - any other raster is converted by the raster helper into a COG in a request folder the tiler
+        //    keeps while it lives (the tiler reads EPSG:3857 COGs that libddb wrote, raster_artefacts.h).
+        // Nothing of it is left once the tiler goes.
+        static std::unique_ptr<Tiler> tilerFor(const fs::path &tileablePath, const std::string &tilesFolder,
+                                               int tileSize = 256, bool tms = false,
+                                               const std::string &tileablePathHash = "");
 
-        // Removes what the tiles left in the cache for five days: tiles, downloads and artefacts. A tile
-        // request (getFromUserCache) and a conversion (toGeoTIFF) run it on their way, one in a thousand
+        // Cleans up the cache with the default ages (cache_cleanup.h): tiles, downloads, DSM tiles and what a
+        // crash left. A tile request (getFromUserCache) and a new tiler of a user file (tilerFor) run it on
+        // their way, one in a thousand
         static void cleanupUserCache();
     };
 
