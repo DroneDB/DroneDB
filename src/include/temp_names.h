@@ -21,9 +21,13 @@ namespace ddb::tempnames
     inline constexpr const char *kRender = "ddb-render-";
     // The name earlier versions gave the folder of a model converted for a 3D build
     inline constexpr const char *kLegacyGltfConvert = "ddb_gltf_convert_";
+    // The temporary file of the GDAL COG driver that built cog/cog.tif in the process of earlier versions
+    // (CPLGenerateTempFilename: the name of the output, then _<pid>_<counter>), about the size of the COG;
+    // a build that was stopped left it behind
+    inline constexpr const char *kLegacyCogBuild = "cog.tif_";
 
-    inline constexpr std::array<std::string_view, 7> kAll = {kObjStage,   kAssimpConvert, kPlyConvert,       kThumbnail,
-                                                             kMergePreview, kRender,      kLegacyGltfConvert};
+    inline constexpr std::array<std::string_view, 8> kAll = {
+        kObjStage, kAssimpConvert, kPlyConvert, kThumbnail, kMergePreview, kRender, kLegacyGltfConvert, kLegacyCogBuild};
 } // namespace ddb::tempnames
 
 #endif // TEMP_NAMES_H

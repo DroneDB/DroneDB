@@ -76,12 +76,15 @@ namespace
         const fs::path oldDsm = aged(cache_ / "dsm_service_cache" / "n45e009.tif", 300, 31 * 24h);
         const fs::path leftRequest = aged(cache_ / "requests" / "cog-left" / "cog.tif", 400, 3 * 24h);
         const fs::path leftTemp = aged(temp_ / (std::string(tempnames::kLegacyGltfConvert) + "x") / "a.glb", 500, 3 * 24h);
+        // A file, not a folder: the temporary COG of the GDAL driver of earlier versions
+        const fs::path leftCog = aged(temp_ / (std::string(tempnames::kLegacyCogBuild) + "7_3"), 700, 3 * 24h);
         const fs::path legacy = aged(cache_ / "artefacts" / "normalized" / "0123.tif", 600, 1h);
         // Not old enough, not libddb's, or in use
         const fs::path newTiles = aged(cache_ / "tiles" / "b2c3" / "18" / "1" / "2.png", 10, 4 * 24h);
         const fs::path newDownload = aged(cache_ / "tiles" / "d4e5-f6a7.tif", 10, 6 * 24h);
         const fs::path newDsm = aged(cache_ / "dsm_service_cache" / "n46e009.tif", 10, 29 * 24h);
         const fs::path otherTemp = aged(temp_ / "somebody-else" / "a.txt", 10, 30 * 24h);
+        const fs::path otherCog = aged(temp_ / "mycog.tif_7_3", 10, 30 * 24h);
         const fs::path newTemp = aged(temp_ / (std::string(tempnames::kRender) + "y") / "a.tif", 10, 1h);
         // A folder whose work still writes below it is not old, however old the folder itself
         const fs::path busy = temp_ / (std::string(tempnames::kAssimpConvert) + "z");
@@ -103,12 +106,12 @@ namespace
         expect("downloads", 1, 200);
         expect("dsm", 1, 300);
         expect("requests", 1, 400);
-        expect("temp", 1, 500);
+        expect("temp", 2, 1200);
         expect("artefacts", 1, 600);
         for (const fs::path &gone : {fs::path(cache_ / "tiles" / "a1b2"), oldDownload, oldDsm, leftRequest.parent_path(),
-                                     leftTemp.parent_path(), fs::path(cache_ / "artefacts")})
+                                     leftTemp.parent_path(), leftCog, fs::path(cache_ / "artefacts")})
             EXPECT_FALSE(fs::exists(gone)) << gone;
-        for (const fs::path &kept : {newTiles, newDownload, newDsm, otherTemp, newTemp, busy / "old.obj",
+        for (const fs::path &kept : {newTiles, newDownload, newDsm, otherTemp, otherCog, newTemp, busy / "old.obj",
                                      fs::path(live.path() / "cog.tif")})
             EXPECT_TRUE(fs::exists(kept)) << kept;
     }
