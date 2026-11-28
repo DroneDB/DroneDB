@@ -7,7 +7,7 @@ import os
 import sys
 
 SENSOR_DATA_OSFM = 'https://raw.githubusercontent.com/mapillary/OpenSfM/master/opensfm/data/sensor_data.json'
-SENSOR_DATA_AV = 'https://raw.githubusercontent.com/alicevision/AliceVision/develop/src/aliceVision/sensorDB/cameraSensors.db'
+SENSOR_DATA_AV = 'https://raw.githubusercontent.com/alicevision/sensordb/develop/cameraSensors.db'
 
 # Take sensor data json from the command line
 sensor_data_ddb = sys.argv[1]
@@ -66,6 +66,7 @@ with urllib.request.urlopen(SENSOR_DATA_AV) as response:
             focal = float(focal)
         except ValueError:
             print("Warning: skipped malformed line: %s" % line)
+            continue
 
         if model.startswith(make):
             makemodel = model
