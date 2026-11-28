@@ -232,19 +232,23 @@ function(ddb_embed_library target)
     ddb_gc_sections(${target})
 endfunction()
 
-find_package(Python3 REQUIRED)
+find_package(Python3 COMPONENTS Interpreter)
 
-# Define a custom target to update sensor data using the Python script
-add_custom_target(
-    update_sensor_data ALL
-    COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/data/create_sensor_data.py"
-        "${CMAKE_SOURCE_DIR}/data/ddb_sensor_data.json"
-        "${CMAKE_BINARY_DIR}/sensor_data.sqlite"
-    COMMENT "Updating sensor data SQLite database..."
-)
-
-message(STATUS "Build target 'update_sensor_data' is ready.")
+# update_sensor_data: regenerates the checked-in data/sensor_data.sqlite from the OpenSfM and
+# AliceVision camera lists (downloaded) and data/ddb_sensor_data.json. It is not part of the
+# build: run it by hand (make update_sensor_data) and commit the new database. The build only
+# copies data/sensor_data.sqlite (ddb_stage_runtime_files), so what ships does not depend on
+# the network or on which step writes the file last.
+if(Python3_Interpreter_FOUND)
+    add_custom_target(
+        update_sensor_data
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/data/create_sensor_data.py"
+            "${CMAKE_SOURCE_DIR}/data/ddb_sensor_data.json"
+            "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite"
+        COMMENT "Updating data/sensor_data.sqlite..."
+    )
+endif()
 
 # Runtime files next to libddb: ddb, the helper programs, ddbcmd and the test binaries are all
 # built in DDB_RUNTIME_DIR (root CMakeLists.txt), so getDataPath() finds these files whether it
