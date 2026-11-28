@@ -238,7 +238,9 @@ find_package(Python3 COMPONENTS Interpreter)
 # AliceVision camera lists (downloaded) and data/ddb_sensor_data.json. It is not part of the
 # build: run it by hand (make update_sensor_data) and commit the new database. The build only
 # copies data/sensor_data.sqlite (ddb_stage_runtime_files), so what ships does not depend on
-# the network or on which step writes the file last.
+# the network or on which step writes the file last. That copy runs only when a binary is
+# linked, so the target also copies the new database to DDB_RUNTIME_DIR: the tests that run next
+# read it without a rebuild.
 if(Python3_Interpreter_FOUND)
     add_custom_target(
         update_sensor_data
@@ -246,6 +248,8 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/data/create_sensor_data.py"
             "${CMAKE_SOURCE_DIR}/data/ddb_sensor_data.json"
             "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "${DDB_RUNTIME_DIR}"
         COMMENT "Updating data/sensor_data.sqlite..."
     )
 endif()

@@ -167,6 +167,49 @@ Every layer the report lists must be active. `DDB_GDAL_SANDBOX=strict` makes `gd
 start when a layer is missing (use it where the host is known to support all of them);
 `best-effort` is the default; `off` applies nothing and is for tests and debugging only.
 
+## Updating the sensor database
+
+`data/sensor_data.sqlite` maps a camera (`make model`, lower case) to the width of its sensor in
+millimetres (column `focal`); libddb reads it to compute the focal length of images. The build
+does not generate it: it copies the checked-in file next to the binaries, and the packages ship
+that copy. Update it **before each release**, in its own commit, so the release has the cameras
+added upstream since the last one:
+
+1. Run the target that regenerates it from the OpenSfM and AliceVision camera lists (downloaded
+   from GitHub, see `SENSOR_DATA_OSFM` and `SENSOR_DATA_AV` in `data/create_sensor_data.py`) and
+   from `data/ddb_sensor_data.json`, which holds the cameras that neither list has:
+
+   ```bash
+   cmake --build build --target update_sensor_data
+   ```
+
+   It needs Python 3 at configure time (the target exists only when CMake finds it) and network
+   access. It writes the new database to a temporary file and replaces `data/sensor_data.sqlite`
+   only when all of it is written, so a failed download leaves the old file as it is. Then it
+   copies the new file to `build/`, where the binaries and the tests read it.
+2. Compare it with the database of the last commit. A removed sensor, or one whose width changed,
+   changes the focal length of images that are already indexed, so look at those before you
+   commit:
+
+   ```bash
+   git show HEAD:data/sensor_data.sqlite > /tmp/sensor_data.old.sqlite
+   sqlite3 data/sensor_data.sqlite "ATTACH '/tmp/sensor_data.old.sqlite' AS o;
+     SELECT (SELECT count(*) FROM sensors) AS now,
+            (SELECT count(*) FROM o.sensors) AS before,
+            (SELECT count(*) FROM sensors n WHERE n.id NOT IN (SELECT id FROM o.sensors)) AS added,
+            (SELECT count(*) FROM o.sensors x WHERE x.id NOT IN (SELECT id FROM sensors)) AS removed,
+            (SELECT count(*) FROM sensors n JOIN o.sensors x USING (id) WHERE n.focal <> x.focal) AS changed;"
+   ```
+
+3. Run the sensor tests (`ctest --test-dir build -R "[Ss]ensor|[Ff]ocal"`), and commit
+   `data/sensor_data.sqlite` with the counts of step 2 in the message. Nothing to commit when the
+   file did not change.
+
+When a download fails with HTTP 404, the list moved upstream: find its new raw URL in that
+project, change the constant in `data/create_sensor_data.py`, and check that the file still has
+the format the script parses (OpenSfM: a JSON object of `"make model": width`; AliceVision: lines
+of `make;model;width;source`).
+
 ## Opening files with GDAL
 
 The host (the Registry, `ddbcmd`, the tests) never opens a file of a user with GDAL: it asks

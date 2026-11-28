@@ -341,6 +341,8 @@ cd build && .\ddbtest.exe --gtest_shuffle
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to submit pull requests.
 
+Before each release, update the camera sensor database (`data/sensor_data.sqlite`) as described in [Updating the sensor database](CONTRIBUTING.md#updating-the-sensor-database).
+
 ## License
 
 This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENSE.md).
